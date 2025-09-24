@@ -1,8 +1,20 @@
 # Airtable Formula VSCode Extension 🧮✨
 
+[![VS Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/Nskha.airtable-formula?label=VS%20Marketplace&color=blue)](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula)
+[![VS Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/Nskha.airtable-formula?label=Installs)](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula)
+[![VS Marketplace Rating](https://img.shields.io/visual-studio-marketplace/r/Nskha.airtable-formula?label=Rating)](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula)
+[![Open VSX Version](https://img.shields.io/open-vsx/v/Nskha/airtable-formula?label=Open%20VSX&color=brightgreen)](https://open-vsx.org/extension/Nskha/airtable-formula)
+[![Open VSX Downloads](https://img.shields.io/open-vsx/dt/Nskha/airtable-formula?label=Downloads)](https://open-vsx.org/extension/Nskha/airtable-formula)
+
 Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.
 
 ![Airtable Formula](https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/refs/heads/main/images/gallery-banner.png)
+
+## Install
+
+- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula)
+- [Open VSX Registry](https://open-vsx.org/extension/Nskha/airtable-formula)
+- [Releases](https://github.com/Automations-Project/VSCode-Airtable-Formula/releases)
 
 ## Features
 
