@@ -2,7 +2,7 @@
 
 Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.
 
-![Airtable Formula](images/airtable-formula.png)
+![Airtable Formula](https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/refs/heads/main/images/gallery-banner.png)
 
 ## Features
 
@@ -38,6 +38,6 @@ This extension contributes the following settings:
 
 ## Release Notes
 
-### 0.0.1
+### 0.0.2
 
 Initial release with beautify and minify functionality for Airtable formulas.

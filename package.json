@@ -3,17 +3,17 @@
   "publisher": "Nskha",
   "displayName": "airtable formula",
   "description": "Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "icon": "images/icon.png",
   "license": "MIT",
   "repository": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
   "galleryBanner": {
-    "path": "images/gallery-banner.png",
+    "path": "https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/refs/heads/main/images/gallery-banner.png",
     "width": 815,
     "height": 250
   },
   "engines": {
-    "vscode": "^1.104.0"
+    "vscode": "^1.74.0"
   },
   "categories": [
     "Other",
@@ -164,7 +164,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "@types/vscode": "^1.104.0",
+    "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
     "@vscode/test-cli": "^0.0.11",
