@@ -34,7 +34,40 @@ This extension contributes the following settings:
 
 ## Requirements
 
-- VS Code 1.104.0 or later
+- VS Code 1.74.0 or later
+
+## Development
+
+### Building the Extension
+
+```bash
+# Install dependencies
+pnpm install
+
+# Compile the extension
+pnpm run compile
+
+# Package for distribution
+pnpm run package
+```
+
+### Releasing
+
+To create a new release with a VSIX file:
+
+1. Update the version in `package.json`
+2. Commit your changes
+3. Create a new GitHub release:
+   - Go to GitHub → Releases → "Create a new release"
+   - Create a new tag (e.g., `v0.0.3`)
+   - Add release notes
+   - Publish the release
+4. GitHub Actions will automatically:
+   - Build the extension
+   - Package it into a `.vsix` file
+   - Upload the VSIX to the release assets
+
+The VSIX file will be available for download from the GitHub release page and can be installed directly in VS Code.
 
 ## Release Notes
 
