@@ -1,0 +1,177 @@
+{
+  "name": "airtable-formula",
+  "publisher": "Nskha",
+  "displayName": "airtable formula",
+  "description": "Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.",
+  "version": "0.0.1",
+  "icon": "images/icon.png",
+  "license": "MIT",
+  "repository": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
+  "galleryBanner": {
+    "path": "images/gallery-banner.png",
+    "width": 815,
+    "height": 250
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Other",
+    "Formatters"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "airtable-formula",
+        "aliases": [
+          "Airtable Formula",
+          "formula"
+        ],
+        "extensions": [
+          ".formula"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "airtable-formula.beautify",
+        "title": "Airtable Formula: Beautify"
+      },
+      {
+        "command": "airtable-formula.minify",
+        "title": "Airtable Formula: Minify"
+      },
+      {
+        "command": "airtable-formula.beautifyFile",
+        "title": "Airtable Formula: Beautify File(s)"
+      },
+      {
+        "command": "airtable-formula.minifyFile",
+        "title": "Airtable Formula: Minify File(s)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == airtable-formula",
+          "command": "airtable-formula.beautify",
+          "group": "navigation@2"
+        },
+        {
+          "when": "resourceLangId == airtable-formula",
+          "command": "airtable-formula.minify",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "when": "resourceLangId == airtable-formula",
+          "command": "airtable-formula.beautify",
+          "group": "1_modification"
+        },
+        {
+          "when": "resourceLangId == airtable-formula",
+          "command": "airtable-formula.minify",
+          "group": "1_modification"
+        }
+      ],
+      "explorer/context": [
+        {
+          "when": "resourceExtname == .formula",
+          "command": "airtable-formula.beautifyFile",
+          "group": "navigation@2"
+        },
+        {
+          "when": "resourceExtname == .formula",
+          "command": "airtable-formula.minifyFile",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Airtable Formula",
+      "properties": {
+        "airtableFormula.scriptRoot": {
+          "type": "string",
+          "default": "${workspaceFolder}/draft/scripts",
+          "description": "Path to the draft/scripts directory containing formula-beautifier.js and formula-minifier.js."
+        },
+        "airtableFormula.beautify.style": {
+          "type": "string",
+          "enum": [
+            "ultra-compact",
+            "compact",
+            "readable",
+            "json",
+            "cascade"
+          ],
+          "default": "compact",
+          "description": "Beautifier style."
+        },
+        "airtableFormula.beautify.indentSize": {
+          "type": "number",
+          "default": 1,
+          "description": "Indentation size used by the beautifier."
+        },
+        "airtableFormula.beautify.maxLineLength": {
+          "type": "number",
+          "default": 120,
+          "description": "Maximum line length target for beautifier line wrapping."
+        },
+        "airtableFormula.beautify.quoteStyle": {
+          "type": "string",
+          "enum": [
+            "double",
+            "single"
+          ],
+          "default": "double",
+          "description": "Preferred quote style for strings in beautified output."
+        },
+        "airtableFormula.minify.level": {
+          "type": "string",
+          "enum": [
+            "micro",
+            "standard",
+            "aggressive",
+            "extreme"
+          ],
+          "default": "standard",
+          "description": "Minification level."
+        },
+        "airtableFormula.minify.preserveReadability": {
+          "type": "boolean",
+          "default": false,
+          "description": "Preserve some whitespace around operators for readability during minify."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run package",
+    "compile": "pnpm run check-types && pnpm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "pnpm run check-types && pnpm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.104.0",
+    "@typescript-eslint/eslint-plugin": "^8.42.0",
+    "@typescript-eslint/parser": "^8.42.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.9",
+    "eslint": "^9.34.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.2"
+  }
+}
