@@ -1,6 +1,4 @@
-# VS Code Extension Release Workflow
-# This workflow builds, tests, packages, and publishes VS Code extensions
-# Triggers on GitHub releases and supports both stable and pre-releases
+# VS Code Extension Release Workflow - Fixed Version
 
 name: Release VS Code Extension
 
@@ -10,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: "Release type"
+        description: 'Release type'
         required: true
-        default: "patch"
+        default: 'patch'
         type: choice
         options:
           - patch
@@ -20,12 +18,12 @@ on:
           - major
           - prerelease
       marketplace_publish:
-        description: "Publish to VS Code Marketplace"
+        description: 'Publish to VS Code Marketplace'
         required: false
         default: true
         type: boolean
       openvsx_publish:
-        description: "Publish to Open VSX Registry"
+        description: 'Publish to Open VSX Registry'
         required: false
         default: true
         type: boolean
@@ -40,24 +38,24 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Fetch all history for proper versioning
-
+          
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false # We'll handle installation manually for better caching
-
+          
       - name: Get pnpm store directory
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
+          
       - name: Setup pnpm cache
         uses: actions/cache@v4
         with:
@@ -65,31 +63,56 @@ jobs:
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
-
+            
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "pnpm"
-
+          node-version: '20'
+          cache: 'pnpm'
+          
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
+        
       - name: Install vsce and ovsx
         run: |
           pnpm add -D @vscode/vsce
           pnpm add -D ovsx
-
-      # Run tests if they exist
+          
+      # Setup headless environment for VS Code tests
+      - name: Setup headless environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2-dev libgtk-3-dev libnss3-dev
+          
+      # Run tests with xvfb for headless mode
       - name: Run tests
         run: |
+          export DISPLAY=:99.0
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+          
+          # Start D-Bus session
+          mkdir -p $XDG_RUNTIME_DIR
+          dbus-daemon --session --address=$DBUS_SESSION_BUS_ADDRESS --nofork --nopidfile --syslog-only &
+          
+          # Start Xvfb with proper configuration
+          Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+          
+          # Wait for Xvfb to start
+          sleep 3
+          
+          # Create VS Code config to disable hardware acceleration
+          mkdir -p ~/.vscode
+          echo '{ "disable-hardware-acceleration": true }' > ~/.vscode/argv.json
+          
+          # Run tests
           if [ -f "package.json" ] && grep -q '"test"' package.json; then
-            pnpm test
+            xvfb-run -a --server-args="-screen 0 1024x768x24 -ac +extension GLX +render -noreset" pnpm test
           else
             echo "No tests found, skipping test step"
           fi
         continue-on-error: false
-
+        
       # Build/compile if build script exists
       - name: Build extension
         run: |
@@ -100,7 +123,7 @@ jobs:
           else
             echo "No build/compile script found, skipping build step"
           fi
-
+          
       # Package the extension
       - name: Package extension
         id: package
@@ -111,12 +134,12 @@ jobs:
             # Use vsce directly if no package script
             npx vsce package --no-dependencies
           fi
-
+          
           # Get the generated VSIX filename
           VSIX_FILE=$(ls *.vsix | head -1)
           echo "vsix_file=$VSIX_FILE" >> $GITHUB_OUTPUT
           echo "Generated VSIX: $VSIX_FILE"
-
+          
       # Validate the package
       - name: Validate package
         run: |
@@ -125,16 +148,16 @@ jobs:
             echo "ERROR: VSIX file not found: $VSIX_FILE"
             exit 1
           fi
-
+          
           # Check file size (should be reasonable)
           FILE_SIZE=$(stat -c%s "$VSIX_FILE")
           if [ $FILE_SIZE -lt 1000 ]; then
             echo "ERROR: VSIX file seems too small: $FILE_SIZE bytes"
             exit 1
           fi
-
+          
           echo "VSIX validation passed. File size: $FILE_SIZE bytes"
-
+          
       # Determine if this is a pre-release
       - name: Check if pre-release
         id: prerelease
@@ -146,7 +169,7 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
             echo "This is a stable release"
           fi
-
+          
       # Publish to VS Code Marketplace
       - name: Publish to VS Code Marketplace
         if: |
@@ -157,7 +180,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           VSIX_FILE="${{ steps.package.outputs.vsix_file }}"
-
+          
           if [[ "${{ steps.prerelease.outputs.is_prerelease }}" == "true" ]]; then
             echo "Publishing pre-release to VS Code Marketplace..."
             npx vsce publish --packagePath "$VSIX_FILE" --pre-release
@@ -165,7 +188,7 @@ jobs:
             echo "Publishing stable release to VS Code Marketplace..."
             npx vsce publish --packagePath "$VSIX_FILE"
           fi
-
+          
       # Publish to Open VSX Registry
       - name: Publish to Open VSX Registry
         if: |
@@ -178,7 +201,7 @@ jobs:
           VSIX_FILE="${{ steps.package.outputs.vsix_file }}"
           echo "Publishing to Open VSX Registry..."
           npx ovsx publish "$VSIX_FILE" --pat $OVSX_PAT
-
+          
       # Upload VSIX to GitHub Release
       - name: Upload VSIX to GitHub Release
         if: github.event_name == 'release'
@@ -189,7 +212,7 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          
       # Upload as workflow artifact (for manual runs)
       - name: Upload VSIX as artifact
         if: github.event_name == 'workflow_dispatch'
@@ -198,7 +221,7 @@ jobs:
           name: vscode-extension-${{ github.run_number }}
           path: ${{ steps.package.outputs.vsix_file }}
           retention-days: 30
-
+          
       # Summary
       - name: Release Summary
         run: |
