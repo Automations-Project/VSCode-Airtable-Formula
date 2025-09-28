@@ -1,4 +1,4 @@
-# VS Code Extension Release Workflow - Fixed Version
+# VS Code Extension Release Workflow - Final Fixed Version
 
 name: Release VS Code Extension
 
@@ -124,14 +124,17 @@ jobs:
             echo "No build/compile script found, skipping build step"
           fi
           
-      # Package the extension
+      # Package the extension with dependency fix
       - name: Package extension
         id: package
         run: |
+          # Clean up any problematic dependencies first
+          npm ls --production --parseable --depth=99999 --loglevel=error || true
+          
           if [ -f "package.json" ] && grep -q '"package"' package.json; then
-            pnpm run package
+            pnpm run package --no-dependencies
           else
-            # Use vsce directly if no package script
+            # Use vsce directly if no package script with production dependencies flag
             npx vsce package --no-dependencies
           fi
           
