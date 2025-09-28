@@ -1,22 +1,33 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { AirtableFormulaDiagnosticsProvider } from './diagnostics';
+import { AirtableFormulaCompletionProvider } from './completions';
 
 // Types
 interface BeautifyOptions {
-    style?: 'ultra-compact' | 'compact' | 'readable' | 'json' | 'cascade';
+    style?: 'ultra-compact' | 'compact' | 'readable' | 'json' | 'cascade' | 'smart';
     indent_size?: number;
     max_line_length?: number;
     quote_style?: 'double' | 'single';
+    strip_comments?: boolean;
+    warn_on_comments?: boolean;
+    preserve_empty_field_refs?: boolean;
+    smart_line_breaks?: boolean;
 }
 
 interface MinifyOptions {
-    level?: 'micro' | 'standard' | 'aggressive' | 'extreme';
+    level?: 'micro' | 'safe' | 'standard' | 'aggressive' | 'extreme';
     preserve_readability?: boolean;
+    max_line_length?: number;
+    safe_line_breaks?: boolean;
+    safe_break_threshold?: number;
 }
 
 interface ExtensionSettings {
     scriptRoot?: string;
+    beautifierVersion?: 'v1' | 'v2';
+    minifierVersion?: 'v1' | 'v2';
     beautify?: {
         style?: BeautifyOptions['style'];
         indentSize?: number;
@@ -34,6 +45,46 @@ type MinifyFn = (text: string) => string;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Extension "airtable-formula" activated');
+    
+    // Apply Airtable color scheme
+    applyAirtableColors();
+
+    // Initialize diagnostics provider
+    const diagnosticsProvider = new AirtableFormulaDiagnosticsProvider();
+    context.subscriptions.push(diagnosticsProvider);
+
+    // Update diagnostics on document change
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument((event) => {
+            if (event.document.languageId === 'airtable-formula') {
+                diagnosticsProvider.updateDiagnostics(event.document);
+            }
+        })
+    );
+
+    // Update diagnostics on document open
+    context.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument((document) => {
+            if (document.languageId === 'airtable-formula') {
+                diagnosticsProvider.updateDiagnostics(document);
+            }
+        })
+    );
+
+    // Update diagnostics for all open documents
+    vscode.workspace.textDocuments.forEach((document) => {
+        if (document.languageId === 'airtable-formula') {
+            diagnosticsProvider.updateDiagnostics(document);
+        }
+    });
+
+    // Register completion provider
+    const completionProvider = vscode.languages.registerCompletionItemProvider(
+        'airtable-formula',
+        new AirtableFormulaCompletionProvider(),
+        '(', '{', "'", '"'
+    );
+    context.subscriptions.push(completionProvider);
 
     // Register document formatter for .formula language (beautify)
     const formatter = vscode.languages.registerDocumentFormattingEditProvider('airtable-formula', {
@@ -52,7 +103,9 @@ export function activate(context: vscode.ExtensionContext) {
                 void vscode.window.showErrorMessage('Beautify failed. See extension host log for details.');
                 return [];
             }
-            if (formatted === original) return [];
+            if (formatted === original) {
+                return [];
+            }
             const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(original.length));
             return [vscode.TextEdit.replace(fullRange, formatted)];
         },
@@ -61,7 +114,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Command: Beautify current selection or whole document
     const beautifyCmd = vscode.commands.registerCommand('airtable-formula.beautify', async () => {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) { return; }
+        if (!editor) {
+            return;
+        }
         const document = editor.document;
         const selection = editor.selection;
         const targetRange = selection && !selection.isEmpty
@@ -89,7 +144,9 @@ export function activate(context: vscode.ExtensionContext) {
     // Command: Minify current selection or whole document
     const minifyCmd = vscode.commands.registerCommand('airtable-formula.minify', async () => {
         const editor = vscode.window.activeTextEditor;
-        if (!editor) { return; }
+        if (!editor) {
+            return;
+        }
         const document = editor.document;
         const selection = editor.selection;
         const targetRange = selection && !selection.isEmpty
@@ -180,11 +237,88 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
+// Apply Airtable-style colors to the editor
+function applyAirtableColors() {
+    const config = vscode.workspace.getConfiguration();
+    const tokenColorCustomizations = config.get<any>('editor.tokenColorCustomizations') || {};
+    
+    // Add or update Airtable formula colors
+    if (!tokenColorCustomizations.textMateRules) {
+        tokenColorCustomizations.textMateRules = [];
+    }
+    
+    const airtableRules = [
+        {
+            scope: [
+                'entity.name.function.text.airtable-formula',
+                'entity.name.function.numeric.airtable-formula',
+                'entity.name.function.datetime.airtable-formula',
+                'entity.name.function.logical.airtable-formula',
+                'entity.name.function.array.airtable-formula',
+                'entity.name.function.regex.airtable-formula',
+                'entity.name.function.record.airtable-formula',
+                'entity.name.function.misc.airtable-formula'
+            ],
+            settings: {
+                foreground: '#7fe095'
+            }
+        },
+        {
+            scope: [
+                'variable.other.field.airtable-formula',
+                'entity.name.field.airtable-formula'
+            ],
+            settings: {
+                foreground: '#b2aefc'
+            }
+        },
+        {
+            scope: [
+                'string.quoted.double.airtable-formula',
+                'string.quoted.single.airtable-formula',
+                'constant.numeric.airtable-formula'
+            ],
+            settings: {
+                foreground: '#61ebe1'
+            }
+        },
+        {
+            scope: [
+                'constant.language.boolean.airtable-formula',
+                'constant.language.datetime.airtable-formula',
+                'support.constant.datetime.airtable-formula'
+            ],
+            settings: {
+                foreground: '#61ebe1'
+            }
+        }
+    ];
+    
+    // Remove existing Airtable rules and add new ones
+    const filteredRules = tokenColorCustomizations.textMateRules.filter(
+        (rule: any) => !rule.scope?.some?.((s: string) => s.includes('airtable-formula'))
+    );
+    
+    tokenColorCustomizations.textMateRules = [...filteredRules, ...airtableRules];
+    
+    // Apply the configuration
+    config.update(
+        'editor.tokenColorCustomizations',
+        tokenColorCustomizations,
+        vscode.ConfigurationTarget.Global
+    ).then(
+        () => console.log('Airtable colors applied successfully'),
+        (err) => console.error('Failed to apply Airtable colors:', err)
+    );
+}
+
 // ------------------ Helpers ------------------
 function getConfig(document?: vscode.TextDocument): ExtensionSettings {
     const cfg = vscode.workspace.getConfiguration('airtableFormula', document);
     return {
         scriptRoot: cfg.get<string>('scriptRoot'),
+        beautifierVersion: cfg.get<'v1' | 'v2'>('beautifierVersion', 'v2'),
+        minifierVersion: cfg.get<'v1' | 'v2'>('minifierVersion', 'v2'),
         beautify: {
             style: cfg.get('beautify.style'),
             indentSize: cfg.get('beautify.indentSize'),
@@ -201,11 +335,15 @@ function getConfig(document?: vscode.TextDocument): ExtensionSettings {
 function resolveScriptPath(document: vscode.TextDocument, fileName: string): string | null {
     // 1) Prefer bundled vendor in dist
     const distVendor = path.join(__dirname, 'vendor', fileName);
-    if (fs.existsSync(distVendor)) return distVendor;
+    if (fs.existsSync(distVendor)) {
+        return distVendor;
+    }
 
     // 2) Dev mode: use src/vendor next to source
     const srcVendor = path.join(__dirname, '..', 'src', 'vendor', fileName);
-    if (fs.existsSync(srcVendor)) return srcVendor;
+    if (fs.existsSync(srcVendor)) {
+        return srcVendor;
+    }
 
     // 3) Legacy config / workspace fallback (draft/scripts or configured path)
     const settings = getConfig(document);
@@ -217,32 +355,55 @@ function resolveScriptPath(document: vscode.TextDocument, fileName: string): str
         root = root.replace('${workspaceFolder}', wsPath);
     }
 
-    if (!root) { return null; }
+    if (!root) {
+        return null;
+    }
     const fullPath = path.join(root, fileName);
-    if (fs.existsSync(fullPath)) return fullPath;
+    if (fs.existsSync(fullPath)) {
+        return fullPath;
+    }
 
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
         const candidate = path.join(folder.uri.fsPath, 'draft', 'scripts', fileName);
-        if (fs.existsSync(candidate)) return candidate;
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
     }
 
     return null;
 }
 
 function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
-    const beautifierPath = resolveScriptPath(document, 'formula-beautifier.js');
-    if (!beautifierPath) return null;
+    const settings = getConfig(document);
+    const version = settings.beautifierVersion || 'v2';
+    
+    // Determine which file to load based on version setting
+    const fileName = version === 'v2' ? 'formula-beautifier-v2.js' : 'formula-beautifier.js';
+    const beautifierPath = resolveScriptPath(document, fileName);
+    
+    // If v2 is selected but not found, fall back to v1
+    let fallbackPath: string | null = null;
+    if (!beautifierPath && version === 'v2') {
+        fallbackPath = resolveScriptPath(document, 'formula-beautifier.js');
+        if (fallbackPath) {
+            console.warn('Beautifier v2 not found, falling back to v1');
+        }
+    }
+    
+    const finalPath = beautifierPath || fallbackPath;
+    if (!finalPath) {
+        return null;
+    }
 
     const req = (eval('require')) as (id: string) => any; // runtime require to avoid bundling
     let BeautifierClass: any;
     try {
-        BeautifierClass = req(beautifierPath);
+        BeautifierClass = req(finalPath);
     } catch (e) {
         console.error('Failed loading beautifier:', e);
         return null;
     }
 
-    const settings = getConfig(document);
     const options: BeautifyOptions = {
         max_line_length: settings.beautify?.maxLineLength ?? 120,
         quote_style: (settings.beautify?.quoteStyle as any) ?? 'double',
@@ -262,19 +423,35 @@ function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
 }
 
 function getMinifyFunction(document: vscode.TextDocument): MinifyFn | null {
-    const minifierPath = resolveScriptPath(document, 'formula-minifier.js');
-    if (!minifierPath) return null;
+    const settings = getConfig(document);
+    const version = settings.minifierVersion || 'v2';
+    
+    // Determine which file to load based on version setting
+    const fileName = version === 'v2' ? 'formula-minifier-v2.js' : 'formula-minifier.js';
+    const minifierPath = resolveScriptPath(document, fileName);
+    
+    // If v2 is selected but not found, fall back to v1
+    let fallbackPath: string | null = null;
+    if (!minifierPath && version === 'v2') {
+        fallbackPath = resolveScriptPath(document, 'formula-minifier.js');
+        if (fallbackPath) {
+            console.warn('Minifier v2 not found, falling back to v1');
+        }
+    }
+    
+    const finalPath = minifierPath || fallbackPath;
+    if (!finalPath) {
+        return null;
+    }
 
     const req = (eval('require')) as (id: string) => any;
     let MinifierClass: any;
     try {
-        MinifierClass = req(minifierPath);
+        MinifierClass = req(finalPath);
     } catch (e) {
         console.error('Failed loading minifier:', e);
         return null;
     }
-
-    const settings = getConfig(document);
     const options: MinifyOptions = {
         level: (settings.minify?.level as any) ?? 'standard',
         preserve_readability: settings.minify?.preserveReadability ?? false,
