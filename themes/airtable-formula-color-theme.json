@@ -1,0 +1,84 @@
+{
+  "name": "Airtable Formula Colors",
+  "type": "dark",
+  "$schema": "vscode://schemas/color-theme",
+  "tokenColors": [
+    {
+      "name": "Airtable Functions",
+      "scope": [
+        "entity.name.function.text.airtable-formula",
+        "entity.name.function.numeric.airtable-formula",
+        "entity.name.function.datetime.airtable-formula",
+        "entity.name.function.logical.airtable-formula",
+        "entity.name.function.array.airtable-formula",
+        "entity.name.function.regex.airtable-formula",
+        "entity.name.function.record.airtable-formula",
+        "entity.name.function.misc.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#7fe095"
+      }
+    },
+    {
+      "name": "Airtable Field References",
+      "scope": [
+        "variable.other.field.airtable-formula",
+        "entity.name.field.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#b2aefc"
+      }
+    },
+    {
+      "name": "Airtable String Values",
+      "scope": [
+        "string.quoted.double.airtable-formula",
+        "string.quoted.single.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#61ebe1"
+      }
+    },
+    {
+      "name": "Airtable Numeric Values",
+      "scope": [
+        "constant.numeric.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#61ebe1"
+      }
+    },
+    {
+      "name": "Airtable Boolean Constants",
+      "scope": [
+        "constant.language.boolean.airtable-formula",
+        "constant.language.datetime.airtable-formula",
+        "support.constant.datetime.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#61ebe1"
+      }
+    },
+    {
+      "name": "Airtable Field Brackets",
+      "scope": [
+        "punctuation.definition.field.begin.airtable-formula",
+        "punctuation.definition.field.end.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#b2aefc"
+      }
+    },
+    {
+      "name": "Airtable Comments (Invalid but highlighted)",
+      "scope": [
+        "comment.line.double-slash.airtable-formula",
+        "comment.block.airtable-formula"
+      ],
+      "settings": {
+        "foreground": "#6A6A6A",
+        "fontStyle": "italic"
+      }
+    }
+  ]
+}

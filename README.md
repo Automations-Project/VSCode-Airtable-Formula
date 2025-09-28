@@ -6,7 +6,7 @@
 [![Open VSX Version](https://img.shields.io/open-vsx/v/Nskha/airtable-formula?label=Open%20VSX&color=brightgreen)](https://open-vsx.org/extension/Nskha/airtable-formula)
 [![Open VSX Downloads](https://img.shields.io/open-vsx/dt/Nskha/airtable-formula?label=Downloads)](https://open-vsx.org/extension/Nskha/airtable-formula)
 
-Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.
+The ultimate Airtable formula development environment in VS Code with Airtable-matching syntax colors, intelligent diagnostics, auto-completion, and advanced formatting tools.
 
 ![Airtable Formula](https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/refs/heads/main/images/gallery-banner.png)
 
@@ -18,11 +18,31 @@ Beautify and compress Airtable formulas in VS Code with syntax-aware formatting,
 
 ## Features
 
-- **Beautify**: Format Airtable formulas with proper indentation and line breaks
-- **Minify**: Compress formulas to reduce size while maintaining functionality  
-- **Syntax Highlighting**: Full support for `.formula` files
-- **Multiple Styles**: Choose from ultra-compact, compact, readable, JSON, and cascade formatting
-- **Customizable**: Configure indentation, line length, quote style, and minification levels
+### 🎨 Airtable-Matching Colors
+- **Exact color scheme**: Functions (green #7fe095), Fields (purple #b2aefc), Values (cyan #61ebe1)
+- **Automatic application**: Colors match Airtable's interface perfectly
+
+### ✨ Smart Formatting
+- **Beautify v2**: Smart adaptive formatting with comment removal and JSON-aware optimization
+- **Minify v2**: Safe mode prevents tokenization issues on long lines
+- **Version selection**: Choose between stable v1 or feature-rich v2
+- **Multiple styles**: Ultra-compact, compact, readable, JSON, cascade, and smart (v2)
+
+### 🔍 Intelligent Diagnostics
+- **Real-time error detection**: Unclosed parentheses, brackets, and quotes
+- **Function validation**: Detects missing parentheses after function names
+- **Comment warnings**: Alerts for invalid comments (not allowed in Airtable)
+- **Related information**: Links opening brackets to where closing is needed
+
+### 💡 IntelliSense Support
+- **Auto-completion**: All Airtable functions with documentation
+- **Function signatures**: Parameter hints and descriptions
+- **Smart triggers**: Activates on `(`, `{`, quotes
+
+### 📁 File Support
+- **Extensions**: `.formula`, `.min.formula`, `.ultra-min.formula`
+- **High tokenization limit**: Handles minified files up to 250,000 characters per line
+- **Batch operations**: Beautify/minify multiple files from Explorer
 
 ## Usage
 
@@ -36,12 +56,25 @@ Beautify and compress Airtable formulas in VS Code with syntax-aware formatting,
 
 This extension contributes the following settings:
 
+* `airtableFormula.beautifierVersion`: Choose beautifier version (v1 or v2, default: v2)
+* `airtableFormula.minifierVersion`: Choose minifier version (v1 or v2, default: v2)
 * `airtableFormula.scriptRoot`: Path to formula scripts directory
-* `airtableFormula.beautify.style`: Formatting style (ultra-compact, compact, readable, json, cascade)
-* `airtableFormula.beautify.indentSize`: Indentation size
-* `airtableFormula.beautify.maxLineLength`: Maximum line length
-* `airtableFormula.beautify.quoteStyle`: Quote style preference
+* `airtableFormula.beautify.style`: Formatting style
+  - `ultra-compact`: No indentation, maximum compression
+  - `compact`: Minimal indentation, balanced readability
+  - `readable`: Human-friendly formatting
+  - `json`: Optimized for JSON string building
+  - `cascade`: For cascading IF conditions
+  - `smart` (v2 only): Adaptive formatting based on complexity
+* `airtableFormula.beautify.indentSize`: Indentation size (default: 1)
+* `airtableFormula.beautify.maxLineLength`: Maximum line length (default: 120)
+* `airtableFormula.beautify.quoteStyle`: Quote style preference (double/single)
 * `airtableFormula.minify.level`: Minification level
+  - `micro`: Minimal changes
+  - `safe` (v2 only): Prevents tokenization issues with line breaks
+  - `standard`: Balanced optimization
+  - `aggressive`: More space removal
+  - `extreme`: Maximum compression
 * `airtableFormula.minify.preserveReadability`: Preserve whitespace for readability
 
 ## Requirements
@@ -82,6 +115,15 @@ To create a new release with a VSIX file:
 The VSIX file will be available for download from the GitHub release page and can be installed directly in VS Code.
 
 ## Release Notes
+
+### 0.1.0
+
+Major update with Airtable-matching colors, intelligent diagnostics, and enhanced formatting:
+- 🎨 Exact Airtable color scheme for syntax highlighting
+- 🔍 Real-time error detection and smart diagnostics
+- 💡 IntelliSense with auto-completion for all functions
+- 🚀 v2 formatters with adaptive formatting and safe minification
+- 📁 Extended file support for minified formulas
 
 ### 0.0.2
 

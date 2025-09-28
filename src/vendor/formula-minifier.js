@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Advanced AST-Based Formula Minifier
+ * Advanced AST-Based Formula Minifier (v1)
  * Leverages parsing for intelligent compression
+ * Note: v2 is available with safe mode and better optimization - select version in extension settings
  */
 class AdvancedFormulaMinifier {
   constructor(options = {}) {

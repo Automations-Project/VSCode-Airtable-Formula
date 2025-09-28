@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Advanced Compact Airtable Formula Beautifier
+ * Advanced Compact Airtable Formula Beautifier (v1)
  * Optimized for JSON output, minimal indentation, and maximum readability
+ * Note: v2 is available with enhanced features - select version in extension settings
  */
 class CompactFormulaBeautifier {
   constructor(options = {}) {

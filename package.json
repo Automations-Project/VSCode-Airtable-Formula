@@ -3,14 +3,16 @@
   "publisher": "Nskha",
   "displayName": "airtable formula",
   "description": "Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "icon": "images/icon.png",
   "license": "MIT",
   "repository": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
   "galleryBanner": {
     "path": "https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/refs/heads/main/images/gallery-banner.png",
     "width": 815,
-    "height": 250
+    "height": 250,
+    "color": "#1e1e1e",
+    "theme": "dark"
   },
   "engines": {
     "vscode": "^1.74.0"
@@ -29,8 +31,24 @@
           "formula"
         ],
         "extensions": [
-          ".formula"
-        ]
+          ".formula",
+          ".min.formula",
+          ".ultra-min.formula"
+        ],
+        "configuration": "./language-configuration/airtable-formula-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "airtable-formula",
+        "scopeName": "source.airtable-formula",
+        "path": "./syntaxes/airtable-formula.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "airtable-formula",
+        "path": "./snippets/airtable-formula-snippets.json"
       }
     ],
     "commands": [
@@ -89,6 +107,57 @@
         }
       ]
     },
+    "configurationDefaults": {
+      "[airtable-formula]": {
+        "editor.maxTokenizationLineLength": 250000,
+        "editor.tokenColorCustomizations": {
+          "textMateRules": [
+            {
+              "scope": [
+                "entity.name.function.text.airtable-formula",
+                "entity.name.function.numeric.airtable-formula",
+                "entity.name.function.datetime.airtable-formula",
+                "entity.name.function.logical.airtable-formula",
+                "entity.name.function.array.airtable-formula",
+                "entity.name.function.regex.airtable-formula",
+                "entity.name.function.record.airtable-formula",
+                "entity.name.function.misc.airtable-formula"
+              ],
+              "settings": {
+                "foreground": "#7fe095"
+              }
+            },
+            {
+              "scope": [
+                "variable.other.field.airtable-formula",
+                "entity.name.field.airtable-formula"
+              ],
+              "settings": {
+                "foreground": "#b2aefc"
+              }
+            },
+            {
+              "scope": [
+                "string.quoted.double.airtable-formula",
+                "string.quoted.single.airtable-formula",
+                "constant.numeric.airtable-formula"
+              ],
+              "settings": {
+                "foreground": "#61ebe1"
+              }
+            },
+            {
+              "scope": [
+                "constant.language.boolean.airtable-formula"
+              ],
+              "settings": {
+                "foreground": "#61ebe1"
+              }
+            }
+          ]
+        }
+      }
+    },
     "configuration": {
       "title": "Airtable Formula",
       "properties": {
@@ -97,6 +166,18 @@
           "default": "${workspaceFolder}/draft/scripts",
           "description": "Path to the draft/scripts directory containing formula-beautifier.js and formula-minifier.js."
         },
+        "airtableFormula.beautifierVersion": {
+          "type": "string",
+          "enum": ["v1", "v2"],
+          "default": "v2",
+          "description": "Choose beautifier version. v2 has enhanced features like comment removal, smart formatting, and better JSON handling."
+        },
+        "airtableFormula.minifierVersion": {
+          "type": "string",
+          "enum": ["v1", "v2"],
+          "default": "v2",
+          "description": "Choose minifier version. v2 has safe mode to prevent tokenization issues and better optimization."
+        },
         "airtableFormula.beautify.style": {
           "type": "string",
           "enum": [
@@ -104,7 +185,16 @@
             "compact",
             "readable",
             "json",
-            "cascade"
+            "cascade",
+            "smart"
+          ],
+          "enumDescriptions": [
+            "No indentation, maximum compression",
+            "Minimal indentation, balanced readability",
+            "Human-friendly formatting with clear structure",
+            "Optimized for JSON string building",
+            "For cascading IF conditions",
+            "(v2 only) Adaptive formatting based on complexity"
           ],
           "default": "compact",
           "description": "Beautifier style."
@@ -132,9 +222,17 @@
           "type": "string",
           "enum": [
             "micro",
+            "safe",
             "standard",
             "aggressive",
             "extreme"
+          ],
+          "enumDescriptions": [
+            "Minimal changes, preserves most formatting",
+            "(v2 only) Prevents tokenization issues with line breaks",
+            "Balanced optimization",
+            "More aggressive space removal and optimization",
+            "Maximum compression, may affect readability"
           ],
           "default": "standard",
           "description": "Minification level."
@@ -145,15 +243,45 @@
           "description": "Preserve some whitespace around operators for readability during minify."
         }
       }
-    }
+    },
+    "colors": [
+      {
+        "id": "airtableFormula.functionColor",
+        "description": "Color for Airtable function names",
+        "defaults": {
+          "dark": "#7fe095",
+          "light": "#7fe095",
+          "highContrast": "#7fe095"
+        }
+      },
+      {
+        "id": "airtableFormula.fieldColor",
+        "description": "Color for Airtable field references",
+        "defaults": {
+          "dark": "#b2aefc",
+          "light": "#b2aefc",
+          "highContrast": "#b2aefc"
+        }
+      },
+      {
+        "id": "airtableFormula.valueColor",
+        "description": "Color for string and numeric values",
+        "defaults": {
+          "dark": "#61ebe1",
+          "light": "#61ebe1",
+          "highContrast": "#61ebe1"
+        }
+      }
+    ]
   },
   "scripts": {
-    "vscode:prepublish": "pnpm run package",
+    "vscode:prepublish": "pnpm run build",
     "compile": "pnpm run check-types && pnpm run lint && node esbuild.js",
+    "build": "pnpm run check-types && pnpm run lint && node esbuild.js --production",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "pnpm run check-types && pnpm run lint && node esbuild.js --production && vsce package",
+    "package": "vsce package",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
