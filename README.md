@@ -27,6 +27,7 @@ The ultimate Airtable formula development environment in VS Code with Airtable-m
 - **Minify v2**: Safe mode prevents tokenization issues on long lines
 - **Version selection**: Choose between stable v1 or feature-rich v2
 - **Multiple styles**: Ultra-compact, compact, readable, JSON, cascade, and smart (v2)
+- **Style/level submenus**: Pick a formatting style or minify level directly from context menus
 
 ### 🔍 Intelligent Diagnostics
 - **Real-time error detection**: Unclosed parentheses, brackets, and quotes
@@ -43,6 +44,7 @@ The ultimate Airtable formula development environment in VS Code with Airtable-m
 - **Extensions**: `.formula`, `.min.formula`, `.ultra-min.formula`
 - **High tokenization limit**: Handles minified files up to 250,000 characters per line
 - **Batch operations**: Beautify/minify multiple files from Explorer
+- **Minify in-place**: Running minify on `.min.formula` or `.ultra-min.formula` overwrites the same file
 
 ## Usage
 
@@ -116,6 +118,11 @@ The VSIX file will be available for download from the GitHub release page and ca
 
 ## Release Notes
 
+### 0.0.2
+
+Initial release with beautify and minify functionality for Airtable formulas.
+
+
 ### 0.1.0
 
 Major update with Airtable-matching colors, intelligent diagnostics, and enhanced formatting:
@@ -125,6 +132,9 @@ Major update with Airtable-matching colors, intelligent diagnostics, and enhance
 - 🚀 v2 formatters with adaptive formatting and safe minification
 - 📁 Extended file support for minified formulas
 
-### 0.0.2
+### 0.2.0
 
-Initial release with beautify and minify functionality for Airtable formulas.
+- 🚀 Context menu submenus for beautify styles and minify levels
+- 🎨 JSON beautifier performance improvements to prevent freezes
+- 🎨 Minify in-place behavior for `.min.formula` / `.ultra-min.formula`
+

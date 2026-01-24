@@ -1,6 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
+// Pre-compiled regex patterns for performance (avoid creating in hot loops)
+const WHITESPACE_RE = /\s/;
+const DIGIT_RE = /\d/;
+const DIGIT_DOT_RE = /[\d.]/;
+const IDENTIFIER_RE = /[A-Z_0-9]/i;
+
 /**
  * Advanced AST-Based Formula Minifier (v1)
  * Leverages parsing for intelligent compression
@@ -60,7 +66,7 @@ class AdvancedFormulaMinifier {
     
     while (i < formula.length) {
       // Skip whitespace
-      if (/\s/.test(formula[i])) {
+      if (WHITESPACE_RE.test(formula[i])) {
         i++;
         continue;
       }
@@ -70,6 +76,7 @@ class AdvancedFormulaMinifier {
         const quote = formula[i];
         let value = quote;
         let escaped = false;
+        const startPos = i;
         i++;
         
         while (i < formula.length) {
@@ -88,6 +95,12 @@ class AdvancedFormulaMinifier {
           }
           i++;
         }
+        
+        // Check for unterminated string
+        if (value[value.length - 1] !== quote) {
+          throw new Error(`Unterminated string starting at position ${startPos}`);
+        }
+        
         tokens.push({ type: 'STRING', value });
         continue;
       }
@@ -107,15 +120,21 @@ class AdvancedFormulaMinifier {
         continue;
       }
       
-      // Numbers
-      if (/\d/.test(formula[i]) || 
-          (formula[i] === '-' && i + 1 < formula.length && /\d/.test(formula[i + 1]))) {
+      // Numbers - only treat '-' as negative sign at start, after '(', ',', or operators
+      const prevToken = tokens[tokens.length - 1];
+      const canBeNegative = !prevToken || 
+                            prevToken.type === 'LPAREN' || 
+                            prevToken.type === 'COMMA' || 
+                            prevToken.type === 'OPERATOR';
+      
+      if (DIGIT_RE.test(formula[i]) || 
+          (formula[i] === '-' && canBeNegative && i + 1 < formula.length && DIGIT_RE.test(formula[i + 1]))) {
         let value = '';
         if (formula[i] === '-') {
           value = '-';
           i++;
         }
-        while (i < formula.length && /[\d.]/.test(formula[i])) {
+        while (i < formula.length && DIGIT_DOT_RE.test(formula[i])) {
           value += formula[i];
           i++;
         }
@@ -145,13 +164,13 @@ class AdvancedFormulaMinifier {
       
       // Function names
       let name = '';
-      while (i < formula.length && /[A-Z_0-9]/i.test(formula[i])) {
+      while (i < formula.length && IDENTIFIER_RE.test(formula[i])) {
         name += formula[i];
         i++;
       }
       
       let j = i;
-      while (j < formula.length && /\s/.test(formula[j])) j++;
+      while (j < formula.length && WHITESPACE_RE.test(formula[j])) j++;
       
       tokens.push({
         type: j < formula.length && formula[j] === '(' ? 'FUNCTION' : 'IDENTIFIER',
@@ -191,7 +210,7 @@ class AdvancedFormulaMinifier {
     
     const parsePrimary = () => {
       const token = peek();
-      if (!token) return null;
+      if (!token) throw new Error('Unexpected end of input');
       
       if (token.type === 'LPAREN') {
         consume();
@@ -237,7 +256,7 @@ class AdvancedFormulaMinifier {
         return { type: 'IDENTIFIER', value: token.value };
       }
       
-      return null;
+      throw new Error(`Unexpected token: ${token.type} (${token.value})`);
     };
     
     return parseExpr();
@@ -430,11 +449,14 @@ class AdvancedFormulaMinifier {
   }
 
   canRemoveSpaces(op) {
-    // Can't remove spaces around & and comparison operators
+    // IMPORTANT: Airtable requires spaces around arithmetic operators!
+    // Only & (concatenation) can safely have no spaces.
+    // {A}*{B} is INVALID, must be {A} * {B}
     if (this.preserveReadability) {
       return false;
     }
-    return op === '+' || op === '-' || op === '*' || op === '/';
+    // Only concatenation operator can have spaces removed
+    return op === '&';
   }
 
   getStringContent(value) {

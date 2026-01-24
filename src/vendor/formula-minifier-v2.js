@@ -107,25 +107,35 @@ class EnhancedFormulaMinifier {
     const tokens = [];
     let i = 0;
     
-    // Known Airtable functions
+    // Known Airtable functions - Complete list from official docs
     const FUNCTIONS = new Set([
-      'IF', 'AND', 'OR', 'NOT', 'XOR', 'SWITCH', 'IS_SAME', 'IS_AFTER', 'IS_BEFORE',
-      'ISERROR', 'ERROR', 'CONCATENATE', 'LEFT', 'RIGHT', 'MID', 'LEN', 'FIND',
-      'SEARCH', 'SUBSTITUTE', 'REPLACE', 'TRIM', 'UPPER', 'LOWER', 'VALUE', 'TEXT',
-      'REPT', 'T', 'ABS', 'AVERAGE', 'CEILING', 'COUNT', 'COUNTA', 'COUNTALL',
-      'EXP', 'FLOOR', 'INT', 'LOG', 'LOG10', 'MAX', 'MIN', 'MOD', 'POWER',
-      'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'SUM', 'DATEADD', 'DATEDIF',
-      'DATETIME_DIFF', 'DATETIME_FORMAT', 'DATETIME_PARSE', 'DATESTR', 'DAY',
-      'HOUR', 'MINUTE', 'MONTH', 'SECOND', 'SET_LOCALE', 'SET_TIMEZONE',
-      'TIMESTR', 'TONOW', 'FROMNOW', 'WEEKDAY', 'WEEKNUM', 'WORKDAY',
-      'WORKDAY_DIFF', 'YEAR', 'ARRAYCOMPACT', 'ARRAYJOIN', 'ARRAYUNIQUE',
-      'ARRAYFLATTEN', 'ARRAYSLICE', 'REGEX_MATCH', 'REGEX_EXTRACT',
-      'REGEX_REPLACE', 'RECORD_ID', 'AUTONUMBER', 'CREATED_BY', 'CREATED_TIME',
-      'LAST_MODIFIED_TIME', 'LAST_MODIFIED_BY', 'ENCODE_URL_COMPONENT', 'BLANK'
+      // Text functions
+      'CONCATENATE', 'LEFT', 'RIGHT', 'MID', 'LEN', 'FIND', 'SEARCH',
+      'SUBSTITUTE', 'REPLACE', 'TRIM', 'UPPER', 'LOWER', 'REPT', 'T',
+      'VALUE', 'TEXT', 'ENCODE_URL_COMPONENT',
+      // Logical functions
+      'IF', 'AND', 'OR', 'NOT', 'XOR', 'SWITCH', 'ISERROR', 'ERROR', 'BLANK',
+      // Numeric functions
+      'ABS', 'AVERAGE', 'CEILING', 'COUNT', 'COUNTA', 'COUNTALL', 'EVEN',
+      'EXP', 'FLOOR', 'INT', 'LOG', 'LOG10', 'MAX', 'MIN', 'MOD', 'ODD',
+      'POWER', 'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'SUM',
+      // Date/Time functions (all require parentheses!)
+      'DATEADD', 'DATEDIF', 'DATETIME_DIFF', 'DATETIME_FORMAT', 'DATETIME_PARSE',
+      'DATESTR', 'DAY', 'HOUR', 'MINUTE', 'MONTH', 'SECOND', 'SET_LOCALE',
+      'SET_TIMEZONE', 'TIMESTR', 'TONOW', 'FROMNOW', 'WEEKDAY', 'WEEKNUM',
+      'WORKDAY', 'WORKDAY_DIFF', 'YEAR', 'NOW', 'TODAY',
+      'IS_BEFORE', 'IS_AFTER', 'IS_SAME',
+      // Array functions
+      'ARRAYCOMPACT', 'ARRAYJOIN', 'ARRAYUNIQUE', 'ARRAYFLATTEN', 'ARRAYSLICE',
+      // Regex functions
+      'REGEX_MATCH', 'REGEX_EXTRACT', 'REGEX_REPLACE',
+      // Record functions
+      'RECORD_ID', 'CREATED_TIME', 'LAST_MODIFIED_TIME'
     ]);
     
-    // Constants that don't need parentheses
-    const CONSTANTS = new Set(['TRUE', 'FALSE', 'NOW', 'TODAY', 'BLANK']);
+    // TRUE and FALSE are boolean constants - they don't need parentheses
+    // Note: NOW(), TODAY(), BLANK() are functions that require parentheses!
+    const BOOLEAN_CONSTANTS = new Set(['TRUE', 'FALSE']);
     
     while (i < formula.length) {
       // Skip whitespace (will be removed or preserved based on context)
@@ -137,6 +147,54 @@ class EnhancedFormulaMinifier {
         if (!this.removeSpaces) {
           tokens.push({ type: 'SPACE', value: formula.substring(start, i) });
         }
+        continue;
+      }
+      
+      // Handle Airtable line break character '\n' (single quotes around \n)
+      if (formula.substr(i, 4) === "'\\n'") {
+        tokens.push({ type: 'STRING', value: "'\\n'", content: '\\n' });
+        i += 4;
+        continue;
+      }
+      
+      // Detect and handle smart quotes (curly quotes) - convert to straight quotes
+      // Smart quotes: " (\u201C), " (\u201D), ' (\u2018), ' (\u2019)
+      const smartQuotes = {
+        '\u201C': '"', '\u201D': '"',  // Left/right double curly quotes
+        '\u2018': "'", '\u2019': "'"   // Left/right single curly quotes
+      };
+      if (smartQuotes[formula[i]]) {
+        const smartQuote = formula[i];
+        const straightQuote = smartQuotes[smartQuote];
+        let value = straightQuote;
+        let content = '';
+        let escaped = false;
+        i++;
+        
+        while (i < formula.length) {
+          const char = formula[i];
+          const isClosingQuote = smartQuotes[char] === straightQuote || char === straightQuote;
+          
+          if (escaped) {
+            value += char;
+            content += char;
+            escaped = false;
+          } else if (char === '\\') {
+            value += char;
+            content += char;
+            escaped = true;
+          } else if (isClosingQuote) {
+            value += straightQuote;
+            i++;
+            break;
+          } else {
+            value += char;
+            content += char;
+          }
+          i++;
+        }
+        
+        tokens.push({ type: 'STRING', value, content });
         continue;
       }
       
@@ -219,7 +277,8 @@ class EnhancedFormulaMinifier {
         
         if (FUNCTIONS.has(value)) {
           tokens.push({ type: 'FUNCTION', value });
-        } else if (CONSTANTS.has(value)) {
+        } else if (BOOLEAN_CONSTANTS.has(value)) {
+          // TRUE and FALSE are boolean constants, not functions
           tokens.push({ type: 'CONSTANT', value });
         } else {
           tokens.push({ type: 'IDENTIFIER', value });
@@ -389,10 +448,10 @@ class EnhancedFormulaMinifier {
         }
       }
       
-      // Track parentheses depth
+      // Track parentheses depth (prevent going negative)
       if (!inString) {
         if (char === '(') parenDepth++;
-        if (char === ')') parenDepth--;
+        if (char === ')' && parenDepth > 0) parenDepth--;
       }
       
       // Check if we should break

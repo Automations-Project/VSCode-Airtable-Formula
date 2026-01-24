@@ -4,6 +4,20 @@ All notable changes to the "airtable-formula" extension will be documented in th
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.2.0] - 2026-01-24
+
+### Added
+- **Context menu submenus** for beautify styles and minify levels
+- **Batch style/level commands** for explorer selections
+
+### Changed
+- **Explorer file operations** now use file-based formatting for better stability
+- **Minify in-place** when running on `.min.formula` or `.ultra-min.formula`
+
+### Fixed
+- **Beautifier v2 JSON performance** improvements to prevent extension host freezes
+- **Vendor script resolution** consistency across style/level commands
+
 ## [0.1.0] - 2025-09-28
 
 ### Added

@@ -3,3 +3,11 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+
+# Bun
+bun.lockb
+
+# Lock files (use bun.lockb)
+pnpm-lock.yaml
+package-lock.json
+yarn.lock

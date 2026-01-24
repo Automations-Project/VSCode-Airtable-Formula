@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Airtable Formula VS Code Extension — Discussions
+    url: https://github.com/orgs/Automations-Project/discussions/new?category=q-a
+    about: Ask questions, share ideas, or start broader discussions here.
+  - name: Documentation
+    url: https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/README.md
+    about: Review usage instructions and settings before filing an issue.

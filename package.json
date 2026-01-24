@@ -3,7 +3,7 @@
   "publisher": "Nskha",
   "displayName": "airtable formula",
   "description": "Beautify and compress Airtable formulas in VS Code with syntax-aware formatting, whitespace control, and smart line breaking.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "images/icon.png",
   "license": "MIT",
   "repository": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
@@ -15,8 +15,16 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.85.0"
   },
+  "keywords": [
+    "airtable",
+    "formula",
+    "beautifier",
+    "formatter",
+    "minifier",
+    "no-code"
+  ],
   "categories": [
     "Other",
     "Formatters"
@@ -67,6 +75,80 @@
       {
         "command": "airtable-formula.minifyFile",
         "title": "Airtable Formula: Minify File(s)"
+      },
+      {
+        "command": "airtable-formula.installAISkills",
+        "title": "Airtable Formula: Install AI Skills"
+      },
+      {
+        "command": "airtable-formula.uninstallAISkills",
+        "title": "Airtable Formula: Uninstall AI Skills"
+      },
+      {
+        "command": "airtable-formula.beautifyWithStyle",
+        "title": "Airtable Formula: Beautify with Style..."
+      },
+      {
+        "command": "airtable-formula.minifyWithLevel",
+        "title": "Airtable Formula: Minify with Level..."
+      },
+      {
+        "command": "airtable-formula.beautifyStyle.smart",
+        "title": "Airtable Formula: Beautify (Smart)"
+      },
+      {
+        "command": "airtable-formula.beautifyStyle.compact",
+        "title": "Airtable Formula: Beautify (Compact)"
+      },
+      {
+        "command": "airtable-formula.beautifyStyle.readable",
+        "title": "Airtable Formula: Beautify (Readable)"
+      },
+      {
+        "command": "airtable-formula.beautifyStyle.ultra-compact",
+        "title": "Airtable Formula: Beautify (Ultra-Compact)"
+      },
+      {
+        "command": "airtable-formula.beautifyStyle.json",
+        "title": "Airtable Formula: Beautify (JSON)"
+      },
+      {
+        "command": "airtable-formula.beautifyStyle.cascade",
+        "title": "Airtable Formula: Beautify (Cascade)"
+      },
+      {
+        "command": "airtable-formula.minifyLevel.standard",
+        "title": "Airtable Formula: Minify (Standard)"
+      },
+      {
+        "command": "airtable-formula.minifyLevel.safe",
+        "title": "Airtable Formula: Minify (Safe)"
+      },
+      {
+        "command": "airtable-formula.minifyLevel.aggressive",
+        "title": "Airtable Formula: Minify (Aggressive)"
+      },
+      {
+        "command": "airtable-formula.minifyLevel.extreme",
+        "title": "Airtable Formula: Minify (Extreme)"
+      },
+      {
+        "command": "airtable-formula.minifyLevel.micro",
+        "title": "Airtable Formula: Minify (Micro)"
+      },
+      {
+        "command": "airtable-formula.formatWithPreset",
+        "title": "Airtable Formula: Format with Preset..."
+      }
+    ],
+    "submenus": [
+      {
+        "id": "airtable-formula.beautifyStyleMenu",
+        "label": "Beautify with Style"
+      },
+      {
+        "id": "airtable-formula.minifyLevelMenu",
+        "label": "Minify with Level"
       }
     ],
     "menus": {
@@ -80,31 +162,51 @@
           "when": "resourceLangId == airtable-formula",
           "command": "airtable-formula.minify",
           "group": "navigation@3"
+        },
+        {
+          "when": "resourceLangId == airtable-formula",
+          "command": "airtable-formula.formatWithPreset",
+          "group": "navigation@4"
         }
       ],
       "editor/context": [
         {
           "when": "resourceLangId == airtable-formula",
-          "command": "airtable-formula.beautify",
-          "group": "1_modification"
+          "submenu": "airtable-formula.beautifyStyleMenu",
+          "group": "1_modification@1"
         },
         {
           "when": "resourceLangId == airtable-formula",
-          "command": "airtable-formula.minify",
-          "group": "1_modification"
+          "submenu": "airtable-formula.minifyLevelMenu",
+          "group": "1_modification@2"
         }
       ],
       "explorer/context": [
         {
           "when": "resourceExtname == .formula",
-          "command": "airtable-formula.beautifyFile",
+          "submenu": "airtable-formula.beautifyStyleMenu",
           "group": "navigation@2"
         },
         {
           "when": "resourceExtname == .formula",
-          "command": "airtable-formula.minifyFile",
+          "submenu": "airtable-formula.minifyLevelMenu",
           "group": "navigation@3"
         }
+      ],
+      "airtable-formula.beautifyStyleMenu": [
+        { "command": "airtable-formula.beautifyStyle.smart", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.beautifyStyle.compact", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.beautifyStyle.readable", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.beautifyStyle.ultra-compact", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.beautifyStyle.json", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.beautifyStyle.cascade", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" }
+      ],
+      "airtable-formula.minifyLevelMenu": [
+        { "command": "airtable-formula.minifyLevel.standard", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.minifyLevel.safe", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.minifyLevel.aggressive", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.minifyLevel.extreme", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" },
+        { "command": "airtable-formula.minifyLevel.micro", "when": "resourceLangId == airtable-formula || resourceExtname == .formula" }
       ]
     },
     "configurationDefaults": {
@@ -163,18 +265,24 @@
       "properties": {
         "airtableFormula.scriptRoot": {
           "type": "string",
-          "default": "${workspaceFolder}/draft/scripts",
-          "description": "Path to the draft/scripts directory containing formula-beautifier.js and formula-minifier.js."
+          "default": "",
+          "description": "Optional path to external formatter scripts (formula-beautifier*.js / formula-minifier*.js). Leave empty to use bundled vendor scripts."
         },
         "airtableFormula.beautifierVersion": {
           "type": "string",
-          "enum": ["v1", "v2"],
+          "enum": [
+            "v1",
+            "v2"
+          ],
           "default": "v2",
           "description": "Choose beautifier version. v2 has enhanced features like comment removal, smart formatting, and better JSON handling."
         },
         "airtableFormula.minifierVersion": {
           "type": "string",
-          "enum": ["v1", "v2"],
+          "enum": [
+            "v1",
+            "v2"
+          ],
           "default": "v2",
           "description": "Choose minifier version. v2 has safe mode to prevent tokenization issues and better optimization."
         },
@@ -215,7 +323,7 @@
             "double",
             "single"
           ],
-          "default": "double",
+          "default": "single",
           "description": "Preferred quote style for strings in beautified output."
         },
         "airtableFormula.minify.level": {
@@ -234,12 +342,12 @@
             "More aggressive space removal and optimization",
             "Maximum compression, may affect readability"
           ],
-          "default": "standard",
+          "default": "safe",
           "description": "Minification level."
         },
         "airtableFormula.minify.preserveReadability": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Preserve some whitespace around operators for readability during minify."
         }
       }
@@ -275,24 +383,25 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "pnpm run build",
-    "compile": "pnpm run check-types && pnpm run lint && node esbuild.js",
-    "build": "pnpm run check-types && pnpm run lint && node esbuild.js --production",
-    "watch": "npm-run-all -p watch:*",
-    "watch:esbuild": "node esbuild.js --watch",
-    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "vsce package",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",
-    "check-types": "tsc --noEmit",
-    "lint": "eslint src",
-    "test": "vscode-test"
+    "vscode:prepublish": "bun run build",
+    "compile": "bun run check-types && bun run lint && bun run build.ts",
+    "build": "bun run check-types && bun run lint && bun run build.ts --production",
+    "watch": "bun run build.ts --watch",
+    "package": "bun x @vscode/vsce package",
+    "check-types": "bun x tsc --noEmit",
+    "lint": "bun x eslint src",
+    "test": "bun run build.ts && tsc -p . --outDir out && node ./out/test/runTest.js",
+    "test:manual": "bun run build.ts && tsc -p . --outDir out && node ./out/test/runTest.js --keep-open",
+    "test:verbose": "bun run build.ts && tsc -p . --outDir out && node ./out/test/runTest.js --verbose",
+    "test:watch": "tsc -p . --outDir out --watch",
+    "test:unit": "bun test"
   },
   "devDependencies": {
+    "@types/bun": "latest",
+    "@types/glob": "^9.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "@types/vscode": "^1.74.0",
+    "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
     "@vscode/test-cli": "^0.0.11",
@@ -300,7 +409,8 @@
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.9",
     "eslint": "^9.34.0",
-    "npm-run-all": "^4.1.5",
+    "glob": "^13.0.0",
+    "mocha": "^11.7.5",
     "typescript": "^5.9.2"
   }
 }

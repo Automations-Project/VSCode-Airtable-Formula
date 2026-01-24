@@ -219,5 +219,99 @@
       "RECORD_ID()"
     ],
     "description": "Get current record ID"
+  },
+  "XOR Condition": {
+    "prefix": "xor",
+    "body": [
+      "XOR(${1:condition1}, ${2:condition2})"
+    ],
+    "description": "XOR logical operator - true if odd number of args are true"
+  },
+  "Error Fallback": {
+    "prefix": "iferror",
+    "body": [
+      "IF(ISERROR(${1:expression}), ${2:fallback_value}, ${1:expression})"
+    ],
+    "description": "Return fallback value if expression errors"
+  },
+  "Time From Now": {
+    "prefix": "fromnow",
+    "body": [
+      "FROMNOW(${1:date})"
+    ],
+    "description": "Duration from now until a date"
+  },
+  "Time To Now": {
+    "prefix": "tonow",
+    "body": [
+      "TONOW(${1:date})"
+    ],
+    "description": "Duration from a date until now"
+  },
+  "Workday": {
+    "prefix": "workday",
+    "body": [
+      "WORKDAY(${1:start_date}, ${2:num_days})"
+    ],
+    "description": "Date that is N workdays from start"
+  },
+  "Workday Difference": {
+    "prefix": "workdaydiff",
+    "body": [
+      "WORKDAY_DIFF(${1:start_date}, ${2:end_date})"
+    ],
+    "description": "Number of workdays between dates"
+  },
+  "JSON Object Builder": {
+    "prefix": "jsonobj",
+    "body": [
+      "\"{\" &",
+      "  \"\\\"${1:key1}\\\":\\\"\" & ${2:value1} & \"\\\",\" &",
+      "  \"\\\"${3:key2}\\\":\\\"\" & ${4:value2} & \"\\\"\" &",
+      "\"}\""
+    ],
+    "description": "Build a JSON object string"
+  },
+  "JSON Array Builder": {
+    "prefix": "jsonarr",
+    "body": [
+      "\"[\" & ARRAYJOIN(${1:array}, \",\") & \"]\""
+    ],
+    "description": "Build a JSON array string from array field"
+  },
+  "Date Comparison": {
+    "prefix": "isbefore",
+    "body": [
+      "IS_BEFORE(${1:date1}, ${2:date2})"
+    ],
+    "description": "Check if date1 is before date2"
+  },
+  "Date Same": {
+    "prefix": "issame",
+    "body": [
+      "IS_SAME(${1:date1}, ${2:date2}, '${3|day,week,month,year|}')"
+    ],
+    "description": "Check if dates are the same"
+  },
+  "Encode URL": {
+    "prefix": "encodeurl",
+    "body": [
+      "ENCODE_URL_COMPONENT(${1:text})"
+    ],
+    "description": "Encode text for use in URL"
+  },
+  "Created Time": {
+    "prefix": "createdtime",
+    "body": [
+      "CREATED_TIME()"
+    ],
+    "description": "When record was created"
+  },
+  "Last Modified Time": {
+    "prefix": "modifiedtime",
+    "body": [
+      "LAST_MODIFIED_TIME()"
+    ],
+    "description": "When record was last modified"
   }
 }

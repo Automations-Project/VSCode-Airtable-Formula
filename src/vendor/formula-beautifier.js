@@ -6,6 +6,12 @@ const path = require('path');
  * Optimized for JSON output, minimal indentation, and maximum readability
  * Note: v2 is available with enhanced features - select version in extension settings
  */
+// Pre-compiled regex patterns for performance (avoid creating in hot loops)
+const WHITESPACE_RE = /\s/;
+const DIGIT_RE = /\d/;
+const DIGIT_DOT_RE = /[\d.]/;
+const IDENTIFIER_RE = /[A-Z_0-9]/i;
+
 class CompactFormulaBeautifier {
   constructor(options = {}) {
     this.maxLineLength = options.max_line_length || 120;
@@ -72,7 +78,7 @@ class CompactFormulaBeautifier {
     
     while (i < formula.length) {
       // Skip whitespace
-      if (/\s/.test(formula[i])) {
+      if (WHITESPACE_RE.test(formula[i])) {
         i++;
         continue;
       }
@@ -82,6 +88,7 @@ class CompactFormulaBeautifier {
         const quote = formula[i];
         let value = quote;
         let escaped = false;
+        const startPos = i;
         i++;
         
         while (i < formula.length) {
@@ -100,6 +107,12 @@ class CompactFormulaBeautifier {
           }
           i++;
         }
+        
+        // Check for unterminated string
+        if (value[value.length - 1] !== quote) {
+          throw new Error(`Unterminated string starting at position ${startPos}`);
+        }
+        
         tokens.push({ type: 'STRING', value });
         continue;
       }
@@ -119,15 +132,21 @@ class CompactFormulaBeautifier {
         continue;
       }
       
-      // Numbers
-      if (/\d/.test(formula[i]) || 
-          (formula[i] === '-' && i + 1 < formula.length && /\d/.test(formula[i + 1]))) {
+      // Numbers - only treat '-' as negative sign at start, after '(', ',', or operators
+      const prevToken = tokens[tokens.length - 1];
+      const canBeNegative = !prevToken || 
+                            prevToken.type === 'LPAREN' || 
+                            prevToken.type === 'COMMA' || 
+                            prevToken.type === 'OPERATOR';
+      
+      if (DIGIT_RE.test(formula[i]) || 
+          (formula[i] === '-' && canBeNegative && i + 1 < formula.length && DIGIT_RE.test(formula[i + 1]))) {
         let value = '';
         if (formula[i] === '-') {
           value = '-';
           i++;
         }
-        while (i < formula.length && /[\d.]/.test(formula[i])) {
+        while (i < formula.length && DIGIT_DOT_RE.test(formula[i])) {
           value += formula[i];
           i++;
         }
@@ -157,14 +176,14 @@ class CompactFormulaBeautifier {
       
       // Function names and identifiers
       let name = '';
-      while (i < formula.length && /[A-Z_0-9]/i.test(formula[i])) {
+      while (i < formula.length && IDENTIFIER_RE.test(formula[i])) {
         name += formula[i];
         i++;
       }
       
       // Look ahead for function call
       let j = i;
-      while (j < formula.length && /\s/.test(formula[j])) j++;
+      while (j < formula.length && WHITESPACE_RE.test(formula[j])) j++;
       
       tokens.push({
         type: j < formula.length && formula[j] === '(' ? 'FUNCTION' : 'IDENTIFIER',
