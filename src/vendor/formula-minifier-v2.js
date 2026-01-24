@@ -135,7 +135,7 @@ class EnhancedFormulaMinifier {
     
     // TRUE and FALSE are boolean constants - they don't need parentheses
     // Note: NOW(), TODAY(), BLANK() are functions that require parentheses!
-    const BOOLEAN_CONSTANTS = new Set(['TRUE', 'FALSE']);
+    const CONSTANTS = new Set(['TRUE', 'FALSE']);
     
     while (i < formula.length) {
       // Skip whitespace (will be removed or preserved based on context)
@@ -277,7 +277,7 @@ class EnhancedFormulaMinifier {
         
         if (FUNCTIONS.has(value)) {
           tokens.push({ type: 'FUNCTION', value });
-        } else if (BOOLEAN_CONSTANTS.has(value)) {
+        } else if (CONSTANTS.has(value)) {
           // TRUE and FALSE are boolean constants, not functions
           tokens.push({ type: 'CONSTANT', value });
         } else {
