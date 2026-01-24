@@ -1,0 +1,42 @@
+name: CI Tests
+
+"on":
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup headless environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2-dev libgtk-3-dev libnss3-dev
+
+      - name: Run tests
+        run: |
+          xvfb-run -a pnpm test

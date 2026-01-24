@@ -3,6 +3,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { AirtableFormulaDiagnosticsProvider } from './diagnostics';
 import { AirtableFormulaCompletionProvider } from './completions';
+import { AirtableFormulaHoverProvider } from './hover';
+import { AirtableFormulaSignatureHelpProvider } from './signature';
+import { AirtableFormulaCodeActionProvider } from './codeActions';
+import { registerSkillCommands, installSkills } from './skills/skillInstaller';
 
 // Types
 interface BeautifyOptions {
@@ -44,10 +48,55 @@ type BeautifyFn = (text: string) => string;
 type MinifyFn = (text: string) => string;
 
 export function activate(context: vscode.ExtensionContext) {
+    const manualTestLogPath = process.env.AIRTABLE_FORMULA_MANUAL_TEST_LOG;
+    const manualTestWrite = (level: 'log' | 'warn' | 'error', ...args: unknown[]) => {
+        if (!manualTestLogPath) {
+            return;
+        }
+        try {
+            const ts = new Date().toISOString();
+            const msg = args.map((a) => {
+                if (a instanceof Error) {
+                    return a.stack || a.message;
+                }
+                if (typeof a === 'string') {
+                    return a;
+                }
+                try {
+                    return JSON.stringify(a);
+                } catch {
+                    return String(a);
+                }
+            }).join(' ');
+            fs.appendFileSync(manualTestLogPath, `[${ts}] [${level}] ${msg}\n`, 'utf8');
+        } catch {
+        }
+    };
+
+    if (manualTestLogPath) {
+        const originalLog = console.log.bind(console);
+        const originalWarn = console.warn.bind(console);
+        const originalError = console.error.bind(console);
+
+        console.log = (...args: unknown[]) => {
+            manualTestWrite('log', ...args);
+            originalLog(...args);
+        };
+        console.warn = (...args: unknown[]) => {
+            manualTestWrite('warn', ...args);
+            originalWarn(...args);
+        };
+        console.error = (...args: unknown[]) => {
+            manualTestWrite('error', ...args);
+            originalError(...args);
+        };
+    }
+
     console.log('Extension "airtable-formula" activated');
-    
-    // Apply Airtable color scheme
-    applyAirtableColors();
+
+    // Register AI skill commands and auto-install skills
+    registerSkillCommands(context);
+    installSkills(false); // Only install if not already present
 
     // Initialize diagnostics provider
     const diagnosticsProvider = new AirtableFormulaDiagnosticsProvider();
@@ -70,6 +119,29 @@ export function activate(context: vscode.ExtensionContext) {
             }
         })
     );
+
+    // Register hover provider
+    const hoverProvider = vscode.languages.registerHoverProvider(
+        'airtable-formula',
+        new AirtableFormulaHoverProvider()
+    );
+    context.subscriptions.push(hoverProvider);
+
+    // Register signature help provider
+    const signatureHelpProvider = vscode.languages.registerSignatureHelpProvider(
+        'airtable-formula',
+        new AirtableFormulaSignatureHelpProvider(),
+        '(', ','
+    );
+    context.subscriptions.push(signatureHelpProvider);
+
+    // Register code actions provider
+    const codeActionsProvider = vscode.languages.registerCodeActionsProvider(
+        'airtable-formula',
+        new AirtableFormulaCodeActionProvider(),
+        { providedCodeActionKinds: AirtableFormulaCodeActionProvider.providedCodeActionKinds }
+    );
+    context.subscriptions.push(codeActionsProvider);
 
     // Update diagnostics for all open documents
     vscode.workspace.textDocuments.forEach((document) => {
@@ -117,6 +189,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!editor) {
             return;
         }
+        console.log('Command: airtable-formula.beautify');
         const document = editor.document;
         const selection = editor.selection;
         const targetRange = selection && !selection.isEmpty
@@ -147,6 +220,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!editor) {
             return;
         }
+        console.log('Command: airtable-formula.minify');
         const document = editor.document;
         const selection = editor.selection;
         const targetRange = selection && !selection.isEmpty
@@ -178,26 +252,9 @@ export function activate(context: vscode.ExtensionContext) {
             void vscode.window.showWarningMessage('No .formula files selected');
             return;
         }
-        let ok = 0, fail = 0;
-        for (const u of targets) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(u);
-                const beautify = getBeautifyFunction(doc);
-                if (!beautify) {
-                    throw new Error('Beautifier not found');
-                }
-                const source = doc.getText();
-                const result = beautify(source);
-                if (result !== source) {
-                    await vscode.workspace.fs.writeFile(u, Buffer.from(result, 'utf8'));
-                    ok++;
-                }
-            } catch (e) {
-                console.error('Beautify file failed for', u.fsPath, e);
-                fail++;
-            }
-        }
-        void vscode.window.showInformationMessage(`Beautified ${ok} file(s)` + (fail ? `, ${fail} failed` : ''));
+        const { beautifyFilesWithStyle } = await import('./commands/beautifyWithStyle.js');
+        const style = vscode.workspace.getConfiguration('airtableFormula', targets[0]).get<string>('beautify.style') ?? 'compact';
+        await beautifyFilesWithStyle(style, uri, uris);
     });
 
     // Explorer context: Minify file(s) to new .min.formula (or .ultra-min.formula for extreme)
@@ -207,110 +264,83 @@ export function activate(context: vscode.ExtensionContext) {
             void vscode.window.showWarningMessage('No .formula files selected');
             return;
         }
-        let ok = 0, fail = 0;
-        for (const u of targets) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(u);
-                const minify = getMinifyFunction(doc);
-                if (!minify) {
-                    throw new Error('Minifier not found');
-                }
-                const source = doc.getText();
-                const result = minify(source);
-                const cfg = getConfig(doc);
-                const suffix = (cfg.minify?.level === 'extreme') ? '.ultra-min' : '.min';
-                const parsed = path.parse(u.fsPath);
-                const outPath = path.join(parsed.dir, `${parsed.name}${suffix}.formula`);
-                const outUri = vscode.Uri.file(outPath);
-                await vscode.workspace.fs.writeFile(outUri, Buffer.from(result, 'utf8'));
-                ok++;
-            } catch (e) {
-                console.error('Minify file failed for', u?.fsPath, e);
-                fail++;
-            }
-        }
-        void vscode.window.showInformationMessage(`Minified ${ok} file(s)` + (fail ? `, ${fail} failed` : ''));
+        const { minifyFilesWithLevel } = await import('./commands/minifyWithLevel.js');
+        const level = vscode.workspace.getConfiguration('airtableFormula', targets[0]).get<string>('minify.level') ?? 'standard';
+        await minifyFilesWithLevel(level, uri, uris);
     });
 
-    context.subscriptions.push(formatter, beautifyCmd, minifyCmd, beautifyFileCmd, minifyFileCmd);
+    // Command: Beautify with style selection
+    const beautifyWithStyleCmd = vscode.commands.registerCommand('airtable-formula.beautifyWithStyle', async () => {
+        const { beautifyWithStyle } = await import('./commands/beautifyWithStyle.js');
+        await beautifyWithStyle();
+    });
+
+    // Command: Minify with level selection
+    const minifyWithLevelCmd = vscode.commands.registerCommand('airtable-formula.minifyWithLevel', async () => {
+        const { minifyWithLevel } = await import('./commands/minifyWithLevel.js');
+        await minifyWithLevel();
+    });
+
+    const beautifyStyleCommands = [
+        { id: 'airtable-formula.beautifyStyle.smart', style: 'smart' },
+        { id: 'airtable-formula.beautifyStyle.compact', style: 'compact' },
+        { id: 'airtable-formula.beautifyStyle.readable', style: 'readable' },
+        { id: 'airtable-formula.beautifyStyle.ultra-compact', style: 'ultra-compact' },
+        { id: 'airtable-formula.beautifyStyle.json', style: 'json' },
+        { id: 'airtable-formula.beautifyStyle.cascade', style: 'cascade' },
+    ];
+
+    const minifyLevelCommands = [
+        { id: 'airtable-formula.minifyLevel.standard', level: 'standard' },
+        { id: 'airtable-formula.minifyLevel.safe', level: 'safe' },
+        { id: 'airtable-formula.minifyLevel.aggressive', level: 'aggressive' },
+        { id: 'airtable-formula.minifyLevel.extreme', level: 'extreme' },
+        { id: 'airtable-formula.minifyLevel.micro', level: 'micro' },
+    ];
+
+    const beautifyStyleCmds = beautifyStyleCommands.map(({ id, style }) =>
+        vscode.commands.registerCommand(id, async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+            const { beautifyWithStyle, beautifyFilesWithStyle } = await import('./commands/beautifyWithStyle.js');
+            if (uri || (uris && uris.length)) {
+                await beautifyFilesWithStyle(style, uri, uris);
+                return;
+            }
+            await beautifyWithStyle(style);
+        })
+    );
+
+    const minifyLevelCmds = minifyLevelCommands.map(({ id, level }) =>
+        vscode.commands.registerCommand(id, async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+            const { minifyWithLevel, minifyFilesWithLevel } = await import('./commands/minifyWithLevel.js');
+            if (uri || (uris && uris.length)) {
+                await minifyFilesWithLevel(level, uri, uris);
+                return;
+            }
+            await minifyWithLevel(level);
+        })
+    );
+
+    // Command: Format with preset (new unified system)
+    const formatWithPresetCmd = vscode.commands.registerCommand('airtable-formula.formatWithPreset', async () => {
+        const { formatWithPreset } = await import('./commands/formatWithPreset.js');
+        await formatWithPreset();
+    });
+
+    context.subscriptions.push(
+        formatter,
+        beautifyCmd,
+        minifyCmd,
+        beautifyFileCmd,
+        minifyFileCmd,
+        beautifyWithStyleCmd,
+        minifyWithLevelCmd,
+        formatWithPresetCmd,
+        ...beautifyStyleCmds,
+        ...minifyLevelCmds
+    );
 }
 
 export function deactivate() {}
-
-// Apply Airtable-style colors to the editor
-function applyAirtableColors() {
-    const config = vscode.workspace.getConfiguration();
-    const tokenColorCustomizations = config.get<any>('editor.tokenColorCustomizations') || {};
-    
-    // Add or update Airtable formula colors
-    if (!tokenColorCustomizations.textMateRules) {
-        tokenColorCustomizations.textMateRules = [];
-    }
-    
-    const airtableRules = [
-        {
-            scope: [
-                'entity.name.function.text.airtable-formula',
-                'entity.name.function.numeric.airtable-formula',
-                'entity.name.function.datetime.airtable-formula',
-                'entity.name.function.logical.airtable-formula',
-                'entity.name.function.array.airtable-formula',
-                'entity.name.function.regex.airtable-formula',
-                'entity.name.function.record.airtable-formula',
-                'entity.name.function.misc.airtable-formula'
-            ],
-            settings: {
-                foreground: '#7fe095'
-            }
-        },
-        {
-            scope: [
-                'variable.other.field.airtable-formula',
-                'entity.name.field.airtable-formula'
-            ],
-            settings: {
-                foreground: '#b2aefc'
-            }
-        },
-        {
-            scope: [
-                'string.quoted.double.airtable-formula',
-                'string.quoted.single.airtable-formula',
-                'constant.numeric.airtable-formula'
-            ],
-            settings: {
-                foreground: '#61ebe1'
-            }
-        },
-        {
-            scope: [
-                'constant.language.boolean.airtable-formula',
-                'constant.language.datetime.airtable-formula',
-                'support.constant.datetime.airtable-formula'
-            ],
-            settings: {
-                foreground: '#61ebe1'
-            }
-        }
-    ];
-    
-    // Remove existing Airtable rules and add new ones
-    const filteredRules = tokenColorCustomizations.textMateRules.filter(
-        (rule: any) => !rule.scope?.some?.((s: string) => s.includes('airtable-formula'))
-    );
-    
-    tokenColorCustomizations.textMateRules = [...filteredRules, ...airtableRules];
-    
-    // Apply the configuration
-    config.update(
-        'editor.tokenColorCustomizations',
-        tokenColorCustomizations,
-        vscode.ConfigurationTarget.Global
-    ).then(
-        () => console.log('Airtable colors applied successfully'),
-        (err) => console.error('Failed to apply Airtable colors:', err)
-    );
-}
 
 // ------------------ Helpers ------------------
 function getConfig(document?: vscode.TextDocument): ExtensionSettings {
@@ -395,10 +425,12 @@ function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
         return null;
     }
 
-    const req = (eval('require')) as (id: string) => any; // runtime require to avoid bundling
+    // Use Node.js require for dynamic loading of vendor scripts
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     let BeautifierClass: any;
     try {
-        BeautifierClass = req(finalPath);
+        // Dynamic require - vendor files are copied to dist/vendor at build time
+        BeautifierClass = require(finalPath);
     } catch (e) {
         console.error('Failed loading beautifier:', e);
         return null;
@@ -444,10 +476,12 @@ function getMinifyFunction(document: vscode.TextDocument): MinifyFn | null {
         return null;
     }
 
-    const req = (eval('require')) as (id: string) => any;
+    // Use Node.js require for dynamic loading of vendor scripts
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     let MinifierClass: any;
     try {
-        MinifierClass = req(finalPath);
+        // Dynamic require - vendor files are copied to dist/vendor at build time
+        MinifierClass = require(finalPath);
     } catch (e) {
         console.error('Failed loading minifier:', e);
         return null;
