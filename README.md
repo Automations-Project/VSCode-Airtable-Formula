@@ -79,6 +79,10 @@ This extension contributes the following settings:
   - `extreme`: Maximum compression
 * `airtableFormula.minify.preserveReadability`: Preserve whitespace for readability
 
+Font note: The extension sets a default editor font for Airtable Formula files to
+`Consolas, 'Courier New', monospace`. This only takes effect if the font is
+installed on the user's system. VS Code extensions cannot install fonts. [Download Airtable Code Font](https://fonts.adobe.com/fonts/consolas)
+
 ## Requirements
 
 - VS Code 1.74.0 or later

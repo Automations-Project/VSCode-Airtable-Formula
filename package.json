@@ -212,6 +212,7 @@
     "configurationDefaults": {
       "[airtable-formula]": {
         "editor.maxTokenizationLineLength": 250000,
+        "editor.fontFamily": "Consolas, 'Courier New', monospace",
         "editor.tokenColorCustomizations": {
           "textMateRules": [
             {
