@@ -10,12 +10,12 @@ const AIRTABLE_FUNCTIONS = {
     numeric: [
         'ABS', 'AVERAGE', 'CEILING', 'COUNT', 'COUNTA', 'COUNTALL', 'EXP', 
         'FLOOR', 'INT', 'LOG', 'LOG10', 'MAX', 'MIN', 'MOD', 'POWER', 
-        'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'SUM'
+        'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'SUM', 'ODD', 'EVEN'
     ],
     datetime: [
         'DATEADD', 'DATEDIF', 'DATETIME_DIFF', 'DATETIME_FORMAT', 'DATETIME_PARSE',
-        'DATESTR', 'DAY', 'HOUR', 'MINUTE', 'MONTH', 'SECOND', 'SET_LOCALE',
-        'SET_TIMEZONE', 'TIMESTR', 'TONOW', 'FROMNOW', 'WEEKDAY', 'WEEKNUM',
+        'DATESTR', 'DAY', 'HOUR', 'MINUTE', 'MONTH', 'NOW', 'SECOND', 'SET_LOCALE',
+        'SET_TIMEZONE', 'TIMESTR', 'TODAY', 'TONOW', 'FROMNOW', 'WEEKDAY', 'WEEKNUM',
         'WORKDAY', 'WORKDAY_DIFF', 'YEAR'
     ],
     logical: [
@@ -29,7 +29,7 @@ const AIRTABLE_FUNCTIONS = {
         'REGEX_MATCH', 'REGEX_EXTRACT', 'REGEX_REPLACE'
     ],
     record: [
-        'RECORD_ID', 'AUTONUMBER', 'CREATED_BY', 'CREATED_TIME', 'LAST_MODIFIED_TIME', 'LAST_MODIFIED_BY'
+        'RECORD_ID', 'CREATED_TIME', 'LAST_MODIFIED_TIME'
     ],
     misc: [
         'ENCODE_URL_COMPONENT', 'BLANK'
@@ -39,8 +39,38 @@ const AIRTABLE_FUNCTIONS = {
 // Flatten all functions into a single array for easy lookup
 const ALL_FUNCTIONS = Object.values(AIRTABLE_FUNCTIONS).flat();
 
-// Constants that don't require parentheses
-const CONSTANTS = ['TRUE', 'FALSE', 'NOW', 'TODAY', 'BLANK'];
+// Constants that can be used with or without parentheses
+const CALLABLE_CONSTANTS = ['NOW', 'TODAY', 'BLANK', 'TRUE', 'FALSE'];
+
+// All valid identifiers that can be called with parentheses
+const ALL_CALLABLE = [...ALL_FUNCTIONS, ...CALLABLE_CONSTANTS];
+
+// Smart quotes that should be replaced with straight quotes
+const SMART_QUOTES: Record<string, string> = {
+    '\u201C': '"', // "
+    '\u201D': '"', // "
+    '\u2018': "'", // '
+    '\u2019': "'", // '
+};
+
+// Common typos and Excel functions that don't exist in Airtable
+const COMMON_TYPOS: Record<string, string> = {
+    'CONCATINATE': 'CONCATENATE',
+    'CONCATNATE': 'CONCATENATE',
+    'SUBSTITUDE': 'SUBSTITUTE',
+    'SUBSTUTE': 'SUBSTITUTE',
+    'SUMIF': 'SUM (SUMIF not available)',
+    'COUNTIF': 'COUNT (COUNTIF not available)',
+    'VLOOKUP': 'linked records (VLOOKUP not available)',
+    'HLOOKUP': 'linked records (HLOOKUP not available)',
+    'INDEX': 'ARRAYSLICE',
+    'IFERROR': 'IF(ISERROR(...), ...)',
+    'ISBLANK': 'IF({Field}, FALSE, TRUE)',
+    'DATEVALUE': 'DATETIME_PARSE',
+    'TIMEVALUE': 'DATETIME_PARSE',
+    'DATEDIFF': 'DATETIME_DIFF',
+    'CONCAT': 'CONCATENATE or &',
+};
 
 export class AirtableFormulaDiagnosticsProvider {
     private diagnosticCollection: vscode.DiagnosticCollection;
@@ -64,6 +94,13 @@ export class AirtableFormulaDiagnosticsProvider {
         diagnostics.push(...this.checkQuotes(document, text));
         diagnostics.push(...this.checkFunctions(document, text));
         diagnostics.push(...this.checkFieldReferences(document, text));
+        
+        // Enhanced diagnostics from research
+        diagnostics.push(...this.checkSmartQuotes(document, text));
+        diagnostics.push(...this.checkCommonTypos(document, text));
+        diagnostics.push(...this.checkDivisionByZero(document, text));
+        diagnostics.push(...this.checkNestedIfs(document, text));
+        diagnostics.push(...this.checkTrailingOperators(document, text));
 
         this.diagnosticCollection.set(document.uri, diagnostics);
     }
@@ -313,6 +350,9 @@ export class AirtableFormulaDiagnosticsProvider {
     private checkFunctions(document: vscode.TextDocument, text: string): vscode.Diagnostic[] {
         const diagnostics: vscode.Diagnostic[] = [];
         
+        // Get ranges to exclude from function checking (field refs, strings, comments)
+        const exclusionRanges = this.getExclusionRanges(text);
+        
         // First check for functions without opening parenthesis
         const functionWithoutParenPattern = new RegExp(
             `\\b(${ALL_FUNCTIONS.join('|')})\\b(?!\\s*\\()`,
@@ -322,12 +362,9 @@ export class AirtableFormulaDiagnosticsProvider {
         
         while ((match = functionWithoutParenPattern.exec(text)) !== null) {
             const functionName = match[1];
-            // Skip if it's inside a string
-            const beforeMatch = text.substring(0, match.index);
-            const singleQuotes = (beforeMatch.match(/'/g) || []).length;
-            const doubleQuotes = (beforeMatch.match(/"/g) || []).length;
             
-            if (singleQuotes % 2 !== 0 || doubleQuotes % 2 !== 0) {
+            // Skip if inside exclusion range
+            if (this.isInsideExclusionRange(match.index, exclusionRanges)) {
                 continue;
             }
             
@@ -349,7 +386,14 @@ export class AirtableFormulaDiagnosticsProvider {
 
         while ((match = functionPattern.exec(text)) !== null) {
             const functionName = match[1];
-            if (!ALL_FUNCTIONS.includes(functionName)) {
+            
+            // Skip if inside exclusion range
+            if (this.isInsideExclusionRange(match.index, exclusionRanges)) {
+                continue;
+            }
+            
+            // Check against all valid callable identifiers (functions + constants)
+            if (!ALL_CALLABLE.includes(functionName)) {
                 const startPos = document.positionAt(match.index);
                 const endPos = document.positionAt(match.index + functionName.length);
                 const range = new vscode.Range(startPos, endPos);
@@ -408,12 +452,61 @@ export class AirtableFormulaDiagnosticsProvider {
         */
     }
 
+    /**
+     * Get ranges that should be excluded from function validation.
+     * This includes: field references {}, strings "", '', and comments.
+     */
+    private getExclusionRanges(text: string): Array<{start: number, end: number}> {
+        const ranges: Array<{start: number, end: number}> = [];
+        
+        // Match field references: {...}
+        const fieldRefRegex = /\{[^{}]*\}/g;
+        let match;
+        while ((match = fieldRefRegex.exec(text)) !== null) {
+            ranges.push({ start: match.index, end: match.index + match[0].length });
+        }
+        
+        // Match double-quoted strings: "..."
+        const doubleQuoteRegex = /"(?:[^"\\]|\\.)*"/g;
+        while ((match = doubleQuoteRegex.exec(text)) !== null) {
+            ranges.push({ start: match.index, end: match.index + match[0].length });
+        }
+        
+        // Match single-quoted strings: '...'
+        const singleQuoteRegex = /'(?:[^'\\]|\\.)*'/g;
+        while ((match = singleQuoteRegex.exec(text)) !== null) {
+            ranges.push({ start: match.index, end: match.index + match[0].length });
+        }
+        
+        // Match single-line comments: //...
+        const singleLineCommentRegex = /\/\/.*/g;
+        while ((match = singleLineCommentRegex.exec(text)) !== null) {
+            ranges.push({ start: match.index, end: match.index + match[0].length });
+        }
+        
+        // Match block comments: /*...*/
+        const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
+        while ((match = blockCommentRegex.exec(text)) !== null) {
+            ranges.push({ start: match.index, end: match.index + match[0].length });
+        }
+        
+        return ranges;
+    }
+
+    /**
+     * Check if a position falls within any exclusion range.
+     */
+    private isInsideExclusionRange(position: number, ranges: Array<{start: number, end: number}>): boolean {
+        return ranges.some(range => position >= range.start && position < range.end);
+    }
+
     private findClosestFunction(input: string): string | null {
         const inputUpper = input.toUpperCase();
         let minDistance = Infinity;
         let closest: string | null = null;
 
-        for (const func of ALL_FUNCTIONS) {
+        // Search against all callable identifiers (functions + constants)
+        for (const func of ALL_CALLABLE) {
             const distance = this.levenshteinDistance(inputUpper, func);
             if (distance < minDistance && distance <= 3) { // Only suggest if within 3 edits
                 minDistance = distance;
@@ -451,6 +544,167 @@ export class AirtableFormulaDiagnosticsProvider {
         }
 
         return dp[m][n];
+    }
+
+    /**
+     * Check for smart quotes (curly quotes) that Airtable doesn't accept
+     */
+    private checkSmartQuotes(document: vscode.TextDocument, text: string): vscode.Diagnostic[] {
+        const diagnostics: vscode.Diagnostic[] = [];
+        
+        for (const [smartQuote, replacement] of Object.entries(SMART_QUOTES)) {
+            let index = text.indexOf(smartQuote);
+            while (index !== -1) {
+                const pos = document.positionAt(index);
+                const range = new vscode.Range(pos, pos.translate(0, 1));
+                
+                const diagnostic = new vscode.Diagnostic(
+                    range,
+                    `Smart quote detected. Replace with straight quote: ${replacement}`,
+                    vscode.DiagnosticSeverity.Error
+                );
+                diagnostic.code = 'smart-quote';
+                diagnostics.push(diagnostic);
+                
+                index = text.indexOf(smartQuote, index + 1);
+            }
+        }
+        
+        return diagnostics;
+    }
+
+    /**
+     * Check for common typos and Excel functions that don't exist in Airtable
+     */
+    private checkCommonTypos(document: vscode.TextDocument, text: string): vscode.Diagnostic[] {
+        const diagnostics: vscode.Diagnostic[] = [];
+        const exclusionRanges = this.getExclusionRanges(text);
+        
+        for (const [typo, suggestion] of Object.entries(COMMON_TYPOS)) {
+            const pattern = new RegExp(`\\b${typo}\\s*\\(`, 'gi');
+            let match;
+            
+            while ((match = pattern.exec(text)) !== null) {
+                if (this.isInsideExclusionRange(match.index, exclusionRanges)) continue;
+                
+                const startPos = document.positionAt(match.index);
+                const endPos = document.positionAt(match.index + typo.length);
+                
+                const diagnostic = new vscode.Diagnostic(
+                    new vscode.Range(startPos, endPos),
+                    `'${typo}' is not an Airtable function. Use ${suggestion}`,
+                    vscode.DiagnosticSeverity.Error
+                );
+                diagnostic.code = 'common-typo';
+                diagnostics.push(diagnostic);
+            }
+        }
+        
+        return diagnostics;
+    }
+
+    /**
+     * Check for potential division by zero issues
+     */
+    private checkDivisionByZero(document: vscode.TextDocument, text: string): vscode.Diagnostic[] {
+        const diagnostics: vscode.Diagnostic[] = [];
+        const exclusionRanges = this.getExclusionRanges(text);
+        
+        // Pattern: field or number divided by field (potential zero)
+        const divisionPattern = /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g;
+        let match;
+        
+        while ((match = divisionPattern.exec(text)) !== null) {
+            if (this.isInsideExclusionRange(match.index, exclusionRanges)) continue;
+            
+            // Look backwards for IF( that might be guarding this division
+            const lookback = Math.max(0, match.index - 100);
+            const context = text.slice(lookback, match.index);
+            
+            // Skip if there's a zero check nearby
+            const hasGuard = /IF\s*\([^)]*(?:=\s*0|!=\s*0|ISERROR)/i.test(context);
+            
+            if (!hasGuard) {
+                const startPos = document.positionAt(match.index);
+                const endPos = document.positionAt(match.index + match[0].length);
+                const divisor = match[2];
+                
+                const diagnostic = new vscode.Diagnostic(
+                    new vscode.Range(startPos, endPos),
+                    `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match[0]})`,
+                    vscode.DiagnosticSeverity.Warning
+                );
+                diagnostic.code = 'division-by-zero';
+                diagnostics.push(diagnostic);
+            }
+        }
+        
+        return diagnostics;
+    }
+
+    /**
+     * Check for deeply nested IF statements that could use SWITCH
+     */
+    private checkNestedIfs(document: vscode.TextDocument, text: string): vscode.Diagnostic[] {
+        const diagnostics: vscode.Diagnostic[] = [];
+        
+        let maxDepth = 0;
+        let currentDepth = 0;
+        let deepestStart = 0;
+        
+        // Track IF nesting depth
+        for (let i = 0; i < text.length; i++) {
+            const slice = text.slice(i, i + 4).toUpperCase();
+            if (slice.startsWith('IF(') || slice.startsWith('IF (')) {
+                currentDepth++;
+                if (currentDepth > maxDepth) {
+                    maxDepth = currentDepth;
+                    deepestStart = i;
+                }
+            } else if (text[i] === ')') {
+                currentDepth = Math.max(0, currentDepth - 1);
+            }
+        }
+        
+        if (maxDepth >= 4) {
+            const startPos = document.positionAt(deepestStart);
+            const endPos = document.positionAt(Math.min(deepestStart + 20, text.length));
+            
+            const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(startPos, endPos),
+                `Deeply nested IF (${maxDepth} levels). Consider using SWITCH() for better readability.`,
+                vscode.DiagnosticSeverity.Information
+            );
+            diagnostic.code = 'nested-if';
+            diagnostics.push(diagnostic);
+        }
+        
+        return diagnostics;
+    }
+
+    /**
+     * Check for trailing operators that indicate incomplete expressions
+     */
+    private checkTrailingOperators(document: vscode.TextDocument, text: string): vscode.Diagnostic[] {
+        const diagnostics: vscode.Diagnostic[] = [];
+        
+        const trimmed = text.trim();
+        const trailingOpMatch = trimmed.match(/[+\-*/&,]\s*$/);
+        
+        if (trailingOpMatch) {
+            const index = text.lastIndexOf(trailingOpMatch[0].trim());
+            const pos = document.positionAt(index);
+            
+            const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(pos, pos.translate(0, 1)),
+                'Trailing operator - expression appears incomplete',
+                vscode.DiagnosticSeverity.Error
+            );
+            diagnostic.code = 'trailing-operator';
+            diagnostics.push(diagnostic);
+        }
+        
+        return diagnostics;
     }
 
     public dispose(): void {

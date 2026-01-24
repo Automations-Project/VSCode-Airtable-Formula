@@ -68,6 +68,21 @@ const FUNCTION_SIGNATURES: { [key: string]: { signature: string; description: st
         description: 'Converts a text string to a number',
         detail: 'Text'
     },
+    'T': {
+        signature: 'T(value)',
+        description: 'Returns the value if it is text, otherwise returns empty string',
+        detail: 'Text'
+    },
+    'REPT': {
+        signature: 'REPT(text, number)',
+        description: 'Repeats text a specified number of times',
+        detail: 'Text'
+    },
+    'TEXT': {
+        signature: 'TEXT(value, format)',
+        description: 'Formats a number into text with a specified format',
+        detail: 'Text'
+    },
 
     // Numeric functions
     'SUM': {
@@ -113,6 +128,61 @@ const FUNCTION_SIGNATURES: { [key: string]: { signature: string; description: st
     'COUNTA': {
         signature: 'COUNTA(value1, value2, ...)',
         description: 'Counts the number of non-empty values',
+        detail: 'Numeric'
+    },
+    'COUNTALL': {
+        signature: 'COUNTALL(value1, value2, ...)',
+        description: 'Counts all values including blanks',
+        detail: 'Numeric'
+    },
+    'ABS': {
+        signature: 'ABS(number)',
+        description: 'Returns the absolute value of a number',
+        detail: 'Numeric'
+    },
+    'CEILING': {
+        signature: 'CEILING(number, [significance])',
+        description: 'Rounds a number up to the nearest integer or significance',
+        detail: 'Numeric'
+    },
+    'FLOOR': {
+        signature: 'FLOOR(number, [significance])',
+        description: 'Rounds a number down to the nearest integer or significance',
+        detail: 'Numeric'
+    },
+    'INT': {
+        signature: 'INT(number)',
+        description: 'Returns the integer portion of a number',
+        detail: 'Numeric'
+    },
+    'EXP': {
+        signature: 'EXP(power)',
+        description: 'Returns e raised to the specified power',
+        detail: 'Numeric'
+    },
+    'LOG': {
+        signature: 'LOG(number, [base])',
+        description: 'Returns the logarithm of a number to a specified base',
+        detail: 'Numeric'
+    },
+    'LOG10': {
+        signature: 'LOG10(number)',
+        description: 'Returns the base-10 logarithm of a number',
+        detail: 'Numeric'
+    },
+    'MOD': {
+        signature: 'MOD(number, divisor)',
+        description: 'Returns the remainder after dividing a number by a divisor',
+        detail: 'Numeric'
+    },
+    'POWER': {
+        signature: 'POWER(base, exponent)',
+        description: 'Returns a number raised to a power',
+        detail: 'Numeric'
+    },
+    'SQRT': {
+        signature: 'SQRT(number)',
+        description: 'Returns the square root of a number',
         detail: 'Numeric'
     },
 
@@ -167,6 +237,71 @@ const FUNCTION_SIGNATURES: { [key: string]: { signature: string; description: st
         description: 'Returns the day of the week',
         detail: 'Date/Time'
     },
+    'WEEKNUM': {
+        signature: 'WEEKNUM(date, [start_day_of_week])',
+        description: 'Returns the week number of the year',
+        detail: 'Date/Time'
+    },
+    'HOUR': {
+        signature: 'HOUR(datetime)',
+        description: 'Returns the hour component of a datetime',
+        detail: 'Date/Time'
+    },
+    'MINUTE': {
+        signature: 'MINUTE(datetime)',
+        description: 'Returns the minute component of a datetime',
+        detail: 'Date/Time'
+    },
+    'SECOND': {
+        signature: 'SECOND(datetime)',
+        description: 'Returns the second component of a datetime',
+        detail: 'Date/Time'
+    },
+    'DATEDIF': {
+        signature: 'DATEDIF(start_date, end_date, unit)',
+        description: 'Calculates the difference between two dates (legacy)',
+        detail: 'Date/Time'
+    },
+    'DATESTR': {
+        signature: 'DATESTR(date)',
+        description: 'Converts a date to a string in ISO format',
+        detail: 'Date/Time'
+    },
+    'TIMESTR': {
+        signature: 'TIMESTR(datetime)',
+        description: 'Converts a time to a string',
+        detail: 'Date/Time'
+    },
+    'TONOW': {
+        signature: 'TONOW(date)',
+        description: 'Returns the duration from a date until now',
+        detail: 'Date/Time'
+    },
+    'FROMNOW': {
+        signature: 'FROMNOW(date)',
+        description: 'Returns the duration from now until a date',
+        detail: 'Date/Time'
+    },
+    'WORKDAY': {
+        signature: 'WORKDAY(start_date, num_days, [holidays])',
+        description: 'Returns a date that is a specified number of workdays away',
+        detail: 'Date/Time'
+    },
+    'WORKDAY_DIFF': {
+        signature: 'WORKDAY_DIFF(start_date, end_date, [holidays])',
+        description: 'Returns the number of workdays between two dates',
+        detail: 'Date/Time'
+    },
+    'SET_LOCALE': {
+        signature: 'SET_LOCALE(date, locale_string)',
+        description: 'Sets the locale for date formatting',
+        detail: 'Date/Time'
+    },
+    'SET_TIMEZONE': {
+        signature: 'SET_TIMEZONE(date, timezone_string)',
+        description: 'Sets the timezone for a date',
+        detail: 'Date/Time'
+    },
 
     // Logical functions
     'IF': {
@@ -209,6 +344,26 @@ const FUNCTION_SIGNATURES: { [key: string]: { signature: string; description: st
         description: 'Tests if a value is an error',
         detail: 'Logical'
     },
+    'XOR': {
+        signature: 'XOR(logical1, logical2, ...)',
+        description: 'Returns true if an odd number of arguments are true',
+        detail: 'Logical'
+    },
+    'IS_SAME': {
+        signature: 'IS_SAME(date1, date2, [unit])',
+        description: 'Returns true if two dates are the same',
+        detail: 'Logical'
+    },
+    'IS_BEFORE': {
+        signature: 'IS_BEFORE(date1, date2)',
+        description: 'Returns true if the first date is before the second',
+        detail: 'Logical'
+    },
+    'IS_AFTER': {
+        signature: 'IS_AFTER(date1, date2)',
+        description: 'Returns true if the first date is after the second',
+        detail: 'Logical'
+    },
 
     // Array functions
     'ARRAYJOIN': {
@@ -229,6 +384,11 @@ const FUNCTION_SIGNATURES: { [key: string]: { signature: string; description: st
     'ARRAYFLATTEN': {
         signature: 'ARRAYFLATTEN(array)',
         description: 'Flattens nested arrays into a single array',
+        detail: 'Array'
+    },
+    'ARRAYSLICE': {
+        signature: 'ARRAYSLICE(array, start, [end])',
+        description: 'Returns a slice of an array from start to end',
         detail: 'Array'
     },
 
@@ -264,6 +424,28 @@ const FUNCTION_SIGNATURES: { [key: string]: { signature: string; description: st
         signature: 'LAST_MODIFIED_TIME()',
         description: 'Returns when the record was last modified',
         detail: 'Record'
+    },
+    'AUTONUMBER': {
+        signature: 'AUTONUMBER()',
+        description: 'Returns the auto-increment number of the record',
+        detail: 'Record'
+    },
+    'CREATED_BY': {
+        signature: 'CREATED_BY()',
+        description: 'Returns the user who created the record',
+        detail: 'Record'
+    },
+    'LAST_MODIFIED_BY': {
+        signature: 'LAST_MODIFIED_BY()',
+        description: 'Returns the user who last modified the record',
+        detail: 'Record'
+    },
+
+    // Misc functions
+    'ENCODE_URL_COMPONENT': {
+        signature: 'ENCODE_URL_COMPONENT(text)',
+        description: 'Encodes text for use in a URL',
+        detail: 'Misc'
     }
 };
 

@@ -126,19 +126,32 @@ class EnhancedFormulaBeautifier {
       hasJsonPattern: false
     };
     
+    const MAX_DEPTH = 100; // Prevent stack overflow on deeply nested formulas
+    
     const analyze = (node, depth = 0) => {
+      // Safety check: stop analyzing if too deep
+      if (depth > MAX_DEPTH) {
+        return;
+      }
+      
       complexity.depth = Math.max(complexity.depth, depth);
+      
+      if (!node || typeof node !== 'object') {
+        return;
+      }
       
       if (node.type === 'CALL') {
         complexity.functionCount++;
         if (node.name === 'IF') {
           complexity.ifNesting++;
         }
-        node.args?.forEach(arg => analyze(arg, depth + 1));
+        if (Array.isArray(node.args)) {
+          node.args.forEach(arg => analyze(arg, depth + 1));
+        }
       } else if (node.type === 'BINARY' && node.op === '&') {
         complexity.stringConcatCount++;
         // Check for JSON pattern (string with quotes and colon)
-        if (node.left?.type === 'STRING' && node.left.value.includes('":"')) {
+        if (node.left?.type === 'STRING' && node.left.value && node.left.value.includes('":"')) {
           complexity.hasJsonPattern = true;
         }
       }
@@ -148,7 +161,12 @@ class EnhancedFormulaBeautifier {
       if (node.expr) analyze(node.expr, depth + 1);
     };
     
-    analyze(ast);
+    try {
+      analyze(ast);
+    } catch (e) {
+      console.warn('Complexity analysis failed, using defaults:', e.message);
+    }
+    
     return complexity;
   }
 
@@ -172,14 +190,30 @@ class EnhancedFormulaBeautifier {
     const tokens = [];
     let i = 0;
     
-    // Known Airtable functions for better recognition
+    // Known Airtable functions - Complete list from official docs
     const FUNCTIONS = new Set([
-      'IF', 'AND', 'OR', 'NOT', 'XOR', 'SWITCH',
-      'CONCATENATE', 'LEFT', 'RIGHT', 'MID', 'LEN', 'FIND', 
-      'SEARCH', 'SUBSTITUTE', 'REPLACE', 'TRIM', 'UPPER', 'LOWER',
-      'VALUE', 'TEXT', 'REPT', 'SUM', 'AVERAGE', 'COUNT', 'MAX', 'MIN',
-      'DATETIME_DIFF', 'DATETIME_FORMAT', 'TODAY', 'NOW',
-      'ARRAYJOIN', 'ARRAYUNIQUE', 'REGEX_MATCH', 'ERROR'
+      // Text functions
+      'CONCATENATE', 'LEFT', 'RIGHT', 'MID', 'LEN', 'FIND', 'SEARCH',
+      'SUBSTITUTE', 'REPLACE', 'TRIM', 'UPPER', 'LOWER', 'REPT', 'T',
+      'VALUE', 'TEXT', 'ENCODE_URL_COMPONENT',
+      // Logical functions (NOTE: TRUE/FALSE are constants, not functions!)
+      'IF', 'AND', 'OR', 'NOT', 'XOR', 'SWITCH', 'ISERROR', 'ERROR', 'BLANK',
+      // Numeric functions
+      'ABS', 'AVERAGE', 'CEILING', 'COUNT', 'COUNTA', 'COUNTALL', 'EVEN',
+      'EXP', 'FLOOR', 'INT', 'LOG', 'LOG10', 'MAX', 'MIN', 'MOD', 'ODD',
+      'POWER', 'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'SQRT', 'SUM',
+      // Date/Time functions
+      'DATEADD', 'DATEDIF', 'DATETIME_DIFF', 'DATETIME_FORMAT', 'DATETIME_PARSE',
+      'DATESTR', 'DAY', 'HOUR', 'MINUTE', 'MONTH', 'SECOND', 'SET_LOCALE',
+      'SET_TIMEZONE', 'TIMESTR', 'TONOW', 'FROMNOW', 'WEEKDAY', 'WEEKNUM',
+      'WORKDAY', 'WORKDAY_DIFF', 'YEAR', 'NOW', 'TODAY',
+      'IS_BEFORE', 'IS_AFTER', 'IS_SAME',
+      // Array functions
+      'ARRAYCOMPACT', 'ARRAYJOIN', 'ARRAYUNIQUE', 'ARRAYFLATTEN', 'ARRAYSLICE',
+      // Regex functions
+      'REGEX_MATCH', 'REGEX_EXTRACT', 'REGEX_REPLACE',
+      // Record functions
+      'RECORD_ID', 'CREATED_TIME', 'LAST_MODIFIED_TIME'
     ]);
     
     while (i < formula.length) {
@@ -189,11 +223,58 @@ class EnhancedFormulaBeautifier {
         continue;
       }
       
+      // Handle Airtable line break character '\n' (single quotes around \n)
+      if (formula.substr(i, 4) === "'\\n'") {
+        tokens.push({ type: 'STRING', value: "'\\n'" });
+        i += 4;
+        continue;
+      }
+      
+      // Detect and handle smart quotes (curly quotes) - convert to straight quotes
+      // Smart quotes: " (\u201C), " (\u201D), ' (\u2018), ' (\u2019)
+      const smartQuotes = {
+        '\u201C': '"', '\u201D': '"',  // Left/right double curly quotes
+        '\u2018': "'", '\u2019': "'"   // Left/right single curly quotes
+      };
+      if (smartQuotes[formula[i]]) {
+        // Smart quotes are invalid - convert to straight quotes
+        const smartQuote = formula[i];
+        const straightQuote = smartQuotes[smartQuote];
+        let value = straightQuote;
+        let escaped = false;
+        i++;
+        
+        while (i < formula.length) {
+          const char = formula[i];
+          // Handle smart closing quotes or straight quote
+          const isClosingQuote = smartQuotes[char] === straightQuote || char === straightQuote;
+          
+          if (escaped) {
+            value += char;
+            escaped = false;
+          } else if (char === '\\') {
+            value += char;
+            escaped = true;
+          } else if (isClosingQuote) {
+            value += straightQuote;
+            i++;
+            break;
+          } else {
+            value += char;
+          }
+          i++;
+        }
+        
+        tokens.push({ type: 'STRING', value });
+        continue;
+      }
+      
       // String literals - preserve exactly
       if (formula[i] === '"' || formula[i] === "'") {
         const quote = formula[i];
         let value = quote;
         let escaped = false;
+        const startPos = i;
         i++;
         
         while (i < formula.length) {
@@ -211,6 +292,11 @@ class EnhancedFormulaBeautifier {
             value += formula[i];
           }
           i++;
+        }
+        
+        // Check for unterminated string
+        if (value[value.length - 1] !== quote) {
+          throw new Error(`Unterminated string starting at position ${startPos}`);
         }
         
         tokens.push({ type: 'STRING', value });
@@ -259,11 +345,14 @@ class EnhancedFormulaBeautifier {
           i++;
         }
         
-        // Check if it's a known function
+        // Check if it's a known function or boolean constant
         if (FUNCTIONS.has(value)) {
           tokens.push({ type: 'FUNCTION', value });
+        } else if (value === 'TRUE' || value === 'FALSE') {
+          // TRUE and FALSE are boolean constants
+          tokens.push({ type: 'CONSTANT', value });
         } else {
-          // Could be TRUE, FALSE, or other constants
+          // Other identifiers
           tokens.push({ type: 'IDENTIFIER', value });
         }
         continue;
@@ -408,6 +497,11 @@ class EnhancedFormulaBeautifier {
         return { type: 'IDENTIFIER', value: token.value };
       }
       
+      if (token.type === 'CONSTANT') {
+        consume();
+        return { type: 'CONSTANT', value: token.value };
+      }
+      
       throw new Error(`Unexpected token: ${token.type}`);
     };
     
@@ -454,23 +548,11 @@ class EnhancedFormulaBeautifier {
         };
         
       case 'BINARY':
-        // Special handling for string concatenation
-        if (node.op === '&' && this.jsonAware) {
-          // Check if this looks like JSON building
-          const left = this.optimizeNode(node.left);
-          const right = this.optimizeNode(node.right);
-          
-          if (this.looksLikeJson(left) || this.looksLikeJson(right)) {
-            return {
-              type: 'BINARY',
-              op: '&',
-              left,
-              right,
-              isJsonConcat: true
-            };
-          }
+        // Special handling for string concatenation (avoid deep recursion)
+        if (node.op === '&') {
+          return this.optimizeConcat(node);
         }
-        
+
         return {
           type: 'BINARY',
           op: node.op,
@@ -519,6 +601,47 @@ class EnhancedFormulaBeautifier {
     return false;
   }
 
+  flattenBinaryChain(node, op) {
+    const parts = [];
+    let hasJsonConcat = false;
+    let current = node;
+    while (current && current.type === 'BINARY' && current.op === op) {
+      if (current.isJsonConcat) {
+        hasJsonConcat = true;
+      }
+      parts.push(current.right);
+      current = current.left;
+    }
+    parts.push(current);
+    parts.reverse();
+    return { parts, hasJsonConcat };
+  }
+
+  optimizeConcat(node) {
+    const { parts } = this.flattenBinaryChain(node, '&');
+    const optimizedParts = parts.map(part => this.optimizeNode(part));
+
+    let result = optimizedParts[0];
+    for (let i = 1; i < optimizedParts.length; i++) {
+      const left = result;
+      const right = optimizedParts[i];
+      const nextNode = {
+        type: 'BINARY',
+        op: '&',
+        left,
+        right
+      };
+
+      if (this.jsonAware && (this.looksLikeJson(left) || this.looksLikeJson(right))) {
+        nextNode.isJsonConcat = true;
+      }
+
+      result = nextNode;
+    }
+
+    return result;
+  }
+
   print(node, depth = 0) {
     if (!node) return '';
     
@@ -542,6 +665,9 @@ class EnhancedFormulaBeautifier {
         return node.value;
         
       case 'IDENTIFIER':
+        return node.value;
+        
+      case 'CONSTANT':
         return node.value;
         
       default:
@@ -598,26 +724,34 @@ class EnhancedFormulaBeautifier {
   }
 
   printBinaryOp(node, depth) {
+    if (node.op === '&') {
+      const { parts, hasJsonConcat } = this.flattenBinaryChain(node, '&');
+      const partStrings = parts.map(part => this.print(part, depth));
+
+      if (this.jsonAware && hasJsonConcat) {
+        const indentSize = this.indentSize || 2;
+        const nextIndent = ' '.repeat(indentSize * (depth + 1));
+        const inlineSeparatorLength = indentSize === 0 ? 1 : 3;
+        const inlineLength = partStrings.reduce((sum, part) => sum + part.length, 0)
+          + (partStrings.length - 1) * inlineSeparatorLength;
+        const shouldBreak = this.smartLineBreaks || inlineLength > this.maxLineLength;
+
+        if (shouldBreak) {
+          if (indentSize === 0) {
+            return partStrings.join('&');
+          }
+          return partStrings.join(`\n${nextIndent}& `);
+        }
+
+        return indentSize === 0 ? partStrings.join('&') : partStrings.join(' & ');
+      }
+
+      return partStrings.join(' & ');
+    }
+
     const left = this.print(node.left, depth);
     const right = this.print(node.right, depth);
     const op = node.op;
-    
-    // Special formatting for JSON concatenation
-    if (node.isJsonConcat && this.jsonAware) {
-      const indentSize = this.indentSize || 2;
-      const indent = ' '.repeat(indentSize * depth);
-      const nextIndent = ' '.repeat(indentSize * (depth + 1));
-      
-      // Check if we should break the line
-      const combined = `${left} & ${right}`;
-      if (combined.length > this.maxLineLength || this.smartLineBreaks) {
-        if (indentSize === 0) {
-          return `${left}&${right}`;
-        } else {
-          return `${left}\n${nextIndent}& ${right}`;
-        }
-      }
-    }
     
     // Check if parentheses are needed based on precedence
     const needsParens = this.needsParentheses(node, depth);
