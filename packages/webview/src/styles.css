@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root {
+  /* Airtable 2026 palette */
+  --at-gray900: rgb(17,18,21);
+  --at-gray800: rgb(29,31,37);
+  --at-gray700: rgb(49,53,62);
+  --at-gray600: rgb(65,69,77);
+  --at-gray500: rgb(97,102,112);
+  --at-gray400: rgb(151,154,160);
+  --at-blue:    rgb(22,110,225);
+  --at-blueLight1: rgb(160,198,255);
+  --at-pink:    rgb(221,4,168);
+  --at-pinkLight1: rgb(247,151,239);
+  --at-green:   rgb(4,138,14);
+  --at-greenLight1: rgb(154,224,149);
+  --at-yellow:  rgb(255,186,5);
+  --at-yellowLight1: rgb(255,214,107);
+  --at-red:     rgb(220,4,59);
+  --at-redLight1: rgb(255,166,193);
+
+  /* Semantic tokens */
+  --bg:        var(--at-gray800);
+  --bg-inset:  var(--at-gray900);
+  --bg-subtle: var(--at-gray700);
+  --bg-nav:    #181d26;
+  --bg-info:   rgb(32,40,51);
+  --bg-success:rgb(31,45,30);
+  --bg-warn:   rgb(51,43,21);
+  --bg-error:  rgb(51,33,39);
+  --bg-ai:     rgba(221,4,168,0.07);
+  --bg-blue-selected: rgba(22,110,225,0.06);
+
+  --border:    rgba(255,255,255,0.10);
+  --border-em: rgba(255,255,255,0.25);
+  --border-focus: var(--at-blue);
+
+  --fg:        #ffffff;
+  --fg-subtle: var(--at-gray400);
+  --fg-muted:  var(--at-gray500);
+  --fg-ai:     var(--at-pinkLight1);
+  --fg-info:   var(--at-blueLight1);
+  --fg-ok:     var(--at-greenLight1);
+  --fg-warn:   var(--at-yellowLight1);
+  --fg-err:    var(--at-redLight1);
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+
+  --ease-std: cubic-bezier(0.2,0.1,0.2,1);
+
+  --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', Menlo, Courier, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; cursor: pointer; border: none; background: none; }
