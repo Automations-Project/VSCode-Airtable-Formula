@@ -2,6 +2,7 @@ import React from 'react';
 import { useStore } from '../store.js';
 import { StatCard } from '../components/StatCard.js';
 import { StatusDot } from '../components/StatusDot.js';
+import { IdeIcon } from '../components/IdeIcon.js';
 
 export function Overview() {
   const { ideStatuses, mcpVersion, aiFilesCount, setTab } = useStore();
@@ -41,6 +42,7 @@ export function Overview() {
         <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
           {ideStatuses.filter(ide => ide.detected).map(ide => (
             <div key={ide.ideId} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:'var(--bg-inset)', border:'1px solid var(--border)', borderRadius:'var(--radius-md)' }}>
+              <IdeIcon ideId={ide.ideId} size={16} color={ide.mcpConfigured ? 'var(--fg)' : 'var(--fg-muted)'} />
               <StatusDot variant={ide.mcpConfigured ? 'ok' : 'warn'} />
               <span style={{ fontSize:11, fontWeight:600, flex:1 }}>{ide.label}</span>
               {ide.version && <span style={{ fontSize:9, color:'var(--fg-muted)', fontFamily:'var(--font-mono)' }}>{ide.version}</span>}
@@ -59,7 +61,7 @@ export function Overview() {
 
       {/* MCP status banner */}
       <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'var(--bg-info)', border:'1px solid rgba(22,110,225,0.18)', borderRadius:'var(--radius-md)' }}>
-        <StatusDot variant={mcpVersion !== '—' ? 'ok' : 'off'} />
+        <IdeIcon ideId="mcp" size={18} color="var(--fg-info)" />
         <div>
           <div style={{ fontSize:11, fontWeight:600, color:'var(--fg-info)' }}>MCP Server</div>
           <div style={{ fontSize:9, color:'var(--fg-muted)', marginTop:1 }}>

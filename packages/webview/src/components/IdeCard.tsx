@@ -2,6 +2,7 @@ import React from 'react';
 import type { IdeStatus } from '@shared/types.js';
 import { StatusDot } from './StatusDot.js';
 import { Pill } from './Pill.js';
+import { IdeIcon } from './IdeIcon.js';
 
 interface IdeCardProps { status: IdeStatus; onSetup: () => void; loading: boolean; }
 
@@ -21,6 +22,7 @@ export function IdeCard({ status, onSetup, loading }: IdeCardProps) {
   return (
     <div style={cardStyle}>
       <div style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 14px' }}>
+        <IdeIcon ideId={status.ideId} size={18} color={status.detected ? 'var(--fg)' : 'var(--fg-muted)'} />
         <StatusDot variant={dotVariant} />
         <span style={{ fontSize:12, fontWeight:700, flex:1 }}>{status.label}</span>
         {status.version && <span style={{ fontSize:9, color:'var(--fg-muted)' }}>{status.version}</span>}
@@ -36,6 +38,7 @@ export function IdeCard({ status, onSetup, loading }: IdeCardProps) {
       {status.detected && (
         <div style={{ padding:'0 14px 12px', display:'flex', flexDirection:'column', gap:6, borderTop:'1px solid var(--border)' }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:'var(--radius-sm)', background: status.mcpConfigured ? 'var(--bg-info)' : 'var(--bg-error)', border: `1px solid ${status.mcpConfigured ? 'rgba(22,110,225,0.18)' : 'rgba(220,4,59,0.2)'}`, marginTop: 8 }}>
+            <IdeIcon ideId="mcp" size={13} color={status.mcpConfigured ? 'var(--fg-info)' : 'var(--fg-err)'} />
             <span style={{ fontSize:11, fontWeight:600, color: status.mcpConfigured ? 'var(--fg-info)' : 'var(--fg-err)' }}>MCP {status.mcpConfigured ? 'configured' : 'not configured'}</span>
           </div>
           <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', borderRadius:'var(--radius-sm)', background:'var(--bg-ai)', border:'1px solid rgba(221,4,168,0.15)' }}>
