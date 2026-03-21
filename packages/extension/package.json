@@ -1,0 +1,79 @@
+{
+  "name": "@airtable-formula/extension",
+  "private": true,
+  "version": "2.0.0",
+  "publisher": "Nskha",
+  "displayName": "Airtable Formula",
+  "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
+  "icon": "images/icon.png",
+  "license": "MIT",
+  "repository": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
+  "engines": { "vscode": "^1.100.0" },
+  "categories": ["AI", "Other", "Formatters"],
+  "keywords": ["airtable", "formula", "mcp", "ai", "beautifier"],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:airtable-formula.dashboard",
+    "onCommand:airtable-formula.openDashboard"
+  ],
+  "files": ["dist/**/*", "syntaxes/**/*", "snippets/**/*", "language-configuration/**/*", "themes/**/*", "images/**/*", "package.json", "README.md"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "airtable-formula",
+        "aliases": ["Airtable Formula", "formula"],
+        "extensions": [".formula", ".min.formula", ".ultra-min.formula"],
+        "configuration": "./language-configuration/airtable-formula-language-configuration.json"
+      }
+    ],
+    "grammars": [{ "language": "airtable-formula", "scopeName": "source.airtable-formula", "path": "./syntaxes/airtable-formula.tmLanguage.json" }],
+    "snippets": [{ "language": "airtable-formula", "path": "./snippets/airtable-formula-snippets.json" }],
+    "commands": [
+      { "command": "airtable-formula.openDashboard",  "title": "Airtable Formula: Open Dashboard",   "category": "Airtable Formula" },
+      { "command": "airtable-formula.setupAll",       "title": "Airtable Formula: Setup All IDEs",   "category": "Airtable Formula" },
+      { "command": "airtable-formula.refreshStatus",  "title": "Airtable Formula: Refresh Status",   "category": "Airtable Formula" },
+      { "command": "airtable-formula.installAISkills","title": "Airtable Formula: Install AI Skills", "category": "Airtable Formula" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "airtable-formula-container", "title": "Airtable Formula", "icon": "images/icon.svg" }]
+    },
+    "views": {
+      "airtable-formula-container": [{ "id": "airtable-formula.dashboard", "name": "Dashboard", "type": "webview" }]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "airtable-formula.refreshStatus", "when": "view == airtable-formula.dashboard", "group": "navigation" }
+      ]
+    },
+    "configuration": {
+      "title": "Airtable Formula",
+      "properties": {
+        "airtableFormula.mcp.autoConfigureOnInstall": { "type": "boolean", "default": true,       "description": "Automatically configure MCP in detected IDEs on first launch." },
+        "airtableFormula.mcp.serverPathOverride":     { "type": "string",  "default": "",         "description": "Override bundled MCP server path. Leave empty to use bundled." },
+        "airtableFormula.mcp.notifyOnUpdates":        { "type": "boolean", "default": true,       "description": "Show notification when MCP server updates are available." },
+        "airtableFormula.ai.autoInstallFiles":        { "type": "boolean", "default": true,       "description": "Automatically install AI skills/rules/workflows on first launch." },
+        "airtableFormula.ai.includeAgents":           { "type": "boolean", "default": false,      "description": "Install agent config files where the IDE supports them." },
+        "airtableFormula.formula.formatterVersion":   { "type": "string",  "default": "v2",       "enum": ["v1", "v2"], "description": "Beautifier/minifier engine version." },
+        "airtableFormula.formula.defaultBeautifyStyle":{ "type": "string", "default": "readable", "description": "Default beautify style (readable, compact, smart, etc.)." }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      { "id": "AirtableFormula.server", "label": "Airtable Internal MCP" }
+    ]
+  },
+  "scripts": {
+    "build":    "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist",
+    "package":  "vsce package --no-dependencies",
+    "test":     "node ./dist/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.0.0",
+    "mcp-internal-airtable": "link:../../../mcp-internal-airtable",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}

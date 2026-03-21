@@ -1,0 +1,15 @@
+{
+  "name": "airtable-formula-workspace",
+  "private": true,
+  "scripts": {
+    "build":   "pnpm -F shared build && pnpm -F webview build && node scripts/bundle-mcp.mjs && pnpm -F extension build",
+    "dev":     "pnpm -F webview dev",
+    "package": "pnpm -F extension package",
+    "test":    "pnpm -F shared test && pnpm -F webview test && pnpm -F extension test",
+    "clean":   "rimraf packages/*/dist packages/extension/dist"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "mcp-internal-airtable": "link:../mcp-internal-airtable"
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "scopeName": "source.airtable-formula",
+  "name": "Airtable Formula",
+  "fileTypes": [
+    "formula",
+    "airtable-formula",
+    "min.formula",
+    "ultra-min.formula"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#fieldReferences"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.airtable-formula",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.airtable-formula",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.begin.airtable-formula"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.end.airtable-formula"
+            }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.airtable-formula",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.airtable-formula"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.airtable-formula"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.airtable-formula",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.airtable-formula",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.airtable-formula"
+            }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.airtable-formula"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.airtable-formula",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "fieldReferences": {
+      "patterns": [
+        {
+          "name": "variable.other.field.airtable-formula",
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.field.begin.airtable-formula" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.field.end.airtable-formula" }
+          },
+          "patterns": [
+            {
+              "name": "entity.name.field.airtable-formula",
+              "match": "[^{}]+"
+            }
+          ]
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.airtable-formula",
+          "match": "\\b(?:TRUE|FALSE)\\b"
+        },
+        {
+          "name": "constant.language.null.airtable-formula",
+          "match": "\\bBLANK\\b"
+        },
+        {
+          "name": "support.constant.datetime.airtable-formula",
+          "match": "\\b(NOW|TODAY)\\b"
+        },
+        {
+          "name": "support.constant.math.airtable-formula",
+          "match": "\\b(PI|E)\\b"
+        },
+        {
+          "name": "support.constant.record.airtable-formula",
+          "match": "\\b(RECORD_ID)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.airtable-formula",
+          "match": "\\b(?:0|[1-9]\\d*)(?:\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.text.airtable-formula",
+          "match": "\\b(CONCATENATE|LEFT|RIGHT|MID|LEN|FIND|SEARCH|SUBSTITUTE|REPLACE|TRIM|UPPER|LOWER|VALUE|T|REPT|TEXT)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.numeric.airtable-formula",
+          "match": "\\b(ABS|AVERAGE|CEILING|COUNT|COUNTA|COUNTALL|EXP|FLOOR|INT|LOG|LOG10|MAX|MIN|MOD|POWER|ROUND|ROUNDDOWN|ROUNDUP|SQRT|SUM)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.datetime.airtable-formula",
+          "match": "\\b(DATEADD|DATEDIF|DATETIME_DIFF|DATETIME_FORMAT|DATETIME_PARSE|DATESTR|DAY|HOUR|MINUTE|MONTH|SECOND|SET_LOCALE|SET_TIMEZONE|TIMESTR|TONOW|FROMNOW|WEEKDAY|WEEKNUM|WORKDAY|WORKDAY_DIFF|YEAR)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.logical.airtable-formula",
+          "match": "\\b(AND|OR|NOT|XOR|IF|SWITCH|IS_SAME|IS_AFTER|IS_BEFORE|ISERROR|ERROR)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.array.airtable-formula",
+          "match": "\\b(ARRAYCOMPACT|ARRAYJOIN|ARRAYUNIQUE|ARRAYFLATTEN|ARRAYSLICE)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.regex.airtable-formula",
+          "match": "\\b(REGEX_MATCH|REGEX_EXTRACT|REGEX_REPLACE)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.record.airtable-formula",
+          "match": "\\b(RECORD_ID|AUTONUMBER|CREATED_BY|CREATED_TIME|LAST_MODIFIED_TIME|LAST_MODIFIED_BY)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.misc.airtable-formula",
+          "match": "\\b(ENCODE_URL_COMPONENT|BLANK)(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.airtable-formula",
+          "match": "<=|>=|!=|=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.airtable-formula",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.concatenation.airtable-formula",
+          "match": "&"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.group.begin.airtable-formula",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.group.end.airtable-formula",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.separator.comma.airtable-formula",
+          "match": ","
+        }
+      ]
+    }
+  }
+}
