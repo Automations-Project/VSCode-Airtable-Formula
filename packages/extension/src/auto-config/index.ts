@@ -7,7 +7,7 @@ const MCP_SERVER_NAME = 'mcp-internal-airtable';
 
 export function buildServerEntry(serverPath: string): Record<string, unknown> {
   return {
-    command: process.execPath,
+    command: 'node',
     args: [serverPath],
     env: { AIRTABLE_HEADLESS_ONLY: '1' },
   };

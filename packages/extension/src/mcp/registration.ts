@@ -46,7 +46,7 @@ export function registerMcpProvider(
         try {
           return [createStdioDefinition(
             MCP_SERVER_LABEL,
-            process.execPath,
+            'node',
             [getBundledServerPath(context)],
             { AIRTABLE_HEADLESS_ONLY: '1' },
             version
