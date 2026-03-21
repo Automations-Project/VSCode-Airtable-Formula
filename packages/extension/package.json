@@ -35,7 +35,7 @@
       { "command": "airtable-formula.installAISkills","title": "Airtable Formula: Install AI Skills", "category": "Airtable Formula" }
     ],
     "viewsContainers": {
-      "activitybar": [{ "id": "airtable-formula-container", "title": "Airtable Formula", "icon": "images/icon.svg" }]
+      "activitybar": [{ "id": "airtable-formula-container", "title": "Airtable Formula", "icon": "images/icon.png" }]
     },
     "views": {
       "airtable-formula-container": [{ "id": "airtable-formula.dashboard", "name": "Dashboard", "type": "webview" }]
@@ -62,7 +62,7 @@
     ]
   },
   "scripts": {
-    "build":    "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist",
+    "build":    "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\"",
     "package":  "vsce package --no-dependencies",
     "test":     "node ./dist/test/runTest.js"
   },

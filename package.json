@@ -2,10 +2,10 @@
   "name": "airtable-formula-workspace",
   "private": true,
   "scripts": {
-    "build":   "pnpm -F shared build && pnpm -F webview build && node scripts/bundle-mcp.mjs && pnpm -F extension build",
+    "build":   "pnpm -F shared build && pnpm -F webview build && node scripts/bundle-mcp.mjs && pnpm -F airtable-formula build",
     "dev":     "pnpm -F webview dev",
-    "package": "pnpm -F extension package",
-    "test":    "pnpm -F shared test && pnpm -F webview test && pnpm -F extension test",
+    "package": "pnpm -F airtable-formula package",
+    "test":    "pnpm -F shared test && pnpm -F webview test && pnpm -F airtable-formula test",
     "clean":   "rimraf packages/*/dist packages/extension/dist"
   },
   "devDependencies": {
