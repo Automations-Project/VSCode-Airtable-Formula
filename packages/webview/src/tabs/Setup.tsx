@@ -5,42 +5,44 @@ import { IdeCard } from '../components/IdeCard.js';
 export function Setup() {
   const { ideStatuses, pendingActions, setupIde, setupAll } = useStore();
 
-  const detected   = ideStatuses.filter(ide => ide.detected);
+  const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
-  const pending    = detected.filter(ide => !ide.mcpConfigured);
-  const isLoading  = pendingActions.size > 0;
+  const pending = detected.filter(ide => !ide.mcpConfigured);
+  const isLoading = pendingActions.size > 0;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+    <div className="stack stack-lg">
 
-      {/* Summary bar */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'var(--bg-inset)', border:'1px solid var(--border)', borderRadius:'var(--radius-md)' }}>
-        <div style={{ flex:1 }}>
-          <span style={{ fontSize:12, fontWeight:600 }}>{detected.length}</span>
-          <span style={{ fontSize:11, color:'var(--fg-muted)', marginLeft:4 }}>IDE{detected.length !== 1 ? 's' : ''} detected</span>
+      {/* Summary header */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">IDE Configuration</div>
+          <div className="title">Setup</div>
+          <div className="detail">
+            {detected.length} IDE{detected.length !== 1 ? 's' : ''} detected
+            {pending.length > 0 && <> &middot; <span style={{ color: 'var(--fg-warn)' }}>{pending.length} need setup</span></>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           {pending.length > 0 && (
-            <span style={{ fontSize:9, marginLeft:8, color:'var(--fg-warn)' }}>· {pending.length} need setup</span>
+            <button className="btn btn-primary" onClick={setupAll} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
+              {isLoading ? 'Setting up...' : 'Setup all'}
+            </button>
+          )}
+          {pending.length === 0 && detected.length > 0 && (
+            <span className="chip chip-ok">All configured</span>
           )}
         </div>
-        {pending.length > 0 && (
-          <button
-            onClick={setupAll}
-            disabled={isLoading}
-            style={{ fontSize:11, padding:'5px 12px', borderRadius:'var(--radius-md)', background:'var(--at-blue)', color:'#fff', fontWeight:600, opacity: isLoading ? 0.6 : 1 }}
-          >
-            {isLoading ? 'Setting up…' : 'Setup all'}
-          </button>
-        )}
-        {pending.length === 0 && detected.length > 0 && (
-          <span style={{ fontSize:10, color:'var(--fg-ok)', fontWeight:600 }}>All configured</span>
-        )}
       </div>
 
       {/* Detected IDEs */}
       {detected.length > 0 && (
-        <div>
-          <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.09em', color:'var(--fg-muted)', marginBottom:8 }}>Detected IDEs</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+        <div className="glass-panel">
+          <div className="section-header">
+            <div className="eyebrow">Detected</div>
+            <div className="title">Available IDEs</div>
+          </div>
+          <div className="stack stack-sm">
             {detected.map(ide => (
               <IdeCard
                 key={ide.ideId}
@@ -55,9 +57,12 @@ export function Setup() {
 
       {/* Undetected IDEs */}
       {undetected.length > 0 && (
-        <div>
-          <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.09em', color:'var(--fg-muted)', marginBottom:8 }}>Not Detected</div>
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+        <div className="glass-panel">
+          <div className="section-header">
+            <div className="eyebrow">Not detected</div>
+            <div className="title">Other supported IDEs</div>
+          </div>
+          <div className="stack stack-sm">
             {undetected.map(ide => (
               <IdeCard
                 key={ide.ideId}
@@ -71,8 +76,8 @@ export function Setup() {
       )}
 
       {ideStatuses.length === 0 && (
-        <div style={{ padding:'24px 12px', textAlign:'center', color:'var(--fg-muted)', fontSize:11, background:'var(--bg-inset)', border:'1px dashed var(--border)', borderRadius:'var(--radius-md)' }}>
-          No IDE data available yet. Loading…
+        <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.72rem', padding: '24px 12px' }}>
+          No IDE data available yet. Loading...
         </div>
       )}
 

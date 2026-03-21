@@ -3,84 +3,123 @@ import { useStore } from '../store.js';
 import { StatCard } from '../components/StatCard.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { IdeIcon } from '../components/IdeIcon.js';
+import { RefreshCw, Zap, Sparkles } from 'lucide-react';
 
 export function Overview() {
-  const { ideStatuses, mcpVersion, aiFilesCount, setTab } = useStore();
+  const { ideStatuses, mcpVersion, aiFilesCount, setTab, refresh, setupAll } = useStore();
 
   const configuredCount = ideStatuses.filter(ide => ide.detected && ide.mcpConfigured).length;
-  const pendingCount    = ideStatuses.filter(ide => ide.detected && !ide.mcpConfigured).length;
+  const detectedCount = ideStatuses.filter(ide => ide.detected).length;
+  const pendingCount = ideStatuses.filter(ide => ide.detected && !ide.mcpConfigured).length;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+    <div className="stack stack-lg">
 
-      {/* Stat grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
-        <StatCard value={configuredCount} label="IDEs configured" accent="blue" />
-        <StatCard value={mcpVersion}      label="MCP version"     accent="green" />
-        <StatCard value={aiFilesCount}    label="AI files active" accent="yellow" />
+      {/* Section 1: Status */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Airtable Platform</div>
+          <div className="title">Status</div>
+        </div>
+        <div className="list-row" style={{ marginTop: 4 }}>
+          <StatusDot variant={configuredCount > 0 ? 'ok' : pendingCount > 0 ? 'warn' : 'off'} />
+          <span style={{ fontSize: '0.75rem', flex: 1 }}>
+            {configuredCount > 0
+              ? 'Ready for MCP sessions'
+              : pendingCount > 0
+                ? `${pendingCount} IDE${pendingCount > 1 ? 's' : ''} need setup`
+                : 'No IDEs detected yet'}
+          </span>
+          <span className="chip chip-info">{configuredCount} IDE{configuredCount !== 1 ? 's' : ''} configured</span>
+          <span className="chip chip-muted">{aiFilesCount} AI files</span>
+        </div>
       </div>
 
-      {/* Pending warning */}
-      {pendingCount > 0 && (
-        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'var(--bg-warn)', border:'1px solid rgba(255,186,5,0.25)', borderRadius:'var(--radius-md)' }}>
-          <StatusDot variant="warn" />
-          <span style={{ fontSize:11, color:'var(--fg-warn)', flex:1 }}>
-            {pendingCount} IDE{pendingCount > 1 ? 's' : ''} detected but not configured
-          </span>
-          <button
-            onClick={() => setTab('setup')}
-            style={{ fontSize:10, padding:'3px 10px', borderRadius:'var(--radius-sm)', background:'var(--at-yellow)', color:'rgb(17,18,21)', fontWeight:700 }}
-          >
-            Go to Setup
-          </button>
-        </div>
-      )}
+      {/* Section 2: Metrics */}
+      <div className="metrics-grid">
+        <StatCard value={configuredCount} label="IDEs configured" accent="blue" />
+        <StatCard value={mcpVersion} label="MCP version" accent="green" />
+      </div>
 
-      {/* IDE list */}
-      <div>
-        <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.09em', color:'var(--fg-muted)', marginBottom:8 }}>Detected IDEs</div>
-        <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      {/* Section 3: Quick Actions */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Quick Actions</div>
+          <div className="title">Controls</div>
+        </div>
+        <div className="stack stack-sm">
+          <div className="action-card" onClick={refresh}>
+            <div className="icon-badge icon-badge-blue">
+              <RefreshCw size={13} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Refresh state</div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Re-scan IDEs and update dashboard</div>
+            </div>
+          </div>
+          <div className="action-card" onClick={setupAll}>
+            <div className="icon-badge icon-badge-green">
+              <Zap size={13} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Setup all IDEs</div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Configure MCP and AI files in all detected IDEs</div>
+            </div>
+          </div>
+          <div className="action-card" onClick={() => setTab('setup')}>
+            <div className="icon-badge icon-badge-pink">
+              <Sparkles size={13} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Install AI files</div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Manage skills, rules, workflows per IDE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 4: IDE Status */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">IDE Status</div>
+          <div className="title">Detected environments</div>
+        </div>
+        <div className="stack stack-sm">
           {ideStatuses.filter(ide => ide.detected).map(ide => (
-            <div key={ide.ideId} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:'var(--bg-inset)', border:'1px solid var(--border)', borderRadius:'var(--radius-md)' }}>
+            <div key={ide.ideId} className="list-row">
               <IdeIcon ideId={ide.ideId} size={16} color={ide.mcpConfigured ? 'var(--fg)' : 'var(--fg-muted)'} />
-              <StatusDot variant={ide.mcpConfigured ? 'ok' : 'warn'} />
-              <span style={{ fontSize:11, fontWeight:600, flex:1 }}>{ide.label}</span>
-              {ide.version && <span style={{ fontSize:9, color:'var(--fg-muted)', fontFamily:'var(--font-mono)' }}>{ide.version}</span>}
-              <span style={{ fontSize:9, color: ide.mcpConfigured ? 'var(--fg-ok)' : 'var(--fg-warn)' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, flex: 1 }}>{ide.label}</span>
+              {ide.version && (
+                <span style={{ fontSize: '0.6rem', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>{ide.version}</span>
+              )}
+              <span className={ide.mcpConfigured ? 'chip chip-ok' : 'chip chip-warn'}>
                 {ide.mcpConfigured ? 'MCP ready' : 'MCP missing'}
               </span>
             </div>
           ))}
-          {ideStatuses.filter(ide => ide.detected).length === 0 && (
-            <div style={{ padding:'16px 12px', textAlign:'center', color:'var(--fg-muted)', fontSize:11, background:'var(--bg-inset)', border:'1px dashed var(--border)', borderRadius:'var(--radius-md)' }}>
+          {detectedCount === 0 && (
+            <div style={{ padding: '16px 12px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.72rem', border: '1px dashed var(--border)', borderRadius: 12 }}>
               No IDEs detected yet
             </div>
           )}
         </div>
       </div>
 
-      {/* MCP status banner */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'var(--bg-info)', border:'1px solid rgba(22,110,225,0.18)', borderRadius:'var(--radius-md)' }}>
-        <IdeIcon ideId="mcp" size={18} color="var(--fg-info)" />
-        <div>
-          <div style={{ fontSize:11, fontWeight:600, color:'var(--fg-info)' }}>MCP Server</div>
-          <div style={{ fontSize:9, color:'var(--fg-muted)', marginTop:1 }}>
-            {mcpVersion !== '—' ? `Running v${mcpVersion}` : 'Not running'}
-          </div>
+      {/* Section 5: MCP Server */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Server</div>
+          <div className="title">MCP Server</div>
         </div>
-        <span style={{ marginLeft:'auto', fontFamily:'var(--font-mono)', fontSize:9, color:'var(--fg-info)', background:'rgba(22,110,225,0.15)', padding:'2px 8px', borderRadius:3 }}>{mcpVersion}</span>
-      </div>
-
-      {/* AI callout */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'var(--bg-ai)', border:'1px solid rgba(221,4,168,0.15)', borderRadius:'var(--radius-md)' }}>
-        <span style={{
-          fontSize:9, fontWeight:700, padding:'2px 8px', borderRadius:10,
-          background:'linear-gradient(90deg,rgba(221,4,168,0.7) 0%,rgba(22,110,225,0.7) 100%)',
-          color:'#fff', letterSpacing:'0.05em', textTransform:'uppercase',
-        }}>AI</span>
-        <div>
-          <div style={{ fontSize:11, fontWeight:600, color:'var(--fg-ai)' }}>AI context files</div>
-          <div style={{ fontSize:9, color:'var(--fg-muted)', marginTop:1 }}>{aiFilesCount} files active across IDEs</div>
+        <div className="list-row">
+          <IdeIcon ideId="mcp" size={18} color="var(--fg-info)" />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--fg-info)' }}>MCP Server</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
+              {mcpVersion !== '\u2014' ? `Running v${mcpVersion}` : 'Not running'}
+            </div>
+          </div>
+          <span className="chip chip-info" style={{ fontFamily: 'var(--font-mono)' }}>{mcpVersion}</span>
         </div>
       </div>
 

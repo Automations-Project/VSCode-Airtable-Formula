@@ -64,3 +64,138 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; cursor: pointer; border: none; background: none; }
+
+/* ─── Design System Classes ─── */
+
+/* Glass Panel */
+.glass-panel {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  box-shadow: 0 8px 24px rgba(2,6,23,0.25);
+  backdrop-filter: blur(18px);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+/* Section Headers (3-tier) */
+.section-header { margin-bottom: 10px; }
+.section-header .eyebrow {
+  font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fg-muted);
+}
+.section-header .title {
+  margin-top: 2px; font-size: 0.85rem; font-weight: 600; color: var(--fg);
+}
+.section-header .detail {
+  margin-top: 2px; font-size: 0.75rem; line-height: 1.4; color: var(--fg-subtle);
+}
+
+/* Action Cards */
+.action-card {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px;
+  border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.03); cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.action-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+
+/* Icon Badges */
+.icon-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 24px; width: 24px; border-radius: 10px; flex-shrink: 0;
+}
+.icon-badge-blue { background: linear-gradient(135deg, rgba(22,110,225,0.28), rgba(22,110,225,0.08)); color: var(--at-blueLight1); }
+.icon-badge-pink { background: linear-gradient(135deg, rgba(221,4,168,0.28), rgba(221,4,168,0.08)); color: var(--at-pinkLight1); }
+.icon-badge-green { background: linear-gradient(135deg, rgba(4,138,14,0.28), rgba(4,138,14,0.08)); color: var(--at-greenLight1); }
+.icon-badge-yellow { background: linear-gradient(135deg, rgba(255,186,5,0.28), rgba(255,186,5,0.08)); color: var(--at-yellowLight1); }
+
+/* Chips / Status Badges */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);
+  padding: 3px 7px; font-size: 0.68rem; font-weight: 500; white-space: nowrap;
+}
+.chip-ok { background: rgba(4,138,14,0.14); color: var(--fg-ok); }
+.chip-warn { background: rgba(255,186,5,0.16); color: var(--fg-warn); }
+.chip-err { background: rgba(220,4,59,0.12); color: var(--fg-err); }
+.chip-info { background: rgba(22,110,225,0.12); color: var(--fg-info); }
+.chip-muted { background: rgba(255,255,255,0.04); color: var(--fg-subtle); }
+
+/* List Rows & Toggle Rows */
+.list-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.03);
+}
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.03);
+}
+
+/* Toggle Switch */
+.toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-track {
+  position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.1); border-radius: 20px; transition: background 200ms ease;
+}
+.toggle-track::after {
+  content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px;
+  background: var(--fg-subtle); border-radius: 50%; transition: transform 200ms ease, background 200ms ease;
+}
+.toggle-switch input:checked + .toggle-track { background: var(--at-blue); }
+.toggle-switch input:checked + .toggle-track::after { transform: translateX(16px); background: #fff; }
+
+/* IDE Cards */
+.ide-card {
+  border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.03); padding: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.ide-card:hover { border-color: rgba(255,255,255,0.12); }
+.ide-card-ready {
+  border-color: rgba(22,110,225,0.25); background: rgba(22,110,225,0.04);
+  box-shadow: 0 0 12px rgba(22,110,225,0.06);
+}
+.ide-card-undetected {
+  opacity: 0.5; border-style: dashed;
+}
+
+/* Ambient Orbs */
+.orb { position: absolute; border-radius: 999px; filter: blur(80px); opacity: 0.3; pointer-events: none; }
+.orb-blue { left: -120px; top: -100px; height: 220px; width: 220px; background: rgba(22,110,225,0.2); }
+.orb-pink { right: 8%; top: 8%; height: 180px; width: 180px; background: rgba(221,4,168,0.14); }
+
+/* Metric Cards */
+.metric-card {
+  border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  box-shadow: 0 4px 12px rgba(2,6,23,0.15);
+}
+.metric-value { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.5px; line-height: 1; }
+.metric-label { font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--fg-muted); margin-top: 4px; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 8px; font-size: 0.7rem; font-weight: 500; cursor: pointer; transition: all 150ms ease; border: none; }
+.btn-primary { background: var(--at-blue); color: #fff; }
+.btn-primary:hover { background: rgb(30,125,240); }
+.btn-ghost { border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: var(--fg-subtle); }
+.btn-ghost:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }
+.btn-sm { padding: 4px 8px; font-size: 0.65rem; }
+
+/* Utility */
+.metrics-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.stack { display: flex; flex-direction: column; }
+.stack-sm { gap: 6px; }
+.stack-md { gap: 12px; }
+.stack-lg { gap: 16px; }
+
+/* Select input */
+.select-input {
+  font-size: 0.7rem; font-family: var(--font-mono);
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; padding: 4px 8px; color: var(--fg-subtle);
+  transition: border-color 150ms ease;
+}
+.select-input:focus { outline: none; border-color: var(--at-blue); }
