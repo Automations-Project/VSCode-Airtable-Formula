@@ -29,7 +29,7 @@ All existing formula features (syntax highlighting, IntelliSense, beautify, mini
 ### Linking Strategy
 - **Dev:** `pnpm link` / `packages/extension/package.json` workspace path override
 - **Production:** `"mcp-internal-airtable": "^2.0.0"` from npm (in `devDependencies` — NOT `bundleDependencies`)
-- **Build:** A `scripts/bundle-mcp.mjs` copy step resolves the package's pre-built `dist/server.mjs` via `require.resolve('mcp-internal-airtable/dist/server.mjs')` and copies it → `packages/extension/dist/mcp/server.mjs` before `vsce package` runs
+- **Build:** A `scripts/bundle-mcp.mjs` (ESM) copy step resolves the server via `createRequire(import.meta.url).resolve('mcp-internal-airtable/dist/server.mjs')` and copies it → `packages/extension/dist/mcp/server.mjs` before `vsce package` runs. Node ≥ 18 required for build environment.
 - **VSIX:** `vsce package --no-dependencies` — tsup has already bundled all runtime code including the server file. `bundleDependencies` is NOT used (it conflicts with `--no-dependencies`). The server lands in `dist/mcp/` via the copy step alone.
 
 ### Extension ID Continuity
@@ -261,7 +261,7 @@ Files deployed (content sourced from `MKG-Airtable-Formulas/Airtable/resources/`
 | Windsurf | `.windsurf/skills/airtable-formula.md` | `.windsurf/rules/airtable-formula.md` | `.windsurf/workflows/airtable-formula.md` | n/a |
 | Cursor | `.cursor/rules/airtable-formula.mdc` | `.cursor/rules/airtable-formula-rules.mdc` | n/a | n/a |
 | VS Code | `.github/instructions/airtable-formula.instructions.md` | same file | n/a | n/a |
-| Claude Code | `~/.claude/skills/airtable-formula/` | `~/.claude/skills/airtable-formula/` | `~/.claude/skills/airtable-formula/` | `~/.claude/skills/airtable-formula/` |
+| Claude Code | `~/.claude/skills/airtable-formula/` (confirmed — existing `skillInstaller.ts` uses this path; main skill file named `SKILL.md`) | `~/.claude/skills/airtable-formula/` | `~/.claude/skills/airtable-formula/` | `~/.claude/skills/airtable-formula/` |
 | Claude Desktop | n/a (no file-based AI config) | n/a | n/a | n/a |
 | Cline | `.clinerules/airtable-formula.md` | same | n/a | n/a |
 
@@ -323,13 +323,27 @@ if (typeof lmApi?.registerMcpServerDefinitionProvider === "function") {
     lmApi.registerMcpServerDefinitionProvider("AirtableFormula.server", {
       onDidChangeMcpServerDefinitions: serverDefinitionsChanged.event,
       provideMcpServerDefinitions: async () => [
-        new ctor("Airtable Internal MCP", process.execPath,
+        createStdioDefinition(
+          "Airtable Internal MCP",
+          process.execPath,                                          // Node binary path
           [path.join(context.extensionPath, "dist", "mcp", "server.mjs")],
-          { AIRTABLE_HEADLESS_ONLY: "1" }
+          { AIRTABLE_HEADLESS_ONLY: "1" },
+          version                                                    // from packageJSON.version
         )
       ]
     })
   );
+}
+
+// Constructor handles both VS Code 1.100 positional and future named-options form:
+function createStdioDefinition(label, command, args, env, version) {
+  const ctor = (vscode as any).McpStdioServerDefinition;
+  if (!ctor) throw new Error("McpStdioServerDefinition unavailable in this VS Code build");
+  try {
+    return new ctor(label, command, args, env, version); // positional (current)
+  } catch {
+    return new ctor({ label, command, args, env, version }); // named-options (future)
+  }
 }
 ```
 
