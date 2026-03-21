@@ -1,4 +1,9 @@
-import fs from 'fs';
+/**
+ * Bundle the MCP server from mcp-internal-airtable into a single self-contained
+ * ESM file using esbuild. Browser automation (patchright) is kept external and
+ * vendored separately by prepare-package-deps.mjs.
+ */
+import { build } from 'esbuild';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -6,27 +11,22 @@ import { createRequire } from 'module';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-// mcp-internal-airtable has no dist/ — it ships as ESM source (src/index.js).
-// We resolve its package.json to find the package root, then copy src/ wholesale.
+// Resolve the entry point of mcp-internal-airtable
 const pkgJsonPath = require.resolve('mcp-internal-airtable/package.json');
-const pkgRoot     = path.dirname(pkgJsonPath);
-const srcDir      = path.join(pkgRoot, 'src');
-const destDir     = path.resolve(__dirname, '../packages/extension/dist/mcp');
+const pkgRoot = path.dirname(pkgJsonPath);
+const entryPoint = path.join(pkgRoot, 'src', 'index.js');
+const outDir = path.resolve(__dirname, '../packages/extension/dist/mcp');
 
-async function copyDir(src, dest) {
-  await fs.promises.mkdir(dest, { recursive: true });
-  const entries = await fs.promises.readdir(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath  = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      await copyDir(srcPath, destPath);
-    } else {
-      await fs.promises.copyFile(srcPath, destPath);
-    }
-  }
-}
+await build({
+  entryPoints: [entryPoint],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  outfile: path.join(outDir, 'index.mjs'),
+  // patchright has native binaries — vendored separately
+  external: ['patchright', 'patchright-core'],
+  logLevel: 'info',
+});
 
-await copyDir(srcDir, destDir);
-
-console.log(`✓ MCP server copied: ${srcDir} → ${destDir}`);
+console.log('✓ MCP server bundled to', outDir);

@@ -6,10 +6,15 @@ import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic,
 const MCP_SERVER_NAME = 'mcp-internal-airtable';
 
 export function buildServerEntry(serverPath: string): Record<string, unknown> {
+  // NODE_PATH points to dist/node_modules so patchright (vendored separately) is resolvable
+  const nodeModulesPath = path.resolve(path.dirname(serverPath), '..', 'node_modules');
   return {
     command: 'node',
     args: [serverPath],
-    env: { AIRTABLE_HEADLESS_ONLY: '1' },
+    env: {
+      AIRTABLE_HEADLESS_ONLY: '1',
+      NODE_PATH: nodeModulesPath,
+    },
   };
 }
 

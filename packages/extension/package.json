@@ -63,7 +63,10 @@
   },
   "scripts": {
     "build":    "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\"",
+    "build:mcp": "node ../../scripts/bundle-mcp.mjs",
+    "prepare:deps": "node ../../scripts/prepare-package-deps.mjs",
     "package":  "vsce package --no-dependencies",
+    "package:vsix": "npm run build && npm run build:mcp && npm run prepare:deps && npm run package",
     "test":     "node ./dist/test/runTest.js"
   },
   "dependencies": {

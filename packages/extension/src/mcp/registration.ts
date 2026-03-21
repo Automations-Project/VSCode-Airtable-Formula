@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { MCP_PROVIDER_ID, MCP_SERVER_LABEL } from '../constants.js';
 import { getBundledServerPath } from './server-path.js';
@@ -44,11 +45,13 @@ export function registerMcpProvider(
       onDidChangeMcpServerDefinitions: onChanged.event,
       provideMcpServerDefinitions: async () => {
         try {
+          const serverPath = getBundledServerPath(context);
+          const nodeModulesPath = path.resolve(path.dirname(serverPath), '..', 'node_modules');
           return [createStdioDefinition(
             MCP_SERVER_LABEL,
             'node',
-            [getBundledServerPath(context)],
-            { AIRTABLE_HEADLESS_ONLY: '1' },
+            [serverPath],
+            { AIRTABLE_HEADLESS_ONLY: '1', NODE_PATH: nodeModulesPath },
             version
           )];
         } catch (err) {

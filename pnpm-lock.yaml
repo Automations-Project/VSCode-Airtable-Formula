@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      esbuild:
+        specifier: ^0.27.4
+        version: 0.27.4
       mcp-internal-airtable:
         specifier: link:../mcp-internal-airtable
         version: link:../mcp-internal-airtable
