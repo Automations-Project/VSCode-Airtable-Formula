@@ -1,12 +1,19 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { AirtableFormulaDiagnosticsProvider } from './diagnostics';
 import { AirtableFormulaCompletionProvider } from './completions';
 import { AirtableFormulaHoverProvider } from './hover';
 import { AirtableFormulaSignatureHelpProvider } from './signature';
 import { AirtableFormulaCodeActionProvider } from './codeActions';
 import { registerSkillCommands, installSkills } from './skills/skillInstaller';
+import { DashboardProvider } from './webview/DashboardProvider.js';
+import { registerMcpProvider } from './mcp/registration.js';
+import { getSettings, updateSetting } from './settings.js';
+import { getAllIdeStatuses, configureMcpForIde } from './auto-config/index.js';
+import { installAiFiles } from './skills/installer.js';
+import { getBundledServerPath } from './mcp/server-path.js';
 
 // Types
 interface BeautifyOptions {
@@ -47,7 +54,7 @@ interface ExtensionSettings {
 type BeautifyFn = (text: string) => string;
 type MinifyFn = (text: string) => string;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const manualTestLogPath = process.env.AIRTABLE_FORMULA_MANUAL_TEST_LOG;
     const manualTestWrite = (level: 'log' | 'warn' | 'error', ...args: unknown[]) => {
         if (!manualTestLogPath) {
@@ -93,6 +100,8 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     console.log('Extension "airtable-formula" activated');
+
+    // ── Formula features (existing, unchanged) ──────────────────────────
 
     // Register AI skill commands and auto-install skills
     registerSkillCommands(context);
@@ -338,9 +347,76 @@ export function activate(context: vscode.ExtensionContext) {
         ...beautifyStyleCmds,
         ...minifyLevelCmds
     );
+
+    // ── Dashboard webview ────────────────────────────────────────────────
+    const dashboardProvider = new DashboardProvider(context);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(DashboardProvider.viewId, dashboardProvider)
+    );
+
+    // ── Dashboard & MCP commands ─────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('airtable-formula.openDashboard', () => {
+            vscode.commands.executeCommand('airtable-formula.dashboard.focus');
+        }),
+        vscode.commands.registerCommand('airtable-formula.refreshStatus', () => {
+            dashboardProvider.refresh();
+        }),
+        vscode.commands.registerCommand('airtable-formula.setupAll', async () => {
+            const settings = getSettings();
+            const serverPath = getBundledServerPath(context);
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+            const statuses = await getAllIdeStatuses();
+            await Promise.all(
+                statuses.filter(s => s.detected).map(s =>
+                    configureMcpForIde(s.ideId, serverPath)
+                        .then(() => installAiFiles(s.ideId, workspaceRoot, false, settings.ai.includeAgents))
+                )
+            );
+            dashboardProvider.refresh();
+            vscode.window.showInformationMessage('Airtable Formula: All IDEs configured.');
+        }),
+        vscode.commands.registerCommand('airtable-formula.installAISkills', async () => {
+            const s = getSettings();
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+            const statuses = await getAllIdeStatuses();
+            await Promise.all(statuses.filter(st => st.detected).map(st =>
+                installAiFiles(st.ideId, workspaceRoot, true, s.ai.includeAgents)
+            ));
+            dashboardProvider.refresh();
+            vscode.window.showInformationMessage('Airtable Formula: AI files installed.');
+        })
+    );
+
+    // ── Native MCP registration ──────────────────────────────────────────
+    const mcpChanged = new vscode.EventEmitter<void>();
+    context.subscriptions.push(mcpChanged);
+    registerMcpProvider(context, mcpChanged);
+
+    // ── First-launch auto-setup ──────────────────────────────────────────
+    const settings = getSettings();
+    const firstLaunch = !context.globalState.get<boolean>('airtable-formula.initialized');
+    if (firstLaunch) {
+        await context.globalState.update('airtable-formula.initialized', true);
+        if (settings.mcp.autoConfigureOnInstall) {
+            const serverPath = getBundledServerPath(context);
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+            const statuses = await getAllIdeStatuses();
+            const detectedReady = statuses.filter(s => s.detected && !s.mcpConfigured);
+            if (detectedReady.length > 0) {
+                await Promise.all(detectedReady.map(s => configureMcpForIde(s.ideId, serverPath)));
+                vscode.window.showInformationMessage(`Airtable Formula: MCP configured for ${detectedReady.map(s => s.label).join(', ')}.`);
+            }
+        }
+        if (settings.ai.autoInstallFiles) {
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+            const statuses = await getAllIdeStatuses();
+            await Promise.all(statuses.filter(s => s.detected).map(s => installAiFiles(s.ideId, workspaceRoot)));
+        }
+    }
 }
 
-export function deactivate() {}
+export function deactivate(): void {}
 
 // ------------------ Helpers ------------------
 function getConfig(document?: vscode.TextDocument): ExtensionSettings {
@@ -406,11 +482,11 @@ function resolveScriptPath(document: vscode.TextDocument, fileName: string): str
 function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
     const settings = getConfig(document);
     const version = settings.beautifierVersion || 'v2';
-    
+
     // Determine which file to load based on version setting
     const fileName = version === 'v2' ? 'formula-beautifier-v2.js' : 'formula-beautifier.js';
     const beautifierPath = resolveScriptPath(document, fileName);
-    
+
     // If v2 is selected but not found, fall back to v1
     let fallbackPath: string | null = null;
     if (!beautifierPath && version === 'v2') {
@@ -419,7 +495,7 @@ function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
             console.warn('Beautifier v2 not found, falling back to v1');
         }
     }
-    
+
     const finalPath = beautifierPath || fallbackPath;
     if (!finalPath) {
         return null;
@@ -457,11 +533,11 @@ function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
 function getMinifyFunction(document: vscode.TextDocument): MinifyFn | null {
     const settings = getConfig(document);
     const version = settings.minifierVersion || 'v2';
-    
+
     // Determine which file to load based on version setting
     const fileName = version === 'v2' ? 'formula-minifier-v2.js' : 'formula-minifier.js';
     const minifierPath = resolveScriptPath(document, fileName);
-    
+
     // If v2 is selected but not found, fall back to v1
     let fallbackPath: string | null = null;
     if (!minifierPath && version === 'v2') {
@@ -470,7 +546,7 @@ function getMinifyFunction(document: vscode.TextDocument): MinifyFn | null {
             console.warn('Minifier v2 not found, falling back to v1');
         }
     }
-    
+
     const finalPath = minifierPath || fallbackPath;
     if (!finalPath) {
         return null;
