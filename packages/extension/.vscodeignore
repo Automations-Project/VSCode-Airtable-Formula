@@ -1,0 +1,11 @@
+**/*.ts
+!dist/**
+!syntaxes/**
+!snippets/**
+!language-configuration/**
+!themes/**
+!images/**
+src/
+node_modules/
+.vscode-test/
+tsconfig.json

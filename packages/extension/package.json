@@ -1,5 +1,5 @@
 {
-  "name": "@airtable-formula/extension",
+  "name": "airtable-formula",
   "private": true,
   "version": "2.0.0",
   "publisher": "Nskha",
@@ -17,8 +17,7 @@
     "onView:airtable-formula.dashboard",
     "onCommand:airtable-formula.openDashboard"
   ],
-  "files": ["dist/**/*", "syntaxes/**/*", "snippets/**/*", "language-configuration/**/*", "themes/**/*", "images/**/*", "package.json", "README.md"],
-  "contributes": {
+"contributes": {
     "languages": [
       {
         "id": "airtable-formula",
