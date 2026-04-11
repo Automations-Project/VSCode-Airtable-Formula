@@ -39,7 +39,13 @@ Typed message protocol between extension host and webview. Exports `ExtensionMes
 React 19 + Vite 6 + Tailwind CSS v4 + Zustand 5 dashboard. Three tabs: Overview, Setup, Settings. Builds directly into `packages/extension/dist/webview/`. Communicates with the extension host via `acquireVsCodeApi().postMessage()` — messages are typed through the shared package.
 
 ### packages/mcp-server
-The Airtable MCP server itself — ES modules Node app, published identity `airtable-user-mcp`. Provides 30+ tools (schema, field CRUD, view configuration, formula validation, extension management) via `@modelcontextprotocol/sdk`. Uses `patchright` (Chromium stealth fork) with a persistent profile for browser-based authentication against Airtable's internal API. Key files:
+The Airtable MCP server itself — ES modules Node app, **published to npm as `airtable-user-mcp`**. Provides 30+ tools (schema, field CRUD, view configuration, formula validation, extension management) via `@modelcontextprotocol/sdk`. Uses `patchright` (Chromium stealth fork) with a persistent profile for browser-based authentication against Airtable's internal API.
+
+Standalone users install via `npx airtable-user-mcp` or `npm i -g airtable-user-mcp`. The CLI exposes subcommands: `login`, `logout`, `status`, `doctor`, `install-browser`. Config and session data live in `~/.airtable-user-mcp/`.
+
+`patchright` and `otpauth` are declared as `optionalDependencies` and lazy-loaded via dynamic `import()` so the server starts without them until browser-based auth is actually needed.
+
+Key files:
 - `src/index.js` — MCP server entry point, tool registration
 - `src/auth.js` — `AirtableAuth` class, browser launch, CSRF/secretSocketId capture
 - `src/client.js` — `AirtableClient`, wraps internal API with caching
@@ -71,11 +77,20 @@ Extension computes `DashboardState` → sends `state:update` message → webview
 Build order matters (shared first, webview second, MCP third, extension last):
 1. `tsup` builds shared types to ESM
 2. `vite build` compiles React webview into `packages/extension/dist/webview/`
-3. `scripts/bundle-mcp.mjs` uses esbuild to bundle the MCP server (from `packages/mcp-server/src/`) into `packages/extension/dist/mcp/{index,login-runner,health-check}.mjs`. Patchright and otpauth are kept external and vendored separately.
+3. `scripts/bundle-mcp.mjs` uses esbuild to bundle the MCP server (from `packages/mcp-server/src/`) into `packages/extension/dist/mcp/{index,login-runner,health-check}.mjs`. Patchright and otpauth are kept external and vendored separately. It also emits `dist/mcp/version.json` containing the bundled server version, package name, build timestamp, and git SHA — the extension dashboard reads this at runtime to display the active MCP server version.
 4. `scripts/prepare-package-deps.mjs` copies `patchright`, `patchright-core`, and `otpauth` from the workspace's hoisted `node_modules/` into `packages/extension/dist/node_modules/` using `dereference: true` to follow pnpm symlinks (invoked during `package:vsix`).
 5. `tsup` builds extension to CJS, then copies `src/vendor/` to `dist/vendor/`
 
 The MCP server source lives in `packages/mcp-server/` and is resolved via `"airtable-user-mcp": "workspace:*"` in both root and extension devDependencies. The shared `pnpm-workspace.yaml` uses `packages/*` glob so the package is picked up automatically.
+
+## Release Flow
+
+Two independent release channels from the same monorepo:
+
+- **MCP server (npm):** Create a GitHub Release with tag `mcp-server/vX.Y.Z` → `publish-mcp-server.yml` publishes `airtable-user-mcp@X.Y.Z` to npm with provenance.
+- **Extension (Marketplace + Open VSX):** Create a GitHub Release with tag `extension/vX.Y.Z` → `publish-extension.yml` publishes the VSIX.
+
+Version numbers are independent (Strategy C). The extension bundles whatever MCP server version was in `packages/mcp-server/` at build time.
 
 ## Language
 
