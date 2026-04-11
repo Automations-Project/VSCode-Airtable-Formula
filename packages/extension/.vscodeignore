@@ -1,13 +1,29 @@
-**/*.ts
+# Ignore everything, then include only what's needed
+**
+
+# Runtime
 !dist/**
+!dist/mcp/**
+!dist/node_modules/**
+
+# Language support
 !syntaxes/**
 !snippets/**
 !language-configuration/**
 !themes/**
-!images/**
-src/
-node_modules/
-.vscode-test/
-scripts/
-tsconfig.json
-vitest.config.ts
+
+# Branding
+!images/icon.png
+!images/gallery-banner.png
+
+# Extension manifest & docs
+!package.json
+!README.md
+!LICENSE
+
+# Always exclude
+**/*.ts
+**/*.map
+**/node_modules/.package-lock.json
+**/.vscode-test/**
+VSCode-Airtable-Formula.code-workspace
