@@ -3,10 +3,12 @@ import { useStore } from '../store.js';
 import { StatCard } from '../components/StatCard.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { IdeIcon } from '../components/IdeIcon.js';
-import { RefreshCw, Zap, Sparkles } from 'lucide-react';
+import { RefreshCw, Zap, Sparkles, LogIn, AlertTriangle, Download } from 'lucide-react';
 
 export function Overview() {
-  const { ideStatuses, mcpVersion, aiFilesCount, setTab, refresh, setupAll } = useStore();
+  const { ideStatuses, versions, aiFilesCount, auth, setTab, refresh, setupAll, login, downloadBrowser } = useStore();
+  const dl = auth.browserDownload;
+  const downloading = dl?.status === 'downloading';
 
   const configuredCount = ideStatuses.filter(ide => ide.detected && ide.mcpConfigured).length;
   const detectedCount = ideStatuses.filter(ide => ide.detected).length;
@@ -33,12 +35,41 @@ export function Overview() {
           <span className="chip chip-info">{configuredCount} IDE{configuredCount !== 1 ? 's' : ''} configured</span>
           <span className="chip chip-muted">{aiFilesCount} AI files</span>
         </div>
+        <div className="list-row" style={{ marginTop: 4 }}>
+          <StatusDot variant={
+            auth.status === 'valid' ? 'ok'
+            : auth.status === 'chrome-missing' ? 'err'
+            : auth.status === 'expired' || auth.status === 'error' ? 'warn'
+            : auth.status === 'checking' || auth.status === 'logging-in' ? 'info'
+            : 'off'
+          } />
+          <span style={{ fontSize: '0.75rem', flex: 1 }}>
+            {auth.status === 'valid' ? 'Airtable session active'
+              : auth.status === 'chrome-missing' ? 'Browser required for auth'
+              : auth.status === 'expired' ? 'Session expired'
+              : auth.status === 'error' ? 'Auth error'
+              : auth.status === 'checking' ? 'Checking session...'
+              : auth.status === 'logging-in' ? 'Logging in...'
+              : 'Session not checked'}
+          </span>
+          {auth.browser?.found && auth.browser?.label && (
+            <span className="chip chip-muted" style={{ fontSize: '0.58rem' }}>{auth.browser.label}</span>
+          )}
+          {auth.userId && <span className="chip chip-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.58rem' }}>{auth.userId}</span>}
+        </div>
       </div>
 
       {/* Section 2: Metrics */}
       <div className="metrics-grid">
         <StatCard value={configuredCount} label="IDEs configured" accent="blue" />
-        <StatCard value={mcpVersion} label="MCP version" accent="green" />
+        <div className="glass-card" style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--fg-muted)', letterSpacing: '0.05em' }}>Version</span>
+          <span style={{ fontSize: '0.85rem' }}>Extension {versions.extension}</span>
+          <span style={{ fontSize: '0.85rem' }}>MCP server {versions.mcpServerBundled} <span style={{ color: 'var(--fg-muted)', fontSize: '0.7rem' }}>bundled</span></span>
+          {versions.mcpServerPublished && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)' }}>↑ update available: {versions.mcpServerPublished}</span>
+          )}
+        </div>
       </div>
 
       {/* Section 3: Quick Actions */}
@@ -75,6 +106,83 @@ export function Overview() {
               <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Manage skills, rules, workflows per IDE</div>
             </div>
           </div>
+          {auth.status === 'chrome-missing' && !downloading && (
+            <>
+              <div className="action-card" onClick={downloadBrowser} style={{ cursor: 'pointer' }}>
+                <div className="icon-badge icon-badge-blue">
+                  <Download size={13} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Download bundled Chromium</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
+                    One-time ~170 MB download into extension storage — no system Chrome needed
+                  </div>
+                </div>
+              </div>
+              <a
+                className="action-card"
+                href="https://www.google.com/chrome/"
+                style={{ textDecoration: 'none', color: 'inherit' }}
+              >
+                <div className="icon-badge icon-badge-pink">
+                  <AlertTriangle size={13} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Or install Google Chrome</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
+                    Use your own system browser — Edge and Chromium also work
+                  </div>
+                </div>
+              </a>
+            </>
+          )}
+          {auth.status === 'chrome-missing' && downloading && (
+            <div className="action-card" style={{ cursor: 'default' }}>
+              <div className="icon-badge icon-badge-blue">
+                <Download size={13} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Downloading Chromium...</span>
+                  <span>{dl?.progress ?? 0}%</span>
+                </div>
+                <div style={{ height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden', marginTop: 4 }}>
+                  <div
+                    style={{
+                      width: `${dl?.progress ?? 0}%`,
+                      height: '100%',
+                      background: 'var(--at-blue)',
+                      transition: 'width 0.2s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          {auth.status !== 'valid' && auth.status !== 'chrome-missing' && auth.hasCredentials && (
+            <div className="action-card" onClick={login}>
+              <div className="icon-badge icon-badge-green">
+                <LogIn size={13} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Login to Airtable</div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
+                  {auth.status === 'expired' ? 'Session expired — click to re-login' : 'Authenticate for MCP access'}
+                </div>
+              </div>
+            </div>
+          )}
+          {!auth.hasCredentials && (
+            <div className="action-card" onClick={() => setTab('settings')}>
+              <div className="icon-badge icon-badge-blue">
+                <LogIn size={13} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Set Airtable credentials</div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Save login details in Settings to enable auto-refresh</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -116,10 +224,10 @@ export function Overview() {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--fg-info)' }}>MCP Server</div>
             <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
-              {mcpVersion !== '\u2014' ? `Running v${mcpVersion}` : 'Not running'}
+              {versions.mcpServerBundled !== '—' ? `Running v${versions.mcpServerBundled}` : 'Not running'}
             </div>
           </div>
-          <span className="chip chip-info" style={{ fontFamily: 'var(--font-mono)' }}>{mcpVersion}</span>
+          <span className="chip chip-info" style={{ fontFamily: 'var(--font-mono)' }}>{versions.mcpServerBundled}</span>
         </div>
       </div>
 

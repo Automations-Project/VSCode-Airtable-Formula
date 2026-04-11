@@ -10,7 +10,7 @@ import { sendToExtension } from '../lib/vscode.js';
 
 beforeEach(() => {
   useStore.setState({
-    ideStatuses: [], mcpVersion: '—', aiFilesCount: 0, loading: true,
+    ideStatuses: [], versions: { extension: '—', mcpServerBundled: '—' }, aiFilesCount: 0, loading: true,
     activeTab: 'overview', pendingActions: new Set(),
     settings: {
       mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
@@ -29,14 +29,14 @@ describe('store', () => {
 
   it('applyState replaces dashboard data and clears loading', () => {
     useStore.getState().applyState({
-      ideStatuses: [], mcpVersion: '2.0.0', aiFilesCount: 3, loading: false,
+      ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' }, aiFilesCount: 3, loading: false,
       settings: {
         mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
         ai: { autoInstallFiles: true, includeAgents: false },
         formula: { formatterVersion: 'v2' }
       }
     });
-    expect(useStore.getState().mcpVersion).toBe('2.0.0');
+    expect(useStore.getState().versions.mcpServerBundled).toBe('2.1.0');
     expect(useStore.getState().loading).toBe(false);
   });
 
