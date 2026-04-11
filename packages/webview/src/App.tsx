@@ -14,7 +14,7 @@ const TABS = [
 ];
 
 export function App() {
-  const { activeTab, setTab, applyState, applyAuthState, markActionDone } = useStore();
+  const { activeTab, setTab, applyState, applyAuthState, markActionDone, versions } = useStore();
 
   useEffect(() => {
     const off = onExtensionMessage((msg: ExtensionMessage) => {
@@ -41,7 +41,7 @@ export function App() {
           <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--at-gray600)' }} />
           <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>VSCode</span>
           <div style={{ flex: 1 }} />
-          <span className="chip chip-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem' }}>v2.0.0</span>
+          <span className="chip chip-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem' }}>v{versions.extension}</span>
         </div>
         <div style={{ display: 'flex' }}>
           {TABS.map(t => (
@@ -65,10 +65,17 @@ export function App() {
 
       {/* Footer */}
       <div style={{ padding: '8px 16px 10px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: 8, flexShrink: 0, position: 'relative', zIndex: 1 }}>
-        {['Docs', 'Changelog', 'GitHub'].map((l, i) => (
-          <React.Fragment key={l}>
+        {([
+          { label: 'Docs', url: 'https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula' },
+          { label: 'Changelog', url: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/CHANGELOG.md' },
+          { label: 'GitHub', url: 'https://github.com/Automations-Project/VSCode-Airtable-Formula' },
+        ] as const).map((link, i) => (
+          <React.Fragment key={link.label}>
             {i > 0 && <span style={{ width: 1, height: 10, background: 'var(--border)', alignSelf: 'center' }} />}
-            <span style={{ fontSize: 9, color: 'var(--fg-muted)', cursor: 'pointer' }}>{l}</span>
+            <span
+              style={{ fontSize: 9, color: 'var(--fg-muted)', cursor: 'pointer' }}
+              onClick={() => sendToExtension({ type: 'setting:change', key: '_openUrl', value: link.url })}
+            >{link.label}</span>
           </React.Fragment>
         ))}
       </div>

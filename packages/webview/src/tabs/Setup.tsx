@@ -3,7 +3,7 @@ import { useStore } from '../store.js';
 import { IdeCard } from '../components/IdeCard.js';
 
 export function Setup() {
-  const { ideStatuses, pendingActions, setupIde, setupAll } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll } = useStore();
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
@@ -48,7 +48,7 @@ export function Setup() {
                 key={ide.ideId}
                 status={ide}
                 onSetup={() => setupIde(ide.ideId)}
-                loading={isLoading}
+                loading={pendingIdeActions.has(ide.ideId)}
               />
             ))}
           </div>

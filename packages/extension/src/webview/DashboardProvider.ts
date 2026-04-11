@@ -153,7 +153,21 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (msg.type === 'setting:change') {
-      await updateSetting(msg.key, msg.value);
+      // Open external URL (used by footer links)
+      if (msg.key === '_openUrl' && typeof msg.value === 'string') {
+        vscode.env.openExternal(vscode.Uri.parse(msg.value));
+        return;
+      }
+      // Route tool profile changes through the manager so it updates both
+      // VS Code settings and the on-disk config atomically.
+      if (msg.key === 'mcp.toolProfile' && this.toolProfileManager) {
+        await this.toolProfileManager.setProfile(msg.value as any);
+      } else if (msg.key.startsWith('mcp.categories.') && this.toolProfileManager) {
+        const cat = msg.key.replace('mcp.categories.', '') as any;
+        await this.toolProfileManager.toggleCategory(cat, msg.value as boolean);
+      } else {
+        await updateSetting(msg.key, msg.value);
+      }
       // Restart auto-refresh if auth settings changed
       if (msg.key.startsWith('auth.')) {
         this.authManager?.restartAutoRefresh();
@@ -253,11 +267,21 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       const latest = data?.['dist-tags']?.latest;
       await this.context.globalState.update('npmVersionCheckTimestamp', now);
       await this.context.globalState.update('npmVersionCheckResult', latest);
-      if (latest && latest !== bundledVersion) return latest;
+      if (latest && this.isNewerVersion(latest, bundledVersion)) return latest;
       return undefined;
     } catch {
       return undefined;
     }
+  }
+
+  private isNewerVersion(a: string, b: string): boolean {
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      if ((pa[i] || 0) > (pb[i] || 0)) return true;
+      if ((pa[i] || 0) < (pb[i] || 0)) return false;
+    }
+    return false;
   }
 
   async refresh(): Promise<void> { await this.pushState(); }

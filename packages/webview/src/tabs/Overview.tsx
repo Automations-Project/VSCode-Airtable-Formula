@@ -62,7 +62,7 @@ export function Overview() {
       {/* Section 2: Metrics */}
       <div className="metrics-grid">
         <StatCard value={configuredCount} label="IDEs configured" accent="blue" />
-        <div className="glass-card" style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <div className="metric-card" style={{ padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', color: 'var(--fg-muted)', letterSpacing: '0.05em' }}>Version</span>
           <span style={{ fontSize: '0.85rem' }}>Extension {versions.extension}</span>
           <span style={{ fontSize: '0.85rem' }}>MCP server {versions.mcpServerBundled} <span style={{ color: 'var(--fg-muted)', fontSize: '0.7rem' }}>bundled</span></span>
