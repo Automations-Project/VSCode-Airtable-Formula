@@ -192,9 +192,16 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       },
     };
 
+    const mcpServerBundled = await this.readBundledMcpVersion();
+    const mcpServerPublished = await this.checkPublishedVersion(mcpServerBundled);
+
     const state: DashboardState = {
       ideStatuses: enriched,
-      mcpVersion: this.getMcpVersion(),
+      versions: {
+        extension: this.getExtensionVersion(),
+        mcpServerBundled,
+        mcpServerPublished,
+      },
       aiFilesCount: enriched.reduce((n, s) => n + Object.values(s.aiFiles).filter(v => v === 'ok').length, 0),
       loading: false,
       settings: {
@@ -217,12 +224,40 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'action:result', id, ok, error });
   }
 
-  private getMcpVersion(): string {
+  private async readBundledMcpVersion(): Promise<string> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pkg = require('airtable-user-mcp/package.json') as { version: string };
-      return `v${pkg.version}`;
-    } catch { return 'v2.0.0'; }
+      const uri = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'mcp', 'version.json');
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      const manifest = JSON.parse(new TextDecoder().decode(bytes));
+      return typeof manifest.mcpServer === 'string' ? manifest.mcpServer : 'unknown';
+    } catch (err) {
+      console.error('[airtable-formula] Failed to read MCP version manifest', err);
+      return 'unknown';
+    }
+  }
+
+  private getExtensionVersion(): string {
+    return (this.context.extension.packageJSON as { version?: string }).version ?? 'unknown';
+  }
+
+  private async checkPublishedVersion(bundledVersion: string): Promise<string | undefined> {
+    try {
+      const lastCheck = this.context.globalState.get<number>('npmVersionCheckTimestamp', 0);
+      const now = Date.now();
+      if (now - lastCheck < 24 * 60 * 60 * 1000) {
+        return this.context.globalState.get<string>('npmVersionCheckResult');
+      }
+      const resp = await fetch('https://registry.npmjs.org/airtable-user-mcp');
+      if (!resp.ok) return undefined;
+      const data = (await resp.json()) as { 'dist-tags'?: { latest?: string } };
+      const latest = data?.['dist-tags']?.latest;
+      await this.context.globalState.update('npmVersionCheckTimestamp', now);
+      await this.context.globalState.update('npmVersionCheckResult', latest);
+      if (latest && latest !== bundledVersion) return latest;
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async refresh(): Promise<void> { await this.pushState(); }
