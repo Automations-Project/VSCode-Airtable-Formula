@@ -113,7 +113,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
-    if (msg.type === 'action:checkSession') {
+    if (msg.type === 'action:status') {
       try {
         await this.authManager?.checkSession();
         await this.pushState();
@@ -123,7 +123,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
-    if (msg.type === 'action:downloadBrowser') {
+    if (msg.type === 'action:install-browser') {
       try {
         await this.authManager?.downloadBrowser();
         await this.pushState();

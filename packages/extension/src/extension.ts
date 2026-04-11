@@ -10,6 +10,15 @@ import { AirtableFormulaCodeActionProvider } from './codeActions';
 import { registerSkillCommands, installSkills } from './skills/skillInstaller';
 import { DashboardProvider } from './webview/DashboardProvider.js';
 import { registerMcpProvider } from './mcp/registration.js';
+import { AuthManager } from './mcp/auth-manager.js';
+import { BrowserDownloadManager } from './mcp/browser-download.js';
+import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES } from './mcp/tool-profile.js';
+
+// Inlined to avoid pulling shared/ESM types into the CJS extension DTS build.
+// These must mirror the ToolProfileName / ToolCategories definitions in
+// packages/shared/src/types.ts.
+type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
+type LocalToolCategoryKey = 'read' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
 import { getSettings, updateSetting } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde } from './auto-config/index.js';
 import { installAiFiles } from './skills/installer.js';
@@ -348,8 +357,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ...minifyLevelCmds
     );
 
+    // ── Auth Manager + Browser Download Manager ──────────────────────────
+    const authManager = new AuthManager(context.secrets, context.extensionPath);
+    const browserDownloadManager = new BrowserDownloadManager(context, context.extensionPath);
+    authManager.attachDownloadManager(browserDownloadManager);
+
+    // ── Tool Profile Manager (merged from legacy mcp-airtable-tool-manager) ──
+    const toolProfileManager = new ToolProfileManager();
+    context.subscriptions.push(authManager, browserDownloadManager, toolProfileManager);
+
     // ── Dashboard webview ────────────────────────────────────────────────
     const dashboardProvider = new DashboardProvider(context);
+    dashboardProvider.setAuthManager(authManager);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(DashboardProvider.viewId, dashboardProvider)
     );
@@ -388,10 +407,149 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         })
     );
 
+    // ── Auth commands ────────────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('airtable-formula.login', async () => {
+            const hasCreds = await authManager.hasCredentials();
+            if (!hasCreds) {
+                vscode.window.showWarningMessage('Airtable Formula: No credentials stored. Open Settings tab in the dashboard to save your Airtable credentials.');
+                return;
+            }
+            vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: 'Airtable Formula: Logging in...', cancellable: false },
+                async () => {
+                    const state = await authManager.login();
+                    if (state.status === 'valid') {
+                        vscode.window.showInformationMessage(`Airtable Formula: Logged in successfully (${state.userId || 'unknown user'}).`);
+                    } else {
+                        vscode.window.showErrorMessage(`Airtable Formula: Login failed — ${state.error || 'unknown error'}.`);
+                    }
+                    dashboardProvider.refresh();
+                }
+            );
+        }),
+        vscode.commands.registerCommand('airtable-formula.logout', async () => {
+            await authManager.clearCredentials();
+            vscode.window.showInformationMessage('Airtable Formula: Credentials cleared.');
+            dashboardProvider.refresh();
+        }),
+        vscode.commands.registerCommand('airtable-formula.status', async () => {
+            vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: 'Airtable Formula: Checking session...', cancellable: false },
+                async () => {
+                    const state = await authManager.checkSession();
+                    if (state.status === 'valid') {
+                        vscode.window.showInformationMessage('Airtable Formula: Session is active.');
+                    } else {
+                        vscode.window.showWarningMessage(`Airtable Formula: Session ${state.status} — ${state.error || 'check Settings tab'}.`);
+                    }
+                    dashboardProvider.refresh();
+                }
+            );
+        }),
+        vscode.commands.registerCommand('airtable-formula.switchToolProfile', async () => {
+            const items: Array<vscode.QuickPickItem & { value: LocalToolProfileName }> = [
+                { label: '$(eye) read-only',   description: BUILTIN_PROFILES['read-only'].description, value: 'read-only' },
+                { label: '$(edit) safe-write', description: BUILTIN_PROFILES['safe-write'].description, value: 'safe-write' },
+                { label: '$(unlock) full',     description: BUILTIN_PROFILES.full.description,          value: 'full' },
+                { label: '$(gear) custom',     description: 'User-defined per-tool selection',          value: 'custom' },
+            ];
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select an MCP tool profile',
+                title: 'Airtable Formula: Switch MCP Tool Profile',
+            });
+            if (!picked) return;
+            await toolProfileManager.setProfile(picked.value);
+            const snapshot = toolProfileManager.getSnapshot();
+            vscode.window.showInformationMessage(`Airtable Formula: MCP profile "${snapshot.profile}" active — ${snapshot.enabledCount}/${snapshot.totalCount} tools enabled.`);
+            dashboardProvider.refresh();
+        }),
+        vscode.commands.registerCommand('airtable-formula.toggleToolCategory', async () => {
+            const settingsCategoryKeys: LocalToolCategoryKey[] = [
+                'read', 'fieldWrite', 'fieldDestructive', 'viewWrite', 'viewDestructive', 'extension'
+            ];
+            // Map settings-side key → on-disk (file-format) category key
+            const fileKeyBySettingsKey: Record<LocalToolCategoryKey, string> = {
+                read:             'read',
+                fieldWrite:       'fieldWrite',
+                fieldDestructive: 'field-destructive',
+                viewWrite:        'viewWrite',
+                viewDestructive:  'view-destructive',
+                extension:        'extension',
+            };
+            const snapshot = toolProfileManager.getSnapshot();
+            const items = settingsCategoryKeys.map(key => {
+                const fileKey = fileKeyBySettingsKey[key];
+                const toolCount = Object.values(TOOL_CATEGORIES).filter(c => c === fileKey).length;
+                return {
+                    label: `${snapshot.categories[key] ? '$(check)' : '$(circle-slash)'} ${CATEGORY_LABELS[fileKey] ?? key}`,
+                    description: `${toolCount} tool${toolCount === 1 ? '' : 's'}`,
+                    picked: snapshot.categories[key],
+                    value: key,
+                };
+            });
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select categories to enable (unchecked = disabled)',
+                title: 'Airtable Formula: Toggle MCP Tool Categories',
+                canPickMany: true,
+            });
+            if (!picked) return;
+            const pickedSet = new Set(picked.map(p => p.value));
+            // Switch to custom and write each category
+            await toolProfileManager.setProfile('custom');
+            for (const key of settingsCategoryKeys) {
+                await toolProfileManager.toggleCategory(key, pickedSet.has(key));
+            }
+            const after = toolProfileManager.getSnapshot();
+            vscode.window.showInformationMessage(`Airtable Formula: custom profile — ${after.enabledCount}/${after.totalCount} tools enabled.`);
+            dashboardProvider.refresh();
+        }),
+        vscode.commands.registerCommand('airtable-formula.showToolStatus', async () => {
+            const channel = vscode.window.createOutputChannel('Airtable Formula: MCP Tools', 'markdown');
+            channel.clear();
+            channel.appendLine(toolProfileManager.renderStatusReport());
+            channel.show();
+        }),
+        vscode.commands.registerCommand('airtable-formula.openToolConfig', async () => {
+            await toolProfileManager.openConfigFile();
+        }),
+        vscode.commands.registerCommand('airtable-formula.install-browser', async () => {
+            vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: 'Airtable Formula: Downloading bundled Chromium...', cancellable: false },
+                async (progress) => {
+                    const listener = browserDownloadManager.onDidChange(state => {
+                        if (state.status === 'downloading' && typeof state.progress === 'number') {
+                            progress.report({ message: `${state.progress}%`, increment: undefined });
+                        }
+                    });
+                    try {
+                        const state = await browserDownloadManager.download();
+                        if (state.status === 'done') {
+                            vscode.window.showInformationMessage('Airtable Formula: Bundled Chromium installed.');
+                        } else {
+                            vscode.window.showErrorMessage(`Airtable Formula: Download failed — ${state.error || 'unknown error'}`);
+                        }
+                    } finally {
+                        listener.dispose();
+                        dashboardProvider.refresh();
+                    }
+                }
+            );
+        }),
+    );
+
     // ── Native MCP registration ──────────────────────────────────────────
     const mcpChanged = new vscode.EventEmitter<void>();
     context.subscriptions.push(mcpChanged);
-    registerMcpProvider(context, mcpChanged);
+    registerMcpProvider(context, mcpChanged, authManager);
+
+    // ── Auth init & auto-refresh ─────────────────────────────────────────
+    await authManager.init();
+
+    // ── Tool profile sync (VS Code settings ↔ tools-config.json) ─────────
+    dashboardProvider.setToolProfileManager(toolProfileManager);
+    await toolProfileManager.init();
+    toolProfileManager.onDidChange(() => dashboardProvider.refresh());
 
     // ── First-launch auto-setup ──────────────────────────────────────────
     const settings = getSettings();

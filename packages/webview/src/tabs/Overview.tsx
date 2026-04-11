@@ -6,7 +6,7 @@ import { IdeIcon } from '../components/IdeIcon.js';
 import { RefreshCw, Zap, Sparkles, LogIn, AlertTriangle, Download } from 'lucide-react';
 
 export function Overview() {
-  const { ideStatuses, versions, aiFilesCount, auth, setTab, refresh, setupAll, login, downloadBrowser } = useStore();
+  const { ideStatuses, versions, aiFilesCount, auth, setTab, refresh, setupAll, login, installBrowser } = useStore();
   const dl = auth.browserDownload;
   const downloading = dl?.status === 'downloading';
 
@@ -108,7 +108,7 @@ export function Overview() {
           </div>
           {auth.status === 'chrome-missing' && !downloading && (
             <>
-              <div className="action-card" onClick={downloadBrowser} style={{ cursor: 'pointer' }}>
+              <div className="action-card" onClick={installBrowser} style={{ cursor: 'pointer' }}>
                 <div className="icon-badge icon-badge-blue">
                   <Download size={13} />
                 </div>

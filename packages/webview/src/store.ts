@@ -14,9 +14,9 @@ interface Store extends DashboardState {
   refresh: () => void;
   login: () => void;
   logout: () => void;
-  checkSession: () => void;
+  status: () => void;
   saveCredentials: (email: string, password: string, otpSecret: string) => void;
-  downloadBrowser: () => void;
+  installBrowser: () => void;
   removeBrowser: () => void;
   markActionDone: (id: string, ok: boolean) => void;
 }
@@ -88,10 +88,10 @@ export const useStore = create<Store>((set, get) => ({
     sendToExtension({ type: 'action:logout', id });
   },
 
-  checkSession: () => {
+  status: () => {
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
-    sendToExtension({ type: 'action:checkSession', id });
+    sendToExtension({ type: 'action:status', id });
   },
 
   saveCredentials: (email, password, otpSecret) => {
@@ -100,10 +100,10 @@ export const useStore = create<Store>((set, get) => ({
     sendToExtension({ type: 'action:saveCredentials', id, email, password, otpSecret });
   },
 
-  downloadBrowser: () => {
+  installBrowser: () => {
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
-    sendToExtension({ type: 'action:downloadBrowser', id });
+    sendToExtension({ type: 'action:install-browser', id });
   },
 
   removeBrowser: () => {

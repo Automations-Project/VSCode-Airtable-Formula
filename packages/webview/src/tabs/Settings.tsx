@@ -42,7 +42,7 @@ function AuthStatusLabel({ status }: { status: string }) {
 export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
-  const { saveCredentials, login, logout, checkSession, downloadBrowser, removeBrowser } = useStore();
+  const { saveCredentials, login, logout, status, installBrowser, removeBrowser } = useStore();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -146,7 +146,7 @@ export function Settings() {
               {!downloading && !downloadDone && (
                 <button
                   className="btn btn-primary"
-                  onClick={downloadBrowser}
+                  onClick={installBrowser}
                   style={{ fontSize: '0.72rem', padding: '6px 12px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}
                 >
                   <Download size={12} /> Download bundled Chromium
@@ -281,7 +281,7 @@ export function Settings() {
               </div>
               <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Login</span>
             </div>
-            <div className="action-card" onClick={isBusy ? undefined : checkSession} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
+            <div className="action-card" onClick={isBusy ? undefined : status} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
                 <RefreshCw size={11} />
               </div>
