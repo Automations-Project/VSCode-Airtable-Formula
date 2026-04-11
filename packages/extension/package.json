@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.10",
   "publisher": "Nskha",
   "displayName": "Airtable Formula",
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
@@ -32,7 +32,15 @@
       { "command": "airtable-formula.openDashboard",  "title": "Airtable Formula: Open Dashboard",   "category": "Airtable Formula" },
       { "command": "airtable-formula.setupAll",       "title": "Airtable Formula: Setup All IDEs",   "category": "Airtable Formula" },
       { "command": "airtable-formula.refreshStatus",  "title": "Airtable Formula: Refresh Status",   "category": "Airtable Formula" },
-      { "command": "airtable-formula.installAISkills","title": "Airtable Formula: Install AI Skills", "category": "Airtable Formula" }
+      { "command": "airtable-formula.installAISkills","title": "Airtable Formula: Install AI Skills", "category": "Airtable Formula" },
+      { "command": "airtable-formula.login",           "title": "Airtable Formula: Login to Airtable",  "category": "Airtable Formula" },
+      { "command": "airtable-formula.logout",          "title": "Airtable Formula: Logout (Clear Credentials)", "category": "Airtable Formula" },
+      { "command": "airtable-formula.checkSession",    "title": "Airtable Formula: Check Session Health", "category": "Airtable Formula" },
+      { "command": "airtable-formula.downloadBrowser",  "title": "Airtable Formula: Download Bundled Chromium", "category": "Airtable Formula" },
+      { "command": "airtable-formula.switchToolProfile","title": "Airtable Formula: Switch MCP Tool Profile",   "category": "Airtable Formula" },
+      { "command": "airtable-formula.toggleToolCategory","title": "Airtable Formula: Toggle MCP Tool Category", "category": "Airtable Formula" },
+      { "command": "airtable-formula.showToolStatus",   "title": "Airtable Formula: Show MCP Tool Status",      "category": "Airtable Formula" },
+      { "command": "airtable-formula.openToolConfig",   "title": "Airtable Formula: Open MCP Tool Config File", "category": "Airtable Formula" }
     ],
     "viewsContainers": {
       "activitybar": [{ "id": "airtable-formula-container", "title": "Airtable Formula", "icon": "images/icon.png" }]
@@ -54,11 +62,36 @@
         "airtableFormula.ai.autoInstallFiles":        { "type": "boolean", "default": true,       "description": "Automatically install AI skills/rules/workflows on first launch." },
         "airtableFormula.ai.includeAgents":           { "type": "boolean", "default": false,      "description": "Install agent config files where the IDE supports them." },
         "airtableFormula.formula.formatterVersion":   { "type": "string",  "default": "v2",       "enum": ["v1", "v2"], "description": "Beautifier/minifier engine version." },
-        "airtableFormula.formula.defaultBeautifyStyle":{ "type": "string", "default": "readable", "description": "Default beautify style (readable, compact, smart, etc.)." }
+        "airtableFormula.formula.defaultBeautifyStyle":{ "type": "string", "default": "readable", "description": "Default beautify style (readable, compact, smart, etc.)." },
+        "airtableFormula.auth.autoRefresh":              { "type": "boolean", "default": true,  "description": "Automatically check and refresh Airtable session on a schedule." },
+        "airtableFormula.auth.refreshIntervalHours":     { "type": "number",  "default": 12,    "minimum": 1, "maximum": 168, "description": "Hours between automatic session health checks (1–168)." },
+        "airtableFormula.mcp.toolProfile": {
+          "type": "string",
+          "default": "full",
+          "enum": ["read-only", "safe-write", "full", "custom"],
+          "enumDescriptions": [
+            "Schema inspection and formula validation only (6 tools)",
+            "Read + create/update fields and views, no deletes (23 tools)",
+            "All tools enabled including destructive and extensions (32 tools)",
+            "User-defined per-tool selection"
+          ],
+          "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
+        },
+        "airtableFormula.mcp.categories.read":             { "type": "boolean", "default": true, "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, validate_formula." },
+        "airtableFormula.mcp.categories.fieldWrite":       { "type": "boolean", "default": true, "description": "Field Write tools: create_field, create_formula_field, update_field_config, update_formula_field, rename_field, update_field_description, duplicate_field." },
+        "airtableFormula.mcp.categories.fieldDestructive": { "type": "boolean", "default": true, "description": "Field Destructive tool: delete_field." },
+        "airtableFormula.mcp.categories.viewWrite":        { "type": "boolean", "default": true, "description": "View Write tools: create_view, duplicate_view, rename_view, update_view_description, update_view_filters, reorder_view_fields, show_or_hide_view_columns, apply_view_sorts, update_view_group_levels, update_view_row_height." },
+        "airtableFormula.mcp.categories.viewDestructive":  { "type": "boolean", "default": true, "description": "View Destructive tool: delete_view." },
+        "airtableFormula.mcp.categories.extension":        { "type": "boolean", "default": true, "description": "Extension Management tools: create_extension, create_extension_dashboard, install_extension, update_extension_state, rename_extension, duplicate_extension, remove_extension." },
+        "airtableFormula.mcp.tools":                       { "type": "object", "default": {}, "description": "Per-tool enable/disable overrides (only used in 'custom' profile). Keys are tool names, values are booleans.", "additionalProperties": { "type": "boolean" } }
       }
     },
     "mcpServerDefinitionProviders": [
-      { "id": "AirtableFormula.server", "label": "Airtable Internal MCP" }
+      {
+        "id": "AirtableFormula.server",
+        "label": "Airtable User MCP",
+        "description": "Manage Airtable bases via 30 MCP tools: schema read, field CRUD (including formula/rollup/lookup), view configuration, formula validation, and extension management. Operates over stdio using JSON-RPC 2.0."
+      }
     ]
   },
   "scripts": {
@@ -67,6 +100,9 @@
     "prepare:deps": "node ../../scripts/prepare-package-deps.mjs",
     "package":  "vsce package --no-dependencies",
     "package:vsix": "npm run build && npm run build:mcp && npm run prepare:deps && npm run package",
+    "packx":    "node scripts/package-vsix.cjs",
+    "packx:no-bump": "node scripts/package-vsix.cjs --no-bump",
+    "version:bump": "node scripts/bump-version.cjs",
     "test":     "node ./dist/test/runTest.js"
   },
   "dependencies": {
@@ -77,7 +113,7 @@
     "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.0.0",
-    "mcp-internal-airtable": "link:../../../mcp-internal-airtable",
+    "airtable-user-mcp": "workspace:*",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"

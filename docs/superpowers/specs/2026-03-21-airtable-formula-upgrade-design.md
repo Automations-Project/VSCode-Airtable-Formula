@@ -21,15 +21,15 @@ All existing formula features (syntax highlighting, IntelliSense, beautify, mini
 
 | Repo | Role | Distribution |
 |------|------|-------------|
-| `mcp-internal-airtable` | MCP server. Browser auth, Airtable internal API, schema/field tools. Independent cycle. | Published to **npm** as `mcp-internal-airtable` |
+| `airtable-user-mcp` | MCP server. Browser auth, Airtable internal API, schema/field tools. Independent cycle. | Published to **npm** as `airtable-user-mcp` |
 | `VSCode-Airtable-Formula` | VS Code extension. Consumes the npm package. All UI and installer logic lives here. | Published to **VS Code Marketplace** |
 
 **Rationale:** The MCP server must remain independently usable (Claude Desktop, Cursor direct config, MKG workflow scripts) without the extension. Independent versioning prevents coupling.
 
 ### Linking Strategy
 - **Dev:** `pnpm link` / `packages/extension/package.json` workspace path override
-- **Production:** `"mcp-internal-airtable": "^2.0.0"` from npm (in `devDependencies` — NOT `bundleDependencies`)
-- **Build:** A `scripts/bundle-mcp.mjs` (ESM) copy step resolves the server via `createRequire(import.meta.url).resolve('mcp-internal-airtable/dist/server.mjs')` and copies it → `packages/extension/dist/mcp/server.mjs` before `vsce package` runs. Node ≥ 18 required for build environment.
+- **Production:** `"airtable-user-mcp": "^2.0.0"` from npm (in `devDependencies` — NOT `bundleDependencies`)
+- **Build:** A `scripts/bundle-mcp.mjs` (ESM) copy step resolves the server via `createRequire(import.meta.url).resolve('airtable-user-mcp/dist/server.mjs')` and copies it → `packages/extension/dist/mcp/server.mjs` before `vsce package` runs. Node ≥ 18 required for build environment.
 - **VSIX:** `vsce package --no-dependencies` — tsup has already bundled all runtime code including the server file. `bundleDependencies` is NOT used (it conflicts with `--no-dependencies`). The server lands in `dist/mcp/` via the copy step alone.
 
 ### Extension ID Continuity
@@ -135,13 +135,13 @@ Activates once on every VS Code launch (acceptable — same as Perplexity). All 
 
   // NEW — native MCP registration
   "mcpServerDefinitionProviders": [
-    { "id": "AirtableFormula.server", "label": "Airtable Internal MCP" }
+    { "id": "AirtableFormula.server", "label": "Airtable User MCP" }
   ]
 }
 ```
 
 ### VSIX packaging
-- `mcp-internal-airtable` is in `devDependencies` — NOT `bundleDependencies` (they conflict with `--no-dependencies`)
+- `airtable-user-mcp` is in `devDependencies` — NOT `bundleDependencies` (they conflict with `--no-dependencies`)
 - Webview Vite output dir: `packages/extension/dist/webview/` — included automatically
 - `.vscodeignore` excludes `airtable-formula/`, `packages/webview/src/`, `packages/shared/src/`, `node_modules/`
 - `vsce package --no-dependencies` — tsup + the MCP copy step have already produced the full `dist/`
@@ -154,7 +154,7 @@ Activates once on every VS Code launch (acceptable — same as Perplexity). All 
 pnpm build
   ├── 1. pnpm -F shared build          # tsup → shared/dist/ (ESM)
   ├── 2. pnpm -F webview build          # vite → extension/dist/webview/
-  ├── 3. node scripts/bundle-mcp.mjs    # copies mcp-internal-airtable/dist/server.mjs
+  ├── 3. node scripts/bundle-mcp.mjs    # copies airtable-user-mcp/dist/server.mjs
   │                                     # → extension/dist/mcp/server.mjs
   └── 4. pnpm -F extension build        # tsup → extension/dist/extension.js (CJS)
 
@@ -162,7 +162,7 @@ pnpm package
   └── vsce package --no-dependencies   # produces .vsix
 ```
 
-`bundle-mcp.mjs` resolves the server path via `require.resolve('mcp-internal-airtable/dist/server.mjs')` and copies with `fs.copyFile`. At runtime, the extension resolves the server path as:
+`bundle-mcp.mjs` resolves the server path via `require.resolve('airtable-user-mcp/dist/server.mjs')` and copies with `fs.copyFile`. At runtime, the extension resolves the server path as:
 ```ts
 const serverPath = path.join(context.extensionPath, 'dist', 'mcp', 'server.mjs');
 ```
@@ -248,7 +248,7 @@ interface IdeStatus {
 ```
 
 ### `AIRTABLE_HEADLESS_ONLY`
-Internal flag read by `mcp-internal-airtable`. When `"1"`, the server skips launching a visible Chrome window and runs in headless Playwright mode. Required for the extension context because showing a visible browser from a VS Code background process is disruptive. The login flow (which needs a visible browser) is handled separately by the MCP server's own auth command.
+Internal flag read by `airtable-user-mcp`. When `"1"`, the server skips launching a visible Chrome window and runs in headless Playwright mode. Required for the extension context because showing a visible browser from a VS Code background process is disruptive. The login flow (which needs a visible browser) is handled separately by the MCP server's own auth command.
 
 ---
 
@@ -324,7 +324,7 @@ if (typeof lmApi?.registerMcpServerDefinitionProvider === "function") {
       onDidChangeMcpServerDefinitions: serverDefinitionsChanged.event,
       provideMcpServerDefinitions: async () => [
         createStdioDefinition(
-          "Airtable Internal MCP",
+          "Airtable User MCP",
           process.execPath,                                          // Node binary path
           [path.join(context.extensionPath, "dist", "mcp", "server.mjs")],
           { AIRTABLE_HEADLESS_ONLY: "1" },
@@ -347,7 +347,7 @@ function createStdioDefinition(label, command, args, env, version) {
 }
 ```
 
-Guard ensures graceful degradation on older VS Code builds. `package.json` declares `"mcpServerDefinitionProviders": [{ "id": "AirtableFormula.server", "label": "Airtable Internal MCP" }]`.
+Guard ensures graceful degradation on older VS Code builds. `package.json` declares `"mcpServerDefinitionProviders": [{ "id": "AirtableFormula.server", "label": "Airtable User MCP" }]`.
 
 ---
 

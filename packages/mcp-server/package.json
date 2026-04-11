@@ -1,0 +1,47 @@
+{
+  "name": "airtable-user-mcp",
+  "version": "2.1.0",
+  "mcpName": "io.github.automations-project/airtable-user-mcp",
+  "description": "Community MCP server for Airtable. Schema inspection, field CRUD, view configuration, formula validation, and extension management. Not affiliated with Airtable Inc.",
+  "main": "src/index.js",
+  "bin": {
+    "airtable-user-mcp": "src/index.js"
+  },
+  "type": "module",
+  "files": [
+    "src/**/*.js",
+    "src/**/*.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Automations-Project/VSCode-Airtable-Formula.git",
+    "directory": "packages/mcp-server"
+  },
+  "homepage": "https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server#readme",
+  "bugs": "https://github.com/Automations-Project/VSCode-Airtable-Formula/issues",
+  "keywords": ["mcp", "model-context-protocol", "airtable", "mcp-server", "ai", "formula", "schema", "automation"],
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/index.js",
+    "login": "node src/login.js",
+    "test": "node --test test/test-cache.js test/test-client.js test/test-tool-config.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.5",
+    "fetch-cookie": "^3.0.1",
+    "node-fetch": "^3.3.2",
+    "tough-cookie": "^4.1.3"
+  },
+  "optionalDependencies": {
+    "otpauth": "^9.5.0",
+    "patchright": "^1.58.2"
+  }
+}

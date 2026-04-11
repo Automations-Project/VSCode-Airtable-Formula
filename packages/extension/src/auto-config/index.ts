@@ -3,7 +3,7 @@ import type { IdeId, IdeStatus, AiFiles } from '@airtable-formula/shared';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry } from './ide-detection.js';
 
-const MCP_SERVER_NAME = 'mcp-internal-airtable';
+const MCP_SERVER_NAME = 'airtable-user-mcp';
 
 export function buildServerEntry(serverPath: string): Record<string, unknown> {
   // NODE_PATH points to dist/node_modules so patchright (vendored separately) is resolvable

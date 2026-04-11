@@ -1,0 +1,81 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.automations-project/airtable-user-mcp",
+  "title": "Airtable User MCP",
+  "description": "Manage Airtable bases: schema, field CRUD, views, formula validation, extensions",
+  "version": "2.1.0",
+  "websiteUrl": "https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server",
+  "repository": {
+    "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png",
+      "mimeType": "image/png",
+      "sizes": ["128x109"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "airtable-user-mcp",
+      "version": "2.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AIRTABLE_HEADLESS_ONLY",
+          "description": "Headless auth (no browser UI)",
+          "isRequired": false
+        },
+        {
+          "name": "AIRTABLE_NO_BROWSER",
+          "description": "Force manual session mode",
+          "isRequired": false
+        },
+        {
+          "name": "AIRTABLE_USER_MCP_HOME",
+          "description": "Override config directory",
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "tools": [
+    { "name": "get_base_schema", "description": "Get full schema of all tables, fields, and views in a base" },
+    { "name": "list_tables", "description": "List all tables in a base with IDs and names" },
+    { "name": "get_table_schema", "description": "Get full schema for a single table including fields and views" },
+    { "name": "list_fields", "description": "List all fields in a table with types and configuration" },
+    { "name": "list_views", "description": "List all views in a table with IDs, names, and types" },
+    { "name": "create_field", "description": "Create a new field including computed types (formula, rollup, lookup, count)" },
+    { "name": "create_formula_field", "description": "Create a formula field (shorthand)" },
+    { "name": "validate_formula", "description": "Validate a formula expression before creating or updating" },
+    { "name": "update_formula_field", "description": "Update the formula text of an existing formula field" },
+    { "name": "update_field_config", "description": "Update configuration of any computed field" },
+    { "name": "update_field_description", "description": "Set or update a field's description text" },
+    { "name": "rename_field", "description": "Rename a field with pre-validation" },
+    { "name": "delete_field", "description": "Delete a field with safety guards and dependency checks" },
+    { "name": "duplicate_field", "description": "Clone a field, optionally copying cell values" },
+    { "name": "create_view", "description": "Create a new view (grid, form, kanban, calendar, gallery, gantt, list)" },
+    { "name": "duplicate_view", "description": "Clone a view with all configuration" },
+    { "name": "rename_view", "description": "Rename a view" },
+    { "name": "delete_view", "description": "Delete a view (cannot delete last view)" },
+    { "name": "update_view_description", "description": "Set or clear a view's description" },
+    { "name": "update_view_filters", "description": "Set filter conditions with AND/OR conjunctions" },
+    { "name": "reorder_view_fields", "description": "Change column order in a view" },
+    { "name": "show_or_hide_view_columns", "description": "Show or hide specific columns in a view" },
+    { "name": "apply_view_sorts", "description": "Set or clear sort conditions on a view" },
+    { "name": "update_view_group_levels", "description": "Set or clear grouping on a view" },
+    { "name": "update_view_row_height", "description": "Change row height (small, medium, large, xlarge)" },
+    { "name": "create_extension", "description": "Register a new extension/block in a base" },
+    { "name": "create_extension_dashboard", "description": "Create a new dashboard page for extensions" },
+    { "name": "install_extension", "description": "Install an extension onto a dashboard page" },
+    { "name": "update_extension_state", "description": "Enable or disable an installed extension" },
+    { "name": "rename_extension", "description": "Rename an installed extension" },
+    { "name": "duplicate_extension", "description": "Clone an installed extension" },
+    { "name": "remove_extension", "description": "Remove an extension from a dashboard" }
+  ]
+}
