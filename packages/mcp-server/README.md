@@ -94,8 +94,10 @@ Add to your MCP client config (`mcp.json`, `claude_desktop_config.json`, etc.):
 
 Install the [Airtable Formula](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) extension — it bundles this server and registers it automatically across all your IDEs.
 
-### From source
+### From Extension (GUI)
+![alt text](image.png)
 
+### From source
 ```json
 {
   "mcpServers": {

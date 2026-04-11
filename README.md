@@ -43,8 +43,10 @@ This monorepo ships **two products** from one source tree:
 - **Airtable Login** — Credentials in OS keychain, browser-based auth with auto-refresh
 - **Dashboard** — React webview with Overview, Setup, and Settings tabs
 
-<!-- TODO: Replace with actual screenshot -->
-<!-- <p align="center"><img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/screenshot-dashboard.png" alt="Dashboard Screenshot" width="700" /></p> -->
+
+# Screenshot
+
+![Dashboard Screenshot](image.png)
 
 ### MCP Server (30 Tools)
 
