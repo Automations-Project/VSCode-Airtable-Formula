@@ -1,0 +1,52 @@
+name: Bug Report
+description: Report a bug in the MCP server or VS Code extension
+labels: [bug]
+body:
+  - type: dropdown
+    id: product
+    attributes:
+      label: Product
+      options:
+        - VS Code extension (airtable-formula)
+        - npm package (airtable-user-mcp)
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "e.g., extension 2.0.11 or airtable-user-mcp 2.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: mcp-client
+    attributes:
+      label: MCP Client (if applicable)
+      options:
+        - VS Code (built-in MCP)
+        - Cursor
+        - Claude Desktop
+        - Cline
+        - Windsurf
+        - Continue
+        - Other
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "e.g., Windows 11, macOS 14.5, Ubuntu 22.04"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      placeholder: Describe the bug and steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or errors
+      render: shell

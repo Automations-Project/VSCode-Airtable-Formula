@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Can't log in?"
+    url: https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server#authentication
+    about: Check the auth guide before opening an auth issue
+  - name: MCP Registry
+    url: https://registry.modelcontextprotocol.io
+    about: Find this server and others on the MCP Registry

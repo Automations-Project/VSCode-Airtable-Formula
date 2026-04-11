@@ -1,0 +1,26 @@
+name: Authentication Problem
+description: Having trouble logging in or sessions expiring
+labels: [auth]
+body:
+  - type: dropdown
+    id: auth-method
+    attributes:
+      label: Authentication method
+      options:
+        - Browser login (patchright)
+        - Manual session cookie
+        - VS Code extension credentials
+    validations:
+      required: true
+  - type: textarea
+    id: doctor-output
+    attributes:
+      label: Doctor output
+      description: "Run `npx airtable-user-mcp doctor` and paste the output"
+      render: shell
+  - type: textarea
+    id: description
+    attributes:
+      label: "What's happening?"
+    validations:
+      required: true
