@@ -1,12 +1,16 @@
-.superpowers/
+# Dependencies & build output
 node_modules/
 packages/*/node_modules/
 packages/*/dist/
 *.vsix
-node_modules/*
-Research/
+
+# Local-only / AI / planning files
+.superpowers/
 .windsurf
-artifacts
-docs
-draft
-examples
+CLAUDE.md
+**/PLAN.md
+docs/
+draft/
+examples/
+artifacts/
+Research/
