@@ -74,6 +74,25 @@ run('pnpm', ['-F', 'airtable-formula', 'build'], repoRoot);
 // ── 3. Prepare deps & package VSIX ──
 run('node', ['scripts/prepare-package-deps.mjs'], repoRoot);
 
+// ── 3b. Copy root README, replacing SVGs (vsce rejects SVG in README) ──
+const readmeSrc = path.join(repoRoot, 'README.md');
+const readmeDst = path.join(packageRoot, 'README.md');
+let readme = fs.readFileSync(readmeSrc, 'utf8');
+// Replace Airtable SVG logo with the extension PNG icon
+readme = readme.replace(
+	/<img src="[^"]*airtable\.svg"[^/]*\/>/,
+	'<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png" alt="Airtable Formula" width="80" />'
+);
+// Replace IDE icons table row (SVGs) with a plain text row
+readme = readme.replace(
+	/\| <img src="[^"]*claude\.svg"[^|]*\|[^\n]*\n/,
+	'| Claude Desktop | Claude Code | Cursor | Windsurf | Cline | Amp |\n'
+);
+// Remove the MCP server icon SVG reference if present
+readme = readme.replace(/<img src="[^"]*mcp\.svg"[^/]*\/>/g, '');
+fs.writeFileSync(readmeDst, readme, 'utf8');
+console.log(`[readme] ${readmeSrc} -> ${readmeDst} (SVGs replaced)`);
+
 fs.mkdirSync(artifactsDir, { recursive: true });
 
 const vsceCommand = process.platform === 'win32' ? 'vsce.cmd' : 'vsce';
