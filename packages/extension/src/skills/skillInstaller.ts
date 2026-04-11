@@ -284,16 +284,16 @@ export async function uninstallSkills(): Promise<void> {
 }
 
 /**
- * Registers skill-related commands
+ * Registers skill-related commands.
+ *
+ * Note: `airtable-formula.installAISkills` is registered in extension.ts
+ * instead — the extension.ts version iterates over all detected IDEs and
+ * installs AI files to each one, which is the comprehensive behavior users
+ * expect. Registering it here too would cause a duplicate command error at
+ * activation time and break every command registered after it in extension.ts
+ * (including switchToolProfile, login, logout, status, etc.).
  */
 export function registerSkillCommands(context: vscode.ExtensionContext): void {
-    // Command to install/reinstall skills
-    context.subscriptions.push(
-        vscode.commands.registerCommand('airtable-formula.installAISkills', () => {
-            installSkills(true);
-        })
-    );
-    
     // Command to uninstall skills
     context.subscriptions.push(
         vscode.commands.registerCommand('airtable-formula.uninstallAISkills', () => {
