@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+import { runCli } from './cli.js';
+
+// Handle CLI subcommands before starting the MCP server
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  const handled = await runCli(cliArgs);
+  if (handled) process.exit(process.exitCode || 0);
+}
+
+// Original MCP server code continues below...
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
