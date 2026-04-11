@@ -30,6 +30,7 @@
   --bg-error:  rgb(51,33,39);
   --bg-ai:     rgba(221,4,168,0.07);
   --bg-blue-selected: rgba(22,110,225,0.06);
+  --bg-input:  rgba(0,0,0,0.25);
 
   --border:    rgba(255,255,255,0.10);
   --border-em: rgba(255,255,255,0.25);
@@ -191,11 +192,54 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
 .stack-md { gap: 12px; }
 .stack-lg { gap: 16px; }
 
+/* Airtable Logo */
+.at-logo-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.at-logo-glow {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(252,180,0,0.45),
+    rgba(248,43,96,0.45),
+    rgba(24,191,255,0.45),
+    rgba(252,180,0,0.45)
+  );
+  filter: blur(7px);
+  opacity: 0.7;
+  animation: at-logo-spin 4s linear infinite;
+}
+@keyframes at-logo-spin {
+  to { transform: rotate(360deg); }
+}
+.at-logo-wrapper:hover .at-logo-glow {
+  opacity: 1;
+  filter: blur(9px);
+}
+
 /* Select input */
 .select-input {
   font-size: 0.7rem; font-family: var(--font-mono);
-  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px; padding: 4px 8px; color: var(--fg-subtle);
+  background: var(--at-gray900); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; padding: 4px 8px; color: var(--fg);
   transition: border-color 150ms ease;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2397989f' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+  cursor: pointer;
 }
 .select-input:focus { outline: none; border-color: var(--at-blue); }
+.select-input option {
+  background: var(--at-gray900);
+  color: var(--fg);
+  padding: 4px 8px;
+}

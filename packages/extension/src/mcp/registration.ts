@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { MCP_PROVIDER_ID, MCP_SERVER_LABEL } from '../constants.js';
 import { getBundledServerPath } from './server-path.js';
+import type { AuthManager } from './auth-manager.js';
 
 type McpCtor = new (...args: unknown[]) => unknown;
 
@@ -20,7 +21,8 @@ function createStdioDefinition(
 
 export function registerMcpProvider(
   context: vscode.ExtensionContext,
-  onChanged: vscode.EventEmitter<void>
+  onChanged: vscode.EventEmitter<void>,
+  authManager?: AuthManager,
 ): void {
   const lmApi = (vscode as unknown as {
     lm?: {
@@ -47,11 +49,28 @@ export function registerMcpProvider(
         try {
           const serverPath = getBundledServerPath(context);
           const nodeModulesPath = path.resolve(path.dirname(serverPath), '..', 'node_modules');
+          const env: Record<string, string> = {
+            AIRTABLE_HEADLESS_ONLY: '1',
+            NODE_PATH: nodeModulesPath,
+          };
+
+          // Pass stored credentials so MCP server can auto-recover sessions
+          if (authManager) {
+            const credEnv = await authManager.getCredentialsEnv();
+            if (credEnv) Object.assign(env, credEnv);
+
+            // Forward detected browser channel/path so the MCP process launches
+            // the same browser the extension preflight chose (Chrome, Edge, etc.)
+            const probe = authManager.browser;
+            if (probe.channel) env.AIRTABLE_BROWSER_CHANNEL = probe.channel;
+            if (probe.executablePath) env.AIRTABLE_BROWSER_PATH = probe.executablePath;
+          }
+
           return [createStdioDefinition(
             MCP_SERVER_LABEL,
             'node',
             [serverPath],
-            { AIRTABLE_HEADLESS_ONLY: '1', NODE_PATH: nodeModulesPath },
+            env,
             version
           )];
         } catch (err) {

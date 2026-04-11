@@ -1,0 +1,21 @@
+# Dev-only reverse-engineering tools — kept locally for future reference,
+# not committed. These tools (capture.js, analyze.js, debug-*.js) are used
+# to reverse-engineer Airtable's internal API when their routes change.
+dev-tools/
+
+# HAR dumps and raw API captures
+captures/
+airtable_capture.json
+
+# Chromium persistent profiles from live/auth tests
+.chrome-profile/
+.chrome-profile-*/
+test/.chrome-profile/
+test/.chrome-profile-*/
+
+# Secrets and environment files
+.env
+.airtable-session.json
+
+# Local test fixture IDs
+test/.demo-ids.json

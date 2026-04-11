@@ -3,3 +3,10 @@ node_modules/
 packages/*/node_modules/
 packages/*/dist/
 *.vsix
+node_modules/*
+Research/
+.windsurf
+artifacts
+docs
+draft
+examples

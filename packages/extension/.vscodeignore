@@ -8,4 +8,6 @@
 src/
 node_modules/
 .vscode-test/
+scripts/
 tsconfig.json
+vitest.config.ts

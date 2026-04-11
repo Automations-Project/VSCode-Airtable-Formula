@@ -6,6 +6,7 @@ export interface Settings {
   mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
+  auth: { autoRefresh: boolean; refreshIntervalHours: number };
 }
 
 export function getSettings(): Settings {
@@ -23,6 +24,10 @@ export function getSettings(): Settings {
     formula: {
       formatterVersion:      cfg.get('formula.formatterVersion', 'v2') as 'v1' | 'v2',
       defaultBeautifyStyle:  cfg.get('formula.defaultBeautifyStyle', 'readable'),
+    },
+    auth: {
+      autoRefresh:          cfg.get('auth.autoRefresh', true),
+      refreshIntervalHours: cfg.get('auth.refreshIntervalHours', 12),
     },
   };
 }

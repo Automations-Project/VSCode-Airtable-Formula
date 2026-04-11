@@ -5,6 +5,7 @@ import type { ExtensionMessage } from '@shared/messages.js';
 import { Overview } from './tabs/Overview.js';
 import { Setup } from './tabs/Setup.js';
 import { Settings } from './tabs/Settings.js';
+import { AirtableLogo } from './components/AirtableLogo.js';
 
 const TABS = [
   { id: 'overview' as const, label: 'Overview' },
@@ -13,11 +14,12 @@ const TABS = [
 ];
 
 export function App() {
-  const { activeTab, setTab, applyState, markActionDone } = useStore();
+  const { activeTab, setTab, applyState, applyAuthState, markActionDone } = useStore();
 
   useEffect(() => {
     const off = onExtensionMessage((msg: ExtensionMessage) => {
       if (msg.type === 'state:update') applyState(msg.payload);
+      if (msg.type === 'auth:state') applyAuthState(msg.payload);
       if (msg.type === 'action:result') markActionDone(msg.id, msg.ok);
     });
     sendToExtension({ type: 'ready' });
@@ -34,7 +36,7 @@ export function App() {
       {/* Header + tabs */}
       <div style={{ background: 'var(--bg-nav)', padding: '0 16px', borderBottom: '1px solid var(--border)', flexShrink: 0, position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 44 }}>
-          <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--at-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#fff', flexShrink: 0 }}>A</div>
+          <AirtableLogo size={22} />
           <span style={{ fontSize: 13, fontWeight: 600 }}>Airtable Formula</span>
           <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--at-gray600)' }} />
           <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>VSCode</span>

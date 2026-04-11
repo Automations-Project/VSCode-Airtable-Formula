@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { SKILL_CONTENT, RULE_CONTENT, WORKFLOWS, FUNCTIONS_REFERENCE } from './templates/skillTemplates';
+import { SKILL_CONTENT, RULE_CONTENT, WORKFLOWS, FUNCTIONS_REFERENCE, MCP_TOOLS_GUIDE, MCP_RULES } from './templates/skillTemplates';
 
 /**
  * IDE types supported by the skill installer
@@ -154,6 +154,18 @@ async function installClaudeSkills(force: boolean): Promise<void> {
                 await writeFile(workflowPath, content);
             }
         }
+        
+        // Install MCP tools guide
+        const mcpGuidePath = path.join(skillDir, 'mcp-tools-guide.md');
+        if (force || !(await fileExists(mcpGuidePath))) {
+            await writeFile(mcpGuidePath, MCP_TOOLS_GUIDE);
+        }
+        
+        // Install MCP rules
+        const mcpRulesPath = path.join(skillDir, 'MCP-RULES.md');
+        if (force || !(await fileExists(mcpRulesPath))) {
+            await writeFile(mcpRulesPath, MCP_RULES);
+        }
     }
     
     vscode.window.showInformationMessage(
@@ -225,6 +237,22 @@ export async function installSkills(force: boolean = false): Promise<void> {
             const workflowContent = ide === 'cursor' ? wrapWithMdcFrontmatter(content, name.replace(/-/g, ' '), ['**/*.formula']) : content;
             await writeFile(workflowPath, workflowContent);
         }
+    }
+    
+    // Install MCP tools guide
+    const mcpGuideFileName = ide === 'cursor' ? 'airtable-mcp-tools.mdc' : 'airtable-mcp-tools.md';
+    const mcpGuidePath = path.join(workspaceRoot, config.skillFolder, mcpGuideFileName);
+    if (force || !(await fileExists(mcpGuidePath))) {
+        const mcpGuideContent = ide === 'cursor' ? wrapWithMdcFrontmatter(MCP_TOOLS_GUIDE, 'Airtable MCP tools guide', ['**/*']) : MCP_TOOLS_GUIDE;
+        await writeFile(mcpGuidePath, mcpGuideContent);
+    }
+    
+    // Install MCP rules (always-on)
+    const mcpRuleFileName = ide === 'cursor' ? 'airtable-mcp-rules.mdc' : (ide === 'vscode' ? 'airtable-mcp-rules.instructions.md' : 'airtable-mcp-rules.md');
+    const mcpRulePath = path.join(workspaceRoot, config.rulesFolder, mcpRuleFileName);
+    if (force || !(await fileExists(mcpRulePath))) {
+        const mcpRuleContent = ide === 'cursor' ? wrapWithMdcFrontmatter(MCP_RULES, 'Airtable MCP tool usage rules', ['**/*'], true) : MCP_RULES;
+        await writeFile(mcpRulePath, mcpRuleContent);
     }
     
     vscode.window.showInformationMessage(
