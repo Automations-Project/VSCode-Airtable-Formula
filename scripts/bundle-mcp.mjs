@@ -9,6 +9,7 @@
  *   - health-check.mjs  — session health check (spawned by extension)
  */
 import { build } from 'esbuild';
+import { readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -56,3 +57,18 @@ await build({
 console.log('✓ Health check bundled');
 
 console.log('✓ All MCP bundles written to', outDir);
+
+// 4. Write version manifest for the extension dashboard
+const mcpPkgRaw = readFileSync(path.join(pkgRoot, 'package.json'), 'utf8');
+const mcpPkg = JSON.parse(mcpPkgRaw);
+const versionManifest = {
+  mcpServer: mcpPkg.version,
+  mcpServerName: mcpPkg.name,
+  bundledAt: new Date().toISOString(),
+  bundledFromGitSha: process.env.GITHUB_SHA || 'local-dev',
+};
+writeFileSync(
+  path.join(outDir, 'version.json'),
+  JSON.stringify(versionManifest, null, 2)
+);
+console.log(`✓ Version manifest: ${mcpPkg.name}@${mcpPkg.version}`);
