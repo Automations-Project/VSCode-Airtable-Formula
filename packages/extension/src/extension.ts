@@ -547,9 +547,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await authManager.init();
 
     // ── Tool profile sync (VS Code settings ↔ tools-config.json) ─────────
+    // IMPORTANT: attach the onDidChange listener BEFORE init() so we catch
+    // the final onDidChange fire at the end of init(). Without this, the
+    // initial state push to the dashboard misses the fresh tool profile
+    // snapshot and the dropdown stays out of sync until the user interacts.
     dashboardProvider.setToolProfileManager(toolProfileManager);
-    await toolProfileManager.init();
     toolProfileManager.onDidChange(() => dashboardProvider.refresh());
+    await toolProfileManager.init();
+    // Force a final refresh so the webview gets the post-init state even if
+    // the webview wasn't yet resolved when init() fired onDidChange above.
+    await dashboardProvider.refresh();
 
     // ── First-launch auto-setup ──────────────────────────────────────────
     const settings = getSettings();

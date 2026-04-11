@@ -59,10 +59,21 @@ export const useStore = create<Store>((set, get) => ({
 
   setTab: (tab) => set({ activeTab: tab }),
   applyState: (state) => set(s => {
-    // Preserve auth from the dedicated auth:state channel if the incoming
-    // state has default/stale auth (e.g. hasCredentials false when we already
-    // know credentials are saved). The auth:state message is the authority.
-    const auth = s.auth.status !== 'unknown' ? s.auth : state.auth;
+    // Auth merge rules:
+    //   1. hasCredentials is STICKY — once true, it stays true until an
+    //      explicit logout (auth:state channel with hasCredentials:false).
+    //      This prevents a stale state:update (e.g. during extension cold
+    //      start, before AuthManager.init() finishes) from clobbering a
+    //      known-good credential state.
+    //   2. The auth:state channel is authoritative for status/userId/browser
+    //      — if s.auth.status !== 'unknown' we already have a richer state
+    //      than what state:update can provide, so keep it.
+    const incomingAuth = state.auth ?? defaultAuth;
+    const currentAuth = s.auth ?? defaultAuth;
+    const auth =
+      currentAuth.status !== 'unknown'
+        ? currentAuth
+        : { ...incomingAuth, hasCredentials: currentAuth.hasCredentials || incomingAuth.hasCredentials };
     return { ...state, auth, loading: false };
   }),
   applyAuthState: (state) => set({ auth: state }),

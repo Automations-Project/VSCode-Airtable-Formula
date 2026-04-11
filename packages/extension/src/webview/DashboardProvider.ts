@@ -191,7 +191,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }))
     );
 
-    const authState: AuthState = this.authManager?.state ?? { status: 'unknown', hasCredentials: false };
+    // Always query SecretStorage fresh for hasCredentials — the AuthManager's
+    // cached _state starts as { hasCredentials: false } and is only updated
+    // when init() finishes. If pushState runs before init() completes (which
+    // happens on cold starts with the dashboard pinned), the cached state
+    // reports stale hasCredentials. Querying directly avoids that race.
+    const baseAuthState: AuthState = this.authManager?.state ?? { status: 'unknown', hasCredentials: false };
+    const freshHasCredentials = this.authManager ? await this.authManager.hasCredentials() : false;
+    const authState: AuthState = { ...baseAuthState, hasCredentials: freshHasCredentials };
 
     // Fall back to a 'full' snapshot with every category enabled if the
     // ToolProfileManager isn't wired yet — keeps the webview render-safe
