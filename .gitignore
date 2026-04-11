@@ -1,16 +1,45 @@
-# Dependencies & build output
-node_modules/
-packages/*/node_modules/
-packages/*/dist/
-*.vsix
+# ============================================================
+# WHITELIST .gitignore
+# Ignore everything, then allow only public project files.
+# New files are private-by-default — you must opt-in below.
+# ============================================================
 
-# Local-only / AI / planning files
-.superpowers/
-.windsurf
-CLAUDE.md
+# 1. Ignore everything
+*
+
+# 2. Allow top-level config & docs
+!.gitignore
+!.npmrc
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!README.md
+!CHANGELOG.md
+!LICENSE
+
+# 3. Allow GitHub config
+!.github/
+!.github/**
+
+# 4. Allow scripts
+!scripts/
+!scripts/**
+
+# 5. Allow packages directory structure
+!packages/
+!packages/extension/
+!packages/extension/**
+!packages/mcp-server/
+!packages/mcp-server/**
+!packages/shared/
+!packages/shared/**
+!packages/webview/
+!packages/webview/**
+
+# 6. Re-ignore build artifacts, deps & private files inside allowed dirs
+**/node_modules/
+**/dist/
+*.vsix
 **/PLAN.md
-docs/
-draft/
-examples/
-artifacts/
-Research/
+packages/mcp-server/.chrome-profile/
+packages/mcp-server/dev-tools/
