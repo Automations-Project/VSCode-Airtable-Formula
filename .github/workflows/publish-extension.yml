@@ -1,0 +1,74 @@
+name: Publish VS Code Extension
+
+on:
+  release:
+    types: [published, prereleased]
+  workflow_dispatch:
+    inputs:
+      marketplace_publish:
+        description: 'Publish to VS Code Marketplace'
+        type: boolean
+        default: true
+      openvsx_publish:
+        description: 'Publish to Open VSX Registry'
+        type: boolean
+        default: true
+      dry_run:
+        description: 'Dry run (skip publish)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'extension/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install -D @vscode/vsce ovsx
+      - name: Verify version matches tag
+        if: github.event_name == 'release'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#extension/v}"
+          PKG_VERSION=$(node -p "require('./packages/extension/package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag ($TAG_VERSION) != package.json ($PKG_VERSION)" && exit 1
+          fi
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm -F airtable-formula run package:vsix
+      - name: Get VSIX filename
+        id: vsix
+        run: echo "file=$(ls packages/extension/*.vsix | head -1)" >> $GITHUB_OUTPUT
+      - name: Publish to VS Code Marketplace
+        if: |
+          !inputs.dry_run &&
+          (github.event_name == 'release' || inputs.marketplace_publish)
+        run: npx vsce publish --packagePath "${{ steps.vsix.outputs.file }}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: Publish to Open VSX
+        if: |
+          !inputs.dry_run &&
+          (github.event_name == 'release' || inputs.openvsx_publish)
+        run: npx ovsx publish "${{ steps.vsix.outputs.file }}" --pat $OVSX_PAT
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      - name: Upload VSIX to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.vsix.outputs.file }}

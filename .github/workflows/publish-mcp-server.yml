@@ -1,0 +1,51 @@
+name: Publish MCP Server to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip publish)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'mcp-server/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+      - run: pnpm install --frozen-lockfile
+      - name: Verify version matches tag
+        if: github.event_name == 'release'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#mcp-server/v}"
+          PKG_VERSION=$(node -p "require('./packages/mcp-server/package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag ($TAG_VERSION) != package.json ($PKG_VERSION)" && exit 1
+          fi
+          echo "Version match: $TAG_VERSION"
+      - run: pnpm -F airtable-user-mcp test
+      - name: Publish
+        if: "!inputs.dry_run"
+        working-directory: packages/mcp-server
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Dry run
+        if: inputs.dry_run
+        working-directory: packages/mcp-server
+        run: npm pack --dry-run
