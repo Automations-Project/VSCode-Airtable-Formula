@@ -38,7 +38,7 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm install -D @vscode/vsce ovsx
+      - run: pnpm install -wD @vscode/vsce ovsx
       - name: Verify version matches tag
         if: github.event_name == 'release'
         run: |
