@@ -1,7 +1,7 @@
 # Airtable User MCP
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Automations-Project/airtable-user-mcp/main/assets/icon.png" alt="Airtable User MCP" width="128" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/icon.png" alt="Airtable User MCP" width="128" />
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp" alt="npm version" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-2.0-blue" alt="MCP 2.0" /></a>
-  <a href="https://github.com/Automations-Project/airtable-user-mcp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" /></a>
+  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" /></a>
 </p>
 
 ---
@@ -106,7 +106,7 @@ Add to your MCP client configuration (e.g., `mcp.json`, `claude_desktop_config.j
 }
 ```
 
-### Via npx (once published to npm)
+### Via npx
 
 ```json
 {
@@ -123,9 +123,13 @@ Add to your MCP client configuration (e.g., `mcp.json`, `claude_desktop_config.j
 
 The server uses browser-based authentication with Airtable. On first use:
 
-1. Run `npm run login` to open a browser and authenticate with Airtable
-2. Cookies are cached locally for subsequent sessions
-3. Set `AIRTABLE_HEADLESS_ONLY=1` for environments without a browser (uses cached cookies only)
+1. Install the browser engine: `npx airtable-user-mcp install-browser`
+2. Log in: `npx airtable-user-mcp login`
+3. Cookies are cached in `~/.airtable-user-mcp/` for subsequent sessions
+4. Check session status: `npx airtable-user-mcp status`
+5. Set `AIRTABLE_NO_BROWSER=1` for environments without a display (uses cached cookies only)
+
+> **Not affiliated with Airtable Inc.** This is a community-maintained project.
 
 ## Usage Examples
 

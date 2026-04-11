@@ -1,6 +1,14 @@
 # Airtable Formula
 
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://img.shields.io/visual-studio-marketplace/v/Nskha.airtable-formula" alt="VS Code Marketplace" /></a>
+  <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp" alt="npm version" /></a>
+  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" /></a>
+</p>
+
 Airtable formula editor, MCP server installer, and AI skills for VS Code.
+
+> **Not affiliated with Airtable Inc.** This is a community-maintained project.
 
 ## Features
 
@@ -9,6 +17,16 @@ Airtable formula editor, MCP server installer, and AI skills for VS Code.
 - **AI Files** — Install Airtable-specific skills, rules, workflows, and agents for AI coding assistants
 - **Airtable Login** — Credentials in OS keychain, headless session with auto-refresh
 - **Dashboard** — React webview with Overview, Setup, and Settings tabs
+
+## Standalone MCP Server
+
+The MCP server is also available as a standalone npm package for use outside VS Code:
+
+```bash
+npx airtable-user-mcp
+```
+
+See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for full documentation, tool list, and configuration examples.
 
 ## Requirements
 
@@ -31,7 +49,7 @@ This is a pnpm monorepo.
 - `packages/extension` — VS Code extension host (TypeScript + tsup)
 - `packages/webview` — React dashboard webview (Vite + Tailwind v4)
 - `packages/shared` — Shared types and message protocol
-- `packages/mcp-server` — Airtable MCP server (`airtable-user-mcp`, ESM Node app with Patchright browser auth)
+- `packages/mcp-server` — Airtable MCP server ([`airtable-user-mcp`](https://www.npmjs.com/package/airtable-user-mcp), ESM Node app with Patchright browser auth)
 
 **Commands:**
 ```bash
@@ -43,3 +61,7 @@ pnpm dev              # start webview dev server (browser preview)
 ```
 
 **MCP server:** The `airtable-user-mcp` workspace package (at `packages/mcp-server/`) is resolved via `workspace:*` and bundled into `packages/extension/dist/mcp/` by `scripts/bundle-mcp.mjs` during the build step. Native browser-automation deps (`patchright`, `patchright-core`, `otpauth`) are vendored into `dist/node_modules/` by `scripts/prepare-package-deps.mjs` before `vsce package` runs.
+
+## License
+
+[MIT](LICENSE)
