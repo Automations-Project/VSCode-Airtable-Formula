@@ -19,3 +19,6 @@ test/.chrome-profile-*/
 
 # Local test fixture IDs
 test/.demo-ids.json
+
+# MCP Registry publisher tokens
+.mcpregistry_*

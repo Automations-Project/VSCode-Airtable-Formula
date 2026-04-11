@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.automations-project/airtable-user-mcp",
+  "name": "io.github.Automations-Project/airtable-user-mcp",
   "title": "Airtable User MCP",
   "description": "Manage Airtable bases: schema, field CRUD, views, formula validation, extensions",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "websiteUrl": "https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server",
   "repository": {
     "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "airtable-user-mcp",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
