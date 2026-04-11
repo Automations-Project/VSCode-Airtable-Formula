@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.11",
+  "version": "2.0.13",
   "publisher": "Nskha",
   "displayName": "Airtable Formula",
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
@@ -103,7 +103,8 @@
     "packx":    "node scripts/package-vsix.cjs",
     "packx:no-bump": "node scripts/package-vsix.cjs --no-bump",
     "version:bump": "node scripts/bump-version.cjs",
-    "test":     "node ./dist/test/runTest.js"
+    "test":     "vitest run",
+    "test:e2e": "node ./dist/test/runTest.js"
   },
   "dependencies": {
     "@airtable-formula/shared": "workspace:*"
