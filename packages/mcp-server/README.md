@@ -14,6 +14,8 @@
 <br />
 
 > **Not affiliated with Airtable Inc.** This is a community-maintained project.
+>
+> **Experimental** — This project is under active development and not intended for production use. APIs, tools, and behavior may change without notice.
 
 </div>
 
@@ -281,6 +283,12 @@ Args: {
 
 - [**Airtable Formula** VS Code Extension](https://github.com/Automations-Project/VSCode-Airtable-Formula) — Dashboard, formula editor, MCP installer, and AI skills
 - [Model Context Protocol](https://modelcontextprotocol.io) — The open standard for AI tool integration
+
+## Support This Project
+
+This project is built and maintained with the help of AI coding tools. If you find it useful and want to support continued development (new tools, updates, bug fixes), you can contribute by gifting **Claude Code credits** — the primary tool used to build this project.
+
+Interested? [Open an issue](https://github.com/Automations-Project/VSCode-Airtable-Formula/issues/new) or reach out to discuss feature requests and sponsorship.
 
 ## License
 
