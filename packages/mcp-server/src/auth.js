@@ -405,17 +405,29 @@ export class AirtableAuth {
   }
 
   async get(url, appId) {
+    const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
+    trace('http', 'http:request', { method: 'GET', endpoint_pattern: pattern, has_payload: false });
+    const start = Date.now();
     const result = await this._apiCall('GET', url, null, appId);
+    trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }
 
   async postForm(url, params, appId) {
+    const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
+    trace('http', 'http:request', { method: 'POST', endpoint_pattern: pattern, has_payload: true });
+    const start = Date.now();
     const result = await this._apiCall('POST', url, params, appId, 'form');
+    trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }
 
   async postJSON(url, body, appId) {
+    const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
+    trace('http', 'http:request', { method: 'POST', endpoint_pattern: pattern, has_payload: true });
+    const start = Date.now();
     const result = await this._apiCall('POST', url, body, appId, 'json');
+    trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }
 
