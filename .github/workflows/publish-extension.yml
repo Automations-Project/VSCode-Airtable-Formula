@@ -39,14 +39,21 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm install -wD @vscode/vsce ovsx
-      - name: Verify version matches tag
+      - name: Set version from tag
         if: github.event_name == 'release'
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#extension/v}"
-          PKG_VERSION=$(node -p "require('./packages/extension/package.json').version")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag ($TAG_VERSION) != package.json ($PKG_VERSION)" && exit 1
-          fi
+          echo "Publishing extension v${TAG_VERSION}"
+          # Write tag version into package.json — tag is source of truth
+          node -e "
+            const fs = require('fs');
+            const p = './packages/extension/package.json';
+            const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+            pkg.version = '${TAG_VERSION}';
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "version=${TAG_VERSION}" >> $GITHUB_OUTPUT
+        id: version
       - run: pnpm build
       - run: pnpm test
       - run: pnpm -F airtable-formula run package:vsix
