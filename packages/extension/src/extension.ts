@@ -23,6 +23,7 @@ import { getSettings, updateSetting } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde } from './auto-config/index.js';
 import { installAiFiles } from './skills/installer.js';
 import { getBundledServerPath } from './mcp/server-path.js';
+import { DebugCollector, exportDebugLog, traceConfigChanges } from './debug/index.js';
 
 // Types
 interface BeautifyOptions {
@@ -109,6 +110,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
 
     console.log('Extension "airtable-formula" activated');
+
+    // ── Debug trace system ──────────────────────────────────────────
+    const debugSettings = getSettings().debug;
+    const debugCollector = new DebugCollector(getSettings().debug.bufferSize, debugSettings.enabled);
 
     // ── Formula features (existing, unchanged) ──────────────────────────
 
@@ -361,6 +366,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const authManager = new AuthManager(context.secrets, context.extensionPath);
     const browserDownloadManager = new BrowserDownloadManager(context, context.extensionPath);
     authManager.attachDownloadManager(browserDownloadManager);
+    authManager.setDebugCollector(debugCollector);
 
     // ── Tool Profile Manager (merged from legacy mcp-airtable-tool-manager) ──
     const toolProfileManager = new ToolProfileManager();
@@ -369,6 +375,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // ── Dashboard webview ────────────────────────────────────────────────
     const dashboardProvider = new DashboardProvider(context);
     dashboardProvider.setAuthManager(authManager);
+    dashboardProvider.setDebugCollector(debugCollector);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(DashboardProvider.viewId, dashboardProvider)
     );
@@ -418,7 +425,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: 'Airtable Formula: Logging in...', cancellable: false },
                 async () => {
+                    debugCollector.trace('ext', 'auth', 'auth:login_start', { method: 'programmatic' });
                     const state = await authManager.login();
+                    debugCollector.trace('ext', 'auth', 'auth:login_result', {
+                        success: state.status === 'valid',
+                    }, state.status !== 'valid' ? state.error : undefined);
                     if (state.status === 'valid') {
                         vscode.window.showInformationMessage(`Airtable Formula: Logged in successfully (${state.userId || 'unknown user'}).`);
                     } else {
@@ -535,6 +546,61 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     }
                 }
             );
+        }),
+    );
+
+    // ── Debug commands ──────────────────────────────────────────────
+    let debugStatusBar: vscode.StatusBarItem | undefined;
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('airtable-formula.debug.startSession', () => {
+            if (debugCollector.isSessionActive) {
+                vscode.window.showWarningMessage('Debug session already active.');
+                return;
+            }
+            debugCollector.startSession();
+            debugStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+            debugStatusBar.text = '$(debug) Debug Session';
+            debugStatusBar.tooltip = 'Airtable Formula: Debug session active — click to stop & export';
+            debugStatusBar.command = 'airtable-formula.debug.stopAndExport';
+            debugStatusBar.show();
+            vscode.window.showInformationMessage('Debug session started. Reproduce the issue, then run "Stop & Export Debug Log".');
+        }),
+        vscode.commands.registerCommand('airtable-formula.debug.stopAndExport', async () => {
+            const session = debugCollector.stopSession();
+            if (debugStatusBar) {
+                debugStatusBar.dispose();
+                debugStatusBar = undefined;
+            }
+            const extVersion = String((context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
+            const uri = await exportDebugLog(debugCollector, session, extVersion, getSettings().debug.bufferSize);
+            if (uri) {
+                const doc = await vscode.workspace.openTextDocument(uri);
+                await vscode.window.showTextDocument(doc);
+                vscode.window.showInformationMessage(`Debug log exported to ${uri.fsPath}`);
+            }
+        }),
+        vscode.commands.registerCommand('airtable-formula.debug.export', async () => {
+            const extVersion = String((context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
+            const uri = await exportDebugLog(debugCollector, null, extVersion, getSettings().debug.bufferSize);
+            if (uri) {
+                const doc = await vscode.workspace.openTextDocument(uri);
+                await vscode.window.showTextDocument(doc);
+                vscode.window.showInformationMessage(`Debug log exported to ${uri.fsPath}`);
+            }
+        }),
+    );
+
+    // React to debug setting changes at runtime
+    context.subscriptions.push(
+        traceConfigChanges(debugCollector),
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('airtableFormula.debug.enabled')) {
+                debugCollector.enabled = getSettings().debug.enabled;
+            }
+            if (e.affectsConfiguration('airtableFormula.debug.bufferSize')) {
+                debugCollector.resize(getSettings().debug.bufferSize);
+            }
         }),
     );
 

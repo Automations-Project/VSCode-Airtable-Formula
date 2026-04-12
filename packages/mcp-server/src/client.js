@@ -1,4 +1,37 @@
 import { SchemaCache } from './cache.js';
+import { randomBytes } from 'node:crypto';
+
+/**
+ * Generate an Airtable-style filter ID: "flt" + 14 base62 characters.
+ * Airtable's internal API requires every filter object (leaf and nested group)
+ * to carry a unique `id` field with this format.
+ */
+function generateFilterId() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = randomBytes(14);
+  let id = 'flt';
+  for (let i = 0; i < 14; i++) {
+    id += chars[bytes[i] % chars.length];
+  }
+  return id;
+}
+
+/**
+ * Recursively inject missing `id` fields into a filterSet array.
+ * Handles leaf filters ({ columnId, operator, value }) and
+ * nested groups ({ type: "nested", conjunction, filterSet: [...] }).
+ */
+function ensureFilterIds(filterSet) {
+  if (!Array.isArray(filterSet)) return filterSet;
+  return filterSet.map(filter => {
+    const f = { ...filter };
+    if (!f.id) f.id = generateFilterId();
+    if (f.type === 'nested' && Array.isArray(f.filterSet)) {
+      f.filterSet = ensureFilterIds(f.filterSet);
+    }
+    return f;
+  });
+}
 
 /**
  * Airtable Internal API Client.
@@ -437,10 +470,19 @@ export class AirtableClient {
   /**
    * Update filters on a view.
    * Verified payload: { filters: { filterSet: [...], conjunction: "and"|"or" } }
+   * Each filter in filterSet MUST have a unique "id" (flt-prefixed). Missing IDs
+   * are auto-generated before sending.
    */
   async updateViewFilters(appId, viewId, filters) {
+    // Airtable requires every filter to carry a unique flt-prefixed id.
+    // Auto-inject missing IDs so callers don't need to generate them.
+    const processedFilters = { ...filters };
+    if (Array.isArray(processedFilters.filterSet)) {
+      processedFilters.filterSet = ensureFilterIds(processedFilters.filterSet);
+    }
+
     const url = `https://airtable.com/v0.3/view/${viewId}/updateFilters`;
-    const payload = { filters };
+    const payload = { filters: processedFilters };
 
     const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
 

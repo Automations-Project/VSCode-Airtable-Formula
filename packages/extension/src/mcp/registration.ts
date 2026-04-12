@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { MCP_PROVIDER_ID, MCP_SERVER_LABEL } from '../constants.js';
 import { getBundledServerPath } from './server-path.js';
 import type { AuthManager } from './auth-manager.js';
+import { getSettings } from '../settings.js';
 
 type McpCtor = new (...args: unknown[]) => unknown;
 
@@ -53,6 +54,15 @@ export function registerMcpProvider(
             AIRTABLE_HEADLESS_ONLY: '1',
             NODE_PATH: nodeModulesPath,
           };
+
+          // Propagate debug settings as env vars for the MCP debug-tracer
+          const debugSettings = getSettings().debug;
+          if (debugSettings.enabled) {
+            env.AIRTABLE_DEBUG = '1';
+          }
+          if (debugSettings.verboseHttp) {
+            env.AIRTABLE_DEBUG_VERBOSE = '1';
+          }
 
           // Pass stored credentials so MCP server can auto-recover sessions
           if (authManager) {

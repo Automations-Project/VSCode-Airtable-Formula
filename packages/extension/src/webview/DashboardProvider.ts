@@ -9,14 +9,20 @@ import { getSettings, updateSetting } from '../settings.js';
 import { getBundledServerPath } from '../mcp/server-path.js';
 import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
+import type { DebugCollector } from '../debug/collector.js';
 
 export class DashboardProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'airtable-formula.dashboard';
   private view?: vscode.WebviewView;
   private authManager?: AuthManager;
   private toolProfileManager?: ToolProfileManager;
+  private _debugCollector?: DebugCollector;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  setDebugCollector(collector: DebugCollector): void {
+    this._debugCollector = collector;
+  }
 
   setAuthManager(authManager: AuthManager): void {
     this.authManager = authManager;
@@ -40,6 +46,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
+    this._debugCollector?.trace('ext', 'webview', 'webview:message_in', {
+      type: msg.type,
+    });
     if (msg.type === 'ready') {
       await this.pushState();
       return;
@@ -180,6 +189,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
   async pushState(): Promise<void> {
     if (!this.view) return;
+    this._debugCollector?.trace('ext', 'webview', 'webview:message_out', {
+      type: 'state:update',
+    });
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
     const settings = getSettings();
     const ideStatuses = await getAllIdeStatuses();

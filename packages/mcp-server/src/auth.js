@@ -1,5 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { trace } from './debug-tracer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROFILE_DIR = path.join(__dirname, '..', process.env.AIRTABLE_PROFILE || '.chrome-profile');
@@ -82,6 +83,11 @@ export class AirtableAuth {
     const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
     const browserPath    = process.env.AIRTABLE_BROWSER_PATH || undefined;
     console.error(`[auth] Launching headless ${browserChannel} with persistent profile...`);
+    trace('auth', 'auth:browser_launch', {
+      browser_type: browserChannel,
+      headless: true,
+      has_custom_path: !!browserPath,
+    });
     const launchOpts = {
       headless: true,
       channel: browserChannel,
@@ -104,6 +110,9 @@ export class AirtableAuth {
 
     await this._extractCsrf();
     await this._verifySession();
+    trace('auth', 'auth:csrf_captured', {
+      success: !!this.csrfToken,
+    });
   }
 
   /**
@@ -217,13 +226,13 @@ export class AirtableAuth {
         this.userId = null;
       }
       this.isLoggedIn = true;
+      trace('auth', 'auth:session_check', { success: true, user_id: this.userId });
       console.error('[auth] Session verified!', this.userId ? `User: ${this.userId}` : '(userId not in payload)');
     } else {
       this.isLoggedIn = false;
-      throw new Error(
-        `Session invalid (${result.status}). Run "node src/login.js" to log in first.\n` +
-        `Response: ${result.body?.substring(0, 200)}`
-      );
+      const sessionError = `Session invalid (${result.status}). Run "node src/login.js" to log in first.\nResponse: ${result.body?.substring(0, 200)}`;
+      trace('auth', 'auth:session_check', { success: false }, sessionError);
+      throw new Error(sessionError);
     }
   }
 
@@ -383,28 +392,42 @@ export class AirtableAuth {
           currentUrl.includes('/signin')) {
         console.error(`[auth] Page redirected to ${currentUrl}. Re-initializing session...`);
         this.isLoggedIn = false;
+        trace('auth', 'auth:refresh', { reason: 'page_redirected', url: currentUrl });
         await this.init();
       }
     } catch {
       // page.url() can throw if browser crashed — force re-init
       console.error('[auth] Browser context lost. Re-initializing...');
       this.isLoggedIn = false;
+      trace('auth', 'auth:refresh', { reason: 'browser_context_lost' });
       await this.init();
     }
   }
 
   async get(url, appId) {
+    const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
+    trace('http', 'http:request', { method: 'GET', endpoint_pattern: pattern, has_payload: false });
+    const start = Date.now();
     const result = await this._apiCall('GET', url, null, appId);
+    trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }
 
   async postForm(url, params, appId) {
+    const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
+    trace('http', 'http:request', { method: 'POST', endpoint_pattern: pattern, has_payload: true });
+    const start = Date.now();
     const result = await this._apiCall('POST', url, params, appId, 'form');
+    trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }
 
   async postJSON(url, body, appId) {
+    const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
+    trace('http', 'http:request', { method: 'POST', endpoint_pattern: pattern, has_payload: true });
+    const start = Date.now();
     const result = await this._apiCall('POST', url, body, appId, 'json');
+    trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }
 

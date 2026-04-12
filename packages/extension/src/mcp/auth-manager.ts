@@ -5,6 +5,8 @@ import type { AuthState, BrowserDownloadState } from '@airtable-formula/shared';
 import { getSettings } from '../settings.js';
 import { detectBrowser, type BrowserProbe } from './browser-detect.js';
 import type { BrowserDownloadManager } from './browser-download.js';
+import { processStderrChunk } from '../debug/stderr-parser.js';
+import type { DebugCollector } from '../debug/collector.js';
 
 const SECRET_PREFIX = 'airtableFormula';
 const SECRET_EMAIL      = `${SECRET_PREFIX}.email`;
@@ -30,6 +32,7 @@ export class AuthManager implements vscode.Disposable {
   private _browser: BrowserProbe = { found: false };
   private _downloadManager?: BrowserDownloadManager;
   private _downloadListener?: vscode.Disposable;
+  private _debugCollector?: DebugCollector;
 
   constructor(
     private readonly secrets: vscode.SecretStorage,
@@ -57,6 +60,10 @@ export class AuthManager implements vscode.Disposable {
     });
     // Seed initial state
     this._updateState({ browserDownload: mgr.state });
+  }
+
+  setDebugCollector(collector: DebugCollector): void {
+    this._debugCollector = collector;
   }
 
   /**
@@ -372,9 +379,14 @@ export class AuthManager implements vscode.Disposable {
         stdout += data.toString();
       });
       child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-        // Forward stderr for debugging
-        console.error(`[${scriptName}]`, data.toString().trim());
+        const raw = data.toString();
+        const nonDebug = this._debugCollector
+          ? processStderrChunk(raw, this._debugCollector)
+          : raw;
+        if (nonDebug.trim()) {
+          stderr += nonDebug;
+          console.error(`[${scriptName}]`, nonDebug.trim());
+        }
       });
 
       const timeout = setTimeout(() => {
