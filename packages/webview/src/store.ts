@@ -19,6 +19,10 @@ interface Store extends DashboardState {
   saveCredentials: (email: string, password: string, otpSecret: string) => void;
   installBrowser: () => void;
   removeBrowser: () => void;
+  unconfigureIde: (ideId: string) => void;
+  debugStartSession: () => void;
+  debugStopAndExport: () => void;
+  debugExport: () => void;
   markActionDone: (id: string, ok: boolean) => void;
 }
 
@@ -35,10 +39,12 @@ const defaultSettings: SettingsSnapshot = {
         viewWrite: true, viewDestructive: true, extension: true,
       },
     },
+    serverSource: 'bundled' as const,
   },
   ai:      { autoInstallFiles: true, includeAgents: false },
   formula: { formatterVersion: 'v2' },
   auth:    { autoRefresh: true, refreshIntervalHours: 12 },
+  debug:   { enabled: true, verboseHttp: false, bufferSize: 1000 },
 };
 
 const defaultAuth: AuthState = {
@@ -134,6 +140,35 @@ export const useStore = create<Store>((set, get) => ({
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
     sendToExtension({ type: 'action:removeBrowser', id });
+  },
+
+  unconfigureIde: (ideId) => {
+    const id = randomId();
+    set(s => {
+      const nextPending = new Set([...s.pendingActions, id]);
+      const nextIde = new Map(s.pendingIdeActions);
+      nextIde.set(ideId, id);
+      return { pendingActions: nextPending, pendingIdeActions: nextIde };
+    });
+    sendToExtension({ type: 'action:unconfigureIde', id, ideId: ideId as any });
+  },
+
+  debugStartSession: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:debug.startSession', id });
+  },
+
+  debugStopAndExport: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:debug.stopAndExport', id });
+  },
+
+  debugExport: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:debug.export', id });
   },
 
   markActionDone: (id, _ok) => {
