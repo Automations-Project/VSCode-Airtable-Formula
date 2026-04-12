@@ -56,51 +56,97 @@ jobs:
       - run: pnpm install -wD @vscode/vsce ovsx
 
       # ── Compute versions ───────────────────────────────────────
+      # For each target, we check both package.json AND the registry.
+      # We bump from whichever is higher, so we never collide with
+      # an already-published version.
+
       - name: Bump extension version
         id: ext_version
         if: inputs.target == 'extension' || inputs.target == 'both'
         run: |
           PKG="packages/extension/package.json"
-          CURRENT=$(node -p "require('./$PKG').version")
+          LOCAL=$(node -p "require('./$PKG').version")
+
+          # Query VS Code Marketplace for the latest published version
+          PUBLISHED=$(npx vsce show Nskha.airtable-formula --json 2>/dev/null \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+                try{console.log(JSON.parse(d).versions[0].version)}
+                catch{console.log('0.0.0')}
+              })" || echo "0.0.0")
+
+          echo "Local: ${LOCAL}, Marketplace: ${PUBLISHED}"
+
+          # Pick the higher version as the base for bumping
+          BASE=$(node -e "
+            const a = '${LOCAL}'.split('.').map(Number);
+            const b = '${PUBLISHED}'.split('.').map(Number);
+            const cmp = a[0]-b[0] || a[1]-b[1] || a[2]-b[2];
+            console.log(cmp >= 0 ? '${LOCAL}' : '${PUBLISHED}');
+          ")
+
           NEXT=$(node -e "
-            const [major, minor, patch] = '${CURRENT}'.split('.').map(Number);
+            const [major, minor, patch] = '${BASE}'.split('.').map(Number);
             const bump = '${{ inputs.bump }}';
             if (bump === 'major') console.log((major+1)+'.0.0');
             else if (bump === 'minor') console.log(major+'.'+(minor+1)+'.0');
             else console.log(major+'.'+minor+'.'+(patch+1));
           ")
-          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+
+          echo "current=${BASE}" >> $GITHUB_OUTPUT
           echo "next=${NEXT}" >> $GITHUB_OUTPUT
+
           # Write new version to package.json
           node -e "
             const fs = require('fs');
-            const raw = fs.readFileSync('$PKG', 'utf8');
-            fs.writeFileSync('$PKG', raw.replace(/\"version\": \"${CURRENT}\"/, '\"version\": \"${NEXT}\"'));
+            const p = '$PKG';
+            const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+            pkg.version = '${NEXT}';
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
           "
-          echo "Extension: ${CURRENT} → ${NEXT}"
+          echo "Extension: ${BASE} → ${NEXT}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Bump MCP server version
         id: mcp_version
         if: inputs.target == 'mcp-server' || inputs.target == 'both'
         run: |
           PKG="packages/mcp-server/package.json"
-          CURRENT=$(node -p "require('./$PKG').version")
+          LOCAL=$(node -p "require('./$PKG').version")
+
+          # Query npm for the latest published version
+          PUBLISHED=$(npm view airtable-user-mcp version 2>/dev/null || echo "0.0.0")
+
+          echo "Local: ${LOCAL}, npm: ${PUBLISHED}"
+
+          # Pick the higher version as the base for bumping
+          BASE=$(node -e "
+            const a = '${LOCAL}'.split('.').map(Number);
+            const b = '${PUBLISHED}'.split('.').map(Number);
+            const cmp = a[0]-b[0] || a[1]-b[1] || a[2]-b[2];
+            console.log(cmp >= 0 ? '${LOCAL}' : '${PUBLISHED}');
+          ")
+
           NEXT=$(node -e "
-            const [major, minor, patch] = '${CURRENT}'.split('.').map(Number);
+            const [major, minor, patch] = '${BASE}'.split('.').map(Number);
             const bump = '${{ inputs.bump }}';
             if (bump === 'major') console.log((major+1)+'.0.0');
             else if (bump === 'minor') console.log(major+'.'+(minor+1)+'.0');
             else console.log(major+'.'+minor+'.'+(patch+1));
           ")
-          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+
+          echo "current=${BASE}" >> $GITHUB_OUTPUT
           echo "next=${NEXT}" >> $GITHUB_OUTPUT
+
           # Write new version to package.json
           node -e "
             const fs = require('fs');
-            const raw = fs.readFileSync('$PKG', 'utf8');
-            fs.writeFileSync('$PKG', raw.replace(/\"version\": \"${CURRENT}\"/, '\"version\": \"${NEXT}\"'));
+            const p = '$PKG';
+            const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+            pkg.version = '${NEXT}';
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
           "
-          echo "MCP server: ${CURRENT} → ${NEXT}"
+          echo "MCP server: ${BASE} → ${NEXT}"
 
       # ── Build & Test ───────────────────────────────────────────
       - name: Build all packages
