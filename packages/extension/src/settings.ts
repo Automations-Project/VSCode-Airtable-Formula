@@ -7,6 +7,7 @@ export interface Settings {
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
   auth: { autoRefresh: boolean; refreshIntervalHours: number };
+  debug: { enabled: boolean; bufferSize: number; verboseHttp: boolean };
 }
 
 export function getSettings(): Settings {
@@ -28,6 +29,11 @@ export function getSettings(): Settings {
     auth: {
       autoRefresh:          cfg.get('auth.autoRefresh', true),
       refreshIntervalHours: cfg.get('auth.refreshIntervalHours', 12),
+    },
+    debug: {
+      enabled:     cfg.get('debug.enabled', true),
+      bufferSize:  cfg.get('debug.bufferSize', 1000),
+      verboseHttp: cfg.get('debug.verboseHttp', false),
     },
   };
 }

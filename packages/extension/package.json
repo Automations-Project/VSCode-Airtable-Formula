@@ -40,7 +40,10 @@
       { "command": "airtable-formula.switchToolProfile","title": "Airtable Formula: Switch MCP Tool Profile",   "category": "Airtable Formula" },
       { "command": "airtable-formula.toggleToolCategory","title": "Airtable Formula: Toggle MCP Tool Category", "category": "Airtable Formula" },
       { "command": "airtable-formula.showToolStatus",   "title": "Airtable Formula: Show MCP Tool Status",      "category": "Airtable Formula" },
-      { "command": "airtable-formula.openToolConfig",   "title": "Airtable Formula: Open MCP Tool Config File", "category": "Airtable Formula" }
+      { "command": "airtable-formula.openToolConfig",   "title": "Airtable Formula: Open MCP Tool Config File", "category": "Airtable Formula" },
+      { "command": "airtable-formula.debug.startSession",  "title": "Airtable Formula: Start Debug Session",       "category": "Airtable Formula" },
+      { "command": "airtable-formula.debug.stopAndExport", "title": "Airtable Formula: Stop & Export Debug Log",   "category": "Airtable Formula" },
+      { "command": "airtable-formula.debug.export",        "title": "Airtable Formula: Export Debug Log",          "category": "Airtable Formula" }
     ],
     "viewsContainers": {
       "activitybar": [{ "id": "airtable-formula-container", "title": "Airtable Formula", "icon": "images/icon.png" }]
@@ -83,7 +86,10 @@
         "airtableFormula.mcp.categories.viewWrite":        { "type": "boolean", "default": true, "description": "View Write tools: create_view, duplicate_view, rename_view, update_view_description, update_view_filters, reorder_view_fields, show_or_hide_view_columns, apply_view_sorts, update_view_group_levels, update_view_row_height." },
         "airtableFormula.mcp.categories.viewDestructive":  { "type": "boolean", "default": true, "description": "View Destructive tool: delete_view." },
         "airtableFormula.mcp.categories.extension":        { "type": "boolean", "default": true, "description": "Extension Management tools: create_extension, create_extension_dashboard, install_extension, update_extension_state, rename_extension, duplicate_extension, remove_extension." },
-        "airtableFormula.mcp.tools":                       { "type": "object", "default": {}, "description": "Per-tool enable/disable overrides (only used in 'custom' profile). Keys are tool names, values are booleans.", "additionalProperties": { "type": "boolean" } }
+        "airtableFormula.mcp.tools":                       { "type": "object", "default": {}, "description": "Per-tool enable/disable overrides (only used in 'custom' profile). Keys are tool names, values are booleans.", "additionalProperties": { "type": "boolean" } },
+        "airtableFormula.debug.enabled":      { "type": "boolean", "default": true,  "description": "Enable debug event collection for both extension and MCP server. Events are buffered in memory and only written to disk on export." },
+        "airtableFormula.debug.bufferSize":    { "type": "number",  "default": 1000, "minimum": 100, "maximum": 10000, "description": "Maximum number of debug events to keep in the ring buffer." },
+        "airtableFormula.debug.verboseHttp":   { "type": "boolean", "default": false, "description": "Include HTTP request/response events from the MCP server (high volume)." }
       }
     },
     "mcpServerDefinitionProviders": [
