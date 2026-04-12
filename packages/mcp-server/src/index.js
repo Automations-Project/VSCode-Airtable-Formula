@@ -28,7 +28,7 @@ const server = new Server(
   {
     name: 'airtable-user-mcp',
     title: 'Airtable User MCP',
-    version: '2.1.0',
+    version: '2.1.2',
     description:
       'Manage Airtable bases with 30+ tools: schema inspection, field CRUD ' +
       '(formula, rollup, lookup, count), view configuration (filters, sorts, ' +
@@ -1081,7 +1081,7 @@ async function main() {
   const enabledCount = toolConfig.enabledToolNames().size;
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[airtable-user-mcp] Server v2.1.0 started');
+  console.error('[airtable-user-mcp] Server v2.1.2 started');
   console.error(`[airtable-user-mcp] Profile: "${toolConfig.activeProfile}" — ${enabledCount}/${TOOLS.length} tools enabled (+manage_tools)`);
   console.error('[airtable-user-mcp] Watching tools-config.json for external changes');
 }

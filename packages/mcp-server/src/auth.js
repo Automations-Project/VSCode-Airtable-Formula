@@ -126,6 +126,14 @@ export class AirtableAuth {
       // Fallback: wait a short fixed time if no selector matched
       await this.page.waitForTimeout(3000);
     }
+
+    // After waiting, check if we landed on a login/redirect page
+    const url = this.page.url();
+    if (url.includes('/login') || url.includes('/signin') || url.includes('/auth')) {
+      throw new Error(
+        `Session expired: page redirected to ${url}. Run "npx airtable-user-mcp login" to log in again.`
+      );
+    }
   }
 
   // ─── Network Interception (secretSocketId capture) ───────────
@@ -285,12 +293,16 @@ export class AirtableAuth {
         };
         if (appId) headers['x-airtable-application-id'] = appId;
 
-        const res = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-        });
-        return { status: res.status, body: await res.text() };
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+          });
+          return { status: res.status, body: await res.text() };
+        } catch (e) {
+          return { status: 0, body: '', error: e.message };
+        }
       }, { url, body, appId, timeZone });
     }
 
@@ -315,8 +327,12 @@ export class AirtableAuth {
         options.body = params.toString();
       }
 
-      const res = await fetch(url, options);
-      return { status: res.status, body: await res.text() };
+      try {
+        const res = await fetch(url, options);
+        return { status: res.status, body: await res.text() };
+      } catch (e) {
+        return { status: 0, body: '', error: e.message };
+      }
     }, { url, method, body, appId, timeZone, csrfToken });
   }
 
@@ -326,10 +342,23 @@ export class AirtableAuth {
     return this._enqueue(async () => {
       await this.ensureLoggedIn();
 
-      const result = await this._rawApiCall(method, urlPath, body, appId, contentType);
+      let result;
+      try {
+        result = await this._rawApiCall(method, urlPath, body, appId, contentType);
+      } catch (evalError) {
+        // page.evaluate itself failed (browser crashed, context destroyed)
+        if (!this._recovering) {
+          console.error(`[auth] page.evaluate failed: ${evalError.message}. Recovering...`);
+          await this._recoverSession();
+          return this._rawApiCall(method, urlPath, body, appId, contentType);
+        }
+        throw evalError;
+      }
 
-      // Session expired — attempt one recovery and retry
-      if ((result.status === 401 || result.status === 403) && !this._recovering) {
+      // Session expired or network failure — attempt one recovery and retry
+      const needsRecovery = result.status === 401 || result.status === 403 || result.error;
+      if (needsRecovery && !this._recovering) {
+        console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering...`);
         await this._recoverSession();
         return this._rawApiCall(method, urlPath, body, appId, contentType);
       }
@@ -342,6 +371,24 @@ export class AirtableAuth {
 
   async ensureLoggedIn() {
     if (!this.context || !this.isLoggedIn) {
+      await this.init();
+      return;
+    }
+
+    // Detect if the page has been redirected away from Airtable (session expiry redirect)
+    try {
+      const currentUrl = this.page.url();
+      if (!currentUrl.includes('airtable.com') ||
+          currentUrl.includes('/login') ||
+          currentUrl.includes('/signin')) {
+        console.error(`[auth] Page redirected to ${currentUrl}. Re-initializing session...`);
+        this.isLoggedIn = false;
+        await this.init();
+      }
+    } catch {
+      // page.url() can throw if browser crashed — force re-init
+      console.error('[auth] Browser context lost. Re-initializing...');
+      this.isLoggedIn = false;
       await this.init();
     }
   }
