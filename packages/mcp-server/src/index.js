@@ -19,6 +19,7 @@ import { AirtableAuth } from './auth.js';
 import { ToolConfigManager, TOOL_CATEGORIES, CATEGORY_LABELS, BUILTIN_PROFILES } from './tool-config.js';
 import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
+import { trace, traceToolHandler } from './debug-tracer.js';
 
 const auth = new AirtableAuth();
 const client = new AirtableClient(auth);
@@ -352,7 +353,27 @@ const TOOLS = [
   },
   {
     name: 'update_view_filters',
-    description: 'Update the filter configuration of a view. Supports AND/OR conjunctions with field-level filter conditions.',
+    description: `Update the filter configuration of a view. Supports AND/OR conjunctions, nested filter groups, and all Airtable filter operators.
+
+FILTER FORMAT:
+  Leaf filter:   { columnId: "fldXXX", operator: "<op>", value: <val> }
+  Nested group:  { type: "nested", conjunction: "and"|"or", filterSet: [...] }
+  Clear filters: { filterSet: [], conjunction: "and" }
+
+Filter IDs (flt-prefixed) are auto-generated — do NOT include them.
+
+OPERATORS by field type:
+  Text/URL/Email/Phone: "contains", "doesNotContain", "is", "isNot", "isEmpty", "isNotEmpty"
+  Number/Percent/Currency: "=", "!=", "<", ">", "<=", ">=", "isEmpty", "isNotEmpty"
+  Single select: "is", "isNot", "isAnyOf", "isNoneOf", "isEmpty", "isNotEmpty"
+  Multiple select: "hasAnyOf", "hasAllOf", "hasNoneOf", "isExactly", "isEmpty", "isNotEmpty"
+  Checkbox: "is", "isNot" (value: true/false)
+  Date: "is", "isBefore", "isAfter", "isOnOrBefore", "isOnOrAfter", "isEmpty", "isNotEmpty"
+
+EXAMPLES:
+  Simple:  { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }], conjunction: "and" }
+  Multi:   { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }, { columnId: "fldYYY", operator: "=", value: 1 }], conjunction: "and" }
+  Nested:  { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }, { type: "nested", conjunction: "or", filterSet: [{ columnId: "fldYYY", operator: "=", value: 1 }] }], conjunction: "and" }`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -361,7 +382,20 @@ const TOOLS = [
         viewId: { type: 'string', description: 'The view ID to update filters on (e.g. "viwXXX")' },
         filters: {
           type: 'object',
-          description: 'Filter config: { filterSet: [{ columnId: "fldXXX", operator: "contains"|"isEmpty"|"isNot"|..., value: "..." }], conjunction: "and"|"or" }',
+          description: 'Filter configuration object with filterSet array and conjunction. See tool description for format and examples.',
+          properties: {
+            filterSet: {
+              type: 'array',
+              description: 'Array of filter conditions (leaf filters and/or nested groups)',
+              items: { type: 'object' },
+            },
+            conjunction: {
+              type: 'string',
+              enum: ['and', 'or'],
+              description: 'Logical conjunction between top-level filters',
+            },
+          },
+          required: ['filterSet', 'conjunction'],
         },
         debug: debugProp,
       },
@@ -1066,8 +1100,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     );
   }
 
+  const traced = traceToolHandler(name, handler);
   try {
-    return await handler(args || {});
+    return await traced(args || {});
   } catch (error) {
     return err(`Error in ${name}: ${error.message}`);
   }
