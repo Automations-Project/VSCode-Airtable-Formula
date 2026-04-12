@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.16",
+  "version": "2.0.17",
   "publisher": "Nskha",
   "displayName": "Airtable Formula",
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
@@ -59,21 +59,81 @@
       }
     ],
     "commands": [
-      { "command": "airtable-formula.openDashboard",  "title": "Airtable Formula: Open Dashboard",   "category": "Airtable Formula" },
-      { "command": "airtable-formula.setupAll",       "title": "Airtable Formula: Setup All IDEs",   "category": "Airtable Formula" },
-      { "command": "airtable-formula.refreshStatus",  "title": "Airtable Formula: Refresh Status",   "category": "Airtable Formula" },
-      { "command": "airtable-formula.installAISkills","title": "Airtable Formula: Install AI Skills", "category": "Airtable Formula" },
-      { "command": "airtable-formula.login",           "title": "Airtable Formula: Login to Airtable",  "category": "Airtable Formula" },
-      { "command": "airtable-formula.logout",          "title": "Airtable Formula: Logout (Clear Credentials)", "category": "Airtable Formula" },
-      { "command": "airtable-formula.status",           "title": "Airtable Formula: Status", "category": "Airtable Formula" },
-      { "command": "airtable-formula.install-browser",  "title": "Airtable Formula: Install Browser", "category": "Airtable Formula" },
-      { "command": "airtable-formula.switchToolProfile","title": "Airtable Formula: Switch MCP Tool Profile",   "category": "Airtable Formula" },
-      { "command": "airtable-formula.toggleToolCategory","title": "Airtable Formula: Toggle MCP Tool Category", "category": "Airtable Formula" },
-      { "command": "airtable-formula.showToolStatus",   "title": "Airtable Formula: Show MCP Tool Status",      "category": "Airtable Formula" },
-      { "command": "airtable-formula.openToolConfig",   "title": "Airtable Formula: Open MCP Tool Config File", "category": "Airtable Formula" },
-      { "command": "airtable-formula.debug.startSession",  "title": "Airtable Formula: Start Debug Session",       "category": "Airtable Formula" },
-      { "command": "airtable-formula.debug.stopAndExport", "title": "Airtable Formula: Stop & Export Debug Log",   "category": "Airtable Formula" },
-      { "command": "airtable-formula.debug.export",        "title": "Airtable Formula: Export Debug Log",          "category": "Airtable Formula" }
+      {
+        "command": "airtable-formula.openDashboard",
+        "title": "Airtable Formula: Open Dashboard",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.setupAll",
+        "title": "Airtable Formula: Setup All IDEs",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.refreshStatus",
+        "title": "Airtable Formula: Refresh Status",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.installAISkills",
+        "title": "Airtable Formula: Install AI Skills",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.login",
+        "title": "Airtable Formula: Login to Airtable",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.logout",
+        "title": "Airtable Formula: Logout (Clear Credentials)",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.status",
+        "title": "Airtable Formula: Status",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.install-browser",
+        "title": "Airtable Formula: Install Browser",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.switchToolProfile",
+        "title": "Airtable Formula: Switch MCP Tool Profile",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.toggleToolCategory",
+        "title": "Airtable Formula: Toggle MCP Tool Category",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.showToolStatus",
+        "title": "Airtable Formula: Show MCP Tool Status",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.openToolConfig",
+        "title": "Airtable Formula: Open MCP Tool Config File",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.debug.startSession",
+        "title": "Airtable Formula: Start Debug Session",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.debug.stopAndExport",
+        "title": "Airtable Formula: Stop & Export Debug Log",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.debug.export",
+        "title": "Airtable Formula: Export Debug Log",
+        "category": "Airtable Formula"
+      }
     ],
     "viewsContainers": {
       "activitybar": [
@@ -123,7 +183,10 @@
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",
-          "enum": ["bundled", "npx"],
+          "enum": [
+            "bundled",
+            "npx"
+          ],
           "enumDescriptions": [
             "Use the MCP server bundled with the extension (default)",
             "Use npx to run airtable-user-mcp from npm (version-independent)"
