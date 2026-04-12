@@ -3,9 +3,9 @@ import type { IdeStatus } from '@shared/types.js';
 import { Pill } from './Pill.js';
 import { IdeIcon } from './IdeIcon.js';
 
-interface IdeCardProps { status: IdeStatus; onSetup: () => void; loading: boolean; }
+interface IdeCardProps { status: IdeStatus; onSetup: () => void; onUnconfigure: () => void; loading: boolean; }
 
-export function IdeCard({ status, onSetup, loading }: IdeCardProps) {
+export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProps) {
   const allReady = status.mcpConfigured && Object.values(status.aiFiles).every(s => s === 'ok');
 
   const chipClass = !status.detected
@@ -56,6 +56,13 @@ export function IdeCard({ status, onSetup, loading }: IdeCardProps) {
             </span>
           </div>
 
+          {/* Stale-path warning */}
+          {status.mcpConfigured && status.mcpServerHealthy === false && (
+            <div className="list-row" style={{ background: 'rgba(255,186,5,0.08)', border: '1px solid rgba(255,186,5,0.22)', borderRadius: 'var(--radius-sm)' }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--fg-warn)' }}>⚠ Server path missing — click Update</span>
+            </div>
+          )}
+
           {/* AI files row */}
           <div className="list-row" style={{ flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.72rem', color: 'var(--fg-ai)', fontWeight: 600 }}>AI files</span>
@@ -69,12 +76,20 @@ export function IdeCard({ status, onSetup, loading }: IdeCardProps) {
 
           {/* Actions */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, paddingTop: 2 }}>
-            {allReady ? (
-              <span className="chip chip-ok" style={{ fontSize: '0.62rem' }}>All set</span>
-            ) : (
+            {!status.mcpConfigured ? (
               <button className="btn btn-primary btn-sm" onClick={onSetup} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
                 {loading ? 'Setting up...' : 'Setup'}
               </button>
+            ) : (
+              <>
+                {allReady && <span className="chip chip-ok" style={{ fontSize: '0.62rem' }}>All set</span>}
+                <button className="btn btn-primary btn-sm" onClick={onSetup} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
+                  {loading ? 'Updating...' : 'Update'}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={onUnconfigure} disabled={loading} style={{ opacity: loading ? 0.6 : 1, color: 'var(--fg-err)' }}>
+                  Remove
+                </button>
+              </>
             )}
           </div>
         </>

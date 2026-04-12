@@ -42,7 +42,11 @@ function AuthStatusLabel({ status }: { status: string }) {
 export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
+  const debug = useStore(s => s.debug);
   const { saveCredentials, login, logout, status, installBrowser, removeBrowser } = useStore();
+  const debugStartSession = useStore(s => s.debugStartSession);
+  const debugStopAndExport = useStore(s => s.debugStopAndExport);
+  const debugExport = useStore(s => s.debugExport);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -338,6 +342,22 @@ export function Settings() {
         <div className="stack stack-sm">
           <SettingToggle label="Auto-configure on install" desc="Set up MCP in detected IDEs on first launch" value={settings.mcp.autoConfigureOnInstall} settingKey="mcp.autoConfigureOnInstall" />
           <SettingToggle label="Notify on MCP updates" value={settings.mcp.notifyOnUpdates} settingKey="mcp.notifyOnUpdates" />
+          <div className="toggle-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Server source</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
+                bundled = extension built-in · npx = npm package (survives updates)
+              </div>
+            </div>
+            <select
+              className="select-input"
+              value={settings.mcp.serverSource ?? 'bundled'}
+              onChange={e => sendToExtension({ type: 'setting:change', key: 'mcp.serverSource', value: e.target.value })}
+            >
+              <option value="bundled">bundled</option>
+              <option value="npx">npx</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -435,6 +455,76 @@ export function Settings() {
             <option value="v2">v2 (default)</option>
             <option value="v1">v1 (legacy)</option>
           </select>
+        </div>
+      </div>
+
+      {/* Debug & Diagnostics */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Diagnostics</div>
+          <div className="title">Debug Tracing</div>
+        </div>
+        <div className="stack stack-sm">
+          <SettingToggle
+            label="Debug tracing"
+            desc="Collect extension & MCP events in a memory ring buffer"
+            value={settings.debug?.enabled ?? true}
+            settingKey="debug.enabled"
+          />
+          <SettingToggle
+            label="Verbose HTTP tracing"
+            desc="Include HTTP request/response events from MCP (high volume)"
+            value={settings.debug?.verboseHttp ?? false}
+            settingKey="debug.verboseHttp"
+          />
+
+          {/* Session status */}
+          <div className="list-row">
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, flex: 1 }}>Session</span>
+            <span className={debug?.sessionActive ? 'chip chip-warn' : 'chip chip-muted'} style={{ fontSize: '0.62rem' }}>
+              {debug?.sessionActive ? '● Recording' : 'Idle'}
+            </span>
+          </div>
+
+          {/* Event count */}
+          <div className="list-row">
+            <span style={{ fontSize: '0.72rem', flex: 1 }}>Events captured</span>
+            <span className="chip chip-info" style={{ fontSize: '0.62rem', fontFamily: 'var(--font-mono)' }}>
+              {debug?.eventCount ?? 0} / {debug?.bufferCapacity ?? 1000}
+            </span>
+          </div>
+
+          {/* Buffer size */}
+          <div className="toggle-row">
+            <span style={{ fontSize: '0.78rem', fontWeight: 500 }}>Buffer size</span>
+            <select
+              className="select-input"
+              value={settings.debug?.bufferSize ?? 1000}
+              onChange={e => sendToExtension({ type: 'setting:change', key: 'debug.bufferSize', value: Number(e.target.value) })}
+            >
+              <option value={100}>100</option>
+              <option value={500}>500</option>
+              <option value={1000}>1,000</option>
+              <option value={5000}>5,000</option>
+              <option value={10000}>10,000</option>
+            </select>
+          </div>
+
+          {/* Action buttons */}
+          <div style={{ display: 'flex', gap: 6, paddingTop: 4 }}>
+            {!debug?.sessionActive ? (
+              <button className="btn btn-primary btn-sm" onClick={debugStartSession} style={{ flex: 1 }}>
+                ▶ Start Session
+              </button>
+            ) : (
+              <button className="btn btn-primary btn-sm" onClick={debugStopAndExport} style={{ flex: 1, background: 'var(--at-pink)' }}>
+                ■ Stop &amp; Export
+              </button>
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={debugExport} style={{ flex: 1 }}>
+              Export Full Log
+            </button>
+          </div>
         </div>
       </div>
 
