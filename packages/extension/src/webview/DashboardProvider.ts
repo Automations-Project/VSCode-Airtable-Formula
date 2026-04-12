@@ -3,10 +3,11 @@ import * as os from 'os';
 import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot } from '@airtable-formula/shared';
 import type { WebviewMessage } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
-import { getAllIdeStatuses, configureMcpForIde } from '../auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde } from '../auto-config/index.js';
 import { installAiFiles, checkAiFiles } from '../skills/installer.js';
 import { getSettings, updateSetting } from '../settings.js';
-import { getBundledServerPath } from '../mcp/server-path.js';
+import { getBundledServerPath, getServerEntry } from '../mcp/server-path.js';
+import { exportDebugLog } from '../debug/exporter.js';
 import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
@@ -61,9 +62,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'action:setupIde') {
       try {
         const serverPath = getBundledServerPath(this.context);
+        const serverEntry = getServerEntry(this.context);
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
         const settings = getSettings();
-        await configureMcpForIde(msg.ideId, serverPath);
+        await configureMcpForIde(msg.ideId, serverPath, serverEntry);
         await installAiFiles(msg.ideId, workspaceRoot, false, settings.ai.includeAgents);
         await this.pushState();
         this.postResult(msg.id, true);
@@ -76,18 +78,30 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'action:setupAll') {
       try {
         const serverPath = getBundledServerPath(this.context);
+        const serverEntry = getServerEntry(this.context);
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
         const settings = getSettings();
         const statuses = await getAllIdeStatuses();
         await Promise.all(
           statuses.filter(s => s.detected).map(s =>
-            configureMcpForIde(s.ideId, serverPath)
+            configureMcpForIde(s.ideId, serverPath, serverEntry)
               .then(() => installAiFiles(s.ideId, workspaceRoot, false, settings.ai.includeAgents))
           )
         );
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:unconfigureIde') {
+      try {
+        await unconfigureMcpForIde(msg.ideId);
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Unconfigure failed for ${msg.ideId}: ${err instanceof Error ? err.message : String(err)}`);
         this.postResult(msg.id, false, String(err));
       }
       return;
@@ -161,6 +175,39 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    if (msg.type === 'action:debug.startSession') {
+      this._debugCollector?.startSession();
+      await this.pushState();
+      this.postResult(msg.id, true);
+      return;
+    }
+    if (msg.type === 'action:debug.stopAndExport') {
+      const session = this._debugCollector?.stopSession() ?? null;
+      const extVersion = String((this.context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
+      if (this._debugCollector) {
+        const uri = await exportDebugLog(this._debugCollector, session, extVersion, getSettings().debug.bufferSize);
+        if (uri) {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc);
+        }
+      }
+      await this.pushState();
+      this.postResult(msg.id, true);
+      return;
+    }
+    if (msg.type === 'action:debug.export') {
+      const extVersion = String((this.context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
+      if (this._debugCollector) {
+        const uri = await exportDebugLog(this._debugCollector, null, extVersion, getSettings().debug.bufferSize);
+        if (uri) {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc);
+        }
+      }
+      await this.pushState();
+      this.postResult(msg.id, true);
+      return;
+    }
     if (msg.type === 'setting:change') {
       // Open external URL (used by footer links)
       if (msg.key === '_openUrl' && typeof msg.value === 'string') {
@@ -228,6 +275,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const mcpServerBundled = await this.readBundledMcpVersion();
     const mcpServerPublished = await this.checkPublishedVersion(mcpServerBundled);
 
+    const debugState = this._debugCollector ? {
+      enabled: this._debugCollector.enabled,
+      sessionActive: this._debugCollector.isSessionActive,
+      eventCount: this._debugCollector.eventCount,
+      bufferCapacity: getSettings().debug.bufferSize,
+      verboseHttp: getSettings().debug.verboseHttp,
+    } : undefined;
+
     const state: DashboardState = {
       ideStatuses: enriched,
       versions: {
@@ -242,12 +297,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           autoConfigureOnInstall: settings.mcp.autoConfigureOnInstall,
           notifyOnUpdates:        settings.mcp.notifyOnUpdates,
           toolProfile,
+          serverSource:           settings.mcp.serverSource,
         },
         ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
         formula: { formatterVersion: settings.formula.formatterVersion },
         auth:    { autoRefresh: settings.auth.autoRefresh, refreshIntervalHours: settings.auth.refreshIntervalHours },
+        debug:   { enabled: settings.debug.enabled, verboseHttp: settings.debug.verboseHttp, bufferSize: settings.debug.bufferSize },
       },
       auth: authState,
+      debug: debugState,
     };
 
     this.view.webview.postMessage({ type: 'state:update', payload: state });

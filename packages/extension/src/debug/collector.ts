@@ -29,6 +29,8 @@ export class DebugCollector {
 
   get isSessionActive(): boolean { return this.sessionStart !== null; }
 
+  get eventCount(): number { return Math.min(this.count, this.capacity); }
+
   push(event: DebugEvent): void {
     if (!this._enabled) return;
 

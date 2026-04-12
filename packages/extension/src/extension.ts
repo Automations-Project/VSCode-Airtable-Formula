@@ -22,7 +22,7 @@ type LocalToolCategoryKey = 'read' | 'fieldWrite' | 'fieldDestructive' | 'viewWr
 import { getSettings, updateSetting } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde } from './auto-config/index.js';
 import { installAiFiles } from './skills/installer.js';
-import { getBundledServerPath } from './mcp/server-path.js';
+import { getBundledServerPath, getServerEntry } from './mcp/server-path.js';
 import { DebugCollector, exportDebugLog, traceConfigChanges } from './debug/index.js';
 
 // Types
@@ -624,6 +624,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // the webview wasn't yet resolved when init() fired onDidChange above.
     await dashboardProvider.refresh();
 
+    // ── Auto-heal stale MCP paths on every activation ──────────────────
+    {
+        const allStatuses = await getAllIdeStatuses();
+        const staleIdes = allStatuses.filter(s => s.detected && s.mcpConfigured && s.mcpServerHealthy === false);
+        if (staleIdes.length > 0) {
+            const entry = getServerEntry(context);
+            const serverPath = getBundledServerPath(context);
+            await Promise.all(staleIdes.map(s => configureMcpForIde(s.ideId, serverPath, entry)));
+            dashboardProvider.refresh();
+        }
+    }
+
     // ── First-launch auto-setup ──────────────────────────────────────────
     const settings = getSettings();
     const firstLaunch = !context.globalState.get<boolean>('airtable-formula.initialized');
@@ -631,11 +643,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await context.globalState.update('airtable-formula.initialized', true);
         if (settings.mcp.autoConfigureOnInstall) {
             const serverPath = getBundledServerPath(context);
+            const entry = getServerEntry(context);
             const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
             const statuses = await getAllIdeStatuses();
             const detectedReady = statuses.filter(s => s.detected && !s.mcpConfigured);
             if (detectedReady.length > 0) {
-                await Promise.all(detectedReady.map(s => configureMcpForIde(s.ideId, serverPath)));
+                await Promise.all(detectedReady.map(s => configureMcpForIde(s.ideId, serverPath, entry)));
                 vscode.window.showInformationMessage(`Airtable Formula: MCP configured for ${detectedReady.map(s => s.label).join(', ')}.`);
             }
         }

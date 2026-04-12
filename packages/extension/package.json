@@ -62,6 +62,7 @@
         "airtableFormula.mcp.autoConfigureOnInstall": { "type": "boolean", "default": true,       "description": "Automatically configure MCP in detected IDEs on first launch." },
         "airtableFormula.mcp.serverPathOverride":     { "type": "string",  "default": "",         "description": "Override bundled MCP server path. Leave empty to use bundled." },
         "airtableFormula.mcp.notifyOnUpdates":        { "type": "boolean", "default": true,       "description": "Show notification when MCP server updates are available." },
+        "airtableFormula.mcp.serverSource": { "type": "string", "default": "bundled", "enum": ["bundled", "npx"], "enumDescriptions": ["Use the MCP server bundled with the extension (default)", "Use npx to run airtable-user-mcp from npm (version-independent)"], "description": "How the MCP server is launched for external IDEs." },
         "airtableFormula.ai.autoInstallFiles":        { "type": "boolean", "default": true,       "description": "Automatically install AI skills/rules/workflows on first launch." },
         "airtableFormula.ai.includeAgents":           { "type": "boolean", "default": false,      "description": "Install agent config files where the IDE supports them." },
         "airtableFormula.formula.formatterVersion":   { "type": "string",  "default": "v2",       "enum": ["v1", "v2"], "description": "Beautifier/minifier engine version." },

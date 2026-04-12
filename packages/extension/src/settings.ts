@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 const NS = 'airtableFormula';
 
 export interface Settings {
-  mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean };
+  mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx' };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
   auth: { autoRefresh: boolean; refreshIntervalHours: number };
@@ -17,6 +17,7 @@ export function getSettings(): Settings {
       autoConfigureOnInstall: cfg.get('mcp.autoConfigureOnInstall', true),
       serverPathOverride:     cfg.get('mcp.serverPathOverride', ''),
       notifyOnUpdates:        cfg.get('mcp.notifyOnUpdates', true),
+      serverSource:           cfg.get('mcp.serverSource', 'bundled') as 'bundled' | 'npx',
     },
     ai: {
       autoInstallFiles: cfg.get('ai.autoInstallFiles', true),

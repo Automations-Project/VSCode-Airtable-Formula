@@ -35,6 +35,18 @@ export function mergeServerEntry(
   return clone;
 }
 
+export function removeServerEntry(
+  config: Record<string, unknown>,
+  serversKey: string,
+  serverName: string,
+): Record<string, unknown> {
+  const clone = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+  const existing = (getNestedKey(clone, serversKey) ?? {}) as Record<string, unknown>;
+  delete existing[serverName];
+  setNestedKey(clone, serversKey, existing);
+  return clone;
+}
+
 export async function isIdeInstalled(ideId: IdeId): Promise<boolean> {
   const config = IDE_CONFIGS[ideId];
   for (const p of config.detectionPaths) {
