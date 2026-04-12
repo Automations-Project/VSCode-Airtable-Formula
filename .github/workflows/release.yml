@@ -1,0 +1,238 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to publish'
+        type: choice
+        options:
+          - extension
+          - mcp-server
+          - both
+        default: extension
+      bump:
+        description: 'Version bump type'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      dry_run:
+        description: 'Dry run — build & test only, skip publish/commit/tag'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # ── Setup ──────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install -wD @vscode/vsce ovsx
+
+      # ── Compute versions ───────────────────────────────────────
+      - name: Bump extension version
+        id: ext_version
+        if: inputs.target == 'extension' || inputs.target == 'both'
+        run: |
+          PKG="packages/extension/package.json"
+          CURRENT=$(node -p "require('./$PKG').version")
+          NEXT=$(node -e "
+            const [major, minor, patch] = '${CURRENT}'.split('.').map(Number);
+            const bump = '${{ inputs.bump }}';
+            if (bump === 'major') console.log((major+1)+'.0.0');
+            else if (bump === 'minor') console.log(major+'.'+(minor+1)+'.0');
+            else console.log(major+'.'+minor+'.'+(patch+1));
+          ")
+          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+          echo "next=${NEXT}" >> $GITHUB_OUTPUT
+          # Write new version to package.json
+          node -e "
+            const fs = require('fs');
+            const raw = fs.readFileSync('$PKG', 'utf8');
+            fs.writeFileSync('$PKG', raw.replace(/\"version\": \"${CURRENT}\"/, '\"version\": \"${NEXT}\"'));
+          "
+          echo "Extension: ${CURRENT} → ${NEXT}"
+
+      - name: Bump MCP server version
+        id: mcp_version
+        if: inputs.target == 'mcp-server' || inputs.target == 'both'
+        run: |
+          PKG="packages/mcp-server/package.json"
+          CURRENT=$(node -p "require('./$PKG').version")
+          NEXT=$(node -e "
+            const [major, minor, patch] = '${CURRENT}'.split('.').map(Number);
+            const bump = '${{ inputs.bump }}';
+            if (bump === 'major') console.log((major+1)+'.0.0');
+            else if (bump === 'minor') console.log(major+'.'+(minor+1)+'.0');
+            else console.log(major+'.'+minor+'.'+(patch+1));
+          ")
+          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+          echo "next=${NEXT}" >> $GITHUB_OUTPUT
+          # Write new version to package.json
+          node -e "
+            const fs = require('fs');
+            const raw = fs.readFileSync('$PKG', 'utf8');
+            fs.writeFileSync('$PKG', raw.replace(/\"version\": \"${CURRENT}\"/, '\"version\": \"${NEXT}\"'));
+          "
+          echo "MCP server: ${CURRENT} → ${NEXT}"
+
+      # ── Build & Test ───────────────────────────────────────────
+      - name: Build all packages
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
+
+      # ── Package extension VSIX ─────────────────────────────────
+      - name: Package VSIX
+        id: vsix
+        if: inputs.target == 'extension' || inputs.target == 'both'
+        run: |
+          # Prepare deps for VSIX
+          node scripts/prepare-package-deps.mjs
+
+          # Copy README with SVG→PNG transform
+          node -e "
+            const fs = require('fs');
+            let readme = fs.readFileSync('README.md', 'utf8');
+            readme = readme.replace(/<img src=\"[^\"]*airtable\\.svg\"[^/]*\\/>/,
+              '<img src=\"https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png\" alt=\"Airtable Formula\" width=\"80\" />');
+            readme = readme.replace(/\| <img src=\"[^\"]*claude\\.svg\"[^|]*\|[^\n]*\n/,
+              '| Claude Desktop | Claude Code | Cursor | Windsurf | Cline | Amp |\n');
+            readme = readme.replace(/<img src=\"[^\"]*mcp\\.svg\"[^/]*\\/>/g, '');
+            fs.writeFileSync('packages/extension/README.md', readme);
+          "
+
+          # Package
+          cd packages/extension
+          npx vsce package --no-dependencies
+          VSIX=$(ls *.vsix | head -1)
+          echo "file=packages/extension/${VSIX}" >> $GITHUB_OUTPUT
+          echo "Packaged: ${VSIX}"
+
+      # ── Publish extension ──────────────────────────────────────
+      - name: Publish extension to VS Code Marketplace
+        if: |
+          !inputs.dry_run &&
+          (inputs.target == 'extension' || inputs.target == 'both')
+        run: npx vsce publish --packagePath "${{ steps.vsix.outputs.file }}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish extension to Open VSX
+        if: |
+          !inputs.dry_run &&
+          (inputs.target == 'extension' || inputs.target == 'both')
+        run: npx ovsx publish "${{ steps.vsix.outputs.file }}" --pat $OVSX_PAT
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      # ── Publish MCP server ─────────────────────────────────────
+      - name: Publish MCP server to npm
+        if: |
+          !inputs.dry_run &&
+          (inputs.target == 'mcp-server' || inputs.target == 'both')
+        working-directory: packages/mcp-server
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ── Commit, tag, push ──────────────────────────────────────
+      - name: Commit version bump and create tags
+        if: "!inputs.dry_run"
+        run: |
+          TARGETS=""
+          TAGS=""
+
+          # Stage modified package.json files
+          if [[ "${{ inputs.target }}" == "extension" || "${{ inputs.target }}" == "both" ]]; then
+            git add packages/extension/package.json
+            TARGETS="${TARGETS} extension v${{ steps.ext_version.outputs.next }}"
+            TAGS="${TAGS} extension/v${{ steps.ext_version.outputs.next }}"
+          fi
+
+          if [[ "${{ inputs.target }}" == "mcp-server" || "${{ inputs.target }}" == "both" ]]; then
+            git add packages/mcp-server/package.json
+            TARGETS="${TARGETS} mcp-server v${{ steps.mcp_version.outputs.next }}"
+            TAGS="${TAGS} mcp-server/v${{ steps.mcp_version.outputs.next }}"
+          fi
+
+          # Commit
+          git commit -m "release:${TARGETS}"
+
+          # Create tags
+          for TAG in $TAGS; do
+            git tag "$TAG"
+          done
+
+          # Push commit and tags
+          git push origin main --tags
+
+      # ── GitHub Releases ────────────────────────────────────────
+      - name: Create extension GitHub Release
+        if: |
+          !inputs.dry_run &&
+          (inputs.target == 'extension' || inputs.target == 'both')
+        run: |
+          gh release create "extension/v${{ steps.ext_version.outputs.next }}" \
+            "${{ steps.vsix.outputs.file }}" \
+            --title "Extension v${{ steps.ext_version.outputs.next }}" \
+            --generate-notes \
+            --target main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create MCP server GitHub Release
+        if: |
+          !inputs.dry_run &&
+          (inputs.target == 'mcp-server' || inputs.target == 'both')
+        run: |
+          gh release create "mcp-server/v${{ steps.mcp_version.outputs.next }}" \
+            --title "MCP Server v${{ steps.mcp_version.outputs.next }}" \
+            --generate-notes \
+            --target main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Summary ────────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "**DRY RUN — nothing published**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [[ "${{ inputs.target }}" == "extension" || "${{ inputs.target }}" == "both" ]]; then
+            echo "- Extension: ${{ steps.ext_version.outputs.current }} → **${{ steps.ext_version.outputs.next }}**" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [[ "${{ inputs.target }}" == "mcp-server" || "${{ inputs.target }}" == "both" ]]; then
+            echo "- MCP Server: ${{ steps.mcp_version.outputs.current }} → **${{ steps.mcp_version.outputs.next }}**" >> $GITHUB_STEP_SUMMARY
+          fi
