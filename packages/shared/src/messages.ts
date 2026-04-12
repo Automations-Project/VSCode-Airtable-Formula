@@ -20,4 +20,8 @@ export type WebviewMessage =
   | { type: 'action:install-browser'; id: string }
   | { type: 'action:removeBrowser';   id: string }
   | { type: 'action:openToolConfig';  id: string }
+  | { type: 'action:unconfigureIde'; id: string; ideId: IdeId }
+  | { type: 'action:debug.startSession'; id: string }
+  | { type: 'action:debug.stopAndExport'; id: string }
+  | { type: 'action:debug.export'; id: string }
   | { type: 'setting:change';   key: string; value: unknown };

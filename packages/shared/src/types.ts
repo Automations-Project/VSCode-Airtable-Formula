@@ -53,12 +53,13 @@ export interface AiFiles {
 }
 
 export interface IdeStatus {
-  ideId:         IdeId;
-  label:         string;
-  detected:      boolean;
-  version?:      string;
-  mcpConfigured: boolean;
-  aiFiles:       AiFiles;
+  ideId:             IdeId;
+  label:             string;
+  detected:          boolean;
+  version?:          string;
+  mcpConfigured:     boolean;
+  mcpServerHealthy?: boolean;
+  aiFiles:           AiFiles;
 }
 
 export type ToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
@@ -88,10 +89,12 @@ export interface SettingsSnapshot {
     autoConfigureOnInstall: boolean;
     notifyOnUpdates:        boolean;
     toolProfile:            ToolProfileSnapshot;
+    serverSource:           'bundled' | 'npx';
   };
   ai:      { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2' };
   auth:    { autoRefresh: boolean; refreshIntervalHours: number };
+  debug:   { enabled: boolean; verboseHttp: boolean; bufferSize: number };
 }
 
 export interface VersionInfo {
@@ -101,6 +104,14 @@ export interface VersionInfo {
   bundledFromGitSha?: string;
 }
 
+export interface DebugState {
+  enabled: boolean;
+  sessionActive: boolean;
+  eventCount: number;
+  bufferCapacity: number;
+  verboseHttp: boolean;
+}
+
 export interface DashboardState {
   ideStatuses:  IdeStatus[];
   versions:     VersionInfo;
@@ -108,4 +119,5 @@ export interface DashboardState {
   loading:      boolean;
   settings:     SettingsSnapshot;
   auth:         AuthState;
+  debug?:       DebugState;
 }
