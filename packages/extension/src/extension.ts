@@ -113,7 +113,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // ── Debug trace system ──────────────────────────────────────────
     const debugSettings = getSettings().debug;
-    const debugCollector = new DebugCollector(debugSettings.bufferSize, debugSettings.enabled);
+    const debugCollector = new DebugCollector(getSettings().debug.bufferSize, debugSettings.enabled);
 
     // ── Formula features (existing, unchanged) ──────────────────────────
 
@@ -573,7 +573,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 debugStatusBar = undefined;
             }
             const extVersion = String((context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
-            const uri = await exportDebugLog(debugCollector, session, extVersion, debugSettings.bufferSize);
+            const uri = await exportDebugLog(debugCollector, session, extVersion, getSettings().debug.bufferSize);
             if (uri) {
                 const doc = await vscode.workspace.openTextDocument(uri);
                 await vscode.window.showTextDocument(doc);
@@ -582,7 +582,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand('airtable-formula.debug.export', async () => {
             const extVersion = String((context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
-            const uri = await exportDebugLog(debugCollector, null, extVersion, debugSettings.bufferSize);
+            const uri = await exportDebugLog(debugCollector, null, extVersion, getSettings().debug.bufferSize);
             if (uri) {
                 const doc = await vscode.workspace.openTextDocument(uri);
                 await vscode.window.showTextDocument(doc);

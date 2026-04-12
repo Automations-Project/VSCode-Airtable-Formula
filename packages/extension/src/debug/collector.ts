@@ -39,7 +39,8 @@ export class DebugCollector {
         prev.source === event.source &&
         prev.category === event.category &&
         prev.event === event.event &&
-        prev.error === event.error) {
+        prev.error === event.error &&
+        prev.data?.tool === event.data?.tool) {
       prev.repeated = (prev.repeated ?? 1) + 1;
       return;
     }

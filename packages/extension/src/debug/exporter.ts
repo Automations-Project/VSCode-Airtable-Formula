@@ -115,7 +115,7 @@ export async function exportDebugLog(
       redaction:
         'moderate — auth tokens stripped, field values/names replaced with [REDACTED], ' +
         'structural IDs (app/tbl/fld/viw/rec/flt) preserved for diagnosis',
-      session,
+      session: session ? { started: session.start, ended: session.end } : null,
       event_count: redacted.length,
       buffer_capacity: bufferCapacity,
       events_dropped: eventsDropped,

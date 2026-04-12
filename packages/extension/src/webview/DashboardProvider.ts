@@ -188,10 +188,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   }
 
   async pushState(): Promise<void> {
+    if (!this.view) return;
     this._debugCollector?.trace('ext', 'webview', 'webview:message_out', {
       type: 'state:update',
     });
-    if (!this.view) return;
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
     const settings = getSettings();
     const ideStatuses = await getAllIdeStatuses();

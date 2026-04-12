@@ -1,6 +1,5 @@
 import { SchemaCache } from './cache.js';
 import { randomBytes } from 'node:crypto';
-import { trace } from './debug-tracer.js';
 
 /**
  * Generate an Airtable-style filter ID: "flt" + 14 base62 characters.
