@@ -6,10 +6,19 @@
 
 **Community MCP server for Airtable — 30 tools your AI assistant can't get from the official API**
 
-[![npm version](https://img.shields.io/npm/v/airtable-user-mcp?style=flat-square&color=CB3837)](https://www.npmjs.com/package/airtable-user-mcp)
-[![MCP 2.0](https://img.shields.io/badge/MCP-2.0-blue?style=flat-square)](https://modelcontextprotocol.io)
-[![MIT License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/LICENSE)
-[![VS Code Extension](https://img.shields.io/visual-studio-marketplace/v/Nskha.airtable-formula?style=flat-square&label=VS%20Code&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula)
+<p align="center">
+  <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/dw/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=Downloads%2FWeek&color=F43F5E" alt="npm downloads per week" /></a>
+  <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP%20Registry-Listed-1D4ED8?style=for-the-badge" alt="MCP Registry listing" /></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-2025--11--25-4A90D9?style=for-the-badge" alt="MCP version 2025-11-25" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Automations-Project/VSCode-Airtable-Formula/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI" alt="CI status" /></a>
+  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/releases/latest"><img src="https://img.shields.io/github/v/release/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=github&logoColor=white&label=Latest%20Release&color=10B981" alt="Latest release" /></a>
+  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=opensourceinitiative&logoColor=white&label=License&color=22C55E" alt="License" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/version-short/Nskha.airtable-formula.svg?style=for-the-badge&label=VS%20Code%20Extension&colorB=007ACC" alt="VS Code extension version" /></a>
+</p>
 
 <br />
 
@@ -273,9 +282,9 @@ Args: {
 | **VS Code Marketplace** | [`Nskha.airtable-formula`](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) |
 | **GitHub** | [`Automations-Project/VSCode-Airtable-Formula`](https://github.com/Automations-Project/VSCode-Airtable-Formula) |
 | **MCP Registry** | [`io.github.automations-project/airtable-user-mcp`](https://registry.modelcontextprotocol.io) |
-| **Smithery** | [smithery.ai](https://smithery.ai) |
-| **Glama** | [glama.ai/mcp/servers](https://glama.ai/mcp/servers) |
-| **PulseMCP** | [pulsemcp.com](https://www.pulsemcp.com) |
+| **Glama** | [glama.ai/mcp/servers](https://glama.ai/mcp/servers/Automations-Project/VSCode-Airtable-Formula) |
+| **PulseMCP** | [pulsemcp.com](https://www.pulsemcp.com/servers/automations-project-airtable-user) |
+| **MCP.so** | [mcp.so](https://mcp.so/client/airtable-user-mcp/Automations-Project) |
 
 ---
 
