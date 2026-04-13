@@ -115,6 +115,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const debugSettings = getSettings().debug;
     const debugCollector = new DebugCollector(getSettings().debug.bufferSize, debugSettings.enabled);
 
+    // Live-stream debug events to the VS Code Output panel
+    const debugOutput = vscode.window.createOutputChannel('Airtable Formula: Debug Log');
+    context.subscriptions.push(debugOutput);
+    debugCollector.onEvent = (ev) => {
+        const time = ev.ts.slice(11, 23); // HH:MM:SS.mmm
+        const tag = `[${ev.source}] ${ev.event}`;
+        const data = Object.keys(ev.data).length > 0 ? ' ' + JSON.stringify(ev.data) : '';
+        const err = ev.error ? ` ERROR: ${ev.error}` : '';
+        debugOutput.appendLine(`${time} ${tag}${data}${err}`);
+    };
+
     // ── Formula features (existing, unchanged) ──────────────────────────
 
     // Register AI skill commands and auto-install skills

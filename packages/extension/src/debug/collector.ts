@@ -18,6 +18,9 @@ export class DebugCollector {
   private sessionIndex: number | null = null;
   private _enabled: boolean;
 
+  /** Optional callback fired on every new event (used by OutputChannel streaming). */
+  onEvent?: (event: DebugEvent) => void;
+
   constructor(capacity: number, enabled: boolean) {
     this.capacity = capacity;
     this.buffer = new Array(capacity).fill(null);
@@ -50,6 +53,7 @@ export class DebugCollector {
     this.buffer[this.head] = event;
     this.head = (this.head + 1) % this.capacity;
     this.count++;
+    this.onEvent?.(event);
   }
 
   trace(
