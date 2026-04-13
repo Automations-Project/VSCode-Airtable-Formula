@@ -20,7 +20,7 @@ import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES 
 type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
 type LocalToolCategoryKey = 'read' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
 import { getSettings, updateSetting } from './settings.js';
-import { getAllIdeStatuses, configureMcpForIde } from './auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { installAiFiles } from './skills/installer.js';
 import { getBundledServerPath, getServerEntry } from './mcp/server-path.js';
 import { DebugCollector, exportDebugLog, traceConfigChanges } from './debug/index.js';
@@ -110,6 +110,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
 
     console.log('Extension "airtable-formula" activated');
+
+    // ── Stable MCP launcher (version-independent path) ────────────────
+    // Write/update ~/.airtable-user-mcp/start.mjs + bundled-path.json so
+    // external IDEs always resolve the current extension's bundled server.
+    await ensureLauncher(getBundledServerPath(context));
 
     // ── Debug trace system ──────────────────────────────────────────
     const debugSettings = getSettings().debug;
