@@ -602,15 +602,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
     );
 
-    // React to debug setting changes at runtime
+    // React to setting changes at runtime
     context.subscriptions.push(
         traceConfigChanges(debugCollector),
-        vscode.workspace.onDidChangeConfiguration((e) => {
+        vscode.workspace.onDidChangeConfiguration(async (e) => {
             if (e.affectsConfiguration('airtableFormula.debug.enabled')) {
                 debugCollector.enabled = getSettings().debug.enabled;
             }
             if (e.affectsConfiguration('airtableFormula.debug.bufferSize')) {
                 debugCollector.resize(getSettings().debug.bufferSize);
+            }
+
+            // Auto-propagate serverSource changes to all configured IDEs
+            if (e.affectsConfiguration('airtableFormula.mcp.serverSource')) {
+                const statuses = await getAllIdeStatuses();
+                const configured = statuses.filter(s => s.detected && s.mcpConfigured);
+                if (configured.length > 0) {
+                    const entry = getServerEntry(context);
+                    const serverPath = getBundledServerPath(context);
+                    await Promise.all(configured.map(s => configureMcpForIde(s.ideId, serverPath, entry)));
+                    vscode.window.showInformationMessage(
+                        `Airtable Formula: MCP server source updated to "${getSettings().mcp.serverSource}" for ${configured.map(s => s.label).join(', ')}.`
+                    );
+                    dashboardProvider.refresh();
+                }
             }
         }),
     );

@@ -107,7 +107,7 @@
       "properties": {
         "airtableFormula.mcp.autoConfigureOnInstall": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically configure MCP in detected IDEs on first launch."
         },
         "airtableFormula.mcp.serverPathOverride": {
@@ -132,7 +132,7 @@
         },
         "airtableFormula.ai.autoInstallFiles": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically install AI skills/rules/workflows on first launch."
         },
         "airtableFormula.ai.includeAgents": {
@@ -168,7 +168,7 @@
         },
         "airtableFormula.mcp.toolProfile": {
           "type": "string",
-          "default": "full",
+          "default": "safe-write",
           "enum": [
             "read-only",
             "safe-write",
@@ -223,7 +223,7 @@
         },
         "airtableFormula.debug.enabled": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Enable debug event collection for both extension and MCP server. Events are buffered in memory and only written to disk on export."
         },
         "airtableFormula.debug.bufferSize": {

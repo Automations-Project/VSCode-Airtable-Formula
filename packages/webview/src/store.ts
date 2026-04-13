@@ -28,11 +28,11 @@ interface Store extends DashboardState {
 
 const defaultSettings: SettingsSnapshot = {
   mcp:     {
-    autoConfigureOnInstall: true,
+    autoConfigureOnInstall: false,
     notifyOnUpdates:        true,
     toolProfile: {
-      profile:      'full',
-      enabledCount: 32,
+      profile:      'safe-write',
+      enabledCount: 23,
       totalCount:   32,
       categories: {
         read: true, fieldWrite: true, fieldDestructive: true,
@@ -41,10 +41,10 @@ const defaultSettings: SettingsSnapshot = {
     },
     serverSource: 'bundled' as const,
   },
-  ai:      { autoInstallFiles: true, includeAgents: false },
+  ai:      { autoInstallFiles: false, includeAgents: false },
   formula: { formatterVersion: 'v2' },
   auth:    { autoRefresh: true, refreshIntervalHours: 12 },
-  debug:   { enabled: true, verboseHttp: false, bufferSize: 1000 },
+  debug:   { enabled: false, verboseHttp: false, bufferSize: 1000 },
 };
 
 const defaultAuth: AuthState = {
