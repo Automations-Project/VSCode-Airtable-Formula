@@ -43,7 +43,9 @@ export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
-  const { saveCredentials, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession } = useStore();
+  const { saveCredentials, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession, selectCustomBrowser, setBrowserChoice } = useStore();
+  const availableBrowsers = auth.availableBrowsers ?? [];
+  const browserChoice = settings.auth.browserChoice;
   const debugStartSession = useStore(s => s.debugStartSession);
   const debugStopAndExport = useStore(s => s.debugStopAndExport);
   const debugExport = useStore(s => s.debugExport);
@@ -119,17 +121,46 @@ export function Settings() {
             </div>
           )}
 
-          <div className="list-row">
+          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
             <Globe size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
             <span style={{ fontSize: '0.72rem', flex: 1 }}>
-              Browser for headless auth
+              Browser for authentication
               <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                Uses Google Chrome, Edge, or Chromium. Falls back to a bundled Chromium you can download below.
+                {availableBrowsers.length > 0
+                  ? `Detected: ${availableBrowsers.map(b => b.label).filter(Boolean).join(', ')}`
+                  : 'No browsers detected'}
               </span>
             </span>
-            <span className={browserFound ? 'chip chip-ok' : 'chip chip-warn'}>
-              {browserFound ? (browserLabel || 'Detected') : 'Missing'}
-            </span>
+            <select
+              className="select-input"
+              value={browserChoice?.executablePath ?? 'auto'}
+              onChange={e => {
+                const val = e.target.value;
+                if (val === 'custom') {
+                  selectCustomBrowser();
+                } else if (val === 'auto') {
+                  setBrowserChoice({ mode: 'auto' });
+                } else {
+                  const browser = availableBrowsers.find(b => b.executablePath === val);
+                  if (browser) {
+                    setBrowserChoice({
+                      mode: 'auto',
+                      channel: browser.channel,
+                      executablePath: browser.executablePath,
+                      label: browser.label,
+                    });
+                  }
+                }
+              }}
+            >
+              {availableBrowsers.map(b => (
+                <option key={b.executablePath} value={b.executablePath}>
+                  {b.label}{b.downloaded ? ' (bundled)' : ''}
+                </option>
+              ))}
+              <option disabled>──────</option>
+              <option value="custom">Custom path...</option>
+            </select>
           </div>
 
           {browserIsDownloaded && !downloading && (
