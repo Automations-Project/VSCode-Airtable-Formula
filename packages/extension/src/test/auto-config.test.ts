@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mergeServerEntry, removeServerEntry, getNestedKey, setNestedKey } from '../auto-config/ide-detection.js';
+
+// Mock vscode before importing modules that depend on it
+vi.mock('vscode', () => ({
+  workspace: {
+    getConfiguration: () => ({
+      get: (_key: string, defaultValue: unknown) => defaultValue,
+    }),
+  },
+}));
+
 import { buildNpxServerEntry } from '../auto-config/index.js';
 
 describe('mergeServerEntry', () => {
@@ -60,6 +70,7 @@ describe('buildNpxServerEntry', () => {
     expect(entry.command).toBe('npx');
     expect(entry.args).toEqual(['-y', 'airtable-user-mcp']);
     expect((entry.env as any).AIRTABLE_HEADLESS_ONLY).toBe('1');
+    expect((entry.env as any).AIRTABLE_PROFILE_DIR).toContain('.airtable-user-mcp');
   });
 
   it('does not include NODE_PATH', () => {
