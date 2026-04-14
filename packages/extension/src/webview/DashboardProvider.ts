@@ -298,6 +298,77 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    if (msg.type === 'action:backupSession') {
+      try {
+        const { backupSession } = await import('../mcp/session-backup.js');
+        const date = new Date().toISOString().slice(0, 10);
+        const dest = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(`airtable-session-backup-${date}.zip`),
+          filters: { 'Zip Archives': ['zip'] },
+        });
+        if (!dest) { this.postResult(msg.id, true); return; }
+
+        const password = await vscode.window.showInputBox({
+          prompt: 'Enter a password to encrypt the backup (leave empty for unencrypted)',
+          password: true,
+        });
+
+        await backupSession(dest.fsPath, password || undefined);
+        vscode.window.showInformationMessage(`Session backed up to ${dest.fsPath}`);
+        this.postResult(msg.id, true);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Backup failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'action:restoreSession') {
+      try {
+        const { restoreSession, isEncryptedFile } = await import('../mcp/session-backup.js');
+        const files = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: false,
+          filters: { 'Zip Archives': ['zip'] },
+        });
+        if (!files?.[0]) { this.postResult(msg.id, true); return; }
+
+        const fileData = await (await import('fs/promises')).readFile(files[0].fsPath);
+        let password: string | undefined;
+        if (isEncryptedFile(fileData)) {
+          password = await vscode.window.showInputBox({
+            prompt: 'Enter the backup password',
+            password: true,
+          });
+          if (password === undefined) { this.postResult(msg.id, true); return; }
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+          'This will replace your current session data. Continue?',
+          { modal: true },
+          'Restore',
+        );
+        if (confirm !== 'Restore') { this.postResult(msg.id, true); return; }
+
+        await restoreSession(files[0].fsPath, password);
+
+        const { secureDirectory } = await import('../mcp/secure-permissions.js');
+        const osMod = await import('os');
+        const pathMod = await import('path');
+        await secureDirectory(pathMod.join(osMod.homedir(), '.airtable-user-mcp'));
+        await this.authManager?.checkSession();
+
+        vscode.window.showInformationMessage('Session restored successfully');
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Restore failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
     if (msg.type === 'setting:change') {
       // Open external URL (used by footer links)
       if (msg.key === '_openUrl' && typeof msg.value === 'string') {
