@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store.js';
 import { sendToExtension } from '../lib/vscode.js';
 import { StatusDot } from '../components/StatusDot.js';
-import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson } from 'lucide-react';
+import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson, FolderOpen, ChevronDown, ChevronRight, Archive, Upload } from 'lucide-react';
 
 function SettingToggle({ label, desc, value, settingKey }: { label: string; desc?: string; value: boolean; settingKey: string }) {
   const toggle = () => sendToExtension({ type: 'setting:change', key: settingKey, value: !value });
@@ -39,6 +39,13 @@ function AuthStatusLabel({ status }: { status: string }) {
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
@@ -54,6 +61,8 @@ export function Settings() {
   const [password, setPassword] = useState('');
   const [otpSecret, setOtpSecret] = useState('');
   const [showCreds, setShowCreds] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
+  const storage = useStore(s => s.storage);
 
   const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     sendToExtension({ type: 'setting:change', key: 'formula.formatterVersion', value: e.target.value });
@@ -352,6 +361,80 @@ export function Settings() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Storage & Data */}
+      <div className="glass-panel">
+        <div
+          className="section-header"
+          onClick={() => setStorageOpen(!storageOpen)}
+          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <div>
+            <div className="eyebrow">Diagnostics</div>
+            <div className="title">Storage & Data</div>
+          </div>
+          {storageOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </div>
+        {storageOpen && (
+          <div className="stack stack-sm">
+            {storage?.entries?.map((entry, i) => (
+              <div key={i} className="list-row" style={{ flexWrap: 'wrap' }}>
+                <FolderOpen size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 500 }}>{entry.label}</span>
+                    {entry.exists
+                      ? <span style={{ fontSize: '0.62rem', color: 'var(--fg-muted)' }}>{entry.sizeBytes != null ? formatBytes(entry.sizeBytes) : '...'}</span>
+                      : <span className="chip chip-warn" style={{ fontSize: '0.58rem' }}>Missing</span>
+                    }
+                  </div>
+                  <div style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: entry.exists ? 'var(--fg-subtle)' : 'var(--fg-muted)', marginTop: 1, wordBreak: 'break-all' }}>
+                    {entry.path}
+                  </div>
+                </div>
+                {entry.exists && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => openStoragePath(entry.path)}
+                    style={{ fontSize: '0.62rem', padding: '2px 8px', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}
+                    title="Open in file explorer"
+                  >
+                    Open ↗
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {!isManual && (
+              <div className="list-row">
+                <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.72rem', flex: 1 }}>OS Keychain</span>
+                <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'} style={{ fontSize: '0.58rem' }}>
+                  {auth.hasCredentials ? 'Credentials: Saved' : 'Credentials: Not set'}
+                </span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 6, paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={backupSession}
+                disabled={!storage?.entries?.some(e => e.exists)}
+                style={{ flex: 1, fontSize: '0.68rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              >
+                <Archive size={11} /> Backup Session
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={restoreSession}
+                style={{ flex: 1, fontSize: '0.68rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              >
+                <Upload size={11} /> Restore Session
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Auto-Refresh settings */}
