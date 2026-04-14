@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store.js';
 import { sendToExtension } from '../lib/vscode.js';
 import { StatusDot } from '../components/StatusDot.js';
-import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson } from 'lucide-react';
+import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson, FolderOpen, ChevronDown, ChevronRight, Archive, Upload } from 'lucide-react';
 
 function SettingToggle({ label, desc, value, settingKey }: { label: string; desc?: string; value: boolean; settingKey: string }) {
   const toggle = () => sendToExtension({ type: 'setting:change', key: settingKey, value: !value });
@@ -39,11 +39,20 @@ function AuthStatusLabel({ status }: { status: string }) {
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
-  const { saveCredentials, login, logout, status, installBrowser, removeBrowser } = useStore();
+  const { saveCredentials, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession, selectCustomBrowser, setBrowserChoice } = useStore();
+  const availableBrowsers = auth.availableBrowsers ?? [];
+  const browserChoice = settings.auth.browserChoice;
   const debugStartSession = useStore(s => s.debugStartSession);
   const debugStopAndExport = useStore(s => s.debugStopAndExport);
   const debugExport = useStore(s => s.debugExport);
@@ -52,6 +61,8 @@ export function Settings() {
   const [password, setPassword] = useState('');
   const [otpSecret, setOtpSecret] = useState('');
   const [showCreds, setShowCreds] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
+  const storage = useStore(s => s.storage);
 
   const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     sendToExtension({ type: 'setting:change', key: 'formula.formatterVersion', value: e.target.value });
@@ -68,6 +79,9 @@ export function Settings() {
     setOtpSecret('');
     setShowCreds(false);
   };
+
+  const loginMode = settings.auth.loginMode ?? 'manual';
+  const isManual = loginMode === 'manual';
 
   const isBusy = auth.status === 'checking' || auth.status === 'logging-in';
   const browserFound = auth.browser?.found ?? true; // optimistic until probe runs
@@ -89,25 +103,73 @@ export function Settings() {
           <div className="title">Airtable Account</div>
         </div>
         <div className="stack stack-sm">
-          <div className="list-row">
-            <Shield size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.72rem', flex: 1 }}>Credentials stored in OS keychain</span>
-            <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'}>
-              {auth.hasCredentials ? 'Saved' : 'Not set'}
-            </span>
+          <div className="toggle-row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8, marginBottom: 4 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Login mode</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
+                {isManual ? 'You log in through the browser — no credentials stored' : 'Automated login with stored credentials'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.68rem' }}>
+              <span style={{ color: isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: isManual ? 600 : 400 }}>Manual</span>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={!isManual} onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })} />
+                <span className="toggle-track" />
+              </label>
+              <span style={{ color: !isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: !isManual ? 600 : 400 }}>Auto</span>
+            </div>
           </div>
 
-          <div className="list-row">
+          {!isManual && (
+            <div className="list-row">
+              <Shield size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+              <span style={{ fontSize: '0.72rem', flex: 1 }}>Credentials stored in OS keychain</span>
+              <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'}>
+                {auth.hasCredentials ? 'Saved' : 'Not set'}
+              </span>
+            </div>
+          )}
+
+          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
             <Globe size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
             <span style={{ fontSize: '0.72rem', flex: 1 }}>
-              Browser for headless auth
+              Browser for authentication
               <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                Uses Google Chrome, Edge, or Chromium. Falls back to a bundled Chromium you can download below.
+                {availableBrowsers.length > 0
+                  ? `Detected: ${availableBrowsers.map(b => b.label).filter(Boolean).join(', ')}`
+                  : 'No browsers detected'}
               </span>
             </span>
-            <span className={browserFound ? 'chip chip-ok' : 'chip chip-warn'}>
-              {browserFound ? (browserLabel || 'Detected') : 'Missing'}
-            </span>
+            <select
+              className="select-input"
+              value={browserChoice?.executablePath ?? 'auto'}
+              onChange={e => {
+                const val = e.target.value;
+                if (val === 'custom') {
+                  selectCustomBrowser();
+                } else if (val === 'auto') {
+                  setBrowserChoice({ mode: 'auto' });
+                } else {
+                  const browser = availableBrowsers.find(b => b.executablePath === val);
+                  if (browser) {
+                    setBrowserChoice({
+                      mode: 'auto',
+                      channel: browser.channel,
+                      executablePath: browser.executablePath,
+                      label: browser.label,
+                    });
+                  }
+                }
+              }}
+            >
+              {availableBrowsers.map(b => (
+                <option key={b.executablePath} value={b.executablePath}>
+                  {b.label}{b.downloaded ? ' (bundled)' : ''}
+                </option>
+              ))}
+              <option disabled>──────</option>
+              <option value="custom">Custom path...</option>
+            </select>
           </div>
 
           {browserIsDownloaded && !downloading && (
@@ -184,7 +246,7 @@ export function Settings() {
             </div>
           )}
 
-          {!showCreds && (
+          {!isManual && !showCreds && (
             <div className="action-card" onClick={() => setShowCreds(true)} style={{ cursor: 'pointer' }}>
               <div className="icon-badge icon-badge-blue">
                 <Key size={13} />
@@ -200,7 +262,7 @@ export function Settings() {
             </div>
           )}
 
-          {showCreds && (
+          {!isManual && showCreds && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
               <input
                 className="input-field"
@@ -279,11 +341,11 @@ export function Settings() {
           )}
 
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <div className="action-card" onClick={isBusy ? undefined : login} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
+            <div className="action-card" onClick={isBusy ? undefined : (isManual ? manualLogin : login)} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-green" style={{ width: 22, height: 22 }}>
                 <LogIn size={11} />
               </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Login</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>{isManual ? 'Login in Browser' : 'Login'}</span>
             </div>
             <div className="action-card" onClick={isBusy ? undefined : status} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
@@ -301,6 +363,80 @@ export function Settings() {
         </div>
       </div>
 
+      {/* Storage & Data */}
+      <div className="glass-panel">
+        <div
+          className="section-header"
+          onClick={() => setStorageOpen(!storageOpen)}
+          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <div>
+            <div className="eyebrow">Diagnostics</div>
+            <div className="title">Storage & Data</div>
+          </div>
+          {storageOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </div>
+        {storageOpen && (
+          <div className="stack stack-sm">
+            {storage?.entries?.map((entry, i) => (
+              <div key={i} className="list-row" style={{ flexWrap: 'wrap' }}>
+                <FolderOpen size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 500 }}>{entry.label}</span>
+                    {entry.exists
+                      ? <span style={{ fontSize: '0.62rem', color: 'var(--fg-muted)' }}>{entry.sizeBytes != null ? formatBytes(entry.sizeBytes) : '...'}</span>
+                      : <span className="chip chip-warn" style={{ fontSize: '0.58rem' }}>Missing</span>
+                    }
+                  </div>
+                  <div style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: entry.exists ? 'var(--fg-subtle)' : 'var(--fg-muted)', marginTop: 1, wordBreak: 'break-all' }}>
+                    {entry.path}
+                  </div>
+                </div>
+                {entry.exists && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => openStoragePath(entry.path)}
+                    style={{ fontSize: '0.62rem', padding: '2px 8px', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}
+                    title="Open in file explorer"
+                  >
+                    Open ↗
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {!isManual && (
+              <div className="list-row">
+                <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.72rem', flex: 1 }}>OS Keychain</span>
+                <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'} style={{ fontSize: '0.58rem' }}>
+                  {auth.hasCredentials ? 'Credentials: Saved' : 'Credentials: Not set'}
+                </span>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 6, paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={backupSession}
+                disabled={!storage?.entries?.some(e => e.exists)}
+                style={{ flex: 1, fontSize: '0.68rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              >
+                <Archive size={11} /> Backup Session
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={restoreSession}
+                style={{ flex: 1, fontSize: '0.68rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              >
+                <Upload size={11} /> Restore Session
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Auto-Refresh settings */}
       <div className="glass-panel">
         <div className="section-header">
@@ -308,7 +444,12 @@ export function Settings() {
           <div className="title">Auto-Refresh</div>
         </div>
         <div className="stack stack-sm">
-          <SettingToggle label="Auto-refresh session" desc="Periodically check and re-login when session expires" value={settings.auth.autoRefresh} settingKey="auth.autoRefresh" />
+          <SettingToggle
+            label={isManual ? 'Monitor session health' : 'Auto-refresh session'}
+            desc={isManual ? 'Periodically check session status and notify when expired' : 'Periodically check and re-login when session expires'}
+            value={settings.auth.autoRefresh}
+            settingKey="auth.autoRefresh"
+          />
           {settings.auth.autoRefresh && (
             <div className="toggle-row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

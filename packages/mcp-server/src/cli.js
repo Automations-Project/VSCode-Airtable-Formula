@@ -98,12 +98,20 @@ export async function runCli(args) {
 
   if (cmd === 'logout') {
     const fs = await import('node:fs/promises');
-    const sessionPath = path.join(getConfigDir(), 'session.json');
+    const profileDir = process.env.AIRTABLE_PROFILE_DIR
+      || path.join(getConfigDir(), '.chrome-profile');
     try {
-      await fs.unlink(sessionPath);
-      process.stdout.write('Session cleared.\n');
+      await fs.rm(profileDir, { recursive: true, force: true });
+      process.stdout.write('Browser session cleared.\n');
     } catch {
       process.stdout.write('No session to clear.\n');
+    }
+    // Also remove legacy session.json if it exists
+    try {
+      const sessionPath = path.join(getConfigDir(), 'session.json');
+      await (await import('node:fs/promises')).unlink(sessionPath);
+    } catch {
+      // ignore
     }
     return true;
   }

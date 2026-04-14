@@ -24,4 +24,10 @@ export type WebviewMessage =
   | { type: 'action:debug.startSession'; id: string }
   | { type: 'action:debug.stopAndExport'; id: string }
   | { type: 'action:debug.export'; id: string }
-  | { type: 'setting:change';   key: string; value: unknown };
+  | { type: 'setting:change';           key: string; value: unknown }
+  | { type: 'action:manualLogin';        id: string }
+  | { type: 'action:openStoragePath';    id: string; path: string }
+  | { type: 'action:backupSession';      id: string }
+  | { type: 'action:restoreSession';     id: string }
+  | { type: 'action:selectCustomBrowser'; id: string }
+  | { type: 'action:setBrowserChoice';   id: string; choice: import('./types.js').BrowserChoice };

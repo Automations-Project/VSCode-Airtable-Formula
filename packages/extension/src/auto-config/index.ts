@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import type { IdeId, IdeStatus, AiFiles } from '@airtable-formula/shared';
+import { getSettings } from '../settings.js';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
 
@@ -53,21 +54,38 @@ export async function ensureLauncher(serverPath: string): Promise<void> {
 }
 
 export function buildServerEntry(_serverPath: string): Record<string, unknown> {
-  // Point to the stable launcher — no version number in this path
+  const env: Record<string, string> = {
+    AIRTABLE_HEADLESS_ONLY: '1',
+    AIRTABLE_PROFILE_DIR: path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile'),
+  };
+
+  const settings = getSettings();
+  const choice = settings.auth.browserChoice;
+  if (choice?.channel) env.AIRTABLE_BROWSER_CHANNEL = choice.channel;
+  if (choice?.executablePath) env.AIRTABLE_BROWSER_PATH = choice.executablePath;
+
   return {
     command: 'node',
     args: [LAUNCHER_SCRIPT],
-    env: {
-      AIRTABLE_HEADLESS_ONLY: '1',
-    },
+    env,
   };
 }
 
 export function buildNpxServerEntry(): Record<string, unknown> {
+  const env: Record<string, string> = {
+    AIRTABLE_HEADLESS_ONLY: '1',
+    AIRTABLE_PROFILE_DIR: path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile'),
+  };
+
+  const settings = getSettings();
+  const choice = settings.auth.browserChoice;
+  if (choice?.channel) env.AIRTABLE_BROWSER_CHANNEL = choice.channel;
+  if (choice?.executablePath) env.AIRTABLE_BROWSER_PATH = choice.executablePath;
+
   return {
     command: 'npx',
     args: ['-y', 'airtable-user-mcp'],
-    env: { AIRTABLE_HEADLESS_ONLY: '1' },
+    env,
   };
 }
 

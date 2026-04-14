@@ -433,32 +433,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // ── Auth commands ────────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('airtable-formula.login', async () => {
-            const hasCreds = await authManager.hasCredentials();
-            if (!hasCreds) {
-                vscode.window.showWarningMessage('Airtable Formula: No credentials stored. Open Settings tab in the dashboard to save your Airtable credentials.');
-                return;
-            }
-            vscode.window.withProgress(
-                { location: vscode.ProgressLocation.Notification, title: 'Airtable Formula: Logging in...', cancellable: false },
-                async () => {
-                    debugCollector.trace('ext', 'auth', 'auth:login_start', { method: 'programmatic' });
-                    const state = await authManager.login();
-                    debugCollector.trace('ext', 'auth', 'auth:login_result', {
-                        success: state.status === 'valid',
-                    }, state.status !== 'valid' ? state.error : undefined);
-                    if (state.status === 'valid') {
-                        vscode.window.showInformationMessage(`Airtable Formula: Logged in successfully (${state.userId || 'unknown user'}).`);
-                    } else {
-                        vscode.window.showErrorMessage(`Airtable Formula: Login failed — ${state.error || 'unknown error'}.`);
-                    }
-                    dashboardProvider.refresh();
-                }
+          const settings = getSettings();
+          if (settings.auth.loginMode === 'manual') {
+            await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: 'Airtable: Opening browser for login...' },
+              () => authManager.manualLogin(),
             );
+          } else {
+            if (!(await authManager.hasCredentials())) {
+              vscode.window.showWarningMessage('Airtable Formula: No credentials stored. Open Settings tab in the dashboard to save your Airtable credentials.');
+              return;
+            }
+            await vscode.window.withProgress(
+              { location: vscode.ProgressLocation.Notification, title: 'Airtable: Logging in...' },
+              () => authManager.login(),
+            );
+          }
         }),
         vscode.commands.registerCommand('airtable-formula.logout', async () => {
-            await authManager.clearCredentials();
-            vscode.window.showInformationMessage('Airtable Formula: Credentials cleared.');
-            dashboardProvider.refresh();
+          const confirm = await vscode.window.showWarningMessage(
+            'This will clear your Airtable browser session and any stored credentials. You\'ll need to log in again.',
+            { modal: true },
+            'Logout',
+          );
+          if (confirm !== 'Logout') return;
+          await authManager.logout();
+          dashboardProvider.refresh();
+          vscode.window.showInformationMessage('Airtable: Logged out and session cleared.');
         }),
         vscode.commands.registerCommand('airtable-formula.status', async () => {
             vscode.window.withProgress(

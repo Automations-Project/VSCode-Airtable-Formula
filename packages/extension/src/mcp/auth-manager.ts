@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 import { fork } from 'child_process';
 import type { AuthState, BrowserDownloadState } from '@airtable-formula/shared';
 import { getSettings } from '../settings.js';
-import { detectBrowser, type BrowserProbe } from './browser-detect.js';
+import { detectBrowser, detectAllBrowsers, type BrowserProbe } from './browser-detect.js';
 import type { BrowserDownloadManager } from './browser-download.js';
 import { processStderrChunk } from '../debug/stderr-parser.js';
 import type { DebugCollector } from '../debug/collector.js';
@@ -12,6 +13,9 @@ const SECRET_PREFIX = 'airtableFormula';
 const SECRET_EMAIL      = `${SECRET_PREFIX}.email`;
 const SECRET_PASSWORD   = `${SECRET_PREFIX}.password`;
 const SECRET_OTP_SECRET = `${SECRET_PREFIX}.otpSecret`;
+
+const PROFILE_DIR = path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
+const CONFIG_DIR = path.join(os.homedir(), '.airtable-user-mcp');
 
 /**
  * Manages Airtable session authentication for the MCP server.
@@ -95,16 +99,63 @@ export class AuthManager implements vscode.Disposable {
    */
   refreshBrowserDetection(): BrowserProbe {
     const downloadedPath = this._downloadManager?.getExecutablePath();
-    this._browser = detectBrowser(downloadedPath);
+    const allBrowsers = detectAllBrowsers(downloadedPath);
+
+    // Use user's browser choice if set, otherwise first available
+    const settings = getSettings();
+    const choice = settings.auth.browserChoice;
+    let selected: BrowserProbe;
+
+    if (choice?.mode === 'custom' && choice.executablePath) {
+      selected = {
+        found: true,
+        channel: (choice.channel as BrowserProbe['channel']) ?? 'chromium',
+        executablePath: choice.executablePath,
+        label: choice.label ?? 'Custom browser',
+      };
+    } else if (choice?.mode === 'auto' && choice.executablePath) {
+      const match = allBrowsers.find(b => b.executablePath === choice.executablePath);
+      selected = match ?? allBrowsers[0] ?? { found: false };
+    } else {
+      selected = allBrowsers[0] ?? { found: false };
+    }
+
+    this._browser = selected;
     this._updateState({
       browser: {
-        found:      this._browser.found,
-        channel:    this._browser.channel,
-        label:      this._browser.label,
-        downloaded: this._browser.downloaded,
+        found: selected.found,
+        channel: selected.channel,
+        label: selected.label,
+        downloaded: selected.downloaded,
+        executablePath: selected.executablePath,
       },
+      availableBrowsers: allBrowsers.map(b => ({
+        found: b.found,
+        channel: b.channel,
+        label: b.label,
+        downloaded: b.downloaded,
+        executablePath: b.executablePath,
+      })),
     });
-    return this._browser;
+    return selected;
+  }
+
+  private _getLoginMode(): 'manual' | 'auto' {
+    const cfg = vscode.workspace.getConfiguration('airtableFormula');
+    return cfg.get('auth.loginMode', 'manual') as 'manual' | 'auto';
+  }
+
+  private _profileEnv(): Record<string, string> {
+    return { AIRTABLE_PROFILE_DIR: PROFILE_DIR };
+  }
+
+  private async _applyPermissions(): Promise<void> {
+    try {
+      const { secureDirectory } = await import('./secure-permissions.js');
+      await secureDirectory(CONFIG_DIR);
+    } catch {
+      // Permissions are best-effort — don't block login
+    }
   }
 
   /**
@@ -153,6 +204,22 @@ export class AuthManager implements vscode.Disposable {
     this._updateState({ status: 'unknown', hasCredentials: false, userId: undefined, error: undefined });
   }
 
+  async logout(): Promise<void> {
+    await this.secrets.delete(SECRET_EMAIL);
+    await this.secrets.delete(SECRET_PASSWORD);
+    await this.secrets.delete(SECRET_OTP_SECRET);
+
+    const fs = await import('fs/promises');
+    try {
+      await fs.rm(PROFILE_DIR, { recursive: true, force: true });
+      console.log('[AuthManager] Browser profile cleared');
+    } catch (err) {
+      console.warn('[AuthManager] Failed to clear browser profile:', err);
+    }
+
+    this._updateState({ status: 'unknown', hasCredentials: false, userId: undefined, error: undefined });
+  }
+
   async hasCredentials(): Promise<boolean> {
     const email = await this.getEmail();
     const password = await this.getPassword();
@@ -194,7 +261,7 @@ export class AuthManager implements vscode.Disposable {
     this._updateState({ status: 'checking' });
 
     try {
-      const result = await this._spawnScript('health-check.mjs', this._browserEnv());
+      const result = await this._spawnScript('health-check.mjs', { ...this._browserEnv(), ...this._profileEnv() });
       const now = new Date().toISOString();
 
       if (result.valid) {
@@ -225,7 +292,6 @@ export class AuthManager implements vscode.Disposable {
   // ─── Login ───────────────────────────────────────────────────
 
   async login(): Promise<AuthState> {
-    // Preflight — need a browser before we even check credentials
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -235,38 +301,64 @@ export class AuthManager implements vscode.Disposable {
       return this._state;
     }
 
-    const creds = await this.getCredentialsEnv();
-    if (!creds) {
-      this._updateState({ status: 'error', error: 'No credentials stored. Save credentials first.' });
+    const loginMode = this._getLoginMode();
+
+    if (loginMode === 'auto') {
+      const creds = await this.getCredentialsEnv();
+      if (!creds) {
+        this._updateState({ status: 'error', error: 'No credentials stored. Save credentials first.' });
+        return this._state;
+      }
+      this._updateState({ status: 'logging-in' });
+      try {
+        const result = await this._spawnScript('login-runner.mjs', {
+          ...creds, ...this._browserEnv(), ...this._profileEnv(),
+        });
+        const now = new Date().toISOString();
+        if (result.ok) {
+          this._updateState({ status: 'valid', userId: result.userId || undefined, lastLogin: now, lastChecked: now, error: undefined });
+          await this._applyPermissions();
+        } else {
+          this._updateState({ status: 'error', lastChecked: now, error: result.error || 'Login failed' });
+        }
+      } catch (err) {
+        this._updateState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      }
+    } else {
+      return this.manualLogin();
+    }
+
+    return this._state;
+  }
+
+  async manualLogin(): Promise<AuthState> {
+    const probe = this.refreshBrowserDetection();
+    if (!probe.found) {
+      this._updateState({
+        status: 'chrome-missing',
+        error: 'No supported browser found. Install Google Chrome to enable Airtable authentication.',
+      });
       return this._state;
     }
 
     this._updateState({ status: 'logging-in' });
 
     try {
-      const result = await this._spawnScript('login-runner.mjs', { ...creds, ...this._browserEnv() });
+      const result = await this._spawnScript(
+        'manual-login-runner.mjs',
+        { ...this._browserEnv(), ...this._profileEnv() },
+        330_000,
+      );
       const now = new Date().toISOString();
 
       if (result.ok) {
-        this._updateState({
-          status: 'valid',
-          userId: result.userId || undefined,
-          lastLogin: now,
-          lastChecked: now,
-          error: undefined,
-        });
+        this._updateState({ status: 'valid', userId: result.userId || undefined, lastLogin: now, lastChecked: now, error: undefined });
+        await this._applyPermissions();
       } else {
-        this._updateState({
-          status: 'error',
-          lastChecked: now,
-          error: result.error || 'Login failed',
-        });
+        this._updateState({ status: 'error', lastChecked: now, error: result.error || 'Login failed' });
       }
     } catch (err) {
-      this._updateState({
-        status: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      });
+      this._updateState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
     }
 
     return this._state;
@@ -304,14 +396,25 @@ export class AuthManager implements vscode.Disposable {
   // ─── Init ────────────────────────────────────────────────────
 
   async init(): Promise<void> {
+    // Migration: set loginMode for pre-update installs
+    const cfg = vscode.workspace.getConfiguration('airtableFormula');
+    const inspected = cfg.inspect('auth.loginMode');
+    const isUnset = !inspected?.globalValue && !inspected?.workspaceValue && !inspected?.workspaceFolderValue;
+    if (isUnset) {
+      const hasCreds = await this.hasCredentials();
+      const mode = hasCreds ? 'auto' : 'manual';
+      await cfg.update('auth.loginMode', mode, vscode.ConfigurationTarget.Global);
+      console.log(`[AuthManager] Migrated loginMode to '${mode}' (hasCreds=${hasCreds})`);
+    }
+
     const hasCreds = await this.hasCredentials();
     const probe = this.refreshBrowserDetection();
     this._updateState({
       hasCredentials: hasCreds,
-      // If no browser is installed, reflect that immediately so the UI can
-      // prompt the user rather than waiting for their first login attempt.
       ...(probe.found ? {} : { status: 'chrome-missing' as const }),
     });
+
+    await this._applyPermissions();
     this.startAutoRefresh();
   }
 
@@ -330,19 +433,27 @@ export class AuthManager implements vscode.Disposable {
     if (this._disposed) return;
     if (this._state.status === 'logging-in' || this._state.status === 'checking') return;
 
-    // Skip auto-refresh entirely if we already know no browser is available —
-    // re-probe first in case the user just installed Chrome mid-session.
     const probe = this.refreshBrowserDetection();
     if (!probe.found) return;
 
     const state = await this.checkSession();
 
-    // If session expired and we have credentials, attempt re-login
     if (state.status === 'expired') {
-      const hasCreds = await this.hasCredentials();
-      if (hasCreds) {
-        console.log('[AuthManager] Session expired, attempting auto-login...');
-        await this.login();
+      const loginMode = this._getLoginMode();
+      if (loginMode === 'auto') {
+        const hasCreds = await this.hasCredentials();
+        if (hasCreds) {
+          console.log('[AuthManager] Session expired, attempting auto-login...');
+          await this.login();
+        }
+      } else {
+        const action = await vscode.window.showWarningMessage(
+          'Airtable session expired.',
+          'Re-login in Browser',
+        );
+        if (action === 'Re-login in Browser') {
+          void this.manualLogin();
+        }
       }
     }
   }
@@ -356,7 +467,7 @@ export class AuthManager implements vscode.Disposable {
    * Spawn a bundled MCP helper script as a child process.
    * Returns parsed JSON from stdout.
    */
-  private _spawnScript(scriptName: string, extraEnv?: Record<string, string>): Promise<any> {
+  private _spawnScript(scriptName: string, extraEnv?: Record<string, string>, timeoutMs = 120_000): Promise<any> {
     return new Promise((resolve, reject) => {
       const scriptPath = path.join(this.extensionPath, 'dist', 'mcp', scriptName);
       const nodeModulesPath = path.join(this.extensionPath, 'dist', 'node_modules');
@@ -391,8 +502,8 @@ export class AuthManager implements vscode.Disposable {
 
       const timeout = setTimeout(() => {
         child.kill('SIGTERM');
-        reject(new Error(`${scriptName} timed out after 120s`));
-      }, 120_000);
+        reject(new Error(`${scriptName} timed out after ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
 
       child.on('close', (code) => {
         clearTimeout(timeout);

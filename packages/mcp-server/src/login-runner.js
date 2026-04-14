@@ -24,6 +24,7 @@
  *   { "ok": false, "error": "..." }
  */
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,7 +72,8 @@ async function main() {
   const email = process.env.AIRTABLE_EMAIL;
   const password = process.env.AIRTABLE_PASSWORD;
   const otpSecret = process.env.AIRTABLE_OTP_SECRET || null;
-  const profileDir = path.join(__dirname, '..', process.env.AIRTABLE_PROFILE || '.chrome-profile');
+  const profileDir = process.env.AIRTABLE_PROFILE_DIR
+    || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
   const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
   const browserPath    = process.env.AIRTABLE_BROWSER_PATH || undefined;
 

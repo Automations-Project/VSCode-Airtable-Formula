@@ -56,6 +56,14 @@ await build({
 });
 console.log('✓ Health check bundled');
 
+// 4. Manual login runner (visible browser, no credentials)
+await build({
+  ...sharedOptions,
+  entryPoints: [path.join(pkgRoot, 'src', 'manual-login-runner.js')],
+  outfile: path.join(outDir, 'manual-login-runner.mjs'),
+});
+console.log('✓ Manual login runner bundled');
+
 console.log('✓ All MCP bundles written to', outDir);
 
 // 4. Write version manifest for the extension dashboard

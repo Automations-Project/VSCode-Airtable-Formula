@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { MCP_PROVIDER_ID, MCP_SERVER_LABEL } from '../constants.js';
 import { getBundledServerPath } from './server-path.js';
@@ -66,14 +67,19 @@ export function registerMcpProvider(
 
           // Pass stored credentials so MCP server can auto-recover sessions
           if (authManager) {
-            const credEnv = await authManager.getCredentialsEnv();
-            if (credEnv) Object.assign(env, credEnv);
+            const settings = getSettings();
+            // Only forward credentials when loginMode is 'auto'
+            if (settings.auth.loginMode === 'auto') {
+              const credEnv = await authManager.getCredentialsEnv();
+              if (credEnv) Object.assign(env, credEnv);
+            }
 
-            // Forward detected browser channel/path so the MCP process launches
-            // the same browser the extension preflight chose (Chrome, Edge, etc.)
             const probe = authManager.browser;
             if (probe.channel) env.AIRTABLE_BROWSER_CHANNEL = probe.channel;
             if (probe.executablePath) env.AIRTABLE_BROWSER_PATH = probe.executablePath;
+
+            // Always pass canonical profile dir
+            env.AIRTABLE_PROFILE_DIR = path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
           }
 
           return [createStdioDefinition(

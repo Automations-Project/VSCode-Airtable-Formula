@@ -6,7 +6,7 @@ export interface Settings {
   mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx' };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
-  auth: { autoRefresh: boolean; refreshIntervalHours: number };
+  auth: { autoRefresh: boolean; refreshIntervalHours: number; loginMode: 'manual' | 'auto'; browserChoice?: { mode: 'auto' | 'custom'; channel?: string; executablePath?: string; label?: string } };
   debug: { enabled: boolean; bufferSize: number; verboseHttp: boolean };
 }
 
@@ -28,8 +28,10 @@ export function getSettings(): Settings {
       defaultBeautifyStyle:  cfg.get('formula.defaultBeautifyStyle', 'readable'),
     },
     auth: {
-      autoRefresh:          cfg.get('auth.autoRefresh', true),
-      refreshIntervalHours: cfg.get('auth.refreshIntervalHours', 12),
+      autoRefresh:           cfg.get('auth.autoRefresh', true),
+      refreshIntervalHours:  cfg.get('auth.refreshIntervalHours', 12),
+      loginMode:             cfg.get('auth.loginMode', 'manual') as 'manual' | 'auto',
+      browserChoice:         cfg.get('auth.browserChoice', undefined),
     },
     debug: {
       enabled:     cfg.get('debug.enabled', true),

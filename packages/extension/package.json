@@ -229,6 +229,40 @@
           "maximum": 168,
           "description": "Hours between automatic session health checks (1–168)."
         },
+        "airtableFormula.auth.loginMode": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "default": "manual",
+          "description": "Login mode: 'manual' opens a browser for you to log in, 'auto' uses stored credentials for automated login."
+        },
+        "airtableFormula.auth.browserChoice": {
+          "type": "object",
+          "default": {
+            "mode": "auto"
+          },
+          "description": "Browser selection for authentication. Set via the dashboard UI.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "custom"
+              ]
+            },
+            "channel": {
+              "type": "string"
+            },
+            "executablePath": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          }
+        },
         "airtableFormula.mcp.toolProfile": {
           "type": "string",
           "default": "safe-write",
@@ -327,11 +361,15 @@
     "@airtable-formula/shared": "workspace:*"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^7.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.0.0",
+    "adm-zip": "^0.5.17",
     "airtable-user-mcp": "workspace:*",
+    "archiver": "^7.0.1",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
