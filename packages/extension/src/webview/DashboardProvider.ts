@@ -19,6 +19,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private authManager?: AuthManager;
   private toolProfileManager?: ToolProfileManager;
   private _debugCollector?: DebugCollector;
+  private _storageCache?: { info: import('@airtable-formula/shared').StorageInfo; ts: number };
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -363,6 +364,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
     const mcpServerBundled = await this.readBundledMcpVersion();
     const mcpServerPublished = await this.checkPublishedVersion(mcpServerBundled);
+    const storage = await this._computeStorageInfo();
 
     const debugState = this._debugCollector ? {
       enabled: this._debugCollector.enabled,
@@ -400,9 +402,80 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       },
       auth: authState,
       debug: debugState,
+      storage,
     };
 
     this.view.webview.postMessage({ type: 'state:update', payload: state });
+  }
+
+  private async _computeStorageInfo(): Promise<import('@airtable-formula/shared').StorageInfo> {
+    const now = Date.now();
+    if (this._storageCache && now - this._storageCache.ts < 60_000) {
+      return this._storageCache.info;
+    }
+
+    const fsP = await import('fs/promises');
+    const pathMod = await import('path');
+    const osMod = await import('os');
+
+    const configDir = pathMod.join(osMod.homedir(), '.airtable-user-mcp');
+    const profileDir = pathMod.join(configDir, '.chrome-profile');
+    const toolConfig = pathMod.join(configDir, 'tools-config.json');
+
+    const entries: import('@airtable-formula/shared').StorageEntry[] = [];
+
+    entries.push(await this._storageEntry('Browser Profile', profileDir, fsP));
+    entries.push(await this._storageEntry('Tool Config', toolConfig, fsP));
+
+    // Bundled Chromium (if applicable)
+    if (this.authManager) {
+      const dlMgr = (this.authManager as any)._downloadManager;
+      if (dlMgr) {
+        const storageDir: string = dlMgr.getStorageDir();
+        entries.push(await this._storageEntry('Bundled Chromium', storageDir, fsP));
+      }
+    }
+
+    const info = { entries };
+    this._storageCache = { info, ts: now };
+    return info;
+  }
+
+  private async _storageEntry(label: string, itemPath: string, fsP: typeof import('fs/promises')): Promise<import('@airtable-formula/shared').StorageEntry> {
+    try {
+      const stat = await fsP.stat(itemPath);
+      let sizeBytes: number;
+      if (stat.isDirectory()) {
+        sizeBytes = await this._dirSize(itemPath, fsP);
+      } else {
+        sizeBytes = stat.size;
+      }
+      return { label, path: itemPath, sizeBytes, exists: true };
+    } catch {
+      return { label, path: itemPath, exists: false };
+    }
+  }
+
+  private async _dirSize(dirPath: string, fsP: typeof import('fs/promises')): Promise<number> {
+    let total = 0;
+    try {
+      const pathMod = await import('path');
+      const entries = await fsP.readdir(dirPath, { withFileTypes: true, recursive: true });
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          try {
+            const p = pathMod.join(entry.parentPath ?? entry.path, entry.name);
+            const s = await fsP.stat(p);
+            total += s.size;
+          } catch {
+            // skip
+          }
+        }
+      }
+    } catch {
+      // empty or inaccessible
+    }
+    return total;
   }
 
   private postResult(id: string, ok: boolean, error?: string): void {
