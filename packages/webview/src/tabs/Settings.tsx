@@ -43,7 +43,7 @@ export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
-  const { saveCredentials, login, logout, status, installBrowser, removeBrowser } = useStore();
+  const { saveCredentials, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession } = useStore();
   const debugStartSession = useStore(s => s.debugStartSession);
   const debugStopAndExport = useStore(s => s.debugStopAndExport);
   const debugExport = useStore(s => s.debugExport);
@@ -69,6 +69,9 @@ export function Settings() {
     setShowCreds(false);
   };
 
+  const loginMode = settings.auth.loginMode ?? 'manual';
+  const isManual = loginMode === 'manual';
+
   const isBusy = auth.status === 'checking' || auth.status === 'logging-in';
   const browserFound = auth.browser?.found ?? true; // optimistic until probe runs
   const browserLabel = auth.browser?.label;
@@ -89,13 +92,32 @@ export function Settings() {
           <div className="title">Airtable Account</div>
         </div>
         <div className="stack stack-sm">
-          <div className="list-row">
-            <Shield size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.72rem', flex: 1 }}>Credentials stored in OS keychain</span>
-            <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'}>
-              {auth.hasCredentials ? 'Saved' : 'Not set'}
-            </span>
+          <div className="toggle-row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8, marginBottom: 4 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Login mode</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
+                {isManual ? 'You log in through the browser — no credentials stored' : 'Automated login with stored credentials'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.68rem' }}>
+              <span style={{ color: isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: isManual ? 600 : 400 }}>Manual</span>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={!isManual} onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })} />
+                <span className="toggle-track" />
+              </label>
+              <span style={{ color: !isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: !isManual ? 600 : 400 }}>Auto</span>
+            </div>
           </div>
+
+          {!isManual && (
+            <div className="list-row">
+              <Shield size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+              <span style={{ fontSize: '0.72rem', flex: 1 }}>Credentials stored in OS keychain</span>
+              <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'}>
+                {auth.hasCredentials ? 'Saved' : 'Not set'}
+              </span>
+            </div>
+          )}
 
           <div className="list-row">
             <Globe size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
@@ -184,7 +206,7 @@ export function Settings() {
             </div>
           )}
 
-          {!showCreds && (
+          {!isManual && !showCreds && (
             <div className="action-card" onClick={() => setShowCreds(true)} style={{ cursor: 'pointer' }}>
               <div className="icon-badge icon-badge-blue">
                 <Key size={13} />
@@ -200,7 +222,7 @@ export function Settings() {
             </div>
           )}
 
-          {showCreds && (
+          {!isManual && showCreds && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
               <input
                 className="input-field"
@@ -279,11 +301,11 @@ export function Settings() {
           )}
 
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <div className="action-card" onClick={isBusy ? undefined : login} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
+            <div className="action-card" onClick={isBusy ? undefined : (isManual ? manualLogin : login)} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-green" style={{ width: 22, height: 22 }}>
                 <LogIn size={11} />
               </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Login</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>{isManual ? 'Login in Browser' : 'Login'}</span>
             </div>
             <div className="action-card" onClick={isBusy ? undefined : status} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
@@ -308,7 +330,12 @@ export function Settings() {
           <div className="title">Auto-Refresh</div>
         </div>
         <div className="stack stack-sm">
-          <SettingToggle label="Auto-refresh session" desc="Periodically check and re-login when session expires" value={settings.auth.autoRefresh} settingKey="auth.autoRefresh" />
+          <SettingToggle
+            label={isManual ? 'Monitor session health' : 'Auto-refresh session'}
+            desc={isManual ? 'Periodically check session status and notify when expired' : 'Periodically check and re-login when session expires'}
+            value={settings.auth.autoRefresh}
+            settingKey="auth.autoRefresh"
+          />
           {settings.auth.autoRefresh && (
             <div className="toggle-row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
