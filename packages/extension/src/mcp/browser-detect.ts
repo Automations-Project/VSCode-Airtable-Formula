@@ -119,6 +119,45 @@ function probeChromium(): string | undefined {
 }
 
 /**
+ * Detect all usable Chromium-based browsers in preferred order:
+ *   1. Google Chrome        (what auth.js was written against)
+ *   2. Microsoft Edge       (preinstalled on Windows, identical DOM)
+ *   3. System Chromium      (Linux fallback)
+ *   4. Downloaded Chromium  (bundled via patchright install — last resort)
+ *
+ * Unlike {@link detectBrowser}, this returns every browser found rather than
+ * stopping at the first match. Useful for letting the user pick, or for
+ * displaying available options in the dashboard.
+ *
+ * Result is NOT cached — callers should cache if they want, because the user
+ * may install Chrome between calls.
+ */
+export function detectAllBrowsers(downloadedPath?: string): BrowserProbe[] {
+  const results: BrowserProbe[] = [];
+
+  const chrome = probeChrome();
+  if (chrome) results.push({ found: true, channel: 'chrome', executablePath: chrome, label: 'Google Chrome' });
+
+  const edge = probeEdge();
+  if (edge) results.push({ found: true, channel: 'msedge', executablePath: edge, label: 'Microsoft Edge' });
+
+  const chromium = probeChromium();
+  if (chromium) results.push({ found: true, channel: 'chromium', executablePath: chromium, label: 'Chromium' });
+
+  if (downloadedPath) {
+    results.push({
+      found: true,
+      channel: 'chromium',
+      executablePath: downloadedPath,
+      label: 'Bundled Chromium',
+      downloaded: true,
+    });
+  }
+
+  return results;
+}
+
+/**
  * Detect a usable Chromium-based browser in preferred order:
  *   1. Google Chrome        (what auth.js was written against)
  *   2. Microsoft Edge       (preinstalled on Windows, identical DOM)
@@ -132,30 +171,6 @@ function probeChromium(): string | undefined {
  * may install Chrome between calls.
  */
 export function detectBrowser(downloadedPath?: string): BrowserProbe {
-  const chrome = probeChrome();
-  if (chrome) {
-    return { found: true, channel: 'chrome', executablePath: chrome, label: 'Google Chrome' };
-  }
-
-  const edge = probeEdge();
-  if (edge) {
-    return { found: true, channel: 'msedge', executablePath: edge, label: 'Microsoft Edge' };
-  }
-
-  const chromium = probeChromium();
-  if (chromium) {
-    return { found: true, channel: 'chromium', executablePath: chromium, label: 'Chromium' };
-  }
-
-  if (downloadedPath && existsSafe(downloadedPath)) {
-    return {
-      found: true,
-      channel: 'chromium',
-      executablePath: downloadedPath,
-      label: 'Bundled Chromium',
-      downloaded: true,
-    };
-  }
-
-  return { found: false };
+  const all = detectAllBrowsers(downloadedPath);
+  return all[0] ?? { found: false };
 }
