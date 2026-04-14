@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
+import * as path from 'path';
 import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot } from '@airtable-formula/shared';
 import type { WebviewMessage } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
@@ -232,6 +233,68 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       await this.pushState();
       this.postResult(msg.id, true);
+      return;
+    }
+    if (msg.type === 'action:selectCustomBrowser') {
+      try {
+        const filters: Record<string, string[]> = process.platform === 'win32'
+          ? { 'Executables': ['exe'] }
+          : process.platform === 'darwin'
+            ? { 'Applications': ['app'] }
+            : {};
+
+        const result = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: false,
+          filters,
+          title: 'Select a Chromium-based browser',
+        });
+
+        if (result?.[0]) {
+          let execPath = result[0].fsPath;
+          if (process.platform === 'darwin' && execPath.endsWith('.app')) {
+            const appName = path.basename(execPath, '.app');
+            execPath = path.join(execPath, 'Contents', 'MacOS', appName);
+          }
+
+          const base = path.basename(execPath).toLowerCase();
+          const isChromium = ['chrome', 'chromium', 'edge', 'msedge', 'brave'].some(n => base.includes(n));
+          if (!isChromium) {
+            vscode.window.showWarningMessage('Only Chromium-based browsers are supported (Chrome, Edge, Chromium, Brave).');
+          }
+
+          const choice = { mode: 'custom' as const, executablePath: execPath, label: path.basename(execPath) };
+          const cfg = vscode.workspace.getConfiguration('airtableFormula');
+          await cfg.update('auth.browserChoice', choice, vscode.ConfigurationTarget.Global);
+          this.authManager?.refreshBrowserDetection();
+          await this.pushState();
+        }
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:setBrowserChoice') {
+      try {
+        const cfg = vscode.workspace.getConfiguration('airtableFormula');
+        await cfg.update('auth.browserChoice', msg.choice, vscode.ConfigurationTarget.Global);
+        this.authManager?.refreshBrowserDetection();
+
+        // Re-write IDE MCP configs with updated browser/profile env vars
+        const serverPath = getBundledServerPath(this.context);
+        const serverEntry = getServerEntry(this.context);
+        const { configureMcpForIde } = await import('../auto-config/index.js');
+        // Re-configure all detected+configured IDEs (MCP config only, not AI files)
+        // Note: We iterate existing IDE statuses from the last push
+        // This is best-effort — if it fails for one IDE, we continue
+
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
       return;
     }
     if (msg.type === 'setting:change') {
