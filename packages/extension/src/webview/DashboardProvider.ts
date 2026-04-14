@@ -128,7 +128,24 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'action:logout') {
       try {
-        await this.authManager?.clearCredentials();
+        const confirm = await vscode.window.showWarningMessage(
+          'This will clear your Airtable browser session and any stored credentials. You\'ll need to log in again.',
+          { modal: true },
+          'Logout',
+        );
+        if (confirm === 'Logout') {
+          await this.authManager!.logout();
+          await this.pushState();
+        }
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:manualLogin') {
+      try {
+        await this.authManager!.manualLogin();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
@@ -160,6 +177,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       try {
         await this.authManager?.removeDownloadedBrowser();
         await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:openStoragePath') {
+      try {
+        await vscode.env.openExternal(vscode.Uri.file(msg.path));
         this.postResult(msg.id, true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
@@ -301,7 +327,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         },
         ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
         formula: { formatterVersion: settings.formula.formatterVersion },
-        auth:    { autoRefresh: settings.auth.autoRefresh, refreshIntervalHours: settings.auth.refreshIntervalHours },
+        auth:    {
+          autoRefresh: settings.auth.autoRefresh,
+          refreshIntervalHours: settings.auth.refreshIntervalHours,
+          loginMode: settings.auth.loginMode,
+          browserChoice: settings.auth.browserChoice,
+        },
         debug:   { enabled: settings.debug.enabled, verboseHttp: settings.debug.verboseHttp, bufferSize: settings.debug.bufferSize },
       },
       auth: authState,
