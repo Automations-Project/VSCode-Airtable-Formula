@@ -24,6 +24,12 @@ interface Store extends DashboardState {
   debugStopAndExport: () => void;
   debugExport: () => void;
   markActionDone: (id: string, ok: boolean) => void;
+  manualLogin: () => void;
+  backupSession: () => void;
+  restoreSession: () => void;
+  selectCustomBrowser: () => void;
+  setBrowserChoice: (choice: import('@shared/types.js').BrowserChoice) => void;
+  openStoragePath: (path: string) => void;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -43,7 +49,7 @@ const defaultSettings: SettingsSnapshot = {
   },
   ai:      { autoInstallFiles: false, includeAgents: false },
   formula: { formatterVersion: 'v2' },
-  auth:    { autoRefresh: true, refreshIntervalHours: 12 },
+  auth:    { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' as const, browserChoice: undefined },
   debug:   { enabled: false, verboseHttp: false, bufferSize: 1000 },
 };
 
@@ -169,6 +175,39 @@ export const useStore = create<Store>((set, get) => ({
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
     sendToExtension({ type: 'action:debug.export', id });
+  },
+
+  manualLogin: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:manualLogin', id });
+  },
+
+  backupSession: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:backupSession', id });
+  },
+
+  restoreSession: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:restoreSession', id });
+  },
+
+  selectCustomBrowser: () => {
+    const id = randomId();
+    sendToExtension({ type: 'action:selectCustomBrowser', id });
+  },
+
+  setBrowserChoice: (choice) => {
+    const id = randomId();
+    sendToExtension({ type: 'action:setBrowserChoice', id, choice });
+  },
+
+  openStoragePath: (p) => {
+    const id = randomId();
+    sendToExtension({ type: 'action:openStoragePath', id, path: p });
   },
 
   markActionDone: (id, _ok) => {
