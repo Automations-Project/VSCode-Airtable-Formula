@@ -1,9 +1,11 @@
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { trace } from './debug-tracer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROFILE_DIR = path.join(__dirname, '..', process.env.AIRTABLE_PROFILE || '.chrome-profile');
+const DEFAULT_PROFILE_DIR = process.env.AIRTABLE_PROFILE_DIR
+  || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
 
 let _chromium = null;
 async function getChromium() {
