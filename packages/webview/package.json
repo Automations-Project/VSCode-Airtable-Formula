@@ -5,25 +5,25 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev":   "vite",
-    "test":  "vitest run"
+    "dev": "vite",
+    "test": "vitest run"
   },
   "dependencies": {
     "@airtable-formula/shared": "workspace:*",
+    "lucide-react": "^0.400.0",
+    "motion": "^12.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "zustand": "^5.0.0",
-    "lucide-react": "^0.400.0",
-    "motion": "^12.0.0"
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.0.0",
     "tailwindcss": "^4.0.0",
-    "@tailwindcss/vite": "^4.0.0",
     "typescript": "^5.4.0",
-    "vite": "^6.0.0",
+    "vite": "^6.4.2",
     "vitest": "^1.6.0"
   }
 }
