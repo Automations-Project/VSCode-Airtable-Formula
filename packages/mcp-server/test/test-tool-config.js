@@ -15,9 +15,9 @@ import {
 } from '../src/tool-config.js';
 
 describe('TOOL_CATEGORIES', () => {
-  it('maps all 30 tools to valid categories', () => {
+  it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
-    assert.equal(tools.length, 32, `Expected 32 tools, got ${tools.length}`);
+    assert.equal(tools.length, 36, `Expected 36 tools, got ${tools.length}`);
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       assert.ok(CATEGORY_LABELS[cat], `Tool "${tool}" has unknown category "${cat}"`);
     }
@@ -28,13 +28,19 @@ describe('TOOL_CATEGORIES', () => {
       .filter(([, cat]) => cat === 'read')
       .map(([name]) => name);
     assert.deepEqual(readTools.sort(), [
-      'get_base_schema', 'get_table_schema', 'list_fields', 'list_tables', 'list_views', 'validate_formula',
+      'get_base_schema', 'get_table_schema', 'get_view', 'list_fields', 'list_tables', 'list_views', 'validate_formula',
     ]);
   });
 
   it('has destructive tools flagged correctly', () => {
     assert.equal(TOOL_CATEGORIES.delete_field, 'field-destructive');
     assert.equal(TOOL_CATEGORIES.delete_view, 'view-destructive');
+    assert.equal(TOOL_CATEGORIES.delete_table, 'table-destructive');
+  });
+
+  it('has table tools flagged correctly', () => {
+    assert.equal(TOOL_CATEGORIES.create_table, 'table-write');
+    assert.equal(TOOL_CATEGORIES.rename_table, 'table-write');
   });
 });
 
@@ -53,6 +59,7 @@ describe('BUILTIN_PROFILES', () => {
     const cats = BUILTIN_PROFILES['safe-write'].categories;
     assert.ok(!cats.includes('field-destructive'));
     assert.ok(!cats.includes('view-destructive'));
+    assert.ok(!cats.includes('table-destructive'));
     assert.ok(!cats.includes('extension'));
   });
 
@@ -76,9 +83,9 @@ describe('ToolConfigManager', () => {
       assert.equal(mgr.activeProfile, 'full');
     });
 
-    it('enables all 32 tools on full profile', () => {
+    it('enables all 36 tools on full profile', () => {
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 32);
+      assert.equal(enabled.size, 36);
     });
 
     it('manage_tools is always enabled', () => {
@@ -87,31 +94,37 @@ describe('ToolConfigManager', () => {
   });
 
   describe('enabledToolNames() for each profile', () => {
-    it('read-only enables only 6 read tools', async () => {
+    it('read-only enables only 7 read tools', async () => {
       await mgr.switchProfile('read-only');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 6);
+      assert.equal(enabled.size, 7);
       assert.ok(enabled.has('get_base_schema'));
+      assert.ok(enabled.has('get_view'));
       assert.ok(enabled.has('validate_formula'));
       assert.ok(!enabled.has('create_field'));
       assert.ok(!enabled.has('delete_field'));
+      assert.ok(!enabled.has('create_table'));
+      assert.ok(!enabled.has('delete_table'));
     });
 
-    it('safe-write enables read + field-write + view-write', async () => {
+    it('safe-write enables read + table-write + field-write + view-write', async () => {
       await mgr.switchProfile('safe-write');
       const enabled = mgr.enabledToolNames();
       assert.ok(enabled.has('get_base_schema'));
+      assert.ok(enabled.has('create_table'));
+      assert.ok(enabled.has('rename_table'));
       assert.ok(enabled.has('create_field'));
       assert.ok(enabled.has('create_view'));
+      assert.ok(!enabled.has('delete_table'));
       assert.ok(!enabled.has('delete_field'));
       assert.ok(!enabled.has('delete_view'));
       assert.ok(!enabled.has('create_extension'));
     });
 
-    it('full enables all 32 tools', async () => {
+    it('full enables all 36 tools', async () => {
       await mgr.switchProfile('full');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 32);
+      assert.equal(enabled.size, 36);
     });
   });
 
@@ -181,10 +194,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('getToolStatus()', () => {
-    it('returns status for all 32 tools', async () => {
+    it('returns status for all 36 tools', async () => {
       await mgr.switchProfile('full');
       const status = mgr.getToolStatus();
-      assert.equal(status.length, 32);
+      assert.equal(status.length, 36);
       assert.ok(status.every(s => s.enabled === true));
     });
 

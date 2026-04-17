@@ -34,6 +34,139 @@ function ensureFilterIds(filterSet) {
 }
 
 /**
+ * Map user-friendly operator names to Airtable internal API operators.
+ * Verified against captured UI traffic (2026-04-17): for text and singleSelect
+ * fields, the UI sends "=" / "!=" — not "is" / "isNot" / "isAnyOf".
+ *
+ * Leaves nested groups and already-correct operators untouched.
+ */
+function normalizeFilterOperator(op) {
+  if (op === 'is') return '=';
+  if (op === 'isNot') return '!=';
+  return op;
+}
+
+function normalizeFilterSet(filterSet) {
+  if (!Array.isArray(filterSet)) return filterSet;
+  return filterSet.map(filter => {
+    if (filter.type === 'nested' && Array.isArray(filter.filterSet)) {
+      return { ...filter, filterSet: normalizeFilterSet(filter.filterSet) };
+    }
+    if (!filter.operator) return filter;
+    const next = { ...filter, operator: normalizeFilterOperator(filter.operator) };
+    // isAnyOf with a single scalar or single-element array collapses to "=" with scalar value
+    if (filter.operator === 'isAnyOf' && filter.value !== undefined) {
+      if (Array.isArray(filter.value) && filter.value.length === 1) {
+        next.operator = '=';
+        next.value = filter.value[0];
+      } else if (!Array.isArray(filter.value)) {
+        next.operator = '=';
+      }
+    }
+    return next;
+  });
+}
+
+/**
+ * Normalize user-friendly field types to Airtable's internal API shape.
+ * Verified against captured UI traffic (2026-04-17):
+ *   URL      → type: "text",  typeOptions: { validatorName: "url" }
+ *   Email    → type: "text",  typeOptions: { validatorName: "email" }
+ *   Phone    → type: "text",  typeOptions: { validatorName: "phoneNumber" }
+ *   DateTime → type: "date",  typeOptions: { isDateTime: true, dateFormat, timeFormat, timeZone, shouldDisplayTimeZone }
+ *             Note: dateFormat/timeFormat are FLAT STRINGS ("Local", "24hour"), not { name: "..." } as in the public REST API.
+ *
+ * Users who pass the canonical internal type ("text" / "date") get their typeOptions passed through.
+ */
+function normalizeFieldType(type, typeOptions = {}) {
+  const opts = typeOptions || {};
+
+  if (type === 'url' || type === 'URL') {
+    return { type: 'text', typeOptions: { validatorName: 'url', ...opts } };
+  }
+  if (type === 'email' || type === 'Email') {
+    return { type: 'text', typeOptions: { validatorName: 'email', ...opts } };
+  }
+  if (type === 'phone' || type === 'phoneNumber' || type === 'Phone') {
+    return { type: 'text', typeOptions: { validatorName: 'phoneNumber', ...opts } };
+  }
+  if (type === 'dateTime' || type === 'datetime' || type === 'DateTime') {
+    return {
+      type: 'date',
+      typeOptions: {
+        isDateTime: true,
+        dateFormat: flattenFormatOption(opts.dateFormat, 'Local'),
+        timeFormat: flattenFormatOption(opts.timeFormat, '24hour'),
+        timeZone: opts.timeZone || 'UTC',
+        shouldDisplayTimeZone: opts.shouldDisplayTimeZone !== undefined ? opts.shouldDisplayTimeZone : true,
+      },
+    };
+  }
+  // date type — if isDateTime is true, normalize format options the same way
+  if (type === 'date' && opts.isDateTime) {
+    return {
+      type: 'date',
+      typeOptions: {
+        ...opts,
+        dateFormat: flattenFormatOption(opts.dateFormat, 'Local'),
+        timeFormat: flattenFormatOption(opts.timeFormat, '24hour'),
+      },
+    };
+  }
+  return { type, typeOptions: opts };
+}
+
+/** Accept either "Local"/"iso"/"friendly" (flat string, what internal API expects)
+ *  or the public REST shape { name: "iso" } and flatten. */
+function flattenFormatOption(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && typeof value.name === 'string') return value.name;
+  return fallback;
+}
+
+/**
+ * Summarize the dependency graph returned by a failed delete_field check.
+ * Airtable returns `applicationDependencyGraphEdgesBySourceObjectId` which can
+ * be hundreds of KB. Compress it to a usable list per consumer type.
+ */
+function summarizeFieldDependencies(details, fieldId) {
+  const edges = details?.applicationDependencyGraphEdgesBySourceObjectId?.[fieldId];
+  if (!Array.isArray(edges)) {
+    // Unknown shape — return a compact stub so callers can still act
+    return { edgeCount: 0, viewGroupings: [], viewSorts: [], viewFilters: [], fields: [], other: [] };
+  }
+  const viewGroupings = [];
+  const viewSorts = [];
+  const viewFilters = [];
+  const fields = [];
+  const other = [];
+  for (const edge of edges) {
+    const kind = edge?.dependencyType || edge?.edgeType || edge?.type || 'unknown';
+    const target = edge?.targetObjectId || edge?.objectId || null;
+    const entry = { targetObjectId: target, dependencyType: kind };
+    if (target && target.startsWith('viw')) {
+      if (/group/i.test(kind)) viewGroupings.push(entry);
+      else if (/sort/i.test(kind)) viewSorts.push(entry);
+      else if (/filter/i.test(kind)) viewFilters.push(entry);
+      else other.push(entry);
+    } else if (target && target.startsWith('fld')) {
+      fields.push(entry);
+    } else {
+      other.push(entry);
+    }
+  }
+  return {
+    edgeCount: edges.length,
+    viewGroupings,
+    viewSorts,
+    viewFilters,
+    fields,
+    other,
+  };
+}
+
+/**
  * Airtable Internal API Client.
  *
  * Endpoint names verified against real captured traffic (2026-03-20):
@@ -155,12 +288,14 @@ export class AirtableClient {
     const columnId = 'fld' + this._genRandomId();
     const url = `https://airtable.com/v0.3/column/${columnId}/create`;
 
+    const normalized = normalizeFieldType(fieldConfig.type, fieldConfig.typeOptions);
+
     const payload = {
       tableId,
       name: fieldConfig.name,
       config: {
-        type: fieldConfig.type,
-        typeOptions: fieldConfig.typeOptions || {},
+        type: normalized.type,
+        typeOptions: normalized.typeOptions,
       },
     };
 
@@ -193,10 +328,12 @@ export class AirtableClient {
 
     const url = `https://airtable.com/v0.3/column/${columnId}/updateConfig`;
 
+    const normalized = normalizeFieldType(config.type, config.typeOptions);
+
     // Flat payload — matches real Airtable requests
     const payload = {
-      type: config.type,
-      typeOptions: config.typeOptions || {},
+      type: normalized.type,
+      typeOptions: normalized.typeOptions,
     };
 
     const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
@@ -278,13 +415,17 @@ export class AirtableClient {
     }
 
     if (!force) {
-      // Return dependency info so caller can decide
+      // Return a summarized dep list so callers can read the response without
+      // wading through hundreds of KB of graph JSON. Full graph still available
+      // via the MCP tool's debug mode.
+      const summary = summarizeFieldDependencies(checkBody.error.details, fieldId);
       return {
         deleted: false,
         fieldId,
         name: expectedName,
         hasDependencies: true,
-        dependencies: checkBody.error.details,
+        dependencies: summary,
+        rawDependencyGraph: checkBody.error.details,
         message: 'Field has downstream dependencies. Set force=true to delete anyway.',
       };
     }
@@ -338,6 +479,127 @@ export class AirtableClient {
       valid: data?.data?.pass === true,
       resultType: data?.data?.resultType || null,
     };
+  }
+
+  // ─── Table Mutations ──────────────────────────────────────────
+
+  /**
+   * Create a new table in a base.
+   * Verified (2026-04-17): POST /v0.3/table/{newTblId}/create
+   * Payload: { applicationId, name }
+   */
+  async createTable(appId, name) {
+    const tableId = 'tbl' + this._genRandomId();
+    const url = `https://airtable.com/v0.3/table/${tableId}/create`;
+
+    const payload = { applicationId: appId, name };
+
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`createTable failed (${res.status}): ${errBody}`);
+    }
+
+    this.cache.invalidate(appId);
+    const data = await res.json().catch(() => ({}));
+    return { tableId, ...data };
+  }
+
+  /**
+   * Rename a table.
+   * Verified (2026-04-17): POST /v0.3/table/{tblId}/updateName
+   * Payload: { name }
+   */
+  async renameTable(appId, tableId, newName) {
+    const { name } = await this._resolveTableById(appId, tableId);
+    if (name === newName) {
+      return { message: 'Table already has this name', tableId, name: newName };
+    }
+
+    const url = `https://airtable.com/v0.3/table/${tableId}/updateName`;
+    const res = await this.auth.postForm(url, this._mutationParams({ name: newName }, appId), appId);
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`renameTable failed (${res.status}): ${errBody}`);
+    }
+
+    this.cache.invalidate(appId);
+    return res.json();
+  }
+
+  /**
+   * Delete a table.
+   * Verified (2026-04-17): POST /v0.3/table/{tblId}/destroy
+   * Payload: {}
+   *
+   * Airtable rejects deleting the only remaining table in a base.
+   * Requires expectedName as a safety guard, matching delete_field's pattern.
+   */
+  async deleteTable(appId, tableId, expectedName) {
+    const { name } = await this._resolveTableById(appId, tableId);
+
+    if (name !== expectedName) {
+      throw new Error(
+        `Safety check failed: table ${tableId} is named "${name}" but expectedName was "${expectedName}". ` +
+        `Refusing to delete to prevent accidental data loss.`
+      );
+    }
+
+    const url = `https://airtable.com/v0.3/table/${tableId}/destroy`;
+    const res = await this.auth.postForm(url, this._mutationParams({}, appId), appId);
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`deleteTable failed (${res.status}): ${errBody}`);
+    }
+
+    this.cache.invalidate(appId);
+    const data = await res.json().catch(() => ({}));
+    return { deleted: true, tableId, name: expectedName, ...data };
+  }
+
+  /** Internal: resolve a table by ID only (no name matching). */
+  async _resolveTableById(appId, tableId) {
+    const data = await this.getApplicationData(appId);
+    const tables = data?.data?.tableSchemas || data?.data?.tables || [];
+    const table = tables.find(t => t.id === tableId);
+    if (!table) {
+      throw new Error(`Table "${tableId}" not found in base ${appId}.`);
+    }
+    return table;
+  }
+
+  // ─── View Reads ───────────────────────────────────────────────
+
+  /**
+   * Read a view's current configuration (filters, sorts, grouping, visibility)
+   * from the base schema. Uses the cached getApplicationData call — no separate
+   * endpoint is required because the schema already carries every view's state.
+   */
+  async getView(appId, viewId) {
+    const data = await this.getApplicationData(appId);
+    const tables = data?.data?.tableSchemas || data?.data?.tables || [];
+    for (const table of tables) {
+      const views = table.views || [];
+      const view = views.find(v => v.id === viewId);
+      if (!view) continue;
+      return {
+        id: view.id,
+        name: view.name,
+        type: view.type,
+        tableId: table.id,
+        filters: view.filters ?? view.filtersById ?? null,
+        sorts: view.sorts ?? null,
+        groupLevels: view.groupLevels ?? null,
+        visibleColumnOrder: view.visibleColumnOrder ?? view.columnOrder ?? null,
+        rowHeight: view.rowHeight ?? null,
+        description: view.description ?? null,
+        raw: view,
+      };
+    }
+    throw new Error(`View "${viewId}" not found in base ${appId}.`);
   }
 
   // ─── View Mutations ───────────────────────────────────────────
@@ -474,11 +736,17 @@ export class AirtableClient {
    * are auto-generated before sending.
    */
   async updateViewFilters(appId, viewId, filters) {
-    // Airtable requires every filter to carry a unique flt-prefixed id.
-    // Auto-inject missing IDs so callers don't need to generate them.
-    const processedFilters = { ...filters };
-    if (Array.isArray(processedFilters.filterSet)) {
-      processedFilters.filterSet = ensureFilterIds(processedFilters.filterSet);
+    // Passing null / empty clears filters.
+    let processedFilters = filters;
+    if (filters && Array.isArray(filters.filterSet)) {
+      // Airtable requires every filter to carry a unique flt-prefixed id.
+      // Auto-inject missing IDs so callers don't need to generate them.
+      // Also normalize operator names (is → =, isNot → !=) to match what
+      // Airtable's internal API accepts for text / singleSelect fields.
+      processedFilters = {
+        ...filters,
+        filterSet: ensureFilterIds(normalizeFilterSet(filters.filterSet)),
+      };
     }
 
     const url = `https://airtable.com/v0.3/view/${viewId}/updateFilters`;

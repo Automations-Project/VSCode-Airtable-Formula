@@ -20,7 +20,15 @@ export const TOOL_CATEGORIES = {
   get_table_schema:       'read',
   list_fields:            'read',
   list_views:             'read',
+  get_view:               'read',
   validate_formula:       'read',
+
+  // Table mutations (non-destructive)
+  create_table:           'table-write',
+  rename_table:           'table-write',
+
+  // Table destructive
+  delete_table:           'table-destructive',
 
   // Field mutations (non-destructive)
   create_field:           'field-write',
@@ -61,12 +69,14 @@ export const TOOL_CATEGORIES = {
 
 /** Human-readable labels for categories */
 export const CATEGORY_LABELS = {
-  'read':              'Read / Inspect',
-  'field-write':       'Field Write',
-  'field-destructive': 'Field Destructive',
-  'view-write':        'View Write',
-  'view-destructive':  'View Destructive',
-  'extension':         'Extension Management',
+  'read':               'Read / Inspect',
+  'table-write':        'Table Write',
+  'table-destructive':  'Table Destructive',
+  'field-write':        'Field Write',
+  'field-destructive':  'Field Destructive',
+  'view-write':         'View Write',
+  'view-destructive':   'View Destructive',
+  'extension':          'Extension Management',
 };
 
 // ─── Built-in Profiles ───────────────────────────────────────
@@ -77,12 +87,12 @@ export const BUILTIN_PROFILES = {
     categories: ['read'],
   },
   'safe-write': {
-    description: 'Read + create/update fields and views (no deletes)',
-    categories: ['read', 'field-write', 'view-write'],
+    description: 'Read + create/update tables, fields, and views (no deletes)',
+    categories: ['read', 'table-write', 'field-write', 'view-write'],
   },
   full: {
     description: 'All tools enabled including destructive and extensions',
-    categories: ['read', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'],
+    categories: ['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'],
   },
 };
 

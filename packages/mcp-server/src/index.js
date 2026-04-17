@@ -29,12 +29,12 @@ const server = new Server(
   {
     name: 'airtable-user-mcp',
     title: 'Airtable User MCP',
-    version: '2.1.2',
+    version: '2.2.0',
     description:
-      'Manage Airtable bases with 30+ tools: schema inspection, field CRUD ' +
-      '(formula, rollup, lookup, count), view configuration (filters, sorts, ' +
-      'grouping, visibility), formula validation, extension/block management, ' +
-      'and tool profile control (read-only, safe-write, full, custom).',
+      'Manage Airtable bases with 35+ tools: schema inspection, table CRUD, ' +
+      'field CRUD (formula, rollup, lookup, count, url, dateTime, email, phone), ' +
+      'view configuration (filters, sorts, grouping, visibility), formula validation, ' +
+      'extension/block management, and tool profile control (read-only, safe-write, full, custom).',
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },
@@ -134,11 +134,93 @@ const TOOLS = [
       required: ['appId', 'tableIdOrName'],
     },
   },
+  {
+    name: 'get_view',
+    description: 'Read a single view\'s full configuration — filters, sorts, grouping, visible columns, row height, description. Use this before update_view_filters to audit the current filter state and decide whether to replace or append.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID (e.g. "viwXXX")' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId'],
+    },
+  },
+
+  // ── Table Mutation Tools ──
+  {
+    name: 'create_table',
+    description: 'Create a new table in an Airtable base. Returns the generated table ID. The table starts with default fields (Name, Notes, Attachments, Status, etc.) — use list_fields after creation to inspect them.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        name: { type: 'string', description: 'Name for the new table' },
+        debug: debugProp,
+      },
+      required: ['appId', 'name'],
+    },
+  },
+  {
+    name: 'rename_table',
+    description: 'Rename a table in an Airtable base.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID to rename (e.g. "tblXXX")' },
+        newName: { type: 'string', description: 'The new name for the table' },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'newName'],
+    },
+  },
+  {
+    name: 'delete_table',
+    description: 'Delete a table from an Airtable base. Requires both tableId AND the expected table name as a safety guard — refuses to delete if the name does not match. Airtable rejects deleting the last remaining table in a base.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID to delete (e.g. "tblXXX")' },
+        expectedName: {
+          type: 'string',
+          description: 'The expected name of the table. Must match exactly or deletion is refused.',
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'expectedName'],
+    },
+  },
 
   // ── Field Mutation Tools ──
   {
     name: 'create_field',
-    description: 'Create a new field in an Airtable table. Supports all field types including computed fields (formula, rollup, lookup, count) that are not available via the official API.',
+    description: `Create a new field in an Airtable table. Supports all field types including computed fields (formula, rollup, lookup, count) that are not available via the official API.
+
+FIELD TYPES (fieldType parameter):
+  Canonical (internal-API names):  "text", "multilineText", "number", "checkbox", "date", "singleSelect", "multipleSelects", "rating", "formula", "rollup", "lookup", "count"
+  Friendly aliases (auto-normalized to internal shape):
+    "url"       → type: "text" with typeOptions.validatorName = "url"
+    "email"     → type: "text" with typeOptions.validatorName = "email"
+    "phone" / "phoneNumber" → type: "text" with typeOptions.validatorName = "phoneNumber"
+    "dateTime"  → type: "date" with typeOptions: { isDateTime: true, dateFormat, timeFormat, timeZone, shouldDisplayTimeZone }
+
+TYPE OPTIONS by fieldType:
+  formula:                { formulaText: "..." }
+  rollup:                 { fieldIdInLinkedTable, recordLinkFieldId, resultType, referencedFieldIds }
+  lookup:                 { recordLinkFieldId, fieldIdInLinkedTable }
+  count:                  { recordLinkFieldId }
+  number (integer):       { format: "integer", negative: false }
+  number (currency):      { format: "currency", symbol: "$", precision: 2, negative: false }
+  number (percent):       { format: "percentV2", precision: 2, negative: false }
+  date / dateTime:        { dateFormat: "Local"|"us"|"european"|"iso"|"friendly", timeFormat: "12hour"|"24hour", timeZone: "UTC"|"client"|<IANA-tz>, shouldDisplayTimeZone: true|false, isDateTime: true (auto for dateTime) }
+  singleSelect:           { choices: [{ name: "Option A", color: "blueLight2" }] }`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -148,11 +230,11 @@ const TOOLS = [
         name: { type: 'string', description: 'Name for the new field' },
         fieldType: {
           type: 'string',
-          description: 'The field type: "formula", "rollup", "lookup", "count", "text", "number", "checkbox", etc.',
+          description: 'The field type. Canonical or friendly alias — see tool description for full list.',
         },
         typeOptions: {
           type: 'object',
-          description: 'Type-specific config. For formula: { formulaText: "..." }. For rollup: { fieldIdInLinkedTable, recordLinkFieldId, resultType, referencedFieldIds }. For lookup: { recordLinkFieldId, fieldIdInLinkedTable }. For count: { recordLinkFieldId }.',
+          description: 'Type-specific config. See tool description for shape per fieldType.',
         },
         description: { type: 'string', description: 'Optional field description' },
         insertAfterFieldId: {
@@ -353,27 +435,48 @@ const TOOLS = [
   },
   {
     name: 'update_view_filters',
-    description: `Update the filter configuration of a view. Supports AND/OR conjunctions, nested filter groups, and all Airtable filter operators.
+    description: `Update the filter configuration of a view. Supports AND/OR conjunctions, nested filter groups, and Airtable's internal filter operators.
 
 FILTER FORMAT:
   Leaf filter:   { columnId: "fldXXX", operator: "<op>", value: <val> }
   Nested group:  { type: "nested", conjunction: "and"|"or", filterSet: [...] }
-  Clear filters: { filterSet: [], conjunction: "and" }
+  Clear filters: { filterSet: [], conjunction: "and" }   (or pass filters: null)
 
 Filter IDs (flt-prefixed) are auto-generated — do NOT include them.
 
-OPERATORS by field type:
-  Text/URL/Email/Phone: "contains", "doesNotContain", "is", "isNot", "isEmpty", "isNotEmpty"
-  Number/Percent/Currency: "=", "!=", "<", ">", "<=", ">=", "isEmpty", "isNotEmpty"
-  Single select: "is", "isNot", "isAnyOf", "isNoneOf", "isEmpty", "isNotEmpty"
-  Multiple select: "hasAnyOf", "hasAllOf", "hasNoneOf", "isExactly", "isEmpty", "isNotEmpty"
-  Checkbox: "is", "isNot" (value: true/false)
-  Date: "is", "isBefore", "isAfter", "isOnOrBefore", "isOnOrAfter", "isEmpty", "isNotEmpty"
+OPERATORS by field type — verified against Airtable's internal API (2026-04-17 capture):
+  Text / URL / Email / Phone:
+    "=" (exact match — value: string)
+    "!=" (not equal)
+    "contains"            (value: string)
+    "doesNotContain"
+    "isEmpty" / "isNotEmpty" (no value)
+  Number / Percent / Currency:
+    "=", "!=", "<", ">", "<=", ">=", "isEmpty", "isNotEmpty"
+  Single select:
+    "=" (value: "selXXX" — the choice ID, NOT the choice name)
+    "!="
+    "isAnyOf" / "isNoneOf" (value: ["selXXX", "selYYY"] — array of choice IDs)
+    "isEmpty" / "isNotEmpty"
+  Multiple select:
+    "hasAnyOf", "hasAllOf", "hasNoneOf", "isExactly", "isEmpty", "isNotEmpty"
+  Checkbox:
+    "=" (value: true|false)
+  Date:
+    "is", "isBefore", "isAfter", "isOnOrBefore", "isOnOrAfter", "isEmpty", "isNotEmpty"
+
+AUTO-NORMALIZATION:
+  - "is"     → "="     (applied automatically — the internal API does not recognize "is")
+  - "isNot"  → "!="
+  - "isAnyOf" with a single-element array or scalar value → "=" with scalar value
+  For single-select, value must be the choice ID (selXXX) — use get_base_schema to find IDs.
 
 EXAMPLES:
-  Simple:  { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }], conjunction: "and" }
-  Multi:   { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }, { columnId: "fldYYY", operator: "=", value: 1 }], conjunction: "and" }
-  Nested:  { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }, { type: "nested", conjunction: "or", filterSet: [{ columnId: "fldYYY", operator: "=", value: 1 }] }], conjunction: "and" }`,
+  Text equals:          { filterSet: [{ columnId: "fldXXX", operator: "=", value: "Prime" }], conjunction: "and" }
+  SingleSelect equals:  { filterSet: [{ columnId: "fldXXX", operator: "=", value: "selABC123" }], conjunction: "and" }
+  Text contains:        { filterSet: [{ columnId: "fldXXX", operator: "contains", value: "hello" }], conjunction: "and" }
+  Number range:         { filterSet: [{ columnId: "fldX", operator: ">=", value: 10 }, { columnId: "fldX", operator: "<=", value: 100 }], conjunction: "and" }
+  Nested (a AND (b OR c)): { filterSet: [{ columnId: "fldA", operator: "contains", value: "x" }, { type: "nested", conjunction: "or", filterSet: [{ columnId: "fldB", operator: "=", value: 1 }] }], conjunction: "and" }`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -396,6 +499,11 @@ EXAMPLES:
             },
           },
           required: ['filterSet', 'conjunction'],
+        },
+        operation: {
+          type: 'string',
+          enum: ['replace', 'append'],
+          description: 'How the given filters interact with existing filters. "replace" (default) overwrites; "append" adds the provided filterSet entries to the existing top-level filterSet (useful when you only want to add conditions without rewriting the whole filter payload).',
         },
         debug: debugProp,
       },
@@ -676,7 +784,7 @@ const MANAGE_TOOLS_DEF = {
       },
       category: {
         type: 'string',
-        description: 'Category name for toggle_category action (read, field-write, field-destructive, view-write, view-destructive, extension)',
+        description: 'Category name for toggle_category action (read, table-write, table-destructive, field-write, field-destructive, view-write, view-destructive, extension)',
       },
       enabled: {
         type: 'boolean',
@@ -759,6 +867,43 @@ const handlers = {
       type: v.type,
     }));
     return ok(views, table, debug);
+  },
+
+  async get_view({ appId, viewId, debug }) {
+    const result = await client.getView(appId, viewId);
+    // Strip raw unless debug is on to keep responses compact
+    const summary = { ...result };
+    if (!debug) delete summary.raw;
+    return ok(summary, result, debug);
+  },
+
+  // ── Table Mutations ──
+
+  async create_table({ appId, name, debug }) {
+    const result = await client.createTable(appId, name);
+    return ok(
+      { created: true, tableId: result.tableId, name },
+      result,
+      debug,
+    );
+  },
+
+  async rename_table({ appId, tableId, newName, debug }) {
+    const result = await client.renameTable(appId, tableId, newName);
+    return ok(
+      { renamed: true, tableId, newName },
+      result,
+      debug,
+    );
+  },
+
+  async delete_table({ appId, tableId, expectedName, debug }) {
+    const result = await client.deleteTable(appId, tableId, expectedName);
+    return ok(
+      { deleted: true, tableId, name: expectedName },
+      result,
+      debug,
+    );
   },
 
   // ── Field Mutations ──
@@ -886,10 +1031,21 @@ const handlers = {
     );
   },
 
-  async update_view_filters({ appId, viewId, filters, debug }) {
-    const result = await client.updateViewFilters(appId, viewId, filters);
+  async update_view_filters({ appId, viewId, filters, operation, debug }) {
+    let effectiveFilters = filters;
+    if (operation === 'append') {
+      const current = await client.getView(appId, viewId);
+      const existing = current.filters || { filterSet: [], conjunction: 'and' };
+      const baseSet = Array.isArray(existing.filterSet) ? existing.filterSet : [];
+      const addSet = Array.isArray(filters?.filterSet) ? filters.filterSet : [];
+      effectiveFilters = {
+        filterSet: [...baseSet, ...addSet],
+        conjunction: filters?.conjunction || existing.conjunction || 'and',
+      };
+    }
+    const result = await client.updateViewFilters(appId, viewId, effectiveFilters);
     return ok(
-      { updated: true, viewId },
+      { updated: true, viewId, operation: operation || 'replace', filterCount: Array.isArray(effectiveFilters?.filterSet) ? effectiveFilters.filterSet.length : 0 },
       result,
       debug,
     );
@@ -1116,7 +1272,7 @@ async function main() {
   const enabledCount = toolConfig.enabledToolNames().size;
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[airtable-user-mcp] Server v2.1.2 started');
+  console.error('[airtable-user-mcp] Server v2.2.0 started');
   console.error(`[airtable-user-mcp] Profile: "${toolConfig.activeProfile}" — ${enabledCount}/${TOOLS.length} tools enabled (+manage_tools)`);
   console.error('[airtable-user-mcp] Watching tools-config.json for external changes');
 }
