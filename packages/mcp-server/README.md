@@ -4,7 +4,7 @@
 
 # airtable-user-mcp
 
-**Community MCP server for Airtable — 30 tools your AI assistant can't get from the official API**
+**Community MCP server for Airtable — 36 tools your AI assistant can't get from the official API**
 
 <p align="center">
   <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
@@ -54,7 +54,7 @@ The official Airtable REST API doesn't expose formula field creation, view confi
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 30 tools.
+That's it. Your MCP client connects via **stdio** and gets access to all 36 tools.
 
 ---
 
@@ -84,11 +84,63 @@ For a visual management experience, install the **[Airtable Formula](https://mar
 
 ---
 
-## Installation
+## Claude Quick Start (no VS Code extension)
 
-### Via npx (recommended)
+Five commands take you from zero → a working Airtable MCP in Claude Desktop or Claude Code. Everything below runs from a normal terminal.
 
-Add to your MCP client config (`mcp.json`, `claude_desktop_config.json`, etc.):
+### Prerequisites
+
+- **Node.js 18 or newer** — `node -v` to check. Install from [nodejs.org](https://nodejs.org) if missing.
+- An Airtable account (personal, team, or enterprise — anything you can log into at [airtable.com](https://airtable.com)).
+
+### 1. Check what's already on your machine
+
+```bash
+npx -y airtable-user-mcp@latest doctor
+```
+
+`doctor` prints your Node version, platform, config dir, and whether the browser engine is installed. If `Patchright: not installed` appears, continue to step 2. If it says `installed`, skip to step 3.
+
+### 2. Install the browser engine (one-time, ~170 MB)
+
+```bash
+npx -y airtable-user-mcp install-browser
+```
+
+This downloads [Patchright](https://github.com/Kaliiiiiiiiii/patchright-nodejs) (a stealth Chromium fork used only for the login flow). You only need to run this once per machine. If you already have Chrome, Edge, or Chromium installed and prefer not to download another browser, see [Browser Choice](#browser-choice) below.
+
+### 3. Log in to Airtable
+
+```bash
+npx -y airtable-user-mcp login
+```
+
+A browser window opens on [airtable.com/login](https://airtable.com/login). Sign in like you normally would — password, SSO, 2FA, whatever your account uses. The window closes automatically when login is detected. Your session is stored in `~/.airtable-user-mcp/.chrome-profile/` and reused by every tool call.
+
+Verify the session landed:
+
+```bash
+npx -y airtable-user-mcp status
+```
+
+You should see `Session: found`.
+
+### 4. Configure your Claude client
+
+<details open>
+<summary><strong>Claude Desktop</strong></summary>
+
+Open `claude_desktop_config.json`:
+
+| OS | Path |
+|:--|:--|
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+Tip: in Claude Desktop, **Settings → Developer → Edit Config** opens this file.
+
+Add the `airtable` entry to `mcpServers`:
 
 ```json
 {
@@ -101,9 +153,99 @@ Add to your MCP client config (`mcp.json`, `claude_desktop_config.json`, etc.):
 }
 ```
 
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 36 tools.
+
+</details>
+
+<details open>
+<summary><strong>Claude Code</strong></summary>
+
+Use the built-in `claude mcp add` command:
+
+```bash
+# Add for all projects on this machine:
+claude mcp add airtable --scope user -- npx -y airtable-user-mcp
+
+# OR — add to the current project only (creates .mcp.json, safe to commit):
+claude mcp add airtable --scope project -- npx -y airtable-user-mcp
+```
+
+Verify:
+
+```bash
+claude mcp list
+```
+
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 36 tools are available.
+
+</details>
+
+### 5. Try it out
+
+Ask your Claude client:
+
+> *"List all tables in my Airtable base `appXXXXXXXXXXXXXX`."*
+
+It will call `list_tables` and return the names and IDs.
+
+---
+
+### Troubleshooting
+
+| Symptom | Fix |
+|:--|:--|
+| `Session: not found` | Re-run `npx -y airtable-user-mcp login` |
+| Login window never loads | Check network / firewall, then `doctor` |
+| Browser download fails on Windows | Run PowerShell as Admin once, then retry `install-browser` |
+| Tools don't appear after config change | Fully quit and reopen Claude Desktop (not just the window) |
+| `command not found: npx` | Install Node.js from [nodejs.org](https://nodejs.org) |
+
+Run `npx -y airtable-user-mcp doctor` at any time for a full diagnostic.
+
+### Browser Choice
+
+If you already have Chrome, Edge, or a system Chromium and want to skip the 170 MB download:
+
+```bash
+# point the server at an existing Chromium-family browser
+export AIRTABLE_BROWSER_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # macOS
+# or on Windows (PowerShell):
+$env:AIRTABLE_BROWSER_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+```
+
+### Useful environment variables
+
+| Variable | Purpose |
+|:--|:--|
+| `AIRTABLE_USER_MCP_HOME` | Override config dir (default: `~/.airtable-user-mcp`) |
+| `AIRTABLE_NO_BROWSER` | Skip Patchright entirely — uses cached cookies only (CI/headless) |
+| `AIRTABLE_HEADLESS_ONLY` | Run the browser without a visible window |
+| `AIRTABLE_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
+
+---
+
+## Installation
+
+### Via npx (recommended)
+
+Already covered above — the `claude mcp add` command or the `mcpServers` JSON entry both use `npx -y airtable-user-mcp` under the hood.
+
 ### Via VS Code / Windsurf / Cursor
 
-Install the [Airtable Formula](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) extension — it bundles this server and registers it automatically across all your IDEs.
+Install the [Airtable Formula](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) extension — it bundles this server and registers it automatically across all your IDEs. Login and status live in a visual dashboard.
+
+### Global install
+
+```bash
+npm install -g airtable-user-mcp
+airtable-user-mcp login
+```
+
+Then reference the binary directly in any MCP config:
+
+```json
+{ "mcpServers": { "airtable": { "command": "airtable-user-mcp" } } }
+```
 
 ### From source
 
@@ -120,32 +262,24 @@ Install the [Airtable Formula](https://marketplace.visualstudio.com/items?itemNa
 
 ---
 
-## Authentication
+## All CLI commands
 
-The server uses browser-based authentication via [Patchright](https://github.com/Kaliiiiiiiiii/patchright-nodejs).
-
-```bash
-# 1. Install the browser engine (one-time, ~170 MB)
-npx airtable-user-mcp install-browser
-
-# 2. Log in to Airtable
-npx airtable-user-mcp login
-
-# 3. Verify your session
-npx airtable-user-mcp status
 ```
-
-Sessions are cached in `~/.airtable-user-mcp/` and reused automatically.
-
-**Headless / CI environments:** Set `AIRTABLE_NO_BROWSER=1` to use cached cookies only, without launching a browser.
-
-**Diagnostics:** Run `npx airtable-user-mcp doctor` to check browser availability, session health, and config.
+npx airtable-user-mcp                  Start MCP server (stdio)   ← what your Claude client runs
+npx airtable-user-mcp login            Log in to Airtable via browser
+npx airtable-user-mcp logout           Clear saved session
+npx airtable-user-mcp status           Show session & browser info
+npx airtable-user-mcp doctor           Run diagnostics
+npx airtable-user-mcp install-browser  Download Chromium (~170 MB)
+npx airtable-user-mcp --version        Print version
+npx airtable-user-mcp --help           Show this help
+```
 
 ---
 
-## Tools (30)
+## Tools (36)
 
-### Schema Read (5)
+### Schema Read (7)
 
 | Tool | Description |
 |:-----|:------------|
@@ -154,19 +288,29 @@ Sessions are cached in `~/.airtable-user-mcp/` and reused automatically.
 | `get_table_schema` | Full schema for a single table |
 | `list_fields` | All fields in a table with types and configuration |
 | `list_views` | All views in a table with IDs, names, and types |
+| `get_view` | Read a single view's full state — filters, sorts, grouping, visibility, description |
+| `validate_formula` | Validate a formula expression before applying |
+
+### Table Management (3)
+
+| Tool | Description |
+|:-----|:------------|
+| `create_table` | Create a new table with default fields |
+| `rename_table` | Rename a table |
+| `delete_table` | Delete a table (requires `expectedName` safety guard) |
 
 ### Field Management (8)
 
 | Tool | Description |
 |:-----|:------------|
-| `create_field` | Create a field — including formula, rollup, lookup, count |
+| `create_field` | Create a field — auto-maps `url` / `email` / `phone` / `dateTime` aliases, plus formula, rollup, lookup, count |
 | `create_formula_field` | Create a formula field (shorthand) |
-| `validate_formula` | Validate a formula expression before applying |
 | `update_formula_field` | Update the formula text of an existing field |
 | `update_field_config` | Update configuration of any computed field |
 | `rename_field` | Rename a field with pre-validation |
-| `delete_field` | Delete with safety guards and dependency checks |
+| `delete_field` | Delete with safety guards and a compact dependency summary |
 | `duplicate_field` | Clone a field, optionally copying cell values |
+| `update_field_description` | Set or update a field's description text |
 
 ### View Configuration (11)
 
@@ -177,20 +321,14 @@ Sessions are cached in `~/.airtable-user-mcp/` and reused automatically.
 | `rename_view` | Rename a view |
 | `delete_view` | Delete a view (cannot delete last view) |
 | `update_view_description` | Set or clear a view's description |
-| `update_view_filters` | Set filter conditions with AND/OR conjunctions |
+| `update_view_filters` | Set or append filter conditions (AND/OR, nested groups, `is`/`isNot` auto-normalized) |
 | `reorder_view_fields` | Change column order |
 | `show_or_hide_view_columns` | Toggle column visibility |
 | `apply_view_sorts` | Set or clear sort conditions |
 | `update_view_group_levels` | Set or clear grouping |
 | `update_view_row_height` | Change row height (small / medium / large / xlarge) |
 
-### Field Metadata (1)
-
-| Tool | Description |
-|:-----|:------------|
-| `update_field_description` | Set or update a field's description text |
-
-### Extension Management (5)
+### Extension Management (7)
 
 | Tool | Description |
 |:-----|:------------|
@@ -243,8 +381,9 @@ Args: {
 
 ## Safety
 
-- **Destructive operations** (`delete_field`, `delete_view`, `remove_extension`) include built-in safety guards
-- `delete_field` requires both `fieldId` **and** `expectedName`, and checks for downstream dependencies before deleting
+- **Destructive operations** (`delete_table`, `delete_field`, `delete_view`, `remove_extension`) include built-in safety guards
+- `delete_table` and `delete_field` both require an `expectedName` parameter that must match the current name exactly — prevents accidentally deleting the wrong object after a rename
+- `delete_field` checks for downstream dependencies and returns a compact summary (`viewGroupings`, `viewSorts`, `viewFilters`, `fields`) before committing; set `force: true` to delete anyway
 - Formula validation is available and recommended before creating/updating formulas
 - All tools accept `debug: true` for raw response inspection
 
