@@ -713,30 +713,58 @@ describe('AirtableClient', () => {
   });
 
   describe('getView', () => {
-    it('returns view configuration extracted from base schema', async () => {
-      // Inject a view with filters/sorts into the mock schema
+    it('merges static metadata from app-read with live state from table/readData', async () => {
+      // Two GETs: application/read (schema) then table/{tableId}/readData (live state)
       mockAuth = createMockAuth({
-        get: () => ({
-          ok: true, status: 200,
-          json: async () => ({
-            data: {
-              tableSchemas: [{
-                id: 'tblAAA', name: 'Tasks',
-                columns: [{ id: 'fld111', name: 'Name', type: 'text' }],
-                views: [{
-                  id: 'viw001',
-                  name: 'Grid view',
-                  type: 'grid',
-                  filters: { filterSet: [{ id: 'flt1', columnId: 'fld111', operator: '=', value: 'x' }], conjunction: 'and' },
-                  sorts: [{ id: 'srt1', columnId: 'fld111', ascending: true }],
-                  groupLevels: [],
-                  description: 'Primary view',
-                }],
-              }],
-            },
-          }),
-          text: async () => '{}',
-        }),
+        get: (url) => {
+          if (url.includes('/application/') && url.includes('/read?')) {
+            return {
+              ok: true, status: 200,
+              json: async () => ({
+                data: {
+                  tableSchemas: [{
+                    id: 'tblAAA', name: 'Tasks',
+                    columns: [{ id: 'fld111', name: 'Name', type: 'text' }],
+                    views: [{
+                      id: 'viw001',
+                      name: 'Grid view',
+                      type: 'grid',
+                      description: 'Primary view',
+                      createdByUserId: 'usrZZZ',
+                    }],
+                  }],
+                },
+              }),
+              text: async () => '{}',
+            };
+          }
+          if (url.includes('/table/tblAAA/readData')) {
+            return {
+              ok: true, status: 200,
+              json: async () => ({
+                data: {
+                  viewDatas: [{
+                    id: 'viw001',
+                    type: 'grid',
+                    description: 'Primary view',
+                    filters: { filterSet: [{ id: 'flt1', columnId: 'fld111', operator: '=', value: 'x' }], conjunction: 'and' },
+                    lastSortsApplied: [{ id: 'srt1', columnId: 'fld111', ascending: true }],
+                    groupLevels: [],
+                    columnOrder: [
+                      { columnId: 'fld111', visibility: true, width: 200 },
+                      { columnId: 'fld222', visibility: false },
+                    ],
+                    frozenColumnCount: 1,
+                    colorConfig: null,
+                    metadata: { grid: { rowHeight: 'medium' } },
+                  }],
+                },
+              }),
+              text: async () => '{}',
+            };
+          }
+          throw new Error(`Unexpected GET in test: ${url}`);
+        },
       });
       client = new AirtableClient(mockAuth);
 
@@ -744,8 +772,15 @@ describe('AirtableClient', () => {
       assert.equal(result.id, 'viw001');
       assert.equal(result.name, 'Grid view');
       assert.equal(result.tableId, 'tblAAA');
+      assert.equal(result.type, 'grid');
       assert.equal(result.filters.conjunction, 'and');
       assert.equal(result.filters.filterSet[0].operator, '=');
+      assert.equal(result.sorts[0].columnId, 'fld111');
+      assert.deepEqual(result.groupLevels, []);
+      assert.equal(result.columnOrder.length, 2);
+      assert.deepEqual(result.visibleColumnOrder, ['fld111']);
+      assert.equal(result.frozenColumnCount, 1);
+      assert.equal(result.rowHeight, 'medium');
       assert.equal(result.description, 'Primary view');
     });
 

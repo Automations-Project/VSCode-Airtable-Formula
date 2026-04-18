@@ -2,12 +2,15 @@
   "name": "airtable-user-mcp",
   "version": "2.2.1",
   "mcpName": "io.github.Automations-Project/airtable-user-mcp",
-  "description": "Community MCP server for Airtable. Schema inspection, field CRUD, view configuration, formula validation, and extension management. Not affiliated with Airtable Inc.",
+  "description": "Community MCP server for Airtable. Schema inspection, table / field / view CRUD (including merge-safe filter / sort / group updates), formula validation, and extension management. Not affiliated with Airtable Inc.",
   "main": "src/index.js",
   "bin": {
     "airtable-user-mcp": "src/index.js"
   },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "files": [
     "src/**/*.js",
     "src/**/*.mjs",
@@ -24,16 +27,36 @@
     "directory": "packages/mcp-server"
   },
   "homepage": "https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server#readme",
-  "bugs": "https://github.com/Automations-Project/VSCode-Airtable-Formula/issues",
+  "bugs": {
+    "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula/issues"
+  },
+  "author": {
+    "name": "Nskha",
+    "url": "https://github.com/Nskha"
+  },
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/Nskha"
+    },
+    {
+      "type": "individual",
+      "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula"
+    }
+  ],
   "keywords": [
     "mcp",
     "model-context-protocol",
     "airtable",
+    "airtable-api",
     "mcp-server",
     "ai",
+    "claude",
+    "cursor",
     "formula",
     "schema",
-    "automation"
+    "automation",
+    "no-code"
   ],
   "license": "MIT",
   "scripts": {

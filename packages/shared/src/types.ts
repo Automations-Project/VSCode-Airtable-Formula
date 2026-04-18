@@ -87,6 +87,8 @@ export type ToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
 
 export interface ToolCategories {
   read:             boolean;
+  tableWrite:       boolean;
+  tableDestructive: boolean;
   fieldWrite:       boolean;
   fieldDestructive: boolean;
   viewWrite:        boolean;

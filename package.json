@@ -2,10 +2,11 @@
   "name": "airtable-formula-workspace",
   "private": true,
   "scripts": {
-    "build": "pnpm -F shared build && pnpm -F webview build && node scripts/bundle-mcp.mjs && pnpm -F airtable-formula build",
+    "build": "node scripts/check-tool-sync.mjs && pnpm -F shared build && pnpm -F webview build && node scripts/bundle-mcp.mjs && pnpm -F airtable-formula build",
     "dev": "pnpm -F webview dev",
     "package": "pnpm -F airtable-formula package",
-    "test": "pnpm -F shared test && pnpm -F webview test && pnpm -F airtable-formula test",
+    "check:tool-sync": "node scripts/check-tool-sync.mjs",
+    "test": "node scripts/check-tool-sync.mjs && pnpm -F shared test && pnpm -F airtable-user-mcp test && pnpm -F webview test && pnpm -F airtable-formula test",
     "packx": "pnpm -F airtable-formula packx",
     "packx:no-bump": "pnpm -F airtable-formula packx:no-bump",
     "version:bump": "pnpm -F airtable-formula version:bump",

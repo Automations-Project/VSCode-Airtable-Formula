@@ -545,11 +545,13 @@ export function Settings() {
 
           {settings.mcp.toolProfile.profile === 'custom' && (
             <div className="stack stack-sm" style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation (6 tools)"          value={settings.mcp.toolProfile.categories.read}             settingKey="mcp.categories.read" />
+              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation (7 tools)"          value={settings.mcp.toolProfile.categories.read}             settingKey="mcp.categories.read" />
+              <SettingToggle label="Table Write"          desc="create_table, rename_table (2 tools)"                         value={settings.mcp.toolProfile.categories.tableWrite}       settingKey="mcp.categories.tableWrite" />
+              <SettingToggle label="Table Destructive"    desc="delete_table (1 tool)"                                        value={settings.mcp.toolProfile.categories.tableDestructive} settingKey="mcp.categories.tableDestructive" />
               <SettingToggle label="Field Write"          desc="Create / update / rename / duplicate fields (7 tools)"        value={settings.mcp.toolProfile.categories.fieldWrite}       settingKey="mcp.categories.fieldWrite" />
-              <SettingToggle label="Field Destructive"    desc="delete_field (1 tool)"                                         value={settings.mcp.toolProfile.categories.fieldDestructive} settingKey="mcp.categories.fieldDestructive" />
+              <SettingToggle label="Field Destructive"    desc="delete_field (1 tool)"                                        value={settings.mcp.toolProfile.categories.fieldDestructive} settingKey="mcp.categories.fieldDestructive" />
               <SettingToggle label="View Write"           desc="Create / update views, filters, sorts, columns (10 tools)"    value={settings.mcp.toolProfile.categories.viewWrite}        settingKey="mcp.categories.viewWrite" />
-              <SettingToggle label="View Destructive"     desc="delete_view (1 tool)"                                          value={settings.mcp.toolProfile.categories.viewDestructive}  settingKey="mcp.categories.viewDestructive" />
+              <SettingToggle label="View Destructive"     desc="delete_view (1 tool)"                                         value={settings.mcp.toolProfile.categories.viewDestructive}  settingKey="mcp.categories.viewDestructive" />
               <SettingToggle label="Extension Management" desc="Create / install / duplicate / remove extensions (7 tools)"   value={settings.mcp.toolProfile.categories.extension}        settingKey="mcp.categories.extension" />
             </div>
           )}

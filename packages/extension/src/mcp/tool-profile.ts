@@ -20,37 +20,44 @@ import type { ToolCategories, ToolProfileName, ToolProfileSnapshot } from '@airt
  */
 
 // These must mirror `packages/mcp-server/src/tool-config.js::TOOL_CATEGORIES`.
-// If the mcp-server source adds or removes a tool, update this table too —
-// a discrepancy only affects the UI's enabled-count display, not correctness.
-export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | 'field-destructive' | 'view-destructive'> = {
+// Drift is caught at build time by scripts/check-tool-sync.mjs — don't edit
+// this table without also editing the mcp-server source (or vice versa).
+type ExtraCategoryKey = 'table-write' | 'table-destructive' | 'field-write' | 'field-destructive' | 'view-write' | 'view-destructive';
+export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategoryKey> = {
   // Read-only / inspection
   get_base_schema:           'read',
   list_tables:               'read',
   get_table_schema:          'read',
   list_fields:               'read',
   list_views:                'read',
+  get_view:                  'read',
   validate_formula:          'read',
+  // Table mutations (non-destructive)
+  create_table:              'table-write',
+  rename_table:              'table-write',
+  // Table destructive
+  delete_table:              'table-destructive',
   // Field mutations (non-destructive)
-  create_field:              'fieldWrite',
-  create_formula_field:      'fieldWrite',
-  update_field_config:       'fieldWrite',
-  update_formula_field:      'fieldWrite',
-  rename_field:              'fieldWrite',
-  update_field_description:  'fieldWrite',
-  duplicate_field:           'fieldWrite',
+  create_field:              'field-write',
+  create_formula_field:      'field-write',
+  update_field_config:       'field-write',
+  update_formula_field:      'field-write',
+  rename_field:              'field-write',
+  update_field_description:  'field-write',
+  duplicate_field:           'field-write',
   // Field destructive
   delete_field:              'field-destructive',
   // View mutations
-  create_view:               'viewWrite',
-  duplicate_view:            'viewWrite',
-  rename_view:               'viewWrite',
-  update_view_description:   'viewWrite',
-  update_view_filters:       'viewWrite',
-  reorder_view_fields:       'viewWrite',
-  show_or_hide_view_columns: 'viewWrite',
-  apply_view_sorts:          'viewWrite',
-  update_view_group_levels:  'viewWrite',
-  update_view_row_height:    'viewWrite',
+  create_view:               'view-write',
+  duplicate_view:            'view-write',
+  rename_view:               'view-write',
+  update_view_description:   'view-write',
+  update_view_filters:       'view-write',
+  reorder_view_fields:       'view-write',
+  show_or_hide_view_columns: 'view-write',
+  apply_view_sorts:          'view-write',
+  update_view_group_levels:  'view-write',
+  update_view_row_height:    'view-write',
   // View destructive
   delete_view:               'view-destructive',
   // Extension management
@@ -64,12 +71,14 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | 'field-destr
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
-  read:              'Read / Inspect',
-  fieldWrite:        'Field Write',
-  'field-destructive':'Field Destructive',
-  viewWrite:         'View Write',
-  'view-destructive':'View Destructive',
-  extension:         'Extension Management',
+  'read':               'Read / Inspect',
+  'table-write':        'Table Write',
+  'table-destructive':  'Table Destructive',
+  'field-write':        'Field Write',
+  'field-destructive':  'Field Destructive',
+  'view-write':         'View Write',
+  'view-destructive':   'View Destructive',
+  'extension':          'Extension Management',
 };
 
 interface ProfileDef {
@@ -80,18 +89,20 @@ interface ProfileDef {
 
 export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', ProfileDef> = {
   'read-only': { description: 'Schema inspection and formula validation only', categories: ['read'] },
-  'safe-write':{ description: 'Read + create/update fields and views (no deletes)',
-                 categories: ['read', 'fieldWrite', 'viewWrite'] },
+  'safe-write':{ description: 'Read + create/update tables, fields, and views (no deletes)',
+                 categories: ['read', 'table-write', 'field-write', 'view-write'] },
   full:        { description: 'All tools enabled including destructive and extensions',
-                 categories: ['read', 'fieldWrite', 'field-destructive', 'viewWrite', 'view-destructive', 'extension'] },
+                 categories: ['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'] },
 };
 
 // Settings key suffix → file-format category key
 const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
   read:             'read',
-  fieldWrite:       'fieldWrite',
+  tableWrite:       'table-write',
+  tableDestructive: 'table-destructive',
+  fieldWrite:       'field-write',
   fieldDestructive: 'field-destructive',
-  viewWrite:        'viewWrite',
+  viewWrite:        'view-write',
   viewDestructive:  'view-destructive',
   extension:        'extension',
 };
@@ -184,6 +195,8 @@ export class ToolProfileManager implements vscode.Disposable {
     const profile = (cfg.get<string>('mcp.toolProfile', 'full') as ToolProfileName) ?? 'full';
     const categories: ToolCategories = {
       read:             cfg.get('mcp.categories.read',             true),
+      tableWrite:       cfg.get('mcp.categories.tableWrite',       true),
+      tableDestructive: cfg.get('mcp.categories.tableDestructive', true),
       fieldWrite:       cfg.get('mcp.categories.fieldWrite',       true),
       fieldDestructive: cfg.get('mcp.categories.fieldDestructive', true),
       viewWrite:        cfg.get('mcp.categories.viewWrite',        true),
@@ -235,7 +248,7 @@ export class ToolProfileManager implements vscode.Disposable {
       '',
     ];
     // Group by category file-key, preserving order
-    const categoryOrder = ['read', 'fieldWrite', 'field-destructive', 'viewWrite', 'view-destructive', 'extension'];
+    const categoryOrder = ['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'];
     for (const cat of categoryOrder) {
       const label = CATEGORY_LABELS[cat] ?? cat;
       const tools = Object.entries(TOOL_CATEGORIES).filter(([, c]) => c === cat);

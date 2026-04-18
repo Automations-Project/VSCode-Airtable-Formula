@@ -13,7 +13,7 @@ beforeEach(() => {
     ideStatuses: [], versions: { extension: '—', mcpServerBundled: '—' }, aiFilesCount: 0, loading: true,
     activeTab: 'overview', pendingActions: new Set(),
     settings: {
-      mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true, toolProfile: { profile: 'safe-write', enabledCount: 23, totalCount: 32, categories: { read: true, fieldWrite: true, fieldDestructive: true, viewWrite: true, viewDestructive: true, extension: true } }, serverSource: 'bundled' },
+      mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true, toolProfile: { profile: 'safe-write', enabledCount: 26, totalCount: 36, categories: { read: true, tableWrite: true, tableDestructive: true, fieldWrite: true, fieldDestructive: true, viewWrite: true, viewDestructive: true, extension: true } }, serverSource: 'bundled' },
       ai: { autoInstallFiles: true, includeAgents: false },
       formula: { formatterVersion: 'v2' },
       auth: { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' },

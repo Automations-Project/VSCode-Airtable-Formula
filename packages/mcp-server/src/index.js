@@ -136,7 +136,17 @@ const TOOLS = [
   },
   {
     name: 'get_view',
-    description: 'Read a single view\'s full configuration — filters, sorts, grouping, visible columns, row height, description. Use this before update_view_filters to audit the current filter state and decide whether to replace or append.',
+    description: `Read a view's live configuration from the base. Returns filters, sorts, groupLevels, columnOrder (rich per-column visibility + width), frozenColumnCount, colorConfig, metadata (view-type specific, e.g. gallery cover, calendar date field), rowHeight, description. Use this before update_view_filters / apply_view_sorts / update_view_group_levels to audit current state and choose between replace and append modes.
+
+Data source: internally hits /v0.3/table/{tableId}/readData with includeDataForViewIds=[viewId]. The application/read endpoint alone does NOT return filter/sort/group state — that's why the update tools need either "append" mode or a prior get_view call to merge safely.
+
+Fields:
+  - filters: { filterSet: [...], conjunction: "and"|"or" } | null
+  - sorts:   [{ id, columnId, ascending }] | null   (stored as lastSortsApplied internally)
+  - groupLevels: [{ id, columnId, order, emptyGroupState }] | null
+  - columnOrder: [{ columnId, visibility, width? }]
+  - visibleColumnOrder: [columnId] — derived from columnOrder for convenience
+  - metadata: type-specific config (gallery.coverColumnId, calendar.dateColumnId, etc.)`,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -550,7 +560,7 @@ EXAMPLES:
   },
   {
     name: 'apply_view_sorts',
-    description: 'Apply sort conditions to a view. Pass an empty array to clear all sorts.',
+    description: 'Apply sort conditions to a view. Default mode replaces all existing sorts — pass an empty array with operation="replace" to clear. Use operation="append" to add new sorts on top of the view\'s existing sort stack without rewriting them.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -567,7 +577,12 @@ EXAMPLES:
             },
             required: ['columnId'],
           },
-          description: 'Array of sort conditions. Empty array [] clears all sorts.',
+          description: 'Array of sort conditions. Empty array [] clears all sorts when operation="replace".',
+        },
+        operation: {
+          type: 'string',
+          enum: ['replace', 'append'],
+          description: 'How the given sorts interact with existing sorts. "replace" (default) overwrites; "append" adds the provided sorts after the existing sort stack (secondary priority).',
         },
         debug: debugProp,
       },
@@ -576,7 +591,7 @@ EXAMPLES:
   },
   {
     name: 'update_view_group_levels',
-    description: 'Set grouping on a view. Pass an empty array to clear grouping.',
+    description: 'Set grouping on a view. Default mode replaces all existing group levels — pass an empty array with operation="replace" to clear grouping. Use operation="append" to add new group levels below the existing ones without rewriting them.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -594,7 +609,12 @@ EXAMPLES:
             },
             required: ['columnId'],
           },
-          description: 'Array of group levels. Empty array [] clears grouping.',
+          description: 'Array of group levels. Empty array [] clears grouping when operation="replace".',
+        },
+        operation: {
+          type: 'string',
+          enum: ['replace', 'append'],
+          description: 'How the given groupLevels interact with existing ones. "replace" (default) overwrites; "append" adds the provided levels after the existing group stack.',
         },
         debug: debugProp,
       },
@@ -871,10 +891,7 @@ const handlers = {
 
   async get_view({ appId, viewId, debug }) {
     const result = await client.getView(appId, viewId);
-    // Strip raw unless debug is on to keep responses compact
-    const summary = { ...result };
-    if (!debug) delete summary.raw;
-    return ok(summary, result, debug);
+    return ok(result, result, debug);
   },
 
   // ── Table Mutations ──
@@ -1069,19 +1086,31 @@ const handlers = {
     );
   },
 
-  async apply_view_sorts({ appId, viewId, sorts, debug }) {
-    const result = await client.applySorts(appId, viewId, sorts);
+  async apply_view_sorts({ appId, viewId, sorts, operation, debug }) {
+    let effectiveSorts = sorts;
+    if (operation === 'append') {
+      const current = await client.getView(appId, viewId);
+      const existing = Array.isArray(current.sorts) ? current.sorts : [];
+      effectiveSorts = [...existing, ...(Array.isArray(sorts) ? sorts : [])];
+    }
+    const result = await client.applySorts(appId, viewId, effectiveSorts);
     return ok(
-      { updated: true, viewId, sortCount: sorts.length },
+      { updated: true, viewId, operation: operation || 'replace', sortCount: effectiveSorts.length },
       result,
       debug,
     );
   },
 
-  async update_view_group_levels({ appId, viewId, groupLevels, debug }) {
-    const result = await client.updateGroupLevels(appId, viewId, groupLevels);
+  async update_view_group_levels({ appId, viewId, groupLevels, operation, debug }) {
+    let effectiveLevels = groupLevels;
+    if (operation === 'append') {
+      const current = await client.getView(appId, viewId);
+      const existing = Array.isArray(current.groupLevels) ? current.groupLevels : [];
+      effectiveLevels = [...existing, ...(Array.isArray(groupLevels) ? groupLevels : [])];
+    }
+    const result = await client.updateGroupLevels(appId, viewId, effectiveLevels);
     return ok(
-      { updated: true, viewId, groupCount: groupLevels.length },
+      { updated: true, viewId, operation: operation || 'replace', groupCount: effectiveLevels.length },
       result,
       debug,
     );

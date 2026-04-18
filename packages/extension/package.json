@@ -7,9 +7,35 @@
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
-  "repository": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
+  "author": {
+    "name": "Nskha",
+    "url": "https://github.com/Nskha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula.git"
+  },
+  "homepage": "https://github.com/Automations-Project/VSCode-Airtable-Formula#readme",
+  "bugs": {
+    "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula/issues"
+  },
+  "qna": "https://github.com/Automations-Project/VSCode-Airtable-Formula/discussions",
+  "sponsor": {
+    "url": "https://github.com/sponsors/Nskha"
+  },
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/Nskha"
+    },
+    {
+      "type": "individual",
+      "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula"
+    }
+  ],
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.100.0",
+    "node": ">=20"
   },
   "categories": [
     "AI",
@@ -273,9 +299,9 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection and formula validation only (6 tools)",
-            "Read + create/update fields and views, no deletes (23 tools)",
-            "All tools enabled including destructive and extensions (32 tools)",
+            "Schema inspection and formula validation only (7 tools)",
+            "Read + create/update tables, fields, and views, no deletes (26 tools)",
+            "All tools enabled including destructive and extensions (36 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -283,7 +309,17 @@
         "airtableFormula.mcp.categories.read": {
           "type": "boolean",
           "default": true,
-          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, validate_formula."
+          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula."
+        },
+        "airtableFormula.mcp.categories.tableWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Table Write tools: create_table, rename_table."
+        },
+        "airtableFormula.mcp.categories.tableDestructive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Table Destructive tool: delete_table."
         },
         "airtableFormula.mcp.categories.fieldWrite": {
           "type": "boolean",
@@ -341,7 +377,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 30 MCP tools: schema read, field CRUD (including formula/rollup/lookup), view configuration, formula validation, and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 36 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup), view configuration (filters / sorts / groups / visibility — with merge-safe append mode), formula validation, and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },

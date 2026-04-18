@@ -574,32 +574,85 @@ export class AirtableClient {
   // ─── View Reads ───────────────────────────────────────────────
 
   /**
-   * Read a view's current configuration (filters, sorts, grouping, visibility)
-   * from the base schema. Uses the cached getApplicationData call — no separate
-   * endpoint is required because the schema already carries every view's state.
+   * Fetch the live state of one view from `/v0.3/table/{tableId}/readData`.
+   * The application/read endpoint only carries static view metadata (id, name,
+   * type) — it does NOT include filters, sorts, groupLevels, or columnOrder.
+   * Those fields live in table/readData under `data.viewDatas[]`.
+   *
+   * Verified against captured traffic 2026-04-18 (appnnJC0PWnw1kVMF).
+   */
+  async readTableData(appId, tableId, viewId) {
+    const params = new URLSearchParams({
+      stringifiedObjectParams: JSON.stringify({
+        includeDataForViewIds: [viewId],
+        shouldIncludeSchemaChecksum: false,
+        mayOnlyIncludeRowAndCellDataForIncludedViews: true,
+        mayExcludeCellDataForLargeViews: true,
+      }),
+      requestId: this._genRequestId(),
+    });
+    const url = `https://airtable.com/v0.3/table/${tableId}/readData?${params}`;
+    const res = await this.auth.get(url, appId);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`readTableData failed (${res.status}): ${text}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Read a view's current configuration (filters, sorts, grouping, column
+   * visibility, row height). Uses two calls:
+   *   1. Cached application/read to resolve tableId + static metadata
+   *   2. Un-cached table/{tableId}/readData for the live view state
    */
   async getView(appId, viewId) {
     const data = await this.getApplicationData(appId);
     const tables = data?.data?.tableSchemas || data?.data?.tables || [];
+    let tableId = null;
+    let staticMeta = null;
     for (const table of tables) {
-      const views = table.views || [];
-      const view = views.find(v => v.id === viewId);
-      if (!view) continue;
-      return {
-        id: view.id,
-        name: view.name,
-        type: view.type,
-        tableId: table.id,
-        filters: view.filters ?? view.filtersById ?? null,
-        sorts: view.sorts ?? null,
-        groupLevels: view.groupLevels ?? null,
-        visibleColumnOrder: view.visibleColumnOrder ?? view.columnOrder ?? null,
-        rowHeight: view.rowHeight ?? null,
-        description: view.description ?? null,
-        raw: view,
-      };
+      const match = (table.views || []).find(v => v.id === viewId);
+      if (match) {
+        tableId = table.id;
+        staticMeta = match;
+        break;
+      }
     }
-    throw new Error(`View "${viewId}" not found in base ${appId}.`);
+    if (!tableId) {
+      throw new Error(`View "${viewId}" not found in base ${appId}.`);
+    }
+
+    const tableData = await this.readTableData(appId, tableId, viewId);
+    const viewDatas = tableData?.data?.viewDatas || [];
+    const viewData = viewDatas.find(v => v.id === viewId) || {};
+
+    const columnOrder = Array.isArray(viewData.columnOrder) ? viewData.columnOrder : null;
+    const visibleColumnOrder = columnOrder
+      ? columnOrder.filter(c => c && c.visibility !== false).map(c => c.columnId)
+      : null;
+
+    return {
+      id: viewId,
+      name: staticMeta?.name ?? null,
+      type: viewData.type ?? staticMeta?.type ?? null,
+      tableId,
+      filters: viewData.filters ?? null,
+      sorts: viewData.lastSortsApplied ?? null,
+      groupLevels: viewData.groupLevels ?? null,
+      columnOrder,
+      visibleColumnOrder,
+      frozenColumnCount: viewData.frozenColumnCount ?? null,
+      colorConfig: viewData.colorConfig ?? null,
+      metadata: viewData.metadata ?? null,
+      rowHeight: viewData.rowHeight
+        ?? viewData.metadata?.grid?.rowHeight
+        ?? viewData.metadata?.rowHeight
+        ?? null,
+      description: viewData.description ?? staticMeta?.description ?? null,
+      createdByUserId: staticMeta?.createdByUserId ?? viewData.createdByUserId ?? null,
+      personalForUserId: staticMeta?.personalForUserId ?? null,
+    };
   }
 
   // ─── View Mutations ───────────────────────────────────────────
