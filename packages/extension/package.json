@@ -9,7 +9,7 @@
   "license": "MIT",
   "author": {
     "name": "Nskha",
-    "url": "https://github.com/Nskha"
+    "url": "https://github.com/automations-Project"
   },
   "repository": {
     "type": "git",
@@ -21,12 +21,12 @@
   },
   "qna": "https://github.com/Automations-Project/VSCode-Airtable-Formula/discussions",
   "sponsor": {
-    "url": "https://github.com/sponsors/Nskha"
+    "url": "https://github.com/sponsors/automations-Project"
   },
   "funding": [
     {
       "type": "github",
-      "url": "https://github.com/sponsors/Nskha"
+      "url": "https://github.com/sponsors/automations-Project"
     },
     {
       "type": "individual",
