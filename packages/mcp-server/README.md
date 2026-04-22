@@ -30,23 +30,58 @@
 
 </div>
 
+
+
 ---
 
-## Why this server?
+## TL;DR
 
-The official Airtable REST API doesn't expose formula field creation, view configuration, or extension management. **airtable-user-mcp** fills that gap by using Airtable's internal API, giving your AI assistant capabilities that are otherwise only available through the Airtable UI.
+```bash
+npx -y airtable-user-mcp login          # one browser login
+claude mcp add airtable --scope user -- npx -y airtable-user-mcp
+```
 
-<div align="center">
+Done. Your AI assistant can now do things like:
 
-| | Capability | Official API | This Server |
-|:-:|:-----------|:---:|:---:|
-| **S** | Schema inspection (bases, tables, fields, views) | Partial | Full |
-| **F** | Create formula / rollup / lookup / count fields | No | Yes |
-| **V** | Validate formulas before applying | No | Yes |
-| **C** | View config (filters, sorts, groups, visibility) | No | Yes |
-| **E** | Extension / block management | No | Yes |
+> *"Create a rollup field on Projects called **Total Spend** that sums `{Amount}` from the linked Invoices table, and add a filter to the `Active` view that hides rows where Total Spend = 0."*
 
-</div>
+The official Airtable MCP would reply *"unsupported."* This one just does it.
+
+---
+
+## Why another Airtable MCP?
+
+The official Airtable MCP is a thin wrapper over the public Web API. That API — by design — never exposed some of the most-requested automation surfaces in Airtable. `airtable-user-mcp` uses Airtable's **internal API** (the same one the web UI calls) to close the gap.
+
+### Head-to-head
+
+| Capability | Official Airtable MCP | **airtable-user-mcp** |
+|---|---|---|
+| Total tools | ~17 | **36** |
+| Auth | PAT or OAuth, per-scope | **Log in once with your normal account** (SSO/2FA supported) |
+| Transport | HTTP (remote) | stdio (local, private) |
+| Data routing | Through `mcp.airtable.com` | **Direct from your machine** |
+| Schema read | Partial | **Full** incl. view state |
+| Create formula fields | ❌ | ✅ |
+| Create rollup / lookup / count fields | ❌ `UNSUPPORTED_FIELD_TYPE_FOR_CREATE` | ✅ |
+| Update a formula's text | ❌ | ✅ |
+| Validate a formula before apply | ❌ | ✅ |
+| Rename / duplicate fields | Limited | ✅ |
+| Safe delete with dependency preview | ❌ | ✅ `expectedName` + `viewFilters/Sorts/Groupings` summary |
+| Create views (7 types) | ❌ API has no endpoint | ✅ grid / form / kanban / calendar / gallery / gantt / list |
+| Set/append view filters (nested AND/OR) | ❌ | ✅ |
+| Set sorts / grouping / row height | ❌ | ✅ |
+| Change column order | ❌ | ✅ |
+| Show / hide columns | ❌ | ✅ |
+| Duplicate a view with full config | ❌ | ✅ |
+| Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
+| `filterByFormula` on record queries | ❌ Explicitly disallowed | ✅ |
+| Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
+| Price | Free | Free, MIT |
+
+*Backed by [Airtable's MCP docs](https://support.airtable.com/docs/using-the-airtable-mcp-server), the [Web API reference](https://www.airtable.com/developers/web/api/introduction), and the [rollup-field `UNSUPPORTED_FIELD_TYPE_FOR_CREATE` thread](https://community.airtable.com/development-apis-11/how-to-set-up-a-rollup-field-using-the-api-4879).*
+
+
 
 ---
 

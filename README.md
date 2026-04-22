@@ -37,6 +37,55 @@
 
 ---
 
+## Why this exists
+
+Airtable's public Web API has never exposed some of the most common tasks builders actually need: creating a formula field, tweaking a view's filter set, installing an extension, or validating a formula before it breaks production. The official MCP server inherits every one of those gaps because it's a thin wrapper over the same REST API.
+
+**Airtable Formula** uses Airtable's own internal API (the one the web UI uses) to give your AI assistant — and you — parity with the product itself. 36+ tools, zero PAT juggling, works in any MCP client.
+
+---
+
+## airtable-user-mcp vs. the official Airtable MCP
+
+| Capability | Official Airtable MCP | **airtable-user-mcp** |
+|---|---|---|
+| **Total tools** | ~17 | **36** |
+| **Auth model** | Personal Access Token or OAuth, per-scope setup | **Log in once with your normal Airtable account** (SSO/2FA supported) |
+| **Transport** | HTTP (remote) | stdio (local, private) |
+| **Data never leaves your machine** | ❌ Requests go through `mcp.airtable.com` | ✅ Runs locally against Airtable's API |
+| **Schema read (bases, tables, fields, views)** | Partial (no view config) | **Full** — filters, sorts, groups, visibility, row height, descriptions |
+| **Create formula fields** | ❌ `UNSUPPORTED_FIELD_TYPE_FOR_CREATE` | ✅ |
+| **Create rollup fields** | ❌ | ✅ |
+| **Create lookup / multipleLookupValues fields** | ❌ | ✅ |
+| **Create count fields** | ❌ | ✅ |
+| **Update formula text of an existing field** | ❌ | ✅ |
+| **Validate a formula before applying** | ❌ | ✅ |
+| **Rename / duplicate / safely delete fields** | Partial (no duplicate, no dependency summary) | ✅ with `expectedName` guard + dependency preview |
+| **Create views (grid/form/kanban/calendar/gallery/gantt/list)** | ❌ (API has no create-view endpoint) | ✅ |
+| **Set/append view filters (nested AND/OR)** | ❌ | ✅ |
+| **Set view sorts** | ❌ | ✅ |
+| **Set view grouping** | ❌ | ✅ |
+| **Change column order** | ❌ | ✅ |
+| **Show/hide columns in a view** | ❌ | ✅ |
+| **Change row height** | ❌ | ✅ |
+| **Duplicate a view with its full configuration** | ❌ | ✅ |
+| **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
+| **Create dashboard pages** | ❌ | ✅ |
+| **`filterByFormula` on record queries** | ❌ Explicitly disallowed | ✅ |
+| **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
+| **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
+| **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
+| **Formula editor with IntelliSense** | ❌ | ✅ (VS Code extension) |
+| **Credentials storage** | You manage the PAT | OS keychain, auto-refresh |
+| **Plan requirement** | Airtable plan with API access + token scopes | Any plan you can log into |
+| **Price** | Free | Free, MIT |
+
+*Sources: [Airtable's official MCP docs](https://support.airtable.com/docs/using-the-airtable-mcp-server), [Airtable Web API reference](https://www.airtable.com/developers/web/api/introduction), and the [`UNSUPPORTED_FIELD_TYPE_FOR_CREATE` rollup thread](https://community.airtable.com/development-apis-11/how-to-set-up-a-rollup-field-using-the-api-4879).*
+
+---
+
+
+
 ## What's In This Repo
 
 This monorepo ships **two products** from one source tree:
