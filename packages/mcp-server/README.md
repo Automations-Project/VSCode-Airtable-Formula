@@ -4,7 +4,7 @@
 
 # airtable-user-mcp
 
-**Community MCP server for Airtable — 36 tools your AI assistant can't get from the official API**
+**Community add-on to the official Airtable MCP — 36 extra tools your AI assistant can't get from the public REST API**
 
 <p align="center">
   <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
@@ -45,15 +45,15 @@ Done. Your AI assistant can now do things like:
 
 > *"Create a rollup field on Projects called **Total Spend** that sums `{Amount}` from the linked Invoices table, and add a filter to the `Active` view that hides rows where Total Spend = 0."*
 
-The official Airtable MCP would reply *"unsupported."* This one just does it.
+The official Airtable MCP can't — its REST API doesn't expose those surfaces. Run both MCPs side-by-side and your AI client sees every tool from each.
 
 ---
 
-## Why another Airtable MCP?
+## Why this is an add-on, not a replacement
 
-The official Airtable MCP is a thin wrapper over the public Web API. That API — by design — never exposed some of the most-requested automation surfaces in Airtable. `airtable-user-mcp` uses Airtable's **internal API** (the same one the web UI calls) to close the gap.
+The official Airtable MCP is a thin wrapper over the public Web API. That API — by design — never exposed some of the most-requested automation surfaces in Airtable. `airtable-user-mcp` uses Airtable's **internal API** (the same one the web UI calls) to close the gap. The two servers cover different surfaces, so the intended setup is **both installed at once** — your MCP client sees the union of their tool sets.
 
-### Head-to-head
+### Coverage map
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
@@ -92,6 +92,27 @@ npx airtable-user-mcp
 ```
 
 That's it. Your MCP client connects via **stdio** and gets access to all 36 tools.
+
+---
+
+## Run alongside the official Airtable MCP
+
+`airtable-user-mcp` is designed to **add** capabilities, not replace anything. The official Airtable MCP handles records over HTTP with PAT/OAuth; this one handles schema, formulas, views, and extensions locally via Airtable's internal API. Register **both** in your MCP client so your AI assistant sees the union of their tool sets.
+
+Add this entry to your `mcpServers` block:
+
+```json
+{
+  "mcpServers": {
+    "airtable-user-mcp": {
+      "command": "npx",
+      "args": ["-y", "airtable-user-mcp"]
+    }
+  }
+}
+```
+
+Then register the official server following [Airtable's setup guide](https://support.airtable.com/docs/using-the-airtable-mcp-server). The two servers are independent and share nothing — they just coexist under different names in your MCP client.
 
 ---
 
@@ -466,6 +487,7 @@ Args: {
 
 ## Related
 
+- [**Official Airtable MCP**](https://support.airtable.com/docs/using-the-airtable-mcp-server) — Airtable's first-party remote server for records over HTTP; this add-on runs alongside it
 - [**Airtable Formula** VS Code Extension](https://github.com/Automations-Project/VSCode-Airtable-Formula) — Dashboard, formula editor, MCP installer, and AI skills
 - [Model Context Protocol](https://modelcontextprotocol.io) — The open standard for AI tool integration
 

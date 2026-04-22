@@ -39,13 +39,15 @@
 
 ## Why this exists
 
-Airtable's public Web API has never exposed some of the most common tasks builders actually need: creating a formula field, tweaking a view's filter set, installing an extension, or validating a formula before it breaks production. The official MCP server inherits every one of those gaps because it's a thin wrapper over the same REST API.
+Airtable's public Web API has never exposed some of the most common tasks builders actually need: creating a formula field, tweaking a view's filter set, installing an extension, or validating a formula before it breaks production. The official Airtable MCP server is a thin wrapper over that same REST API, so it inherits every one of those gaps.
 
-**Airtable Formula** uses Airtable's own internal API (the one the web UI uses) to give your AI assistant — and you — parity with the product itself. 36+ tools, zero PAT juggling, works in any MCP client.
+**`airtable-user-mcp` is an add-on to the official Airtable MCP, not a replacement.** It uses Airtable's own internal API (the one the web UI uses) to cover exactly the surface area the REST API can't reach. Register both servers in your AI client and your assistant gets the full Airtable automation experience — records over HTTP via the official MCP, plus schema, formulas, views, and extensions via this one.
 
 ---
 
-## airtable-user-mcp vs. the official Airtable MCP
+## What `airtable-user-mcp` adds on top of the official Airtable MCP
+
+This is a coverage map, not a "pick one" decision — the two servers are complementary and designed to run side-by-side.
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
@@ -84,7 +86,24 @@ Airtable's public Web API has never exposed some of the most common tasks builde
 
 ---
 
+## Use both MCPs together
 
+`airtable-user-mcp` is additive. Register the official Airtable MCP following [Airtable's setup guide](https://support.airtable.com/docs/using-the-airtable-mcp-server), then add this one alongside it in the same `mcpServers` block:
+
+```json
+{
+  "mcpServers": {
+    "airtable-user-mcp": {
+      "command": "npx",
+      "args": ["-y", "airtable-user-mcp"]
+    }
+  }
+}
+```
+
+Your MCP client will expose every tool from both servers. The two entries are independent — rename the keys (`airtable`, `airtable-official`, `airtable-user-mcp`, etc.) however makes sense for your workflow.
+
+---
 
 ## What's In This Repo
 
