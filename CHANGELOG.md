@@ -6,6 +6,42 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP Server 2.4.2 — User follow-up bugs (report 2026-05-01)
+
+After upgrading to 2.4.0 and running real end-to-end view-rollout work,
+the reporter surfaced two bugs in the new tooling. Both fixed here.
+
+**Bug 1 — `set_view_columns` orchestration 422'd at the move step** (P1).
+The internal step 3 looped per-id `moveVisibleColumns([id], i)` starting
+at index 0. That fails reliably because grid views pin the primary
+column at visible index 0 (you can't move anything else there) and
+per-id moves of an already-correctly-positioned column also fail.
+Steps 1 and 2 (hide-all + show-the-set) succeeded, so visibility was
+correct but column order was untouched.
+
+Fix: replace the loop with one batched `moveVisibleColumns(visibleColumnIds, 1)`
+call — the entire ordered list is inserted starting at visible index 1,
+after the pinned primary. Verified by the reporter's workaround snippet
+on 11 grid views (100% success rate). Test updated to match.
+
+**Bug 2 — `list_view_sections` returned empty `sections`** (P2, partial fix).
+On the reporter's base, `table.viewSections` is absent from the cached
+`application/{appId}/read` response even when `tableViewOrder` clearly
+contains `vsc...` IDs. The full fix needs a network capture from a base
+with sections to discover where the section objects actually live in
+the schema response (none of our existing captures cover this — they
+were either mutations-only or pre-section).
+
+Partial fix shipped here: when `viewSections` is empty but
+`tableViewOrder` contains `vsc...` IDs, surface them as bare-id entries
+with `name: null`, `viewOrder: null`, `partial: true`, and a top-level
+`introspectionPartial: true` flag with a `introspectionNote` explaining
+the limitation. The agent at least knows which section IDs exist and
+can pass them to `move_view_to_section` / `rename_view_section` /
+`delete_view_section` (all of which still work for side effects).
+
+mcp-server: 2.4.1 → 2.4.2.
+
 ### MCP Server 2.4.1 — Hotfix: bundled server crashed on startup
 
 Released hours after 2.4.0. The bundled extension copy of the MCP

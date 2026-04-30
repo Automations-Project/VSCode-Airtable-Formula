@@ -95,7 +95,40 @@ describe('listViewSections (§1.3)', () => {
     assert.equal(rocket.name, '🚀 Posting workflow');
     assert.equal(rocket.viewCount, 1);
     assert.deepEqual(rocket.viewOrder, ['viwInsideA']);
+    assert.equal(rocket.partial, false);
     assert.deepEqual(result.tableViewOrder, ['viwGrid', 'vscRocket', 'vscTrash']);
+    assert.equal(result.introspectionPartial, undefined);
+  });
+
+  it('falls back to surfacing section IDs from tableViewOrder when viewSections is missing (Bug 2 hotfix 2026-05-01)', async () => {
+    // Simulate the user follow-up scenario: table.viewSections empty, but
+    // table.viewOrder still contains vsc-prefixed IDs.
+    const schemaWithMissingSections = {
+      data: {
+        tableSchemas: [
+          {
+            id: 'tblAAA',
+            name: 'Offers',
+            columns: [{ id: 'fldA', name: 'A', type: 'text', typeOptions: {} }],
+            views: [{ id: 'viwGrid', name: 'Grid', type: 'grid' }],
+            viewOrder: ['vscPreExisting1', 'vscPreExisting2', 'viwGrid', 'vscNewlyCreated'],
+            // viewSections deliberately omitted to simulate the schema gap
+          },
+        ],
+      },
+    };
+    const auth = createMockAuth(schemaWithMissingSections);
+    const client = new AirtableClient(auth);
+    const result = await client.listViewSections('appXXX', 'tblAAA');
+
+    // Should still surface the 3 section IDs as partial entries
+    assert.equal(result.sections.length, 3);
+    assert.deepEqual(result.sections.map(s => s.id), ['vscPreExisting1', 'vscPreExisting2', 'vscNewlyCreated']);
+    assert.equal(result.sections[0].name, null);
+    assert.equal(result.sections[0].viewOrder, null);
+    assert.equal(result.sections[0].partial, true);
+    assert.equal(result.introspectionPartial, true);
+    assert.match(result.introspectionNote, /Section names and viewOrder are not currently readable/);
   });
 });
 
@@ -138,8 +171,8 @@ describe('moveViewOrViewSection (§1.3)', () => {
   });
 });
 
-describe('setViewColumns one-shot (§1.4)', () => {
-  it('hides all → shows requested → moves each into its target index', async () => {
+describe('setViewColumns one-shot (§1.4 — Bug 1 hotfix 2026-05-01)', () => {
+  it('hides all → shows requested → moves the whole list in ONE batched call starting at index 1', async () => {
     const auth = createMockAuth(SCHEMA_WITH_VIEW);
     const client = new AirtableClient(auth);
     await client.setViewColumns('appXXX', 'viwT', { visibleColumnIds: ['fldB', 'fldA'], frozenColumnCount: 1 });
@@ -153,13 +186,13 @@ describe('setViewColumns one-shot (§1.4)', () => {
     assert.deepEqual(show.columnIds, ['fldB', 'fldA']);
     assert.equal(show.visibility, true);
 
-    // 3. Two moveVisibleColumns calls (one per field, in left-to-right order)
+    // 3. ONE batched moveVisibleColumns call — entire list, target index 1
+    //    (after the pinned primary column). Per-id loops 422'd in v2.4.0.
     const moves = auth.calls.filter(c => c.url.includes('/moveVisibleColumns'));
-    assert.equal(moves.length, 2);
-    assert.equal(JSON.parse(moves[0].params.stringifiedObjectParams).columnIds[0], 'fldB');
-    assert.equal(JSON.parse(moves[0].params.stringifiedObjectParams).targetVisibleIndex, 0);
-    assert.equal(JSON.parse(moves[1].params.stringifiedObjectParams).columnIds[0], 'fldA');
-    assert.equal(JSON.parse(moves[1].params.stringifiedObjectParams).targetVisibleIndex, 1);
+    assert.equal(moves.length, 1);
+    const movePayload = JSON.parse(moves[0].params.stringifiedObjectParams);
+    assert.deepEqual(movePayload.columnIds, ['fldB', 'fldA']);
+    assert.equal(movePayload.targetVisibleIndex, 1);
 
     // 4. updateFrozenColumnCount(1)
     const freeze = findPost(auth, '/updateFrozenColumnCount');

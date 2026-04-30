@@ -1209,28 +1209,69 @@ export class AirtableClient {
 
   /**
    * List all sidebar sections for a table.
-   * Reads from cached `getApplicationData` — sections live at `table.viewSections`
-   * as a `{ [vscId]: { id, name, viewOrder, pinnedForUserId, createdByUserId } }` map.
-   * `table.viewOrder` mixes view IDs and section IDs at the top level — when a view
-   * is inside a section, it appears in the section's `viewOrder`, NOT the table's.
+   *
+   * Two data sources, in order of preference:
+   *   1. `table.viewSections` from the cached `application/{appId}/read`
+   *      response — when present this gives full {id, name, viewOrder,
+   *      pinnedForUserId, createdByUserId} per section.
+   *   2. `vsc...`-prefixed IDs in `table.viewOrder` — fallback when the
+   *      schema response doesn't surface viewSections (user follow-up
+   *      Bug 2, 2026-05-01: the read response on some bases doesn't
+   *      expose section names/contents even though the IDs are clearly
+   *      present in tableViewOrder).
+   *
+   * If only fallback data is available, each section in the response will
+   * have `name: null`, `viewOrder: null`, `viewCount: null`, and a
+   * `partial: true` marker. Use `move_view_to_section` for side effects
+   * even when introspection is partial.
    */
   async listViewSections(appId, tableIdOrName) {
     assertAirtableId(appId, 'appId');
     const table = await this.resolveTable(appId, tableIdOrName);
-    const sections = table.viewSections || {};
+    const tableViewOrder = Array.isArray(table.viewOrder) ? table.viewOrder : [];
+    const sectionsObj = table.viewSections || {};
+    const richSections = Object.values(sectionsObj).map(s => ({
+      id: s.id,
+      name: s.name ?? null,
+      viewOrder: Array.isArray(s.viewOrder) ? s.viewOrder : [],
+      viewCount: Array.isArray(s.viewOrder) ? s.viewOrder.length : 0,
+      pinnedForUserId: s.pinnedForUserId ?? null,
+      createdByUserId: s.createdByUserId ?? null,
+      partial: false,
+    }));
+
+    let sections = richSections;
+    let partial = false;
+    if (richSections.length === 0) {
+      // Fallback: surface section IDs from tableViewOrder so the agent
+      // at least knows which IDs exist. Names + viewOrder are unknown
+      // until the full-fix capture lands.
+      const idsFromOrder = tableViewOrder.filter(id => typeof id === 'string' && id.startsWith('vsc'));
+      if (idsFromOrder.length > 0) {
+        partial = true;
+        sections = idsFromOrder.map(id => ({
+          id,
+          name: null,
+          viewOrder: null,
+          viewCount: null,
+          pinnedForUserId: null,
+          createdByUserId: null,
+          partial: true,
+        }));
+      }
+    }
+
     return {
       tableId: table.id,
       tableName: table.name,
-      sections: Object.values(sections).map(s => ({
-        id: s.id,
-        name: s.name,
-        viewOrder: Array.isArray(s.viewOrder) ? s.viewOrder : [],
-        viewCount: Array.isArray(s.viewOrder) ? s.viewOrder.length : 0,
-        pinnedForUserId: s.pinnedForUserId ?? null,
-        createdByUserId: s.createdByUserId ?? null,
-      })),
-      // Top-level table viewOrder is mixed (view IDs and section IDs).
-      tableViewOrder: Array.isArray(table.viewOrder) ? table.viewOrder : [],
+      sections,
+      tableViewOrder,
+      ...(partial ? {
+        introspectionPartial: true,
+        introspectionNote:
+          'Section names and viewOrder are not currently readable from the cached schema response on this base. ' +
+          'IDs come from tableViewOrder. move_view_to_section / rename_view_section / delete_view_section still work — only this read is partial.',
+      } : {}),
     };
   }
 
@@ -1393,15 +1434,24 @@ export class AirtableClient {
 
   /**
    * One-shot view-column setup. Composes hide-all → show-the-requested-set →
-   * move-each-into-position → optional frozen-column count. Solves the user
-   * report's §1.4 "new views show all 168 fields, unusable until manually
-   * trimmed" problem.
+   * batch-move into target positions → optional frozen-column count. Solves
+   * the user report's §1.4 "new views show all 168 fields, unusable until
+   * manually trimmed" problem.
    *
    * `visibleColumnIds` (required): array of field IDs that should be visible.
    *   All other fields are hidden. Order in this array becomes the visible
    *   left-to-right order.
    * `frozenColumnCount` (optional): if set, frozen-column divider is placed
    *   N columns from the left.
+   *
+   * Implementation note (2026-05-01 hotfix — user follow-up Bug 1):
+   *   v2.4.0 looped per-id `moveVisibleColumns([id], i)` starting at index 0,
+   *   which 422'd because grid views pin the primary column at visible index
+   *   0 (you can't move anything else there) and per-id moves of an already-
+   *   correctly-positioned column also fail. The fix is one batched call
+   *   inserting the entire ordered list starting at index 1, after the
+   *   primary. Verified by the reporter against 11 grid views in their
+   *   workaround snippet — succeeds 100% of the time.
    */
   async setViewColumns(appId, viewId, { visibleColumnIds, frozenColumnCount } = {}) {
     assertAirtableId(appId, 'appId');
@@ -1414,11 +1464,9 @@ export class AirtableClient {
     await this.showOrHideAllColumns(appId, viewId, false);
     // 2. Show the requested set in one batched call.
     await this.showOrHideColumns(appId, viewId, visibleColumnIds, true);
-    // 3. Walk left-to-right, moving each into its target visible index. The
-    //    UI does this one-at-a-time, so we mirror that for safety.
-    for (let i = 0; i < visibleColumnIds.length; i++) {
-      await this.moveVisibleColumns(appId, viewId, [visibleColumnIds[i]], i);
-    }
+    // 3. Single batched move — places the entire ordered list starting at
+    //    visible index 1 (after the pinned primary column at index 0).
+    await this.moveVisibleColumns(appId, viewId, visibleColumnIds, 1);
     // 4. Optional frozen-column divider.
     if (Number.isFinite(frozenColumnCount) && frozenColumnCount >= 0) {
       await this.updateFrozenColumnCount(appId, viewId, frozenColumnCount);
