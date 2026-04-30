@@ -1,8 +1,8 @@
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'node:crypto';
 import { trace } from './debug-tracer.js';
+import { getProfileDir } from './paths.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
@@ -12,8 +12,6 @@ function genPageLoadId() {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROFILE_DIR = process.env.AIRTABLE_PROFILE_DIR
-  || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
 
 let _chromium = null;
 async function getChromium() {
@@ -48,7 +46,7 @@ async function getChromium() {
  */
 export class AirtableAuth {
   constructor(options = {}) {
-    this.profileDir = options.profileDir || DEFAULT_PROFILE_DIR;
+    this.profileDir = options.profileDir || getProfileDir();
     this.context = null;
     this.page = null;
     this.isLoggedIn = false;

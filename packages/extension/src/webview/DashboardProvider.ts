@@ -273,6 +273,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           const cfg = vscode.workspace.getConfiguration('airtableFormula');
           await cfg.update('auth.browserChoice', choice, vscode.ConfigurationTarget.Global);
           this.authManager?.refreshBrowserDetection();
+          await this.rewriteConfiguredIdeMcpEntries();
           await this.pushState();
         }
         this.postResult(msg.id, true);
@@ -286,15 +287,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const cfg = vscode.workspace.getConfiguration('airtableFormula');
         await cfg.update('auth.browserChoice', msg.choice, vscode.ConfigurationTarget.Global);
         this.authManager?.refreshBrowserDetection();
-
-        // Re-write IDE MCP configs with updated browser/profile env vars
-        const serverPath = getBundledServerPath(this.context);
-        const serverEntry = getServerEntry(this.context);
-        const { configureMcpForIde } = await import('../auto-config/index.js');
-        // Re-configure all detected+configured IDEs (MCP config only, not AI files)
-        // Note: We iterate existing IDE statuses from the last push
-        // This is best-effort — if it fails for one IDE, we continue
-
+        await this.rewriteConfiguredIdeMcpEntries();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
@@ -554,6 +547,26 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // empty or inaccessible
     }
     return total;
+  }
+
+  // Re-writes the MCP entry in every IDE that already has one, so env changes
+  // (browserChoice, serverSource, profile dir) propagate immediately instead
+  // of going stale until the user next runs Setup for that IDE.
+  private async rewriteConfiguredIdeMcpEntries(): Promise<void> {
+    const serverPath = getBundledServerPath(this.context);
+    const serverEntry = getServerEntry(this.context);
+    const statuses = await getAllIdeStatuses();
+    await Promise.all(
+      statuses
+        .filter(s => s.mcpConfigured)
+        .map(async s => {
+          try {
+            await configureMcpForIde(s.ideId, serverPath, serverEntry);
+          } catch (err) {
+            console.error(`[airtable-formula] Failed to re-apply MCP config for ${s.ideId}:`, err);
+          }
+        }),
+    );
   }
 
   private postResult(id: string, ok: boolean, error?: string): void {

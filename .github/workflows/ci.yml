@@ -27,9 +27,13 @@ jobs:
       - name: Verify npm tarball contents
         shell: bash
         run: |
+          set -euo pipefail
           cd packages/mcp-server
-          npm pack --dry-run 2>&1 | tee /tmp/pack-output.txt || true
-          if grep -q "dev-tools/" /tmp/pack-output.txt 2>/dev/null; then
+          # Fail the job if `npm pack --dry-run` itself fails (e.g. missing
+          # files listed in package.json "files", malformed package.json).
+          # `tee` preserves the status of the left-hand command via pipefail.
+          npm pack --dry-run 2>&1 | tee pack-output.txt
+          if grep -q "dev-tools/" pack-output.txt; then
             echo "ERROR: dev-tools/ in tarball" && exit 1
           fi
           echo "Tarball contents clean"

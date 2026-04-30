@@ -137,9 +137,6 @@ For a visual management experience, install the **[Airtable Formula](https://mar
 - **Airtable login** with credentials in OS keychain and auto-refresh
 - **Formula editor** with syntax highlighting, IntelliSense, and beautify/minify
 
-<!-- TODO: Replace with actual screenshot -->
-<!-- <p align="center"><img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/screenshot-dashboard.png" alt="Dashboard Screenshot" width="700" /></p> -->
-
 ---
 
 ## Claude Quick Start (no VS Code extension)

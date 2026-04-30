@@ -21,12 +21,11 @@
  *   { "valid": false, "error": "Chrome launch failed: ..." }
  */
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
+import { getProfileDir } from './paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const profileDir = process.env.AIRTABLE_PROFILE_DIR
-  || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
+const profileDir = getProfileDir();
 const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
 const browserPath    = process.env.AIRTABLE_BROWSER_PATH || undefined;
 

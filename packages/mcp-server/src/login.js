@@ -16,8 +16,8 @@
  */
 import dotenv from 'dotenv';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
+import { getProfileDir } from './paths.js';
 
 dotenv.config();
 
@@ -62,9 +62,7 @@ function parseArgs() {
     email: opts.email || process.env.AIRTABLE_EMAIL,
     password: opts.password || process.env.AIRTABLE_PASSWORD,
     otpSecret: opts.otpSecret || process.env.AIRTABLE_OTP_SECRET || null,
-    profileDir: opts.profile
-      ? path.resolve(opts.profile)
-      : (process.env.AIRTABLE_PROFILE_DIR || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile')),
+    profileDir: opts.profile ? path.resolve(opts.profile) : getProfileDir(),
   };
 }
 

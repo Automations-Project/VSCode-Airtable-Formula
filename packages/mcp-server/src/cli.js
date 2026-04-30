@@ -1,8 +1,8 @@
 import { createRequire } from 'module';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { getHomeDir, getProfileDir } from './paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -34,9 +34,8 @@ Environment:
 \n`);
 }
 
-function getConfigDir() {
-  return process.env.AIRTABLE_USER_MCP_HOME || path.join(os.homedir(), '.airtable-user-mcp');
-}
+// Kept as a thin wrapper for call-site clarity; the single source of truth is paths.js.
+const getConfigDir = getHomeDir;
 
 export async function runCli(args) {
   const cmd = args[0];
@@ -98,8 +97,7 @@ export async function runCli(args) {
 
   if (cmd === 'logout') {
     const fs = await import('node:fs/promises');
-    const profileDir = process.env.AIRTABLE_PROFILE_DIR
-      || path.join(getConfigDir(), '.chrome-profile');
+    const profileDir = getProfileDir();
     try {
       await fs.rm(profileDir, { recursive: true, force: true });
       process.stdout.write('Browser session cleared.\n');

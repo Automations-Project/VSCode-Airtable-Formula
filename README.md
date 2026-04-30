@@ -130,20 +130,20 @@ This monorepo ships **two products** from one source tree:
 - **Airtable Login** — Credentials in OS keychain, browser-based auth with auto-refresh
 - **Dashboard** — React webview with Overview, Setup, and Settings tabs
 
-<!-- TODO: Replace with actual screenshot -->
-<!-- <p align="center"><img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/screenshot-dashboard.png" alt="Dashboard Screenshot" width="700" /></p> -->
 
-### MCP Server (30 Tools)
+### MCP Server (52 Tools)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
 | Category | Tools | Highlights |
 |:---------|:-----:|:-----------|
-| **Schema Read** | 5 | Full schema inspection — bases, tables, fields, views |
-| **Field Management** | 8 | Create formula / rollup / lookup / count fields, validate formulas |
-| **View Configuration** | 11 | Filters, sorts, grouping, column visibility, row height |
-| **Field Metadata** | 1 | Set or update field descriptions |
-| **Extension Management** | 5 | Create, install, enable/disable, rename, remove extensions |
+| **Schema Read** | 8 | Full schema inspection — bases, tables, fields, views, sidebar sections |
+| **Table Management** | 3 | create / rename / delete tables |
+| **Field Management** | 8 | Create formula / rollup / lookup / count fields, validate formulas, update descriptions, delete |
+| **View Configuration** | 20 | Filters, sorts, grouping, columns, freezing, row height, covers, color rules, calendar dates, create / duplicate / rename / delete |
+| **Sidebar Sections** | 4 | Create, rename, move-into-section, delete (auto-promotes contained views to ungrouped) |
+| **Form Metadata** | 2 | Description, redirect URL, attribution, copy-to-respondent, branding (legacy form views) |
+| **Extension Management** | 7 | Create, install, enable/disable, rename, duplicate, remove extensions |
 
 See the full tool reference in [`packages/mcp-server/README.md`](packages/mcp-server/README.md).
 

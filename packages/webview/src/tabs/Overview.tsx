@@ -79,7 +79,7 @@ export function Overview() {
           <div className="title">Controls</div>
         </div>
         <div className="stack stack-sm">
-          <div className="action-card" onClick={refresh}>
+          <button type="button" className="action-card" onClick={refresh}>
             <div className="icon-badge icon-badge-blue">
               <RefreshCw size={13} />
             </div>
@@ -87,8 +87,8 @@ export function Overview() {
               <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Refresh state</div>
               <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Re-scan IDEs and update dashboard</div>
             </div>
-          </div>
-          <div className="action-card" onClick={setupAll}>
+          </button>
+          <button type="button" className="action-card" onClick={setupAll}>
             <div className="icon-badge icon-badge-green">
               <Zap size={13} />
             </div>
@@ -96,8 +96,8 @@ export function Overview() {
               <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Setup all IDEs</div>
               <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Configure MCP and AI files in all detected IDEs</div>
             </div>
-          </div>
-          <div className="action-card" onClick={() => setTab('setup')}>
+          </button>
+          <button type="button" className="action-card" onClick={() => setTab('setup')}>
             <div className="icon-badge icon-badge-pink">
               <Sparkles size={13} />
             </div>
@@ -105,10 +105,10 @@ export function Overview() {
               <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Install AI files</div>
               <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Manage skills, rules, workflows per IDE</div>
             </div>
-          </div>
+          </button>
           {auth.status === 'chrome-missing' && !downloading && (
             <>
-              <div className="action-card" onClick={installBrowser} style={{ cursor: 'pointer' }}>
+              <button type="button" className="action-card" onClick={installBrowser}>
                 <div className="icon-badge icon-badge-blue">
                   <Download size={13} />
                 </div>
@@ -118,7 +118,7 @@ export function Overview() {
                     One-time ~170 MB download into extension storage — no system Chrome needed
                   </div>
                 </div>
-              </div>
+              </button>
               <a
                 className="action-card"
                 href="https://www.google.com/chrome/"
@@ -160,7 +160,7 @@ export function Overview() {
             </div>
           )}
           {auth.status !== 'valid' && auth.status !== 'chrome-missing' && auth.hasCredentials && (
-            <div className="action-card" onClick={login}>
+            <button type="button" className="action-card" onClick={login}>
               <div className="icon-badge icon-badge-green">
                 <LogIn size={13} />
               </div>
@@ -170,10 +170,10 @@ export function Overview() {
                   {auth.status === 'expired' ? 'Session expired — click to re-login' : 'Authenticate for MCP access'}
                 </div>
               </div>
-            </div>
+            </button>
           )}
           {!auth.hasCredentials && (
-            <div className="action-card" onClick={() => setTab('settings')}>
+            <button type="button" className="action-card" onClick={() => setTab('settings')}>
               <div className="icon-badge icon-badge-blue">
                 <LogIn size={13} />
               </div>
@@ -181,7 +181,7 @@ export function Overview() {
                 <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>Set Airtable credentials</div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>Save login details in Settings to enable auto-refresh</div>
               </div>
-            </div>
+            </button>
           )}
         </div>
       </div>

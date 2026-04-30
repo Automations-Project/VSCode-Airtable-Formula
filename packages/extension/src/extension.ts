@@ -22,7 +22,7 @@ import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES 
 // These must mirror the ToolProfileName / ToolCategories definitions in
 // packages/shared/src/types.ts.
 type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
-type LocalToolCategoryKey = 'read' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
+type LocalToolCategoryKey = 'read' | 'tableWrite' | 'tableDestructive' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
 import { getSettings, updateSetting } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { installAiFiles } from './skills/installer.js';
@@ -51,8 +51,7 @@ interface MinifyOptions {
 
 interface ExtensionSettings {
     scriptRoot?: string;
-    beautifierVersion?: 'v1' | 'v2';
-    minifierVersion?: 'v1' | 'v2';
+    formatterVersion?: 'v1' | 'v2';
     beautify?: {
         style?: BeautifyOptions['style'];
         indentSize?: number;
@@ -538,14 +537,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand('airtable-formula.toggleToolCategory', async () => {
             const settingsCategoryKeys: LocalToolCategoryKey[] = [
-                'read', 'fieldWrite', 'fieldDestructive', 'viewWrite', 'viewDestructive', 'extension'
+                'read', 'tableWrite', 'tableDestructive', 'fieldWrite', 'fieldDestructive', 'viewWrite', 'viewDestructive', 'extension'
             ];
-            // Map settings-side key → on-disk (file-format) category key
+            // Map settings-side key → on-disk (file-format) category key used by
+            // TOOL_CATEGORIES values and CATEGORY_LABELS keys.
             const fileKeyBySettingsKey: Record<LocalToolCategoryKey, string> = {
                 read:             'read',
-                fieldWrite:       'fieldWrite',
+                tableWrite:       'table-write',
+                tableDestructive: 'table-destructive',
+                fieldWrite:       'field-write',
                 fieldDestructive: 'field-destructive',
-                viewWrite:        'viewWrite',
+                viewWrite:        'view-write',
                 viewDestructive:  'view-destructive',
                 extension:        'extension',
             };
@@ -739,12 +741,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 export function deactivate(): void {}
 
 // ------------------ Helpers ------------------
+// Reads `formula.formatterVersion`, falling back to legacy `beautifierVersion` /
+// `minifierVersion` when set. Legacy keys are no longer contributed in the
+// manifest but older user/workspace settings may still reference them.
+function resolveFormatterVersion(cfg: vscode.WorkspaceConfiguration): 'v1' | 'v2' {
+    const unified = cfg.get<'v1' | 'v2'>('formula.formatterVersion');
+    if (unified === 'v1' || unified === 'v2') return unified;
+    const legacyBeautify = cfg.get<'v1' | 'v2'>('beautifierVersion');
+    if (legacyBeautify === 'v1' || legacyBeautify === 'v2') return legacyBeautify;
+    const legacyMinify = cfg.get<'v1' | 'v2'>('minifierVersion');
+    if (legacyMinify === 'v1' || legacyMinify === 'v2') return legacyMinify;
+    return 'v2';
+}
+
 function getConfig(document?: vscode.TextDocument): ExtensionSettings {
     const cfg = vscode.workspace.getConfiguration('airtableFormula', document);
     return {
         scriptRoot: cfg.get<string>('scriptRoot'),
-        beautifierVersion: cfg.get<'v1' | 'v2'>('beautifierVersion', 'v2'),
-        minifierVersion: cfg.get<'v1' | 'v2'>('minifierVersion', 'v2'),
+        formatterVersion: resolveFormatterVersion(cfg),
         beautify: {
             style: cfg.get('beautify.style'),
             indentSize: cfg.get('beautify.indentSize'),
@@ -801,7 +815,7 @@ function resolveScriptPath(document: vscode.TextDocument, fileName: string): str
 
 function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
     const settings = getConfig(document);
-    const version = settings.beautifierVersion || 'v2';
+    const version = settings.formatterVersion || 'v2';
 
     // Determine which file to load based on version setting
     const fileName = version === 'v2' ? 'formula-beautifier-v2.js' : 'formula-beautifier.js';
@@ -852,7 +866,7 @@ function getBeautifyFunction(document: vscode.TextDocument): BeautifyFn | null {
 
 function getMinifyFunction(document: vscode.TextDocument): MinifyFn | null {
     const settings = getConfig(document);
-    const version = settings.minifierVersion || 'v2';
+    const version = settings.formatterVersion || 'v2';
 
     // Determine which file to load based on version setting
     const fileName = version === 'v2' ? 'formula-minifier-v2.js' : 'formula-minifier.js';

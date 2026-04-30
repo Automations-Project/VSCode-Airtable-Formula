@@ -1,7 +1,19 @@
 import React from 'react';
-import type { IdeStatus } from '@shared/types.js';
+import type { IdeId, IdeStatus } from '@shared/types.js';
 import { Pill } from './Pill.js';
 import { IdeIcon } from './IdeIcon.js';
+
+// Install / docs URL per supported IDE, shown on undetected cards so the user
+// knows where to go. Kept local because it's presentation-only state.
+const IDE_DOCS_URL: Record<IdeId, string> = {
+  'cursor':         'https://cursor.com/download',
+  'windsurf':       'https://windsurf.com/download',
+  'windsurf-next':  'https://windsurf.com/download',
+  'claude-code':    'https://docs.claude.com/en/docs/claude-code/quickstart',
+  'claude-desktop': 'https://claude.ai/download',
+  'cline':          'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
+  'amp':            'https://ampcode.com/',
+};
 
 interface IdeCardProps { status: IdeStatus; onSetup: () => void; onUnconfigure: () => void; loading: boolean; }
 
@@ -96,9 +108,17 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
       )}
 
       {/* Not detected — docs link */}
-      {!status.detected && (
+      {!status.detected && IDE_DOCS_URL[status.ideId] && (
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="btn btn-ghost btn-sm">Docs</button>
+          <a
+            className="btn btn-ghost btn-sm"
+            href={IDE_DOCS_URL[status.ideId]}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: 'none' }}
+          >
+            Docs
+          </a>
         </div>
       )}
     </div>

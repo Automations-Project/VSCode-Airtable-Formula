@@ -149,7 +149,11 @@ export function Settings() {
             </span>
             <select
               className="select-input"
-              value={browserChoice?.executablePath ?? 'auto'}
+              value={
+                browserChoice?.mode === 'auto' && !browserChoice.executablePath
+                  ? 'auto'
+                  : browserChoice?.executablePath ?? 'auto'
+              }
               onChange={e => {
                 const val = e.target.value;
                 if (val === 'custom') {
@@ -169,6 +173,7 @@ export function Settings() {
                 }
               }}
             >
+              <option value="auto">Auto (pick best available)</option>
               {availableBrowsers.map(b => (
                 <option key={b.executablePath} value={b.executablePath}>
                   {b.label}{b.downloaded ? ' (bundled)' : ''}
@@ -254,7 +259,7 @@ export function Settings() {
           )}
 
           {!isManual && !showCreds && (
-            <div className="action-card" onClick={() => setShowCreds(true)} style={{ cursor: 'pointer' }}>
+            <button type="button" className="action-card" onClick={() => setShowCreds(true)}>
               <div className="icon-badge icon-badge-blue">
                 <Key size={13} />
               </div>
@@ -266,7 +271,7 @@ export function Settings() {
                   Email, password, and optional TOTP secret
                 </div>
               </div>
-            </div>
+            </button>
           )}
 
           {!isManual && showCreds && (
@@ -348,24 +353,24 @@ export function Settings() {
           )}
 
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <div className="action-card" onClick={isBusy ? undefined : (isManual ? manualLogin : login)} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
+            <button type="button" className="action-card" onClick={isManual ? manualLogin : login} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-green" style={{ width: 22, height: 22 }}>
                 <LogIn size={11} />
               </div>
               <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>{isManual ? 'Login in Browser' : 'Login'}</span>
-            </div>
-            <div className="action-card" onClick={isBusy ? undefined : status} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
+            </button>
+            <button type="button" className="action-card" onClick={status} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
                 <RefreshCw size={11} />
               </div>
               <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Check</span>
-            </div>
-            <div className="action-card" onClick={isBusy ? undefined : logout} style={{ flex: 1, minWidth: 100, cursor: isBusy ? 'default' : 'pointer', opacity: isBusy ? 0.5 : 1 }}>
+            </button>
+            <button type="button" className="action-card" onClick={logout} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-pink" style={{ width: 22, height: 22 }}>
                 <LogOut size={11} />
               </div>
               <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Logout</span>
-            </div>
+            </button>
           </div>
         </div>
       </div>
@@ -563,7 +568,7 @@ export function Settings() {
             </div>
           )}
 
-          <div className="action-card" onClick={() => sendToExtension({ type: 'action:openToolConfig', id: 'open-tool-config' })} style={{ cursor: 'pointer' }}>
+          <button type="button" className="action-card" onClick={() => sendToExtension({ type: 'action:openToolConfig', id: 'open-tool-config' })}>
             <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
               <FileJson size={11} />
             </div>
@@ -573,7 +578,7 @@ export function Settings() {
                 Raw config at ~/.airtable-user-mcp/tools-config.json
               </div>
             </div>
-          </div>
+          </button>
         </div>
       </div>
 

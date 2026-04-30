@@ -72,8 +72,8 @@ async function main() {
   const email = process.env.AIRTABLE_EMAIL;
   const password = process.env.AIRTABLE_PASSWORD;
   const otpSecret = process.env.AIRTABLE_OTP_SECRET || null;
-  const profileDir = process.env.AIRTABLE_PROFILE_DIR
-    || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
+  const { getProfileDir } = await import('./paths.js');
+  const profileDir = getProfileDir();
   const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
   const browserPath    = process.env.AIRTABLE_BROWSER_PATH || undefined;
 

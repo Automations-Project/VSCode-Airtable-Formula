@@ -90,7 +90,9 @@ function resolveScriptPath(target: ConfigTarget, fileName: string, scriptRoot?: 
 function getBeautifyFunctionWithStyle(target: ConfigTarget, style: string): BeautifyFn | null {
     const scope = target instanceof vscode.Uri ? target : target.uri;
     const config = vscode.workspace.getConfiguration('airtableFormula', scope);
-    const version = config.get<string>('beautifierVersion') || 'v2';
+    const version = config.get<string>('formula.formatterVersion')
+        ?? config.get<string>('beautifierVersion')
+        ?? 'v2';
     const scriptRoot = config.get<string>('scriptRoot');
     
     const fileName = version === 'v2' ? 'formula-beautifier-v2.js' : 'formula-beautifier.js';

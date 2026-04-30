@@ -87,7 +87,9 @@ function resolveScriptPath(target: ConfigTarget, fileName: string, scriptRoot?: 
 function getMinifyFunctionWithLevel(target: ConfigTarget, level: string): MinifyFn | null {
     const scope = target instanceof vscode.Uri ? target : target.uri;
     const config = vscode.workspace.getConfiguration('airtableFormula', scope);
-    const version = config.get<string>('minifierVersion') || 'v2';
+    const version = config.get<string>('formula.formatterVersion')
+        ?? config.get<string>('minifierVersion')
+        ?? 'v2';
     const scriptRoot = config.get<string>('scriptRoot');
     
     const fileName = version === 'v2' ? 'formula-minifier-v2.js' : 'formula-minifier.js';

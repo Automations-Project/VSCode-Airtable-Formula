@@ -96,8 +96,13 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
   background: rgba(255,255,255,0.03); cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
+  /* Browser resets for when .action-card is a <button> or <a> element */
+  font: inherit; color: inherit; text-align: left; text-decoration: none;
+  width: 100%; box-sizing: border-box;
 }
 .action-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+.action-card:focus-visible { outline: 2px solid var(--at-blue); outline-offset: 2px; }
+.action-card[disabled], .action-card[aria-disabled="true"] { cursor: default; }
 
 /* Icon Badges */
 .icon-badge {

@@ -6,6 +6,18 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed (Audit Round 3)
+- **Formatter version setting was inert** — Dashboard's "Formatter version" dropdown now actually switches engines. Extension consolidated on `airtableFormula.formula.formatterVersion` and reads this key from all four load sites; legacy `beautifierVersion` / `minifierVersion` remain as fallback for user settings migrated from prior versions
+- **Browser-choice changes didn't propagate to IDE MCP configs** — Selecting a different browser (or picking a custom path) now re-writes the MCP entry for every already-configured IDE, so the new `AIRTABLE_BROWSER_CHANNEL` / `AIRTABLE_BROWSER_PATH` env vars take effect immediately instead of staying stale until the next Setup
+- **Toggle MCP Tool Category command couldn't toggle table categories** — Added `tableWrite` and `tableDestructive` to the command palette quick-pick; also fixed mis-mapped `fieldWrite` / `viewWrite` file keys that were breaking the label and tool-count display for those rows
+- **Formatter commands missing from command palette** — `beautify`, `minify`, `beautifyWithStyle`, `minifyWithLevel`, and `formatWithPreset` are now contributed in `package.json`, with `.formula` language enablement. `beautifyFile` / `minifyFile` added to the explorer context menu for `.formula` files
+- **Webview action cards weren't keyboard-accessible** — All clickable `.action-card` divs are now `<button>` elements (or proper `<a>` for links); added `:focus-visible` outline and button resets so styling is preserved
+- **Browser select had no way back to Auto** — Added an "Auto (pick best available)" option to the Settings browser dropdown
+- **Dead "Docs" button on undetected IDE cards** — Now links to each IDE's install/docs URL (Cursor, Windsurf, Claude Code/Desktop, Cline, Amp)
+- **`AIRTABLE_USER_MCP_HOME` advertised but not honored** — Introduced `packages/mcp-server/src/paths.js` as the single source of truth; `auth.js`, `tool-config.js`, `health-check.js`, `login.js`, `login-runner.js`, `manual-login-runner.js`, and `cli.js` all read config and profile paths through it so the env var works everywhere, not just in the CLI `status` / `doctor` commands
+- **CI npm-pack smoke masked failures** — Removed `|| true` so `npm pack --dry-run` failures (missing files, malformed package.json) actually fail the job; switched to `set -euo pipefail` and a workspace-relative log file instead of `/tmp/`
+- **README screenshot TODOs** — Removed placeholder comments in the root and mcp-server READMEs
+
 ### Fixed (Audit Round 2)
 - **Incomplete URL injection guard** — `renameTable`, `deleteTable`, `createView`, `updateFieldConfig`, and `renameField` now validate Airtable IDs before URL construction (previously only early resolvers caught the issue)
 - **Auth logout timer leak** — `AuthManager.logout()` now stops the auto-refresh timer before wiping credentials, eliminating ghost browser launches against a cleared profile

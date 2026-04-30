@@ -15,10 +15,9 @@
  *   { "ok": false, "error": "..." }
  */
 import path from 'path';
-import os from 'os';
+import { getProfileDir } from './paths.js';
 
-const profileDir = process.env.AIRTABLE_PROFILE_DIR
-  || path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
+const profileDir = getProfileDir();
 const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
 const browserPath = process.env.AIRTABLE_BROWSER_PATH || undefined;
 

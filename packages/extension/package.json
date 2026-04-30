@@ -157,6 +157,46 @@
         "command": "airtable-formula.debug.export",
         "title": "Airtable Formula: Export Debug Log",
         "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.beautify",
+        "title": "Airtable Formula: Beautify Formula",
+        "category": "Airtable Formula",
+        "enablement": "editorLangId == airtable-formula"
+      },
+      {
+        "command": "airtable-formula.minify",
+        "title": "Airtable Formula: Minify Formula",
+        "category": "Airtable Formula",
+        "enablement": "editorLangId == airtable-formula"
+      },
+      {
+        "command": "airtable-formula.beautifyWithStyle",
+        "title": "Airtable Formula: Beautify Formula (Pick Style…)",
+        "category": "Airtable Formula",
+        "enablement": "editorLangId == airtable-formula"
+      },
+      {
+        "command": "airtable-formula.minifyWithLevel",
+        "title": "Airtable Formula: Minify Formula (Pick Level…)",
+        "category": "Airtable Formula",
+        "enablement": "editorLangId == airtable-formula"
+      },
+      {
+        "command": "airtable-formula.formatWithPreset",
+        "title": "Airtable Formula: Format with Preset…",
+        "category": "Airtable Formula",
+        "enablement": "editorLangId == airtable-formula"
+      },
+      {
+        "command": "airtable-formula.beautifyFile",
+        "title": "Beautify .formula File",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.minifyFile",
+        "title": "Minify .formula File",
+        "category": "Airtable Formula"
       }
     ],
     "viewsContainers": {
@@ -183,6 +223,28 @@
           "command": "airtable-formula.refreshStatus",
           "when": "view == airtable-formula.dashboard",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "airtable-formula.beautifyFile",
+          "when": "false"
+        },
+        {
+          "command": "airtable-formula.minifyFile",
+          "when": "false"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "airtable-formula.beautifyFile",
+          "when": "resourceExtname == .formula",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "airtable-formula.minifyFile",
+          "when": "resourceExtname == .formula",
+          "group": "7_modification@2"
         }
       ]
     },
