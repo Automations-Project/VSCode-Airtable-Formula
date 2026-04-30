@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { mergeServerEntry, removeServerEntry, getNestedKey, setNestedKey } from '../auto-config/ide-detection.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { mergeServerEntry, removeServerEntry, getNestedKey, setNestedKey, writeConfigAtomic } from '../auto-config/ide-detection.js';
 
 // Mock vscode before importing modules that depend on it
 vi.mock('vscode', () => ({
@@ -90,5 +93,77 @@ describe('getNestedKey / setNestedKey', () => {
     const obj = {};
     setNestedKey(obj, 'a.b.c', 99);
     expect((obj as any).a.b.c).toBe(99);
+  });
+});
+
+// ─── H10 — writeConfigAtomic uses unique tmp paths ──────────────────────────
+describe('writeConfigAtomic (H10)', () => {
+  const sandbox = path.join(os.tmpdir(), 'airtable-atomic-' + Date.now());
+
+  beforeEach(() => {
+    fs.mkdirSync(sandbox, { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it('writes a fresh config file', async () => {
+    const target = path.join(sandbox, 'config.json');
+    await writeConfigAtomic(target, { foo: 'bar' });
+    expect(JSON.parse(fs.readFileSync(target, 'utf8'))).toEqual({ foo: 'bar' });
+  });
+
+  it('overwrites an existing file atomically', async () => {
+    const target = path.join(sandbox, 'config.json');
+    fs.writeFileSync(target, '{"old": true}');
+    await writeConfigAtomic(target, { new: true });
+    expect(JSON.parse(fs.readFileSync(target, 'utf8'))).toEqual({ new: true });
+  });
+
+  it('concurrent writes never corrupt the target with interleaved output', async () => {
+    const target = path.join(sandbox, 'config.json');
+    // Before the H10 fix the two writes would share the same `.tmp` suffix
+    // and one could truncate the other's output — the target could end up
+    // with partial / mixed bytes. With unique tmp paths that can no longer
+    // happen.
+    //
+    // Note: on Windows, concurrent rename() onto the same target can fail
+    // with EPERM (one wins, the loser sees "file in use"). That's a Windows
+    // limitation, not an H10 regression; we verify the invariant "target
+    // ends up with ONE writer's payload, never a corrupted blob" via
+    // allSettled rather than Promise.all.
+    const results = await Promise.allSettled([
+      writeConfigAtomic(target, { writer: 'a' }),
+      writeConfigAtomic(target, { writer: 'b' }),
+    ]);
+    // At least one writer must have succeeded.
+    expect(results.some(r => r.status === 'fulfilled')).toBe(true);
+
+    const final = JSON.parse(fs.readFileSync(target, 'utf8'));
+    expect(['a', 'b']).toContain(final.writer);
+
+    // No leftover tmp files should remain in the sandbox — the loser must
+    // clean up its tmp on failure (the catch block in writeConfigAtomic).
+    const lingering = fs.readdirSync(sandbox).filter(f => f.endsWith('.tmp'));
+    expect(lingering).toEqual([]);
+  });
+
+  it('cleans up the tmp file when the rename fails', async () => {
+    // Point at a target whose parent directory is actually a FILE, so mkdir
+    // succeeds for the parent (same dir) but the subsequent rename can't
+    // place the file there. Simplest reproducer: mark the target name as a
+    // directory so rename clashes.
+    const target = path.join(sandbox, 'target');
+    fs.mkdirSync(target, { recursive: true });
+
+    // rename(tmp, target) should fail because `target` is a non-empty dir...
+    // Make it non-empty to guarantee the EISDIR/EEXIST rename error.
+    fs.writeFileSync(path.join(target, 'sentinel'), 'x');
+
+    await expect(writeConfigAtomic(target, { x: 1 })).rejects.toThrow();
+
+    // The sandbox must not contain any lingering .tmp files.
+    const lingering = fs.readdirSync(sandbox).filter(f => f.endsWith('.tmp'));
+    expect(lingering).toEqual([]);
   });
 });

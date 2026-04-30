@@ -5,10 +5,11 @@
  * enable/disable state. Persists config to ~/.airtable-user-mcp/tools-config.json.
  * Sends tools/list_changed notifications when the active tool set changes.
  */
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 // ─── Tool Categories ──────────────────────────────────────────
 
@@ -147,9 +148,24 @@ export class ToolConfigManager {
   async save() {
     await mkdir(CONFIG_DIR, { recursive: true });
     this._selfWrite = true;
-    await writeFile(CONFIG_FILE, JSON.stringify(this._config, null, 2), 'utf8');
-    // Reset after a short delay so the watcher ignores our own write
-    setTimeout(() => { this._selfWrite = false; }, 200);
+    // Atomic write: stage to a unique temp file then rename over the target.
+    // A crash mid-write leaves the previous config intact rather than an empty
+    // / truncated file that would hydrate as defaults on next boot.
+    const tmp = `${CONFIG_FILE}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      try {
+        await writeFile(tmp, JSON.stringify(this._config, null, 2), 'utf8');
+        await rename(tmp, CONFIG_FILE);
+      } catch (err) {
+        // Best-effort cleanup — rename may have happened before a later failure
+        await unlink(tmp).catch(() => {});
+        throw err;
+      }
+    } finally {
+      // Always schedule the reset — otherwise a mid-write failure would leave
+      // _selfWrite stuck at true and the watcher would ignore external edits.
+      setTimeout(() => { this._selfWrite = false; }, 200);
+    }
   }
 
   // ── Profile queries ──

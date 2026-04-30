@@ -7,7 +7,11 @@ import { AirtableFormulaCompletionProvider } from './completions';
 import { AirtableFormulaHoverProvider } from './hover';
 import { AirtableFormulaSignatureHelpProvider } from './signature';
 import { AirtableFormulaCodeActionProvider } from './codeActions';
-import { registerSkillCommands, installSkills } from './skills/skillInstaller';
+// Skill install/uninstall is now driven exclusively through `installAiFiles`
+// from `./skills/installer.js` (invoked by the dashboard and by the
+// `airtable-formula.installAISkills` command below). The legacy detectIDE()
+// path in `./skills/skillInstaller.ts` has been removed — it was running in
+// parallel with the dashboard path with divergent template content.
 import { DashboardProvider } from './webview/DashboardProvider.js';
 import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
@@ -66,6 +70,29 @@ type MinifyFn = (text: string) => string;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const manualTestLogPath = process.env.AIRTABLE_FORMULA_MANUAL_TEST_LOG;
+    // Scrub common secret patterns before they reach disk. The mirror can
+    // capture anything the extension / MCP server prints, so defense-in-depth
+    // matters even though the feature is intended for local CI runs.
+    const SECRET_PATTERNS: RegExp[] = [
+        /(secretSocketId[=:"\s]+)[A-Za-z0-9._-]+/gi,
+        /(_csrf[=:"\s]+)[A-Za-z0-9._-]+/gi,
+        /(csrfToken[=:"\s]+)[A-Za-z0-9._-]+/gi,
+        /(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi,
+        /(authorization[=:"\s]+)[A-Za-z0-9._~+/=-]+/gi,
+        /(password[=:"\s]+)\S+/gi,
+        /(AIRTABLE_PASSWORD[=:"\s]+)\S+/gi,
+        /(AIRTABLE_OTP_SECRET[=:"\s]+)\S+/gi,
+        /(otpSecret[=:"\s]+)\S+/gi,
+        /(set-cookie:?\s*)[^\r\n]+/gi,
+        /(cookie:?\s*)[^\r\n]+/gi,
+    ];
+    const redactManualTestString = (s: string): string => {
+        let out = s;
+        for (const re of SECRET_PATTERNS) {
+            out = out.replace(re, '$1[REDACTED]');
+        }
+        return out;
+    };
     const manualTestWrite = (level: 'log' | 'warn' | 'error', ...args: unknown[]) => {
         if (!manualTestLogPath) {
             return;
@@ -85,7 +112,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     return String(a);
                 }
             }).join(' ');
-            fs.appendFileSync(manualTestLogPath, `[${ts}] [${level}] ${msg}\n`, 'utf8');
+            fs.appendFileSync(manualTestLogPath, `[${ts}] [${level}] ${redactManualTestString(msg)}\n`, 'utf8');
         } catch {
         }
     };
@@ -133,9 +160,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // ── Formula features (existing, unchanged) ──────────────────────────
 
-    // Register AI skill commands and auto-install skills
-    registerSkillCommands(context);
-    installSkills(false); // Only install if not already present
+    // Auto-install AI skills into detected IDEs on activation (fire-and-forget).
+    // The first-launch block at the bottom of activate() handles the initial
+    // installation when `settings.ai.autoInstallFiles` is enabled; this extra
+    // pass is a safety net for re-activations where a user added a new IDE
+    // without triggering first-launch.
+    if (getSettings().ai.autoInstallFiles) {
+        void (async () => {
+            try {
+                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+                const statuses = await getAllIdeStatuses();
+                await Promise.all(
+                    statuses
+                        .filter(s => s.detected)
+                        .map(s => installAiFiles(s.ideId, workspaceRoot, false, getSettings().ai.includeAgents)),
+                );
+            } catch (err) {
+                console.warn('[AirtableFormula] Skill auto-install failed:', err);
+            }
+        })();
+    }
 
     // Initialize diagnostics provider
     const diagnosticsProvider = new AirtableFormulaDiagnosticsProvider();

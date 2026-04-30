@@ -826,4 +826,51 @@ describe('AirtableClient', () => {
       assert.ok(result.rawDependencyGraph);
     });
   });
+
+  describe('Airtable ID validation (defense-in-depth)', () => {
+    // These tests guard against URL-injection regressions. Every client
+    // method that interpolates an ID into a URL must validate it up-front.
+
+    it('renameTable rejects a malformed tableId', async () => {
+      await assert.rejects(
+        () => client.renameTable('appXXX', '../../evil', 'NewName'),
+        { message: /Invalid tableId/ },
+      );
+    });
+
+    it('deleteTable rejects a malformed tableId', async () => {
+      await assert.rejects(
+        () => client.deleteTable('appXXX', 'NOT_AN_ID', 'Tasks'),
+        { message: /Invalid tableId/ },
+      );
+    });
+
+    it('createView rejects a malformed tableId', async () => {
+      await assert.rejects(
+        () => client.createView('appXXX', 'not-a-tbl-id', { name: 'X' }),
+        { message: /Invalid tableId/ },
+      );
+    });
+
+    it('updateFieldConfig rejects a malformed columnId', async () => {
+      await assert.rejects(
+        () => client.updateFieldConfig('appXXX', '../evil/col', { type: 'text' }),
+        { message: /Invalid columnId/ },
+      );
+    });
+
+    it('renameField rejects a malformed columnId', async () => {
+      await assert.rejects(
+        () => client.renameField('appXXX', 'NOT_FLD', 'X'),
+        { message: /Invalid columnId/ },
+      );
+    });
+
+    it('renameTable rejects a malformed appId', async () => {
+      await assert.rejects(
+        () => client.renameTable('../evil', 'tblAAA', 'X'),
+        { message: /Invalid appId/ },
+      );
+    });
+  });
 });

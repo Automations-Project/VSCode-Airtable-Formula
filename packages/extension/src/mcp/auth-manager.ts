@@ -205,6 +205,10 @@ export class AuthManager implements vscode.Disposable {
   }
 
   async logout(): Promise<void> {
+    // Stop the refresh timer first so it can't race against the profile wipe
+    // and immediately re-launch the browser with stale (now-deleted) state.
+    this.stopAutoRefresh();
+
     await this.secrets.delete(SECRET_EMAIL);
     await this.secrets.delete(SECRET_PASSWORD);
     await this.secrets.delete(SECRET_OTP_SECRET);
@@ -500,13 +504,22 @@ export class AuthManager implements vscode.Disposable {
         }
       });
 
+      let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
       const timeout = setTimeout(() => {
         child.kill('SIGTERM');
+        // If the process ignores SIGTERM (hung browser, native patchright
+        // wait, etc.), escalate to SIGKILL so we don't leave a zombie.
+        sigkillTimer = setTimeout(() => {
+          try {
+            if (!child.killed) child.kill('SIGKILL');
+          } catch { /* already gone */ }
+        }, 5_000);
         reject(new Error(`${scriptName} timed out after ${Math.round(timeoutMs / 1000)}s`));
       }, timeoutMs);
 
       child.on('close', (code) => {
         clearTimeout(timeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
         try {
           // Parse the last line of stdout as JSON
           const lines = stdout.trim().split('\n').filter(Boolean);
@@ -523,6 +536,7 @@ export class AuthManager implements vscode.Disposable {
 
       child.on('error', (err) => {
         clearTimeout(timeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
         reject(err);
       });
     });

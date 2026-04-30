@@ -179,6 +179,16 @@ function summarizeFieldDependencies(details, fieldId) {
  *   view/{id}/showOrHideAllColumns — toggle all columns visibility
  *   table/{id}/getUnsavedColumnConfigResultType — validate formula before saving
  */
+
+/** Valid Airtable ID format: 3-letter prefix + alphanumeric. Prevents path traversal. */
+const AIRTABLE_ID_RE = /^[a-z]{3}[A-Za-z0-9]+$/;
+
+function assertAirtableId(id, label = 'id') {
+  if (typeof id !== 'string' || !AIRTABLE_ID_RE.test(id)) {
+    throw new Error(`Invalid ${label}: "${id}". Expected an Airtable-style ID (e.g., appXXX, tblXXX, fldXXX).`);
+  }
+}
+
 export class AirtableClient {
   constructor(auth) {
     this.auth = auth;
@@ -188,6 +198,7 @@ export class AirtableClient {
   // ─── Read Operations ──────────────────────────────────────────
 
   async getApplicationData(appId) {
+    assertAirtableId(appId, 'appId');
     const cached = this.cache.getFull(appId);
     if (cached) return cached;
 
@@ -211,6 +222,7 @@ export class AirtableClient {
   }
 
   async getScaffoldingData(appId) {
+    assertAirtableId(appId, 'appId');
     const cached = this.cache.getScaffolding(appId);
     if (cached) return cached;
 
@@ -239,19 +251,32 @@ export class AirtableClient {
   async resolveTable(appId, tableIdOrName) {
     const data = await this.getApplicationData(appId);
     const tables = data?.data?.tableSchemas || data?.data?.tables || [];
-    const table = tables.find(t =>
-      t.id === tableIdOrName || t.name === tableIdOrName
-    );
-    if (!table) {
-      const available = tables.map(t => `${t.name} (${t.id})`).join(', ');
-      throw new Error(`Table "${tableIdOrName}" not found. Available: ${available}`);
+
+    // Exact ID match is always unambiguous.
+    const byId = tables.find(t => t.id === tableIdOrName);
+    if (byId) return byId;
+
+    // Name lookup: collect all matches and reject ambiguous results instead
+    // of silently returning the first one.
+    const byName = tables.filter(t => t.name === tableIdOrName);
+    if (byName.length === 1) return byName[0];
+    if (byName.length > 1) {
+      const matches = byName.map(t => `${t.name} (${t.id})`).join(', ');
+      throw new Error(
+        `Ambiguous table name "${tableIdOrName}" \u2014 ${byName.length} tables share this name: ${matches}. ` +
+        `Use the table ID to disambiguate.`
+      );
     }
-    return table;
+
+    const available = tables.map(t => `${t.name} (${t.id})`).join(', ');
+    throw new Error(`Table "${tableIdOrName}" not found. Available: ${available}`);
   }
 
   async resolveField(appId, fieldId) {
     const data = await this.getApplicationData(appId);
     const tables = data?.data?.tableSchemas || data?.data?.tables || [];
+    // Field IDs are globally unique within a base, so an ID-based lookup can't
+    // be ambiguous. Return the first (and only) match.
     for (const table of tables) {
       const fields = table.columns || table.fields || [];
       const field = fields.find(f => f.id === fieldId);
@@ -285,6 +310,8 @@ export class AirtableClient {
    * Verified payload shape: { tableId, name, config: { type, typeOptions }, description?, activeViewId?, afterOverallColumnIndex?, origin? }
    */
   async createField(appId, tableId, fieldConfig) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
     const columnId = 'fld' + this._genRandomId();
     const url = `https://airtable.com/v0.3/column/${columnId}/create`;
 
@@ -324,6 +351,8 @@ export class AirtableClient {
    * NOT wrapped in { config: ... } — that's only for create.
    */
   async updateFieldConfig(appId, columnId, config) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(columnId, 'columnId');
     await this.resolveField(appId, columnId);
 
     const url = `https://airtable.com/v0.3/column/${columnId}/updateConfig`;
@@ -353,6 +382,8 @@ export class AirtableClient {
    * Payload: { name: "new name" }
    */
   async renameField(appId, columnId, newName) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(columnId, 'columnId');
     const { field } = await this.resolveField(appId, columnId);
     if (field.name === newName) {
       return { message: 'Field already has this name', fieldId: columnId, name: newName };
@@ -455,6 +486,8 @@ export class AirtableClient {
    * Returns { pass: boolean, resultType: string } or error details.
    */
   async validateFormula(appId, tableId, formulaText) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
     const url = `https://airtable.com/v0.3/table/${tableId}/getUnsavedColumnConfigResultType`;
     const payload = {
       config: {
@@ -489,6 +522,7 @@ export class AirtableClient {
    * Payload: { applicationId, name }
    */
   async createTable(appId, name) {
+    assertAirtableId(appId, 'appId');
     const tableId = 'tbl' + this._genRandomId();
     const url = `https://airtable.com/v0.3/table/${tableId}/create`;
 
@@ -512,6 +546,8 @@ export class AirtableClient {
    * Payload: { name }
    */
   async renameTable(appId, tableId, newName) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
     const { name } = await this._resolveTableById(appId, tableId);
     if (name === newName) {
       return { message: 'Table already has this name', tableId, name: newName };
@@ -538,6 +574,8 @@ export class AirtableClient {
    * Requires expectedName as a safety guard, matching delete_field's pattern.
    */
   async deleteTable(appId, tableId, expectedName) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
     const { name } = await this._resolveTableById(appId, tableId);
 
     if (name !== expectedName) {
@@ -582,6 +620,9 @@ export class AirtableClient {
    * Verified against captured traffic 2026-04-18 (appnnJC0PWnw1kVMF).
    */
   async readTableData(appId, tableId, viewId) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    assertAirtableId(viewId, 'viewId');
     const params = new URLSearchParams({
       stringifiedObjectParams: JSON.stringify({
         includeDataForViewIds: [viewId],
@@ -663,6 +704,8 @@ export class AirtableClient {
    * View types: "grid", "form", "kanban", "calendar", "gallery", "gantt", "levels" (list)
    */
   async createView(appId, tableId, viewConfig) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
     // Airtable requires copyFromViewId — resolve first view if not provided
     let copyFromViewId = viewConfig.copyFromViewId || null;
     if (!copyFromViewId) {
@@ -701,6 +744,9 @@ export class AirtableClient {
    * Uses view/create with copyMode: "duplicate".
    */
   async duplicateView(appId, tableId, sourceViewId, newName) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    assertAirtableId(sourceViewId, 'sourceViewId');
     const viewId = 'viw' + this._genRandomId();
     const url = `https://airtable.com/v0.3/view/${viewId}/create`;
 
@@ -732,6 +778,8 @@ export class AirtableClient {
    * Payload: { name: "...", origin: "viewName" }
    */
   async renameView(appId, viewId, newName) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/updateName`;
     const payload = { name: newName, origin: 'viewName' };
 
@@ -751,6 +799,8 @@ export class AirtableClient {
    * Real endpoint: /v0.3/view/{id}/destroy (empty payload)
    */
   async deleteView(appId, viewId) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/destroy`;
 
     const res = await this.auth.postForm(url, this._mutationParams({}, appId), appId);
@@ -769,6 +819,8 @@ export class AirtableClient {
    * Payload: { description: "..." }
    */
   async updateViewDescription(appId, viewId, description) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/updateDescription`;
     const payload = { description };
 
@@ -789,6 +841,8 @@ export class AirtableClient {
    * are auto-generated before sending.
    */
   async updateViewFilters(appId, viewId, filters) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     // Passing null / empty clears filters.
     let processedFilters = filters;
     if (filters && Array.isArray(filters.filterSet)) {
@@ -821,6 +875,8 @@ export class AirtableClient {
    * Maps field IDs to their desired column index positions.
    */
   async reorderViewFields(appId, viewId, fieldOrder) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/updateMultipleViewConfigs`;
     const payload = { targetOverallColumnIndicesById: fieldOrder };
 
@@ -838,6 +894,8 @@ export class AirtableClient {
    * Show or hide all columns in a view.
    */
   async showOrHideAllColumns(appId, viewId, visibility) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/showOrHideAllColumns`;
     const payload = { visibility };
 
@@ -856,6 +914,8 @@ export class AirtableClient {
    * Payload: { columnIds: ["fldXXX", ...], visibility: boolean }
    */
   async showOrHideColumns(appId, viewId, columnIds, visibility) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/showOrHideColumns`;
     const payload = { columnIds, visibility };
 
@@ -874,6 +934,8 @@ export class AirtableClient {
    * Payload: { sortObjs: [{ id, columnId, ascending }], shouldAutoSort: true }
    */
   async applySorts(appId, viewId, sortObjs) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/applySorts`;
     // Generate sort IDs if not provided
     const sorts = sortObjs.map(s => ({
@@ -898,6 +960,8 @@ export class AirtableClient {
    * Payload: { groupLevels: [{ id, columnId, order: "ascending"|"descending", emptyGroupState: "hidden"|"visible" }] }
    */
   async updateGroupLevels(appId, viewId, groupLevels) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/updateGroupLevels`;
     const levels = groupLevels.map(g => ({
       id: g.id || ('glv' + this._genRandomId()),
@@ -922,6 +986,8 @@ export class AirtableClient {
    * Payload: { rowHeight: "small"|"medium"|"large"|"xlarge" }
    */
   async updateRowHeight(appId, viewId, rowHeight) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
     const url = `https://airtable.com/v0.3/view/${viewId}/updateRowHeight`;
 
     const res = await this.auth.postForm(url, this._mutationParams({ rowHeight }, appId), appId);
@@ -941,6 +1007,8 @@ export class AirtableClient {
    * Real endpoint: /v0.3/column/{id}/updateDescription
    */
   async updateFieldDescription(appId, fieldId, description) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(fieldId, 'fieldId');
     const url = `https://airtable.com/v0.3/column/${fieldId}/updateDescription`;
 
     const res = await this.auth.postForm(url, this._mutationParams({ description }, appId), appId);
@@ -959,6 +1027,8 @@ export class AirtableClient {
    * Note: activeViewId is required — if not provided, resolves the first view in the table.
    */
   async duplicateField(appId, tableId, sourceFieldId, { duplicateCells = false, activeViewId = null } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(sourceFieldId, 'sourceFieldId');
     // activeViewId is required by Airtable — resolve if not provided
     if (!activeViewId) {
       const table = await this.resolveTable(appId, tableId);
@@ -997,6 +1067,7 @@ export class AirtableClient {
    * Payload: { name, applicationId, latestReleaseId }
    */
   async createBlock(appId, name, latestReleaseId) {
+    assertAirtableId(appId, 'appId');
     const blockId = 'blk' + this._genRandomId();
     const url = `https://airtable.com/v0.3/block/${blockId}/create`;
 
@@ -1022,6 +1093,7 @@ export class AirtableClient {
    * Endpoint: /v0.3/blockInstallationPage/{bipId}/create
    */
   async createBlockInstallationPage(appId, name) {
+    assertAirtableId(appId, 'appId');
     const pageId = 'bip' + this._genRandomId();
     const url = `https://airtable.com/v0.3/blockInstallationPage/${pageId}/create`;
 
@@ -1048,6 +1120,9 @@ export class AirtableClient {
    * Endpoint: /v0.3/blockInstallation/{bliId}/create
    */
   async installBlock(appId, blockId, pageId, name, { type = 'release' } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(blockId, 'blockId');
+    assertAirtableId(pageId, 'pageId');
     const installationId = 'bli' + this._genRandomId();
     const url = `https://airtable.com/v0.3/blockInstallation/${installationId}/create`;
 
@@ -1074,6 +1149,8 @@ export class AirtableClient {
    * Endpoint: /v0.3/blockInstallation/{bliId}/updateState
    */
   async updateBlockInstallationState(appId, installationId, state) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(installationId, 'installationId');
     const url = `https://airtable.com/v0.3/blockInstallation/${installationId}/updateState`;
 
     const res = await this.auth.postForm(url, this._mutationParams({ state }, appId), appId);
@@ -1091,6 +1168,8 @@ export class AirtableClient {
    * Endpoint: /v0.3/blockInstallation/{bliId}/updateName
    */
   async renameBlockInstallation(appId, installationId, name) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(installationId, 'installationId');
     const url = `https://airtable.com/v0.3/blockInstallation/${installationId}/updateName`;
 
     const res = await this.auth.postForm(url, this._mutationParams({ name }, appId), appId);
@@ -1108,6 +1187,9 @@ export class AirtableClient {
    * Endpoint: /v0.3/blockInstallation/{newBliId}/createAsClone
    */
   async duplicateBlockInstallation(appId, sourceInstallationId, pageId) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(sourceInstallationId, 'sourceInstallationId');
+    assertAirtableId(pageId, 'pageId');
     const installationId = 'bli' + this._genRandomId();
     const url = `https://airtable.com/v0.3/blockInstallation/${installationId}/createAsClone`;
 
@@ -1132,6 +1214,8 @@ export class AirtableClient {
    * Endpoint: /v0.3/blockInstallation/{bliId}/destroy
    */
   async removeBlockInstallation(appId, installationId) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(installationId, 'installationId');
     const url = `https://airtable.com/v0.3/blockInstallation/${installationId}/destroy`;
 
     const res = await this.auth.postForm(url, this._mutationParams({}, appId), appId);
@@ -1151,10 +1235,14 @@ export class AirtableClient {
   }
 
   _genRandomId() {
+    // Use crypto.randomBytes for uniform distribution and lower collision rate
+    // than Math.random(). `randomBytes` is already imported at the top of the file
+    // for generateFilterId().
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const bytes = randomBytes(14);
     let result = '';
     for (let i = 0; i < 14; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
+      result += chars[bytes[i] % chars.length];
     }
     return result;
   }

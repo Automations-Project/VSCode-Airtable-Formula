@@ -1,7 +1,15 @@
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { randomBytes } from 'node:crypto';
 import { trace } from './debug-tracer.js';
+
+/** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
+function genPageLoadId() {
+  // 10 bytes → ~13 base36 chars when converted as BigInt
+  const hex = randomBytes(10).toString('hex');
+  return 'pgl' + BigInt('0x' + hex).toString(36).slice(0, 13).padStart(13, '0');
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROFILE_DIR = process.env.AIRTABLE_PROFILE_DIR
@@ -47,12 +55,22 @@ export class AirtableAuth {
     this.userId = null;
     this.csrfToken = null;
 
-    // Request queue — serializes all browser-backed API calls
+    // Request queue — serializes all browser-backed API calls.
+    // Bounded so a runaway LLM loop cannot blow up memory even when the
+    // upstream semaphore lets thousands of tool calls through over time.
     this._queue = [];
     this._processing = false;
+    this._maxQueueSize = Number(process.env.AIRTABLE_MAX_AUTH_QUEUE) || 64;
 
-    // Per-app secretSocketId cache (captured from network traffic)
+    // Per-app secretSocketId cache (captured from network traffic).
+    // LRU-bounded so long-running servers with many bases don't grow this
+    // indefinitely.
     this._secretSocketIds = new Map();
+    this._maxSocketIdCache = 50;
+
+    // Reference to the page-level 'request' listener so we can detach it on
+    // _doInit's context-close step rather than leak it per session-recovery.
+    this._networkHandler = null;
 
     // Session recovery state
     this._recovering = false;
@@ -75,11 +93,16 @@ export class AirtableAuth {
   }
 
   async _doInit() {
-    // Close existing context if recovering
+    // Close existing context if recovering. Detach the prior network listener
+    // from the old page so we don't leak a handler per recovery cycle.
     if (this.context) {
+      if (this.page && this._networkHandler) {
+        try { this.page.removeListener('request', this._networkHandler); } catch { /* page may be dead */ }
+      }
       await this.context.close().catch(() => {});
       this.context = null;
       this.page = null;
+      this._networkHandler = null;
     }
 
     const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
@@ -99,22 +122,35 @@ export class AirtableAuth {
     const chromium = await getChromium();
     this.context = await chromium.launchPersistentContext(this.profileDir, launchOpts);
 
-    this.page = this.context.pages()[0] || await this.context.newPage();
+    // M5 — if anything after launchPersistentContext throws (page creation,
+    // navigation, CSRF extraction, session verification), close the context
+    // on the way out. Without this we'd leak a Chromium process per failed
+    // init, and subsequent init() calls can't resume cleanly.
+    try {
+      this.page = this.context.pages()[0] || await this.context.newPage();
 
-    // Intercept network traffic to capture secretSocketId
-    this._setupNetworkInterception();
+      // Intercept network traffic to capture secretSocketId
+      this._setupNetworkInterception();
 
-    // Navigate and wait for the app to be ready (not a blind timeout)
-    await this.page.goto('https://airtable.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await this._waitForAppReady();
+      // Navigate and wait for the app to be ready (not a blind timeout)
+      await this.page.goto('https://airtable.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this._waitForAppReady();
 
-    console.error('[auth] Page URL:', this.page.url());
+      console.error('[auth] Page URL:', this.page.url());
 
-    await this._extractCsrf();
-    await this._verifySession();
-    trace('auth', 'auth:csrf_captured', {
-      success: !!this.csrfToken,
-    });
+      await this._extractCsrf();
+      await this._verifySession();
+      trace('auth', 'auth:csrf_captured', {
+        success: !!this.csrfToken,
+      });
+    } catch (err) {
+      // Don't leak a running browser when init fails.
+      try { await this.context.close(); } catch { /* best-effort */ }
+      this.context = null;
+      this.page = null;
+      this._networkHandler = null;
+      throw err;
+    }
   }
 
   /**
@@ -150,7 +186,9 @@ export class AirtableAuth {
   // ─── Network Interception (secretSocketId capture) ───────────
 
   _setupNetworkInterception() {
-    this.page.on('request', (request) => {
+    // Store the handler so _doInit can removeListener on context close — this
+    // avoids stacking up a handler per session recovery.
+    this._networkHandler = (request) => {
       try {
         const url = request.url();
         // Capture secretSocketId from Airtable's internal requests
@@ -159,22 +197,40 @@ export class AirtableAuth {
           if (postData) {
             const socketIdMatch = postData.match(/secretSocketId[=:]([^&"]+)/);
             if (socketIdMatch) {
-              // Try to figure out which app this belongs to
+              // Only cache per exact appId. URLs with no app-id prefix are
+              // skipped — we refuse to store a "global" fallback because
+              // getSecretSocketId must never hand base B a socketId captured
+              // for base A.
               const appMatch = url.match(/(app[A-Za-z0-9]+)/);
-              const appId = appMatch ? appMatch[1] : '_global';
-              this._secretSocketIds.set(appId, decodeURIComponent(socketIdMatch[1]));
-              console.error(`[auth] Captured secretSocketId for ${appId}`);
+              if (appMatch) {
+                const appId = appMatch[1];
+                // LRU: refresh insertion order on write, evict oldest if over cap.
+                if (this._secretSocketIds.has(appId)) this._secretSocketIds.delete(appId);
+                this._secretSocketIds.set(appId, decodeURIComponent(socketIdMatch[1]));
+                if (this._secretSocketIds.size > this._maxSocketIdCache) {
+                  const oldest = this._secretSocketIds.keys().next().value;
+                  if (oldest !== undefined) this._secretSocketIds.delete(oldest);
+                }
+                console.error(`[auth] Captured secretSocketId for ${appId}`);
+              }
             }
           }
         }
       } catch {
         // Silently ignore interception errors
       }
-    });
+    };
+    this.page.on('request', this._networkHandler);
   }
 
   getSecretSocketId(appId) {
-    return this._secretSocketIds.get(appId) || this._secretSocketIds.get('_global') || null;
+    // Only return a socketId captured for this exact appId. A cross-app
+    // fallback was a correctness bug: a socketId captured from base A would
+    // get silently used for a mutation on base B. Better to return null and
+    // let Airtable respond with a retriable error than risk a cross-base
+    // signed call.
+    if (!appId) return null;
+    return this._secretSocketIds.get(appId) || null;
   }
 
   // ─── CSRF Extraction ─────────────────────────────────────────
@@ -241,6 +297,10 @@ export class AirtableAuth {
   /**
    * Attempt session recovery: close browser, relaunch, re-verify.
    * Only one recovery attempt at a time.
+   *
+   * Sets _initPromise atomically so that if a separate init() call arrives
+   * mid-recovery, it will await the SAME _doInit() rather than kick off its
+   * own Chromium launch.
    */
   async _recoverSession() {
     if (this._recovering) return;
@@ -248,8 +308,15 @@ export class AirtableAuth {
     try {
       console.error('[auth] Session expired. Attempting recovery...');
       this.isLoggedIn = false;
-      this._initPromise = null;
-      await this._doInit();
+      // Atomic assignment — init() observes this as already-in-progress and
+      // awaits the same promise, preventing a parallel _doInit().
+      const recovery = this._doInit();
+      this._initPromise = recovery;
+      try {
+        await recovery;
+      } finally {
+        this._initPromise = null;
+      }
       console.error('[auth] Session recovered successfully.');
     } finally {
       this._recovering = false;
@@ -261,8 +328,18 @@ export class AirtableAuth {
   /**
    * Enqueue a request. All browser-backed calls go through here to prevent
    * concurrent page.evaluate() calls from corrupting each other.
+   *
+   * H4 — the queue is bounded. When saturated we reject new calls rather than
+   * accept unbounded backlog; callers can surface this as a retry prompt to
+   * the LLM or drop the tool call gracefully.
    */
   _enqueue(fn) {
+    if (this._queue.length >= this._maxQueueSize) {
+      return Promise.reject(new Error(
+        `Auth queue saturated (${this._queue.length}/${this._maxQueueSize}). ` +
+        `Retry after in-flight browser calls drain, or set AIRTABLE_MAX_AUTH_QUEUE to raise the cap.`
+      ));
+    }
     return new Promise((resolve, reject) => {
       this._queue.push({ fn, resolve, reject });
       this._drain();
@@ -291,13 +368,29 @@ export class AirtableAuth {
     const url = urlPath.startsWith('http') ? urlPath : `https://airtable.com${urlPath}`;
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const csrfToken = this.csrfToken;
+    // Generate page-load-id Node-side — `Math.random()` inside page.evaluate
+    // is still not cryptographically strong and we can't reach node:crypto
+    // from the browser context.
+    const pageLoadId = genPageLoadId();
+
+    // H3 — per-evaluate timeout. Playwright has no built-in timeout on
+    // page.evaluate; a CDP-dead Chromium can hang forever. We race against
+    // a 15s timer and let _apiCall's catch trigger _recoverSession.
+    const EVAL_TIMEOUT_MS = 15_000;
+    const withTimeout = (promise) => Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error(`page.evaluate exceeded ${EVAL_TIMEOUT_MS / 1000}s; browser may be unresponsive`)),
+        EVAL_TIMEOUT_MS,
+      )),
+    ]);
 
     if (contentType === 'json') {
-      return this.page.evaluate(async ({ url, body, appId, timeZone }) => {
+      return withTimeout(this.page.evaluate(async ({ url, method, body, appId, timeZone, pageLoadId }) => {
         const headers = {
           'Content-Type': 'application/json',
           'x-airtable-inter-service-client': 'webClient',
-          'x-airtable-page-load-id': 'pgl' + Math.random().toString(36).substring(2, 15),
+          'x-airtable-page-load-id': pageLoadId,
           'x-requested-with': 'XMLHttpRequest',
           'x-user-locale': 'en',
           'x-time-zone': timeZone,
@@ -305,22 +398,24 @@ export class AirtableAuth {
         if (appId) headers['x-airtable-application-id'] = appId;
 
         try {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body),
-          });
+          // Honor caller's method — previously this was hardcoded to POST which
+          // silently broke any GET/PUT/PATCH JSON call.
+          const options = { method, headers };
+          if (body !== null && body !== undefined && method !== 'GET') {
+            options.body = JSON.stringify(body);
+          }
+          const res = await fetch(url, options);
           return { status: res.status, body: await res.text() };
         } catch (e) {
           return { status: 0, body: '', error: e.message };
         }
-      }, { url, body, appId, timeZone });
+      }, { url, method, body, appId, timeZone, pageLoadId }));
     }
 
-    return this.page.evaluate(async ({ url, method, body, appId, timeZone, csrfToken }) => {
+    return withTimeout(this.page.evaluate(async ({ url, method, body, appId, timeZone, csrfToken, pageLoadId }) => {
       const headers = {
         'x-airtable-inter-service-client': 'webClient',
-        'x-airtable-page-load-id': 'pgl' + Math.random().toString(36).substring(2, 15),
+        'x-airtable-page-load-id': pageLoadId,
         'x-requested-with': 'XMLHttpRequest',
         'x-user-locale': 'en',
         'x-time-zone': timeZone,
@@ -344,37 +439,59 @@ export class AirtableAuth {
       } catch (e) {
         return { status: 0, body: '', error: e.message };
       }
-    }, { url, method, body, appId, timeZone, csrfToken });
+    }, { url, method, body, appId, timeZone, csrfToken, pageLoadId }));
   }
 
-  // ─── Queued API Call (with session recovery) ──────────────────
+  // ─── Queued API Call (with session recovery & rate-limit backoff) ──────────────────
 
   async _apiCall(method, urlPath, body = null, appId = null, contentType = 'form') {
     return this._enqueue(async () => {
       await this.ensureLoggedIn();
 
-      let result;
-      try {
-        result = await this._rawApiCall(method, urlPath, body, appId, contentType);
-      } catch (evalError) {
-        // page.evaluate itself failed (browser crashed, context destroyed)
-        if (!this._recovering) {
-          console.error(`[auth] page.evaluate failed: ${evalError.message}. Recovering...`);
-          await this._recoverSession();
-          return this._rawApiCall(method, urlPath, body, appId, contentType);
+      const MAX_RETRIES = 3;
+      const HARD_TIMEOUT_MS = 30_000;
+      const deadline = Date.now() + HARD_TIMEOUT_MS;
+      let attempt = 0;
+      while (true) {
+        if (Date.now() > deadline) {
+          // Bail out rather than retry past the caller's patience budget.
+          // A hung _recoverSession or repeated 429s shouldn't stall the queue.
+          throw new Error(`API call exceeded ${HARD_TIMEOUT_MS / 1000}s wall-clock budget (method=${method}, url=${urlPath.slice(0, 60)}...)`);
         }
-        throw evalError;
-      }
+        let result;
+        try {
+          result = await this._rawApiCall(method, urlPath, body, appId, contentType);
+        } catch (evalError) {
+          // page.evaluate itself failed (browser crashed, context destroyed)
+          if (!this._recovering && attempt < MAX_RETRIES) {
+            console.error(`[auth] page.evaluate failed: ${evalError.message}. Recovering...`);
+            await this._recoverSession();
+            attempt++;
+            continue;
+          }
+          throw evalError;
+        }
 
-      // Session expired or network failure — attempt one recovery and retry
-      const needsRecovery = result.status === 401 || result.status === 403 || result.error;
-      if (needsRecovery && !this._recovering) {
-        console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering...`);
-        await this._recoverSession();
-        return this._rawApiCall(method, urlPath, body, appId, contentType);
-      }
+        // Rate limited — exponential backoff (429 = Too Many Requests, 503 = Service Unavailable)
+        if ((result.status === 429 || result.status === 503) && attempt < MAX_RETRIES) {
+          const delay = 500 * (2 ** attempt);
+          console.error(`[auth] Rate limited (${result.status}), retrying in ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          attempt++;
+          continue;
+        }
 
-      return result;
+        // Session expired or network failure — attempt one recovery and retry
+        const needsRecovery = result.status === 401 || result.status === 403 || result.error;
+        if (needsRecovery && !this._recovering && attempt < MAX_RETRIES) {
+          console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering...`);
+          await this._recoverSession();
+          attempt++;
+          continue;
+        }
+
+        return result;
+      }
     });
   }
 

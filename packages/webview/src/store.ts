@@ -34,7 +34,7 @@ interface Store extends DashboardState {
 
 const defaultSettings: SettingsSnapshot = {
   mcp:     {
-    autoConfigureOnInstall: false,
+    autoConfigureOnInstall: true,
     notifyOnUpdates:        true,
     toolProfile: {
       profile:      'safe-write',
@@ -48,7 +48,7 @@ const defaultSettings: SettingsSnapshot = {
     },
     serverSource: 'bundled' as const,
   },
-  ai:      { autoInstallFiles: false, includeAgents: false },
+  ai:      { autoInstallFiles: true, includeAgents: false },
   formula: { formatterVersion: 'v2' },
   auth:    { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' as const, browserChoice: undefined },
   debug:   { enabled: false, verboseHttp: false, bufferSize: 1000 },

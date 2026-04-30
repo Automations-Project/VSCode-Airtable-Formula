@@ -20,6 +20,13 @@ import { ToolConfigManager, TOOL_CATEGORIES, CATEGORY_LABELS, BUILTIN_PROFILES }
 import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const PKG_VERSION = require('../package.json').version;
 
 const auth = new AirtableAuth();
 const client = new AirtableClient(auth);
@@ -29,7 +36,7 @@ const server = new Server(
   {
     name: 'airtable-user-mcp',
     title: 'Airtable User MCP',
-    version: '2.2.0',
+    version: PKG_VERSION,
     description:
       'Manage Airtable bases with 35+ tools: schema inspection, table CRUD, ' +
       'field CRUD (formula, rollup, lookup, count, url, dateTime, email, phone), ' +
@@ -1268,6 +1275,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: [...enabledTools, MANAGE_TOOLS_DEF] };
 });
 
+// Cap on concurrent tool calls. All Airtable-bound calls funnel through the
+// auth queue (single browser context), but an aggressive LLM loop can still
+// queue thousands of requests and blow up memory. This limit rejects new calls
+// cleanly when the backlog is saturated.
+const _rawCap = Number(process.env.AIRTABLE_MAX_CONCURRENT_TOOLS);
+// Clamp: a broken env var ("abc" → NaN, "0" → rejects all calls) must not
+// break the server. Minimum of 1, sensible default of 16.
+const MAX_CONCURRENT_TOOL_CALLS = Number.isFinite(_rawCap) && _rawCap >= 1 ? Math.floor(_rawCap) : 16;
+let inflightToolCalls = 0;
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
@@ -1285,37 +1302,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     );
   }
 
+  if (inflightToolCalls >= MAX_CONCURRENT_TOOL_CALLS) {
+    return err(
+      `Too many concurrent tool calls (${inflightToolCalls}/${MAX_CONCURRENT_TOOL_CALLS}). ` +
+      `Retry after in-flight requests drain, or set AIRTABLE_MAX_CONCURRENT_TOOLS to raise the cap.`
+    );
+  }
+
+  inflightToolCalls++;
   const traced = traceToolHandler(name, handler);
   try {
     return await traced(args || {});
   } catch (error) {
     return err(`Error in ${name}: ${error.message}`);
+  } finally {
+    inflightToolCalls--;
   }
 });
 
 // ─── Start & Shutdown ─────────────────────────────────────────
+
+let activeTransport = null;
 
 async function main() {
   await toolConfig.load();
   await toolConfig.startWatching();
   const enabledCount = toolConfig.enabledToolNames().size;
   const transport = new StdioServerTransport();
+  activeTransport = transport;
   await server.connect(transport);
-  console.error('[airtable-user-mcp] Server v2.2.0 started');
+  console.error(`[airtable-user-mcp] Server v${PKG_VERSION} started`);
   console.error(`[airtable-user-mcp] Profile: "${toolConfig.activeProfile}" — ${enabledCount}/${TOOLS.length} tools enabled (+manage_tools)`);
   console.error('[airtable-user-mcp] Watching tools-config.json for external changes');
 }
 
-process.on('SIGINT', async () => {
-  toolConfig.stopWatching();
-  await auth.close();
+// ─── Graceful Shutdown ────────────────────────────────────────
+// Host IDEs kill the MCP server abruptly; without bounded cleanup, headless
+// Chromium children can leak on Windows and tools-config.json file watchers
+// can keep the event loop alive past the signal.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[airtable-user-mcp] Received ${signal}, shutting down...`);
+
+  // Hard cap so a hung browser can't block exit indefinitely
+  const killSwitch = setTimeout(() => {
+    console.error('[airtable-user-mcp] Shutdown timeout exceeded — force exit');
+    process.exit(1);
+  }, 5000);
+  killSwitch.unref?.();
+
+  try { toolConfig.stopWatching(); } catch (e) { console.error('[airtable-user-mcp] stopWatching failed:', e); }
+  try { if (activeTransport?.close) await activeTransport.close(); } catch (e) { console.error('[airtable-user-mcp] transport.close failed:', e); }
+  try { await auth.close(); } catch (e) { console.error('[airtable-user-mcp] auth.close failed:', e); }
+
+  clearTimeout(killSwitch);
   process.exit(0);
-});
-process.on('SIGTERM', async () => {
-  toolConfig.stopWatching();
-  await auth.close();
-  process.exit(0);
-});
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 main().catch((err) => {
   console.error('[airtable-user-mcp] Fatal:', err);

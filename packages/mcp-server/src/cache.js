@@ -9,11 +9,14 @@
  */
 
 const DEFAULT_TTL_MS = 15_000; // 15 seconds
+const DEFAULT_MAX_ENTRIES = 50; // per-map cap — full-schema payloads can reach ~1MB each
 
 export class SchemaCache {
-  constructor(ttlMs = DEFAULT_TTL_MS) {
+  constructor(ttlMs = DEFAULT_TTL_MS, maxEntries = DEFAULT_MAX_ENTRIES) {
     this.ttlMs = ttlMs;
-    // Map<appId, { data, timestamp }>
+    this.maxEntries = maxEntries;
+    // Map<appId, { data, timestamp }>  — Map keeps insertion order, which
+    // we use for simple LRU-ish eviction (evict oldest when size exceeds cap).
     this._scaffolding = new Map();
     this._full = new Map();
   }
@@ -25,7 +28,7 @@ export class SchemaCache {
   }
 
   setScaffolding(appId, data) {
-    this._scaffolding.set(appId, { data, timestamp: Date.now() });
+    this._setEntry(this._scaffolding, appId, data);
   }
 
   // ─── Full Schema Cache ────────────────────────────────────────
@@ -35,7 +38,7 @@ export class SchemaCache {
   }
 
   setFull(appId, data) {
-    this._full.set(appId, { data, timestamp: Date.now() });
+    this._setEntry(this._full, appId, data);
   }
 
   // ─── Invalidation ─────────────────────────────────────────────
@@ -63,6 +66,21 @@ export class SchemaCache {
       map.delete(appId);
       return null;
     }
+    // Refresh insertion order so frequently-used bases stay warm while
+    // the LRU eviction chops the oldest.
+    map.delete(appId);
+    map.set(appId, entry);
     return entry.data;
+  }
+
+  _setEntry(map, appId, data) {
+    // If we'd exceed the cap, evict oldest (Map iteration order = insertion order)
+    if (!map.has(appId) && map.size >= this.maxEntries) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    // Re-insert to move to most-recent end
+    map.delete(appId);
+    map.set(appId, { data, timestamp: Date.now() });
   }
 }

@@ -119,6 +119,41 @@ function probeChromium(): string | undefined {
 }
 
 /**
+ * Probe for Brave Browser \u2014 Chromium-based, identical DOM, login flow works
+ * unchanged. Patchright treats it as channel: 'chromium' with an explicit
+ * executablePath.
+ */
+function probeBrave(): string | undefined {
+  const platform = process.platform;
+  const candidates: string[] = [];
+
+  if (platform === 'win32') {
+    const programFiles    = process.env['ProgramFiles']       || 'C:\\Program Files';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const localAppData    = process.env['LOCALAPPDATA']       || path.join(os.homedir(), 'AppData', 'Local');
+    candidates.push(
+      path.join(programFiles,    'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(programFilesX86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(localAppData,    'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+    );
+  } else if (platform === 'darwin') {
+    candidates.push(
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      path.join(os.homedir(), 'Applications/Brave Browser.app/Contents/MacOS/Brave Browser'),
+    );
+  } else {
+    candidates.push(
+      '/usr/bin/brave-browser',
+      '/usr/bin/brave',
+      '/snap/bin/brave',
+      '/opt/brave.com/brave/brave-browser',
+    );
+  }
+
+  return candidates.find(existsSafe);
+}
+
+/**
  * Detect all usable Chromium-based browsers in preferred order:
  *   1. Google Chrome        (what auth.js was written against)
  *   2. Microsoft Edge       (preinstalled on Windows, identical DOM)
@@ -143,6 +178,11 @@ export function detectAllBrowsers(downloadedPath?: string): BrowserProbe[] {
 
   const chromium = probeChromium();
   if (chromium) results.push({ found: true, channel: 'chromium', executablePath: chromium, label: 'Chromium' });
+
+  // Brave uses the 'chromium' patchright channel + explicit executablePath.
+  // Listed after Chromium so users who have both get native Chromium first.
+  const brave = probeBrave();
+  if (brave) results.push({ found: true, channel: 'chromium', executablePath: brave, label: 'Brave Browser' });
 
   if (downloadedPath) {
     results.push({

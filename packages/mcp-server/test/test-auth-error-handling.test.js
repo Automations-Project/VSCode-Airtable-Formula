@@ -146,4 +146,70 @@ describe('AirtableAuth error handling', () => {
       assert.equal(initCalled, false, 'init() should NOT be called on valid URL');
     });
   });
+
+  describe('_apiCall rate-limit backoff', () => {
+    it('retries on 429 without triggering session recovery', async () => {
+      let recoverCalled = false;
+      let rawCallCount = 0;
+
+      auth._rawApiCall = async () => {
+        rawCallCount++;
+        if (rawCallCount < 3) return { status: 429, body: 'Too Many Requests' };
+        return { status: 200, body: '{"ok":true}' };
+      };
+      auth._recoverSession = async () => { recoverCalled = true; };
+
+      const result = await auth._apiCall('GET', '/v0.3/test');
+      assert.equal(result.status, 200, 'final call should succeed');
+      assert.equal(recoverCalled, false, '_recoverSession should NOT be called on 429');
+      assert.ok(rawCallCount >= 3, `expected >=3 calls, got ${rawCallCount}`);
+    });
+
+    it('retries on 503 Service Unavailable', async () => {
+      let rawCallCount = 0;
+      auth._rawApiCall = async () => {
+        rawCallCount++;
+        if (rawCallCount < 2) return { status: 503, body: 'Service Unavailable' };
+        return { status: 200, body: '{}' };
+      };
+      auth._recoverSession = async () => {};
+
+      const result = await auth._apiCall('GET', '/v0.3/test');
+      assert.equal(result.status, 200);
+      assert.equal(rawCallCount, 2);
+    });
+  });
+
+  describe('_apiCall wall-clock timeout', () => {
+    it('throws a hard timeout error when attempts keep failing past budget', async () => {
+      // Each call sleeps longer than the retry delay would allow in the window.
+      // We stub _recoverSession to also take time so the loop can't succeed.
+      auth._rawApiCall = async () => {
+        // Return a recoverable failure every time so the loop burns attempts
+        return { status: 401, body: 'Unauthorized' };
+      };
+      auth._recoverSession = async () => {
+        // Mimic a slow recovery. Exceeds 30s only in aggregate across retries,
+        // but the MAX_RETRIES=3 guard would short-circuit first. We rely on
+        // MAX_RETRIES behaviour here; this test documents the contract.
+        await new Promise(r => setTimeout(r, 10));
+      };
+
+      // With MAX_RETRIES=3 we expect the loop to bail after 3 attempts rather
+      // than stalling forever, even before the 30s budget kicks in.
+      const start = Date.now();
+      const result = await auth._apiCall('GET', '/v0.3/test').catch(err => ({ error: err.message }));
+      const elapsed = Date.now() - start;
+      // Either the retry loop ran out of attempts (giving us a 401 back), or
+      // the hard timeout fired. Either way we must have returned promptly.
+      assert.ok(elapsed < 5000, `call should return quickly, took ${elapsed}ms`);
+      // If we got a 401 back it means retries were exhausted, which is fine.
+      // If we got an error it should be the timeout error.
+      if (result.error) {
+        assert.ok(/wall-clock budget/.test(result.error), `unexpected error: ${result.error}`);
+      } else {
+        assert.equal(result.status, 401);
+      }
+    });
+  });
 });

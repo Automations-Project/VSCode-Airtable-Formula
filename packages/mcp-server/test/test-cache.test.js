@@ -77,4 +77,46 @@ describe('SchemaCache', () => {
       assert.equal(cache.getScaffolding('app2'), null);
     });
   });
+
+  describe('LRU eviction', () => {
+    it('evicts oldest entry when full schema cap is exceeded', () => {
+      // Small cap for fast testing
+      const lru = new (cache.constructor)(60_000, 3);
+      lru.setFull('a', { n: 1 });
+      lru.setFull('b', { n: 2 });
+      lru.setFull('c', { n: 3 });
+      assert.deepEqual(lru.getFull('a'), { n: 1 });
+
+      // Adding a 4th app evicts the oldest (after a was just read, c is oldest)
+      lru.setFull('d', { n: 4 });
+      assert.deepEqual(lru.getFull('d'), { n: 4 });
+      // `a` was just read so it's most-recently-used; `b` should be oldest.
+      assert.equal(lru.getFull('b'), null, 'b should have been evicted as LRU');
+      assert.deepEqual(lru.getFull('a'), { n: 1 }, 'a should survive as MRU');
+      assert.deepEqual(lru.getFull('c'), { n: 3 }, 'c should still be present');
+    });
+
+    it('evicts scaffolding cache independently from full cache', () => {
+      const lru = new (cache.constructor)(60_000, 2);
+      lru.setScaffolding('a', { s: 1 });
+      lru.setScaffolding('b', { s: 2 });
+      lru.setScaffolding('c', { s: 3 });
+      assert.equal(lru.getScaffolding('a'), null, 'a should have been evicted');
+      assert.deepEqual(lru.getScaffolding('b'), { s: 2 });
+      assert.deepEqual(lru.getScaffolding('c'), { s: 3 });
+    });
+
+    it('refreshes insertion order on get (touch behavior)', () => {
+      const lru = new (cache.constructor)(60_000, 2);
+      lru.setFull('a', { n: 1 });
+      lru.setFull('b', { n: 2 });
+      // Touch `a` to make it most-recently-used
+      assert.deepEqual(lru.getFull('a'), { n: 1 });
+      // Now add `c` — should evict `b` (oldest), not `a`
+      lru.setFull('c', { n: 3 });
+      assert.deepEqual(lru.getFull('a'), { n: 1 }, 'a stays because it was touched');
+      assert.equal(lru.getFull('b'), null, 'b evicted as LRU');
+      assert.deepEqual(lru.getFull('c'), { n: 3 });
+    });
+  });
 });

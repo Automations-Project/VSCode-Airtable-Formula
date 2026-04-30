@@ -51,9 +51,7 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onStartupFinished",
-    "onView:airtable-formula.dashboard",
-    "onCommand:airtable-formula.openDashboard"
+    "onStartupFinished"
   ],
   "contributes": {
     "languages": [
@@ -193,7 +191,7 @@
       "properties": {
         "airtableFormula.mcp.autoConfigureOnInstall": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically configure MCP in detected IDEs on first launch."
         },
         "airtableFormula.mcp.serverPathOverride": {

@@ -138,8 +138,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         if (confirm === 'Logout') {
           await this.authManager!.logout();
           await this.pushState();
+          this.postResult(msg.id, true);
+        } else {
+          // User dismissed the modal — surface that so the webview doesn't
+          // flip into a "logged out" state on a no-op.
+          this.postResult(msg.id, false, 'Cancelled');
         }
-        this.postResult(msg.id, true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
       }
@@ -425,11 +429,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     // during very early activation.
     const toolProfile: ToolProfileSnapshot = this.toolProfileManager?.getSnapshot() ?? {
       profile:      'full',
-      enabledCount: 32,
-      totalCount:   32,
+      enabledCount: 36,
+      totalCount:   36,
       categories: {
-        read: true, fieldWrite: true, fieldDestructive: true,
-        viewWrite: true, viewDestructive: true, extension: true,
+        read: true,
+        tableWrite: true, tableDestructive: true,
+        fieldWrite: true, fieldDestructive: true,
+        viewWrite: true, viewDestructive: true,
+        extension: true,
       },
     };
 

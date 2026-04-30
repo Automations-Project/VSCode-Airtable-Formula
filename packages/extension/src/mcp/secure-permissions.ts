@@ -50,10 +50,20 @@ async function secureWindows(dirPath: string): Promise<void> {
     return;
   }
 
+  // icacls parses its grant argument `principal:permissions` with its own
+  // quoting rules; usernames containing spaces / `(` / `)` / `,` would corrupt
+  // the grant. Double quotes around the principal force icacls to treat it as
+  // one token. Strip any embedded double-quote defensively (they are not legal
+  // in Windows usernames anyway).
+  const safeUser = username.replace(/"/g, '');
+  if (safeUser !== username) {
+    console.warn('[secure-permissions] Removed quote characters from USERNAME before passing to icacls');
+  }
+
   await execFileAsync('icacls', [
     dirPath,
     '/inheritance:r',
     '/grant:r',
-    `${username}:(OI)(CI)F`,
+    `"${safeUser}":(OI)(CI)F`,
   ]);
 }

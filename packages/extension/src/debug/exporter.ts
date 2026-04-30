@@ -11,6 +11,9 @@ const ALWAYS_STRIP_KEYS = new Set([
   'cookie', 'cookies', 'set-cookie',
   'password', 'otpSecret', 'otpCode', 'totp',
   'AIRTABLE_PASSWORD', 'AIRTABLE_OTP_SECRET', 'AIRTABLE_EMAIL',
+  'authorization', 'apiKey', 'api_key', 'token', 'accessToken',
+  'refreshToken', 'bearer', 'privateKey', 'private_key',
+  'stringifiedObjectParams',
 ]);
 
 const REDACT_VALUE_KEYS = new Set([
@@ -18,7 +21,10 @@ const REDACT_VALUE_KEYS = new Set([
   'email', 'username',
 ]);
 
-function redactValue(key: string, val: unknown): unknown {
+// Cycle-safe redaction — mirrors the MCP-side tracer fix. A self-referencing
+// payload (or a hostile Proxy from an LLM tool call that ends up in a trace)
+// must not crash the whole export.
+function redactValue(key: string, val: unknown, seen: WeakSet<object>): unknown {
   if (val === null || val === undefined) return val;
   if (ALWAYS_STRIP_KEYS.has(key)) return '[REDACTED]';
 
@@ -34,30 +40,55 @@ function redactValue(key: string, val: unknown): unknown {
     return val;
   }
 
-  if (Array.isArray(val)) {
-    return val.map((item, i) => redactValue(String(i), item));
-  }
+  if (typeof val !== 'object') return val;
 
-  if (typeof val === 'object') {
-    return redactObject(val as Record<string, unknown>);
-  }
+  // Cycle detection: `finally { seen.delete(val) }` means we treat `seen` as a
+  // path-set (branch-local) rather than a whole-walk visited-set, so legitimate
+  // DAGs aren't falsely collapsed.
+  if (seen.has(val as object)) return '[Circular]';
+  seen.add(val as object);
 
-  return val;
+  try {
+    if (Array.isArray(val)) {
+      return val.map((item, i) => redactValue(String(i), item, seen));
+    }
+    return redactObject(val as Record<string, unknown>, seen);
+  } catch {
+    // Hostile Proxy or unreadable object — drop to a sentinel so the rest of
+    // the event still exports.
+    return '[Unserializable]';
+  } finally {
+    seen.delete(val as object);
+  }
 }
 
-function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
+function redactObject(obj: Record<string, unknown>, seen: WeakSet<object>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(obj)) {
-    result[key] = redactValue(key, val);
+  try {
+    // Object.entries throws on a Proxy that traps `ownKeys`; the caller catches.
+    for (const [key, val] of Object.entries(obj)) {
+      result[key] = redactValue(key, val, seen);
+    }
+  } catch {
+    return { _redactionFailed: true };
   }
   return result;
 }
 
 function redactEvent(event: DebugEvent): DebugEvent {
-  return {
-    ...event,
-    data: redactObject(event.data),
-  };
+  try {
+    return {
+      ...event,
+      data: redactObject(event.data, new WeakSet()),
+    };
+  } catch {
+    // Absolute last-resort — event shape itself was degenerate. Emit a
+    // breadcrumb so export doesn't lose the whole log for one bad event.
+    return {
+      ...event,
+      data: { _redactionFailed: true },
+    };
+  }
 }
 
 // ─── Export ───────────────────────────────────────────────────

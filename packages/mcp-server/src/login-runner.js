@@ -134,7 +134,9 @@ async function main() {
         try {
           await otpInput.waitFor({ state: 'visible', timeout: 15000 });
           const code = generateTOTP(otpSecret);
-          console.error(`[login-runner] Generated TOTP code: ${code}`);
+          // Never log the live code — it's valid for 30s and stderr is
+          // captured into the extension's debug channel.
+          console.error('[login-runner] Generated TOTP code: [REDACTED]');
           await otpInput.fill(code);
           await page.keyboard.press('Enter');
           console.error('[login-runner] TOTP code submitted');

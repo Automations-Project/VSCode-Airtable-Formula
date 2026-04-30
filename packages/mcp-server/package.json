@@ -62,7 +62,7 @@
   "scripts": {
     "start": "node src/index.js",
     "login": "node src/login.js",
-    "test": "node --test test/test-cache.js test/test-client.js test/test-tool-config.js test/test-auth-error-handling.js"
+    "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

@@ -101,6 +101,11 @@ async function main() {
     viewport: null,
   });
 
+  // Wrap everything past this point in try/finally so unexpected exceptions
+  // (missing selectors, TOTP step crash, navigation errors) don't leave an
+  // orphan Chrome window open that the user has to close manually.
+  let outerError;
+  try {
   const page = context.pages()[0] || await context.newPage();
   await page.goto('https://airtable.com/login', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
@@ -144,7 +149,9 @@ async function main() {
       try {
         await otpInput.waitFor({ state: 'visible', timeout: 15000 });
         const code = await generateTOTP(otpSecret);
-        console.log(`  Generated TOTP code: ${code}`);
+        // Never log the live code — it's valid for 30s and stderr flows into
+        // the extension's debug output channel / manual-test log.
+        console.log('  Generated TOTP code: [REDACTED]');
         await otpInput.fill(code);
 
         // Submit the form by pressing Enter (most reliable — avoids hidden submit input issues)
@@ -199,19 +206,34 @@ async function main() {
   }
 
   if (!loggedIn) {
-    console.error('❌ Login not detected after 5 minutes.');
-    await context.close();
-    process.exit(1);
+    // Throw so the outer finally closes the browser, then the top-level
+    // main().catch sets exit code 1.
+    throw new Error('Login not detected after 5 minutes');
   }
 
   console.log('\nSession stored in Chrome profile.');
   console.log('MCP server will use this session headlessly.');
   console.log('\nClosing browser...');
-  await context.close();
   console.log('Done!');
+  } catch (err) {
+    // Capture so the finally block can still run before we re-throw.
+    outerError = err;
+  } finally {
+    try { await context.close(); } catch { /* best-effort — browser may be gone */ }
+  }
+  if (outerError) throw outerError;
 }
 
-main().catch(err => {
-  console.error('Error:', err);
-  process.exit(1);
-});
+export default main;
+
+// Run automatically only when this file is the entry point (node src/login.js).
+// cli.js imports us and awaits `runLogin()` itself, so we must not auto-run in
+// that case — otherwise we'd launch Chrome twice.
+const invokedDirectly =
+  process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (invokedDirectly) {
+  main().catch(err => {
+    console.error('Error:', err);
+    process.exit(1);
+  });
+}

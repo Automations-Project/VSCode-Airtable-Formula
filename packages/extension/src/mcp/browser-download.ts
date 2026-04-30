@@ -209,12 +209,22 @@ export class BrowserDownloadManager implements vscode.Disposable {
       });
 
       const timeoutMs = 10 * 60 * 1000; // 10 min hard cap
+      let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
       const timeout = setTimeout(() => {
         child.kill('SIGTERM');
+        // Escalate to SIGKILL after 5s. Windows ignores SIGTERM for most
+        // processes and the patchright install can hang on a stuck zip
+        // download; without this the process outlives the 10-min deadline.
+        sigkillTimer = setTimeout(() => {
+          try {
+            if (!child.killed) child.kill('SIGKILL');
+          } catch { /* already gone */ }
+        }, 5_000);
       }, timeoutMs);
 
       child.on('error', err => {
         clearTimeout(timeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
         this._inFlight = false;
         this._setState({ status: 'error', error: err.message });
         resolve(this._state);
@@ -222,6 +232,7 @@ export class BrowserDownloadManager implements vscode.Disposable {
 
       child.on('close', code => {
         clearTimeout(timeout);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
         this._inFlight = false;
 
         if (code === 0 && this.isDownloaded()) {

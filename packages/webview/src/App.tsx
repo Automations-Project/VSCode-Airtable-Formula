@@ -17,10 +17,25 @@ export function App() {
   const { activeTab, setTab, applyState, applyAuthState, markActionDone, versions } = useStore();
 
   useEffect(() => {
+    // Runtime guards — the extension is the sole message source but a bug or
+    // version mismatch could ship a malformed payload. Silently drop invalid
+    // messages so a bad push doesn't crash the whole dashboard.
+    const isStateUpdate = (p: unknown): p is Parameters<typeof applyState>[0] =>
+      !!p && typeof p === 'object' && Array.isArray((p as { ideStatuses?: unknown }).ideStatuses);
+    const isAuthState = (p: unknown): p is Parameters<typeof applyAuthState>[0] =>
+      !!p && typeof p === 'object' && typeof (p as { status?: unknown }).status === 'string';
+
     const off = onExtensionMessage((msg: ExtensionMessage) => {
-      if (msg.type === 'state:update') applyState(msg.payload);
-      if (msg.type === 'auth:state') applyAuthState(msg.payload);
-      if (msg.type === 'action:result') markActionDone(msg.id, msg.ok);
+      if (!msg || typeof msg !== 'object' || typeof (msg as { type?: unknown }).type !== 'string') return;
+      if (msg.type === 'state:update') {
+        if (isStateUpdate(msg.payload)) applyState(msg.payload);
+        else console.warn('[airtable-formula] ignoring malformed state:update', msg);
+      } else if (msg.type === 'auth:state') {
+        if (isAuthState(msg.payload)) applyAuthState(msg.payload);
+        else console.warn('[airtable-formula] ignoring malformed auth:state', msg);
+      } else if (msg.type === 'action:result') {
+        if (typeof msg.id === 'string' && typeof msg.ok === 'boolean') markActionDone(msg.id, msg.ok);
+      }
     });
     sendToExtension({ type: 'ready' });
     return off;
@@ -43,21 +58,33 @@ export function App() {
           <div style={{ flex: 1 }} />
           <span className="chip chip-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem' }}>v{versions.extension}</span>
         </div>
-        <div style={{ display: 'flex' }}>
+        <div style={{ display: 'flex' }} role="tablist" aria-label="Dashboard sections">
           {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
-              padding: '8px 14px 9px', fontSize: 11, fontWeight: activeTab === t.id ? 600 : 500,
-              color: activeTab === t.id ? 'var(--fg)' : 'var(--fg-muted)',
-              borderBottom: `2px solid ${activeTab === t.id ? 'var(--at-blue)' : 'transparent'}`,
-              transition: 'color var(--ease-std) 120ms, border-color var(--ease-std) 120ms',
-              whiteSpace: 'nowrap',
-            }}>{t.label}</button>
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              role="tab"
+              aria-selected={activeTab === t.id}
+              aria-controls={`tabpanel-${t.id}`}
+              aria-label={`${t.label} tab`}
+              style={{
+                padding: '8px 14px 9px', fontSize: 11, fontWeight: activeTab === t.id ? 600 : 500,
+                color: activeTab === t.id ? 'var(--fg)' : 'var(--fg-muted)',
+                borderBottom: `2px solid ${activeTab === t.id ? 'var(--at-blue)' : 'transparent'}`,
+                transition: 'color var(--ease-std) 120ms, border-color var(--ease-std) 120ms',
+                whiteSpace: 'nowrap',
+              }}>{t.label}</button>
           ))}
         </div>
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px 20px', position: 'relative', zIndex: 1 }}>
+      <div
+        style={{ flex: 1, overflowY: 'auto', padding: '14px 16px 20px', position: 'relative', zIndex: 1 }}
+        role="tabpanel"
+        id={`tabpanel-${activeTab}`}
+        aria-label={TABS.find(t => t.id === activeTab)?.label}
+      >
         {activeTab === 'overview' && <Overview />}
         {activeTab === 'setup'    && <Setup />}
         {activeTab === 'settings' && <Settings />}
@@ -71,11 +98,13 @@ export function App() {
           { label: 'GitHub', url: 'https://github.com/Automations-Project/VSCode-Airtable-Formula' },
         ] as const).map((link, i) => (
           <React.Fragment key={link.label}>
-            {i > 0 && <span style={{ width: 1, height: 10, background: 'var(--border)', alignSelf: 'center' }} />}
-            <span
-              style={{ fontSize: 9, color: 'var(--fg-muted)', cursor: 'pointer' }}
+            {i > 0 && <span style={{ width: 1, height: 10, background: 'var(--border)', alignSelf: 'center' }} aria-hidden="true" />}
+            <button
+              type="button"
+              aria-label={`Open ${link.label} (external link)`}
+              style={{ fontSize: 9, color: 'var(--fg-muted)', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
               onClick={() => sendToExtension({ type: 'setting:change', key: '_openUrl', value: link.url })}
-            >{link.label}</span>
+            >{link.label}</button>
           </React.Fragment>
         ))}
       </div>

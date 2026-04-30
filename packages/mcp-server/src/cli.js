@@ -119,7 +119,15 @@ export async function runCli(args) {
   if (cmd === 'install-browser') {
     process.stderr.write('Installing Chromium via patchright-core...\n');
     try {
-      execFileSync('npx', ['patchright-core', 'install', 'chromium'], { stdio: 'inherit' });
+      // H13 \u2014 Windows needs .cmd resolution (npx is a batch file, not a binary).
+      // Using `shell: true` handles both: the command line is passed through
+      // the OS shell which picks up the correct npx invocation for the
+      // platform.
+      const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+      execFileSync(npxCmd, ['patchright-core', 'install', 'chromium'], {
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      });
       process.stderr.write('Done. Chromium is ready.\n');
     } catch (err) {
       process.stderr.write(`Failed to install Chromium: ${err.message}\n`);

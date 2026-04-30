@@ -12,9 +12,16 @@ function SettingToggle({ label, desc, value, settingKey }: { label: string; desc
         <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>{label}</div>
         {desc && <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>{desc}</div>}
       </div>
-      <label className="toggle-switch">
-        <input type="checkbox" checked={value} onChange={toggle} />
-        <span className="toggle-track" />
+      <label className="toggle-switch" aria-label={`${label} toggle`}>
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={toggle}
+          aria-label={label}
+          role="switch"
+          aria-checked={value}
+        />
+        <span className="toggle-track" aria-hidden="true" />
       </label>
     </div>
   );
