@@ -6,6 +6,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP Server 2.4.1 — Hotfix: bundled server crashed on startup
+
+Released hours after 2.4.0. The bundled extension copy of the MCP
+server crashed immediately on every spawn with `MODULE_NOT_FOUND` for
+`../package.json`, surfacing in MCP clients as `transport error:
+transport closed`. No tool ever ran from the bundled launcher.
+
+Root cause: `index.js` resolved its own version with
+`require('../package.json')`. That works when running from source
+(`packages/mcp-server/src/index.js` → `packages/mcp-server/package.json`)
+but fails when bundled to `packages/extension/dist/mcp/index.mjs` —
+`../package.json` resolves to a non-existent
+`packages/extension/dist/package.json`.
+
+Fix: read `version.json` (which `bundle-mcp.mjs` writes alongside the
+bundle) first, fall back to `../package.json` for source/npx runs, fall
+back to `'unknown'` if both fail. Verified end-to-end against the bundled
+launcher with a real `initialize` handshake.
+
+Anyone whose MCP entries pointed at the bundled launcher
+(`~/.airtable-user-mcp/start.mjs` → `dist/mcp/index.mjs`) was affected.
+Standalone npx runs (`npx -y airtable-user-mcp`) were not — that path
+keeps `package.json` adjacent. mcp-server: 2.4.0 → 2.4.1.
+
 ### MCP Server 2.4.0 — Sidebar sections, view setup, non-grid metadata, user-report bug fixes (user report 2026-04-30)
 
 **16 net-new tools (52 total, was 36).** All endpoints captured against Airtable's internal API on 2026-04-30 with `pnpm capture:cdp:mutations`.

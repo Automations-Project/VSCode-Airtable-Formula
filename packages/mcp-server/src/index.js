@@ -22,11 +22,35 @@ import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { readFileSync } from 'fs';
 import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const PKG_VERSION = require('../package.json').version;
+
+// Resolve the server version. Two layouts:
+//   - Source / npx run:  this file is .../mcp-server/src/index.js, so the
+//     package.json one level up is the source of truth.
+//   - Bundled in extension:  this file is .../extension/dist/mcp/index.mjs.
+//     The relative `../package.json` resolves to .../extension/dist/
+//     package.json which doesn't exist → MODULE_NOT_FOUND on startup
+//     (regression fix 2026-04-30 — the extension bundle was crashing
+//     immediately, "transport closed" in the MCP client).
+//   The bundler writes a version.json next to index.mjs, so we read that
+//   first when present and fall back to ../package.json for source runs.
+function resolveServerVersion() {
+  try {
+    const versionFile = path.join(__dirname, 'version.json');
+    const raw = readFileSync(versionFile, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.mcpServer === 'string') return parsed.mcpServer;
+  } catch { /* fall through to package.json */ }
+  try {
+    return require('../package.json').version;
+  } catch { /* unknown */ }
+  return 'unknown';
+}
+const PKG_VERSION = resolveServerVersion();
 
 const auth = new AirtableAuth();
 const client = new AirtableClient(auth);
