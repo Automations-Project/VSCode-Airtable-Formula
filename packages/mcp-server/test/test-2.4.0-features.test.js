@@ -100,6 +100,35 @@ describe('listViewSections (§1.3)', () => {
     assert.equal(result.introspectionPartial, undefined);
   });
 
+  it('reads from `viewSectionsById` (the real Airtable response key, 2.4.3)', async () => {
+    const realShapeSchema = {
+      data: {
+        tableSchemas: [
+          {
+            id: 'tblAAA',
+            name: 'Offers',
+            columns: [{ id: 'fldA', name: 'A', type: 'text', typeOptions: {} }],
+            views: [{ id: 'viwGrid', name: 'Grid', type: 'grid' }],
+            viewOrder: ['viwGrid', 'vscRocket'],
+            // Real Airtable shape — captured 2026-05-01
+            viewSectionsById: {
+              vscRocket: { id: 'vscRocket', name: '🚀 Posting', createdByUserId: 'usr1', pinnedForUserId: null, viewOrder: ['viwInsideA'] },
+            },
+          },
+        ],
+      },
+    };
+    const auth = createMockAuth(realShapeSchema);
+    const client = new AirtableClient(auth);
+    const result = await client.listViewSections('appXXX', 'tblAAA');
+    assert.equal(result.sections.length, 1);
+    assert.equal(result.sections[0].id, 'vscRocket');
+    assert.equal(result.sections[0].name, '🚀 Posting');
+    assert.deepEqual(result.sections[0].viewOrder, ['viwInsideA']);
+    assert.equal(result.sections[0].partial, false);
+    assert.equal(result.introspectionPartial, undefined);
+  });
+
   it('falls back to surfacing section IDs from tableViewOrder when viewSections is missing (Bug 2 hotfix 2026-05-01)', async () => {
     // Simulate the user follow-up scenario: table.viewSections empty, but
     // table.viewOrder still contains vsc-prefixed IDs.

@@ -6,6 +6,23 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP Server 2.4.3 — `list_view_sections` full fix (carry-over from 2.4.2)
+
+Probed the schema read response with a fresh patchright session against
+a base that has sections (`packages/mcp-server/dev-tools/debug-sections.js`,
+new `pnpm probe:sections` script). Found that sidebar sections live at
+`data.tableSchemas[N].viewSectionsById` — NOT `viewSections` like the
+WebSocket realtime delta model uses. 2.4.0 + 2.4.1 read the wrong key,
+which is why the sections array came back empty.
+
+`listViewSections` now reads from `viewSectionsById` first, falls back
+to `viewSections` for fixture/test compatibility, falls back to the
+2.4.2 ID-only-from-tableViewOrder path if both are absent. The rich
+shape (`name`, `viewOrder`, `pinnedForUserId`, `createdByUserId`) is
+fully restored on real bases.
+
+mcp-server: 2.4.2 → 2.4.3.
+
 ### MCP Server 2.4.2 — User follow-up bugs (report 2026-05-01)
 
 After upgrading to 2.4.0 and running real end-to-end view-rollout work,

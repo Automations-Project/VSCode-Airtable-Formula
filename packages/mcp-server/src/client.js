@@ -1210,26 +1210,24 @@ export class AirtableClient {
   /**
    * List all sidebar sections for a table.
    *
-   * Two data sources, in order of preference:
-   *   1. `table.viewSections` from the cached `application/{appId}/read`
-   *      response — when present this gives full {id, name, viewOrder,
-   *      pinnedForUserId, createdByUserId} per section.
-   *   2. `vsc...`-prefixed IDs in `table.viewOrder` — fallback when the
-   *      schema response doesn't surface viewSections (user follow-up
-   *      Bug 2, 2026-05-01: the read response on some bases doesn't
-   *      expose section names/contents even though the IDs are clearly
-   *      present in tableViewOrder).
+   * Reads `table.viewSectionsById` from the cached `application/{appId}/read`
+   * response. Each entry has `{id, name, createdByUserId, pinnedForUserId,
+   * viewOrder}`. Verified against capture 2026-05-01 (probe-sections-probe).
    *
-   * If only fallback data is available, each section in the response will
-   * have `name: null`, `viewOrder: null`, `viewCount: null`, and a
-   * `partial: true` marker. Use `move_view_to_section` for side effects
-   * even when introspection is partial.
+   * Note: the realtime WebSocket delta model uses `tables.{tblId}.viewSections`
+   * (different key name) — that's what 2.4.0/2.4.1 mistakenly looked at,
+   * surfacing empty results. 2.4.2 added a fallback that surfaces section IDs
+   * from `tableViewOrder`; 2.4.3 reads from the correct `viewSectionsById`
+   * path so the rich shape (names, viewOrder, etc.) is available again.
    */
   async listViewSections(appId, tableIdOrName) {
     assertAirtableId(appId, 'appId');
     const table = await this.resolveTable(appId, tableIdOrName);
     const tableViewOrder = Array.isArray(table.viewOrder) ? table.viewOrder : [];
-    const sectionsObj = table.viewSections || {};
+    // Real Airtable response key is `viewSectionsById`. Tests / fixtures and
+    // the realtime delta model use the legacy `viewSections` name; accept
+    // both so we don't break older callers and so test mocks stay simple.
+    const sectionsObj = table.viewSectionsById || table.viewSections || {};
     const richSections = Object.values(sectionsObj).map(s => ({
       id: s.id,
       name: s.name ?? null,
