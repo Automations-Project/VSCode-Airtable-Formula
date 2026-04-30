@@ -7,9 +7,9 @@
  */
 import { readFile, writeFile, mkdir, rename, unlink } from 'node:fs/promises';
 import { watch } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { getHomeDir, getToolConfigPath } from './paths.js';
 
 // ─── Tool Categories ──────────────────────────────────────────
 
@@ -23,6 +23,7 @@ export const TOOL_CATEGORIES = {
   list_views:             'read',
   get_view:               'read',
   validate_formula:       'read',
+  list_view_sections:     'read',
 
   // Table mutations (non-destructive)
   create_table:           'table-write',
@@ -54,9 +55,30 @@ export const TOOL_CATEGORIES = {
   apply_view_sorts:       'view-write',
   update_view_group_levels: 'view-write',
   update_view_row_height: 'view-write',
+  set_view_columns:       'view-write',
+  show_or_hide_all_columns: 'view-write',
+  move_visible_columns:   'view-write',
+  move_overall_columns:   'view-write',
+  update_frozen_column_count: 'view-write',
+  set_view_cover:         'view-write',
+  set_view_color_config:  'view-write',
+  set_view_cell_wrap:     'view-write',
+  set_calendar_date_columns: 'view-write',
 
   // View destructive
   delete_view:            'view-destructive',
+
+  // View sections (sidebar grouping — non-destructive create/rename/move)
+  create_view_section:    'view-section',
+  rename_view_section:    'view-section',
+  move_view_to_section:   'view-section',
+
+  // View sections (destructive)
+  delete_view_section:    'view-section-destructive',
+
+  // Form metadata (legacy form views — public-facing artifacts gated separately)
+  set_form_metadata:                'form-write',
+  set_form_submission_notification: 'form-write',
 
   // Extension / block management
   create_extension:       'extension',
@@ -70,14 +92,17 @@ export const TOOL_CATEGORIES = {
 
 /** Human-readable labels for categories */
 export const CATEGORY_LABELS = {
-  'read':               'Read / Inspect',
-  'table-write':        'Table Write',
-  'table-destructive':  'Table Destructive',
-  'field-write':        'Field Write',
-  'field-destructive':  'Field Destructive',
-  'view-write':         'View Write',
-  'view-destructive':   'View Destructive',
-  'extension':          'Extension Management',
+  'read':                     'Read / Inspect',
+  'table-write':              'Table Write',
+  'table-destructive':        'Table Destructive',
+  'field-write':              'Field Write',
+  'field-destructive':        'Field Destructive',
+  'view-write':               'View Write',
+  'view-destructive':         'View Destructive',
+  'view-section':             'View Sections',
+  'view-section-destructive': 'View Sections (destructive)',
+  'form-write':               'Form Metadata',
+  'extension':                'Extension Management',
 };
 
 // ─── Built-in Profiles ───────────────────────────────────────
@@ -88,19 +113,25 @@ export const BUILTIN_PROFILES = {
     categories: ['read'],
   },
   'safe-write': {
-    description: 'Read + create/update tables, fields, and views (no deletes)',
-    categories: ['read', 'table-write', 'field-write', 'view-write'],
+    description: 'Read + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
+    categories: ['read', 'table-write', 'field-write', 'view-write', 'view-section'],
   },
   full: {
-    description: 'All tools enabled including destructive and extensions',
-    categories: ['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'],
+    description: 'All tools enabled including destructive ops, form metadata, and extensions',
+    categories: [
+      'read', 'table-write', 'table-destructive',
+      'field-write', 'field-destructive',
+      'view-write', 'view-destructive',
+      'view-section', 'view-section-destructive',
+      'form-write', 'extension',
+    ],
   },
 };
 
 // ─── Config Paths ─────────────────────────────────────────────
 
-export const CONFIG_DIR = join(homedir(), '.airtable-user-mcp');
-export const CONFIG_FILE = join(CONFIG_DIR, 'tools-config.json');
+// Config paths resolve lazily via getHomeDir() / getToolConfigPath() so
+// AIRTABLE_USER_MCP_HOME is honored at call time, not at module load.
 
 // ─── Default Config ───────────────────────────────────────────
 
@@ -136,7 +167,7 @@ export class ToolConfigManager {
 
   async load() {
     try {
-      const raw = await readFile(CONFIG_FILE, 'utf8');
+      const raw = await readFile(getToolConfigPath(), 'utf8');
       const parsed = JSON.parse(raw);
       this._config = { ...defaultConfig(), ...parsed };
     } catch {
@@ -146,16 +177,17 @@ export class ToolConfigManager {
   }
 
   async save() {
-    await mkdir(CONFIG_DIR, { recursive: true });
+    const configFile = getToolConfigPath();
+    await mkdir(dirname(configFile), { recursive: true });
     this._selfWrite = true;
     // Atomic write: stage to a unique temp file then rename over the target.
     // A crash mid-write leaves the previous config intact rather than an empty
     // / truncated file that would hydrate as defaults on next boot.
-    const tmp = `${CONFIG_FILE}.${randomBytes(6).toString('hex')}.tmp`;
+    const tmp = `${configFile}.${randomBytes(6).toString('hex')}.tmp`;
     try {
       try {
         await writeFile(tmp, JSON.stringify(this._config, null, 2), 'utf8');
-        await rename(tmp, CONFIG_FILE);
+        await rename(tmp, configFile);
       } catch (err) {
         // Best-effort cleanup — rename may have happened before a later failure
         await unlink(tmp).catch(() => {});
@@ -323,10 +355,11 @@ export class ToolConfigManager {
 
   /** Start watching tools-config.json for external changes (e.g. from VS Code extension) */
   async startWatching() {
+    const configFile = getToolConfigPath();
     // Ensure config dir exists so we can watch it
-    await mkdir(CONFIG_DIR, { recursive: true });
+    await mkdir(getHomeDir(), { recursive: true });
     try {
-      this._watcher = watch(CONFIG_FILE, (eventType) => {
+      this._watcher = watch(configFile, (eventType) => {
         if (eventType !== 'change') return;
         if (this._selfWrite) return;
         // Debounce rapid changes (editors often do write+rename)

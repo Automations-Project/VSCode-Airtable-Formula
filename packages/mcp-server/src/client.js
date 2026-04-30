@@ -46,6 +46,165 @@ function normalizeFilterOperator(op) {
   return op;
 }
 
+/**
+ * Walk the filterSet and throw a descriptive Error if any leaf filter uses
+ * `isEmpty` / `isNotEmpty` against a linked-record (foreignKey) field. The
+ * internal API rejects those operators on foreignKey with `422 FAILED_STATE_CHECK`
+ * and no workaround is available client-side beyond a transitive helper formula.
+ */
+function assertNoForeignKeyEmptiness(filterSet, fieldsById) {
+  if (!Array.isArray(filterSet)) return;
+  for (const filter of filterSet) {
+    if (filter.type === 'nested' && Array.isArray(filter.filterSet)) {
+      assertNoForeignKeyEmptiness(filter.filterSet, fieldsById);
+      continue;
+    }
+    const op = filter.operator;
+    if (op !== 'isEmpty' && op !== 'isNotEmpty') continue;
+    const field = fieldsById[filter.columnId];
+    if (field?.type === 'foreignKey') {
+      throw new Error(
+        `Airtable's internal API does not support "${op}" on linked-record fields ` +
+        `(field "${field.name || filter.columnId}", id ${filter.columnId}). ` +
+        `Workaround: create a helper formula field (e.g. \`IF(LEN({Linked} & "")>0,"yes","")\`) ` +
+        `and filter on that helper with "=" / "!=".`,
+      );
+    }
+  }
+}
+
+/**
+ * Build a more useful Error for a failed filter mutation. Airtable returns
+ * `{"error": {"type": "FAILED_STATE_CHECK"}}` with no further detail — we
+ * inspect the just-sent payload to surface the most likely culprit
+ * (operator/field-type mismatch, nesting depth, etc.) and attach the upstream
+ * status + body so callers can still see the raw response.
+ */
+function enrichFilterError(status, body, payload) {
+  let parsed;
+  try { parsed = body ? JSON.parse(body) : null; } catch { /* keep raw */ }
+  const errType = parsed?.error?.type;
+  const reasons = [];
+  const filterSet = payload?.filterSet;
+  if (Array.isArray(filterSet)) {
+    const depth = nestingDepth(filterSet);
+    if (depth > 2) {
+      reasons.push(
+        `Nested filter depth is ${depth}; the internal API only accepts up to 2 ` +
+        `(top conjunction + one nested layer). Flatten by repeating shared conditions ` +
+        `inside each leaf group (user report 2026-04-30 §2.4).`,
+      );
+    }
+    walkLeaves(filterSet, leaf => {
+      if (leaf.operator === 'isEmpty' || leaf.operator === 'isNotEmpty') {
+        reasons.push(
+          `Leaf filter uses "${leaf.operator}" on field ${leaf.columnId}. If this is a ` +
+          `linked-record / lookup / rollup field, the internal API may reject it; ` +
+          `text and formula(text) fields are auto-rewritten to "=" / "!=" "" by this client.`,
+        );
+      }
+    });
+  }
+  const summary = reasons.length
+    ? `\n  Likely causes:\n    - ${reasons.join('\n    - ')}`
+    : '';
+  return new Error(
+    `updateViewFilters failed (${status}${errType ? ' ' + errType : ''}): ${body || '(empty body)'}` + summary,
+  );
+}
+
+function nestingDepth(filterSet, current = 1) {
+  if (!Array.isArray(filterSet)) return current;
+  let max = current;
+  for (const f of filterSet) {
+    if (f.type === 'nested' && Array.isArray(f.filterSet)) {
+      max = Math.max(max, nestingDepth(f.filterSet, current + 1));
+    }
+  }
+  return max;
+}
+
+/**
+ * Merge a partial fieldId → targetPosition map with the current ordered field
+ * list and return a complete `fieldId → finalPosition` map covering every
+ * field in `currentOrder`. Moved fields are applied in ascending target-order
+ * so multiple moves with overlapping positions resolve deterministically.
+ */
+function mergePartialFieldOrder(currentOrder, partial) {
+  // Strip the moved fields from a working copy of the current order, then
+  // splice them in at their target positions in priority order.
+  const movedIds = Object.keys(partial).filter(id => currentOrder.includes(id));
+  const remaining = currentOrder.filter(id => !movedIds.includes(id));
+  const moves = movedIds
+    .map(id => ({ id, target: Number(partial[id]) }))
+    .filter(m => Number.isFinite(m.target))
+    .sort((a, b) => a.target - b.target);
+
+  const result = remaining.slice();
+  for (const { id, target } of moves) {
+    const insertAt = Math.max(0, Math.min(target, result.length));
+    result.splice(insertAt, 0, id);
+  }
+  const indices = {};
+  for (let i = 0; i < result.length; i++) indices[result[i]] = i;
+  return indices;
+}
+
+function walkLeaves(filterSet, fn) {
+  if (!Array.isArray(filterSet)) return;
+  for (const f of filterSet) {
+    if (f.type === 'nested' && Array.isArray(f.filterSet)) walkLeaves(f.filterSet, fn);
+    else if (f.columnId) fn(f);
+  }
+}
+
+/**
+ * Field types where Airtable's internal filter API rejects `isEmpty` / `isNotEmpty`
+ * with `422 FAILED_STATE_CHECK` even though docs claim support. For these we
+ * rewrite to `=` / `!=` against the empty string, which the UI uses internally
+ * for the same semantics. Verified against capture 2026-04-17 + user report
+ * 2026-04-30 (MCP_FEATURE_REQUESTS — §2.1 text, §2.2 formula(text)).
+ */
+const EMPTINESS_REWRITE_TYPES = new Set(['text', 'formula', 'lookup', 'rollup']);
+
+function isTextResultType(field) {
+  if (!field) return false;
+  if (field.type === 'text') return true;
+  // Formula / lookup / rollup expose their cell result type via typeOptions.resultType
+  // (verified 2026-04-17). When unknown we still try the rewrite — if the result
+  // is numeric, Airtable accepts `=` `""` semantically as "is empty" too.
+  const result = field?.typeOptions?.resultType;
+  if (EMPTINESS_REWRITE_TYPES.has(field.type)) return result === undefined || result === 'text';
+  return false;
+}
+
+/**
+ * Type-aware second pass: walk the filterSet (post static normalization) and
+ * rewrite `isEmpty` / `isNotEmpty` to the equivalent `=`/`!=` `""` form on
+ * field types where the internal API rejects the documented operators.
+ *
+ * `fieldsById` is a `{ [fieldId]: { type, typeOptions } }` map — built once
+ * by the caller from the table schema.
+ */
+function normalizeEmptinessByFieldType(filterSet, fieldsById) {
+  if (!Array.isArray(filterSet)) return filterSet;
+  return filterSet.map(filter => {
+    if (filter.type === 'nested' && Array.isArray(filter.filterSet)) {
+      return { ...filter, filterSet: normalizeEmptinessByFieldType(filter.filterSet, fieldsById) };
+    }
+    if (!filter.operator || !filter.columnId) return filter;
+    const field = fieldsById[filter.columnId];
+    if (!field || !isTextResultType(field)) return filter;
+    if (filter.operator === 'isEmpty') {
+      return { ...filter, operator: '=', value: '' };
+    }
+    if (filter.operator === 'isNotEmpty') {
+      return { ...filter, operator: '!=', value: '' };
+    }
+    return filter;
+  });
+}
+
 function normalizeFilterSet(filterSet) {
   if (!Array.isArray(filterSet)) return filterSet;
   return filterSet.map(filter => {
@@ -846,13 +1005,25 @@ export class AirtableClient {
     // Passing null / empty clears filters.
     let processedFilters = filters;
     if (filters && Array.isArray(filters.filterSet)) {
-      // Airtable requires every filter to carry a unique flt-prefixed id.
-      // Auto-inject missing IDs so callers don't need to generate them.
-      // Also normalize operator names (is → =, isNot → !=) to match what
-      // Airtable's internal API accepts for text / singleSelect fields.
+      // Build a fieldId → { type, typeOptions } map for the view's table so we
+      // can rewrite `isEmpty`/`isNotEmpty` on text / formula(text) / lookup /
+      // rollup fields, where the internal API rejects those operators with
+      // 422 FAILED_STATE_CHECK (user report 2026-04-30 §2.1 + §2.2).
+      // Skipping this map only forfeits the rewrite — IDs and static
+      // operator normalization still happen below.
+      const fieldsById = await this._fieldsByIdForView(appId, viewId).catch(() => ({}));
+
+      // Refuse foreignKey isEmpty/isNotEmpty with a clear error rather than
+      // letting Airtable's opaque 422 through (user report §2.3 — no
+      // workaround available client-side; the internal API genuinely doesn't
+      // support these operators on linked-record fields).
+      assertNoForeignKeyEmptiness(filters.filterSet, fieldsById);
+
+      const staticNormalized = normalizeFilterSet(filters.filterSet);
+      const typeNormalized = normalizeEmptinessByFieldType(staticNormalized, fieldsById);
       processedFilters = {
         ...filters,
-        filterSet: ensureFilterIds(normalizeFilterSet(filters.filterSet)),
+        filterSet: ensureFilterIds(typeNormalized),
       };
     }
 
@@ -863,22 +1034,55 @@ export class AirtableClient {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
-      throw new Error(`updateViewFilters failed (${res.status}): ${errBody}`);
+      throw enrichFilterError(res.status, errBody, processedFilters);
     }
 
     return res.json();
   }
 
+  /** Build { fieldId: { type, typeOptions } } for the table containing `viewId`. */
+  async _fieldsByIdForView(appId, viewId) {
+    const data = await this.getApplicationData(appId);
+    const tables = data?.data?.tableSchemas || data?.data?.tables || [];
+    const table = tables.find(t => (t.views || []).some(v => v.id === viewId));
+    if (!table) return {};
+    const map = {};
+    for (const f of table.columns || table.fields || []) {
+      map[f.id] = { type: f.type, typeOptions: f.typeOptions || {}, name: f.name };
+    }
+    return map;
+  }
+
   /**
    * Reorder fields (columns) within a view.
    * Payload: { targetOverallColumnIndicesById: { fldXXX: 0, fldYYY: 1, ... } }
-   * Maps field IDs to their desired column index positions.
+   *
+   * Accepts a *partial* map: the caller may pass only the fields they want to
+   * move, e.g. `{ fldX: 1 }`. We resolve the view's current columnOrder and
+   * merge — moved fields are placed at their target positions, every other
+   * field keeps its relative order. Verified safer than passing a single-key
+   * map directly (user report 2026-04-30 §2.6 — Airtable's internal API
+   * 422s on incomplete maps).
    */
   async reorderViewFields(appId, viewId, fieldOrder) {
     assertAirtableId(appId, 'appId');
     assertAirtableId(viewId, 'viewId');
+    if (!fieldOrder || typeof fieldOrder !== 'object') {
+      throw new Error('reorderViewFields requires a fieldOrder object mapping field IDs to target positions.');
+    }
+
+    const view = await this.getView(appId, viewId);
+    const currentOrder = Array.isArray(view.columnOrder) ? view.columnOrder.map(c => c.columnId) : null;
+
+    // If we couldn't resolve the current order (rare — usually an unknown viewId),
+    // fall back to passing the user's map straight through. The upstream 422
+    // they get will at least include their original payload.
+    const fullMap = currentOrder
+      ? mergePartialFieldOrder(currentOrder, fieldOrder)
+      : fieldOrder;
+
     const url = `https://airtable.com/v0.3/view/${viewId}/updateMultipleViewConfigs`;
-    const payload = { targetOverallColumnIndicesById: fieldOrder };
+    const payload = { targetOverallColumnIndicesById: fullMap };
 
     const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
 
@@ -997,6 +1201,390 @@ export class AirtableClient {
       throw new Error(`updateRowHeight failed (${res.status}): ${errBody}`);
     }
 
+    return res.json();
+  }
+
+  // ─── View Sections (sidebar grouping) ─────────────────────────
+  // All endpoints captured 2026-04-30 (user report Recording 1).
+
+  /**
+   * List all sidebar sections for a table.
+   * Reads from cached `getApplicationData` — sections live at `table.viewSections`
+   * as a `{ [vscId]: { id, name, viewOrder, pinnedForUserId, createdByUserId } }` map.
+   * `table.viewOrder` mixes view IDs and section IDs at the top level — when a view
+   * is inside a section, it appears in the section's `viewOrder`, NOT the table's.
+   */
+  async listViewSections(appId, tableIdOrName) {
+    assertAirtableId(appId, 'appId');
+    const table = await this.resolveTable(appId, tableIdOrName);
+    const sections = table.viewSections || {};
+    return {
+      tableId: table.id,
+      tableName: table.name,
+      sections: Object.values(sections).map(s => ({
+        id: s.id,
+        name: s.name,
+        viewOrder: Array.isArray(s.viewOrder) ? s.viewOrder : [],
+        viewCount: Array.isArray(s.viewOrder) ? s.viewOrder.length : 0,
+        pinnedForUserId: s.pinnedForUserId ?? null,
+        createdByUserId: s.createdByUserId ?? null,
+      })),
+      // Top-level table viewOrder is mixed (view IDs and section IDs).
+      tableViewOrder: Array.isArray(table.viewOrder) ? table.viewOrder : [],
+    };
+  }
+
+  /**
+   * Create a sidebar section. The section ID is client-generated (Airtable lets
+   * us choose the `vsc...` prefix and 14-char body, same pattern as `fld` / `viw`).
+   */
+  async createViewSection(appId, tableId, name) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    const sectionId = 'vsc' + this._genRandomId();
+    const url = `https://airtable.com/v0.3/viewSection/${sectionId}/create`;
+    const payload = { tableId, name: name || 'View section' };
+
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`createViewSection failed (${res.status}): ${errBody}`);
+    }
+    this.cache.invalidate(appId);
+    const body = await res.json();
+    return { id: sectionId, name: payload.name, tableId, raw: body };
+  }
+
+  async renameViewSection(appId, sectionId, name) {
+    assertAirtableId(appId, 'appId');
+    if (!sectionId || !sectionId.startsWith('vsc')) {
+      throw new Error(`renameViewSection: expected sectionId to start with "vsc", got "${sectionId}"`);
+    }
+    const url = `https://airtable.com/v0.3/viewSection/${sectionId}/updateName`;
+    const res = await this.auth.postForm(url, this._mutationParams({ name }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`renameViewSection failed (${res.status}): ${errBody}`);
+    }
+    this.cache.invalidate(appId);
+    return res.json();
+  }
+
+  /**
+   * Destroy a sidebar section. Airtable handles non-empty sections natively:
+   * any views inside the section are auto-promoted into the table's top-level
+   * `viewOrder` at the position the section used to occupy. Verified 2026-04-30.
+   */
+  async deleteViewSection(appId, sectionId) {
+    assertAirtableId(appId, 'appId');
+    if (!sectionId || !sectionId.startsWith('vsc')) {
+      throw new Error(`deleteViewSection: expected sectionId to start with "vsc", got "${sectionId}"`);
+    }
+    const url = `https://airtable.com/v0.3/viewSection/${sectionId}/destroy`;
+    const res = await this.auth.postForm(url, this._mutationParams({}, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`deleteViewSection failed (${res.status}): ${errBody}`);
+    }
+    this.cache.invalidate(appId);
+    return res.json();
+  }
+
+  /**
+   * Move a view or a section within the sidebar. The single endpoint covers
+   * four user actions:
+   *   - viewId + targetViewSectionId          → put view INTO that section at index
+   *   - viewId + (no targetViewSectionId)     → move view OUT to ungrouped at index
+   *   - sectionId + targetIndex               → reorder section among other sections
+   *   - viewId + same section + new index     → reorder within a section
+   * `targetIndex` is the destination index (0 = top of the list). For section
+   * reorders, the index is into the table's top-level `viewOrder`; for moves
+   * within a section, it's into that section's `viewOrder`.
+   */
+  async moveViewOrViewSection(appId, tableId, viewIdOrViewSectionId, targetIndex, targetViewSectionId = undefined) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!viewIdOrViewSectionId) {
+      throw new Error('moveViewOrViewSection requires viewIdOrViewSectionId');
+    }
+    const url = `https://airtable.com/v0.3/table/${tableId}/moveViewOrViewSection`;
+    const payload = { viewIdOrViewSectionId, targetIndex: Number.isFinite(targetIndex) ? targetIndex : 0 };
+    if (targetViewSectionId) payload.targetViewSectionId = targetViewSectionId;
+
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`moveViewOrViewSection failed (${res.status}): ${errBody}`);
+    }
+    this.cache.invalidate(appId);
+    return res.json();
+  }
+
+  // ─── View Columns (visibility, ordering, freezing) ────────────
+  // Endpoints captured 2026-04-30 (user report Recording 2 + 3).
+
+  /** Hide or show every column in a view in one call. */
+  async showOrHideAllColumns(appId, viewId, visibility) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    const url = `https://airtable.com/v0.3/view/${viewId}/showOrHideAllColumns`;
+    const res = await this.auth.postForm(url, this._mutationParams({ visibility: !!visibility }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`showOrHideAllColumns failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Move one or more columns within the *visible-only* index. Index 0 is the
+   * leftmost visible column. Different from `reorderViewFields`, which writes
+   * the full overall column order (visible + hidden).
+   */
+  async moveVisibleColumns(appId, viewId, columnIds, targetVisibleIndex) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    if (!Array.isArray(columnIds) || columnIds.length === 0) {
+      throw new Error('moveVisibleColumns requires a non-empty columnIds array');
+    }
+    const url = `https://airtable.com/v0.3/view/${viewId}/moveVisibleColumns`;
+    const payload = { columnIds, targetVisibleIndex: Number(targetVisibleIndex) };
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`moveVisibleColumns failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Move one or more columns within the *overall* index (visible + hidden).
+   * Sibling of `moveVisibleColumns`; complements existing `reorderViewFields`.
+   */
+  async moveOverallColumns(appId, viewId, columnIds, targetOverallIndex) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    if (!Array.isArray(columnIds) || columnIds.length === 0) {
+      throw new Error('moveOverallColumns requires a non-empty columnIds array');
+    }
+    const url = `https://airtable.com/v0.3/view/${viewId}/moveOverallColumns`;
+    const payload = { columnIds, targetOverallIndex: Number(targetOverallIndex) };
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`moveOverallColumns failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  /** Update the frozen-column divider position for a grid view. */
+  async updateFrozenColumnCount(appId, viewId, frozenColumnCount) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    const url = `https://airtable.com/v0.3/view/${viewId}/updateFrozenColumnCount`;
+    const payload = { frozenColumnCount: Number(frozenColumnCount) };
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`updateFrozenColumnCount failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * One-shot view-column setup. Composes hide-all → show-the-requested-set →
+   * move-each-into-position → optional frozen-column count. Solves the user
+   * report's §1.4 "new views show all 168 fields, unusable until manually
+   * trimmed" problem.
+   *
+   * `visibleColumnIds` (required): array of field IDs that should be visible.
+   *   All other fields are hidden. Order in this array becomes the visible
+   *   left-to-right order.
+   * `frozenColumnCount` (optional): if set, frozen-column divider is placed
+   *   N columns from the left.
+   */
+  async setViewColumns(appId, viewId, { visibleColumnIds, frozenColumnCount } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    if (!Array.isArray(visibleColumnIds) || visibleColumnIds.length === 0) {
+      throw new Error('setViewColumns requires a non-empty visibleColumnIds array');
+    }
+
+    // 1. Hide everything.
+    await this.showOrHideAllColumns(appId, viewId, false);
+    // 2. Show the requested set in one batched call.
+    await this.showOrHideColumns(appId, viewId, visibleColumnIds, true);
+    // 3. Walk left-to-right, moving each into its target visible index. The
+    //    UI does this one-at-a-time, so we mirror that for safety.
+    for (let i = 0; i < visibleColumnIds.length; i++) {
+      await this.moveVisibleColumns(appId, viewId, [visibleColumnIds[i]], i);
+    }
+    // 4. Optional frozen-column divider.
+    if (Number.isFinite(frozenColumnCount) && frozenColumnCount >= 0) {
+      await this.updateFrozenColumnCount(appId, viewId, frozenColumnCount);
+    }
+    return { updated: true, viewId, visibleColumnIds, frozenColumnCount: frozenColumnCount ?? null };
+  }
+
+  // ─── View Presentation (cover image, color rules, cell wrap) ──
+  // Endpoints captured 2026-04-30 (Recording 3 — Kanban + Gallery).
+
+  /**
+   * Set the cover-image field and crop/fit mode for Kanban or Gallery views.
+   * Pass `coverColumnId: null` to remove the cover.
+   */
+  async setViewCover(appId, viewId, { coverColumnId, coverFitType } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    const out = {};
+    // Either or both fields can be passed; we issue the corresponding endpoint(s).
+    if (coverColumnId !== undefined) {
+      const url = `https://airtable.com/v0.3/view/${viewId}/updateCoverColumnId`;
+      const res = await this.auth.postForm(url, this._mutationParams({ coverColumnId: coverColumnId || null }, appId), appId);
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`updateCoverColumnId failed (${res.status}): ${errBody}`);
+      }
+      out.coverColumnId = coverColumnId || null;
+    }
+    if (coverFitType !== undefined) {
+      if (coverFitType !== 'fit' && coverFitType !== 'crop') {
+        throw new Error(`setViewCover: coverFitType must be "fit" or "crop", got "${coverFitType}"`);
+      }
+      const url = `https://airtable.com/v0.3/view/${viewId}/updateCoverFitType`;
+      const res = await this.auth.postForm(url, this._mutationParams({ coverFitType }, appId), appId);
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`updateCoverFitType failed (${res.status}): ${errBody}`);
+      }
+      out.coverFitType = coverFitType;
+    }
+    return { updated: true, viewId, ...out };
+  }
+
+  /**
+   * Apply a color config to a view. Currently supports `type: "selectColumn"` —
+   * card colors come from a single-select field's choice colors. Other types
+   * (e.g. rule-based coloring) exist in Airtable's UI but aren't captured yet;
+   * passing an unknown type is forwarded as-is so callers willing to experiment
+   * aren't blocked.
+   */
+  async setViewColorConfig(appId, viewId, colorConfig) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    if (!colorConfig || typeof colorConfig !== 'object') {
+      throw new Error('setViewColorConfig requires a colorConfig object');
+    }
+    const url = `https://airtable.com/v0.3/view/${viewId}/updateColorConfig`;
+    const res = await this.auth.postForm(url, this._mutationParams({ colorConfig }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`updateColorConfig failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  /** Toggle whether long cell values wrap or truncate. */
+  async setViewCellWrap(appId, viewId, shouldWrapCellValues) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    const url = `https://airtable.com/v0.3/view/${viewId}/updateShouldWrapCellValues`;
+    const payload = { shouldWrapCellValues: !!shouldWrapCellValues };
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`updateShouldWrapCellValues failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  // ─── Calendar metadata ────────────────────────────────────────
+  // Endpoint captured 2026-04-30 (Recording 4).
+
+  /**
+   * Set the date-column ranges shown on a Calendar view. Each entry is either:
+   *   { startColumnId }                       → single-point events
+   *   { startColumnId, endColumnId }          → range events
+   * The array form lets a single calendar overlay multiple date series at once.
+   */
+  async setCalendarDateColumns(appId, viewId, dateColumnRanges) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    if (!Array.isArray(dateColumnRanges) || dateColumnRanges.length === 0) {
+      throw new Error('setCalendarDateColumns requires a non-empty dateColumnRanges array');
+    }
+    const url = `https://airtable.com/v0.3/view/${viewId}/updateCalendarDateColumnRanges`;
+    const res = await this.auth.postForm(url, this._mutationParams({ dateColumnRanges }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`updateCalendarDateColumnRanges failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  // ─── Form metadata (legacy form views) ────────────────────────
+  // Endpoints captured 2026-04-30 (Recording 6). Builder-form ("Interfaces"
+  // page/* endpoints) are intentionally out of scope — they're a separate
+  // product surface.
+
+  /**
+   * Update one or more legacy-form-view metadata properties. Unset properties
+   * are not touched. Each property maps to its own atomic endpoint; we fan
+   * out so callers can patch multiple things in one logical operation.
+   */
+  async setFormMetadata(appId, viewId, props = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    const ops = [];
+    if (props.description !== undefined)
+      ops.push(['updateFormDescription', { description: props.description }]);
+    if (props.afterSubmitMessage !== undefined)
+      ops.push(['updateFormAfterSubmitMessage', { afterSubmitMessage: props.afterSubmitMessage }]);
+    if (props.redirectUrl !== undefined)
+      ops.push(['updateFormRedirectUrl', { redirectUrl: props.redirectUrl }]);
+    if (props.refreshAfterSubmit !== undefined)
+      ops.push(['updateFormRefreshAfterSubmit', { refreshAfterSubmit: props.refreshAfterSubmit }]);
+    if (props.shouldAllowRequestCopyOfResponse !== undefined)
+      ops.push(['updateFormShouldAllowRequestCopyOfResponse', { shouldAllowRequestCopyOfResponse: !!props.shouldAllowRequestCopyOfResponse }]);
+    if (props.shouldAttributeResponses !== undefined)
+      ops.push(['updateFormShouldAttributeResponses', { shouldAttributeResponses: !!props.shouldAttributeResponses }]);
+    if (props.isAirtableBrandingRemoved !== undefined)
+      ops.push(['updateFormIsAirtableBrandingRemoved', { isAirtableBrandingRemoved: !!props.isAirtableBrandingRemoved }]);
+
+    if (ops.length === 0) {
+      throw new Error('setFormMetadata requires at least one property to update');
+    }
+
+    const applied = {};
+    for (const [endpoint, payload] of ops) {
+      const url = `https://airtable.com/v0.3/view/${viewId}/${endpoint}`;
+      const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`${endpoint} failed (${res.status}): ${errBody}`);
+      }
+      Object.assign(applied, payload);
+    }
+    return { updated: true, viewId, applied };
+  }
+
+  /**
+   * Toggle email-on-submit notifications for a specific user on a form view.
+   * Per-user, not per-form — that's why this is separate from setFormMetadata.
+   */
+  async setFormSubmissionNotification(appId, viewId, userId, shouldEnable) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(viewId, 'viewId');
+    if (!userId || !userId.startsWith('usr')) {
+      throw new Error(`setFormSubmissionNotification: expected userId to start with "usr", got "${userId}"`);
+    }
+    const url = `https://airtable.com/v0.3/view/${viewId}/updateFormSubmissionNotificationPreferencesForUser`;
+    const payload = { userId, shouldEnable: !!shouldEnable };
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`updateFormSubmissionNotificationPreferencesForUser failed (${res.status}): ${errBody}`);
+    }
     return res.json();
   }
 

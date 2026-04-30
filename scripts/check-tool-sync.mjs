@@ -130,10 +130,12 @@ function countByCats(cats) {
   return Object.values(mcpCategories).filter(c => set.has(c)).length;
 }
 
+// Drive expected counts off mcpProfiles directly so adding a new category to
+// BUILTIN_PROFILES doesn't require editing this script too.
 const expected = {
-  'read-only':  countByCats(['read']),
-  'safe-write': countByCats(['read', 'table-write', 'field-write', 'view-write']),
-  full:         countByCats(['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension']),
+  'read-only':  countByCats(mcpProfiles['read-only']?.categories ?? []),
+  'safe-write': countByCats(mcpProfiles['safe-write']?.categories ?? []),
+  full:         countByCats(mcpProfiles.full?.categories         ?? []),
 };
 
 const countRegex = /\((\d+)\s+tools?\)/;

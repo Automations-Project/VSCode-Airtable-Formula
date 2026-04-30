@@ -22,7 +22,12 @@ import type { ToolCategories, ToolProfileName, ToolProfileSnapshot } from '@airt
 // These must mirror `packages/mcp-server/src/tool-config.js::TOOL_CATEGORIES`.
 // Drift is caught at build time by scripts/check-tool-sync.mjs — don't edit
 // this table without also editing the mcp-server source (or vice versa).
-type ExtraCategoryKey = 'table-write' | 'table-destructive' | 'field-write' | 'field-destructive' | 'view-write' | 'view-destructive';
+type ExtraCategoryKey =
+  | 'table-write' | 'table-destructive'
+  | 'field-write' | 'field-destructive'
+  | 'view-write' | 'view-destructive'
+  | 'view-section' | 'view-section-destructive'
+  | 'form-write';
 export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategoryKey> = {
   // Read-only / inspection
   get_base_schema:           'read',
@@ -32,6 +37,7 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   list_views:                'read',
   get_view:                  'read',
   validate_formula:          'read',
+  list_view_sections:        'read',
   // Table mutations (non-destructive)
   create_table:              'table-write',
   rename_table:              'table-write',
@@ -58,8 +64,26 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   apply_view_sorts:          'view-write',
   update_view_group_levels:  'view-write',
   update_view_row_height:    'view-write',
+  set_view_columns:          'view-write',
+  show_or_hide_all_columns:  'view-write',
+  move_visible_columns:      'view-write',
+  move_overall_columns:      'view-write',
+  update_frozen_column_count:'view-write',
+  set_view_cover:            'view-write',
+  set_view_color_config:     'view-write',
+  set_view_cell_wrap:        'view-write',
+  set_calendar_date_columns: 'view-write',
   // View destructive
   delete_view:               'view-destructive',
+  // View sections (non-destructive)
+  create_view_section:       'view-section',
+  rename_view_section:       'view-section',
+  move_view_to_section:      'view-section',
+  // View sections (destructive)
+  delete_view_section:       'view-section-destructive',
+  // Form metadata (legacy form views)
+  set_form_metadata:                'form-write',
+  set_form_submission_notification: 'form-write',
   // Extension management
   create_extension:          'extension',
   create_extension_dashboard:'extension',
@@ -71,14 +95,17 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
-  'read':               'Read / Inspect',
-  'table-write':        'Table Write',
-  'table-destructive':  'Table Destructive',
-  'field-write':        'Field Write',
-  'field-destructive':  'Field Destructive',
-  'view-write':         'View Write',
-  'view-destructive':   'View Destructive',
-  'extension':          'Extension Management',
+  'read':                     'Read / Inspect',
+  'table-write':              'Table Write',
+  'table-destructive':        'Table Destructive',
+  'field-write':              'Field Write',
+  'field-destructive':        'Field Destructive',
+  'view-write':               'View Write',
+  'view-destructive':         'View Destructive',
+  'view-section':             'View Sections',
+  'view-section-destructive': 'View Sections (destructive)',
+  'form-write':               'Form Metadata',
+  'extension':                'Extension Management',
 };
 
 interface ProfileDef {
@@ -89,22 +116,31 @@ interface ProfileDef {
 
 export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', ProfileDef> = {
   'read-only': { description: 'Schema inspection and formula validation only', categories: ['read'] },
-  'safe-write':{ description: 'Read + create/update tables, fields, and views (no deletes)',
-                 categories: ['read', 'table-write', 'field-write', 'view-write'] },
-  full:        { description: 'All tools enabled including destructive and extensions',
-                 categories: ['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'] },
+  'safe-write':{ description: 'Read + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
+                 categories: ['read', 'table-write', 'field-write', 'view-write', 'view-section'] },
+  full:        { description: 'All tools enabled including destructive ops, form metadata, and extensions',
+                 categories: [
+                   'read', 'table-write', 'table-destructive',
+                   'field-write', 'field-destructive',
+                   'view-write', 'view-destructive',
+                   'view-section', 'view-section-destructive',
+                   'form-write', 'extension',
+                 ] },
 };
 
 // Settings key suffix → file-format category key
 const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
-  read:             'read',
-  tableWrite:       'table-write',
-  tableDestructive: 'table-destructive',
-  fieldWrite:       'field-write',
-  fieldDestructive: 'field-destructive',
-  viewWrite:        'view-write',
-  viewDestructive:  'view-destructive',
-  extension:        'extension',
+  read:                    'read',
+  tableWrite:              'table-write',
+  tableDestructive:        'table-destructive',
+  fieldWrite:              'field-write',
+  fieldDestructive:        'field-destructive',
+  viewWrite:               'view-write',
+  viewDestructive:         'view-destructive',
+  viewSection:             'view-section',
+  viewSectionDestructive:  'view-section-destructive',
+  formWrite:               'form-write',
+  extension:               'extension',
 };
 
 // Inverse: file-format category key → settings key suffix
@@ -194,14 +230,17 @@ export class ToolProfileManager implements vscode.Disposable {
     const cfg = vscode.workspace.getConfiguration('airtableFormula');
     const profile = (cfg.get<string>('mcp.toolProfile', 'full') as ToolProfileName) ?? 'full';
     const categories: ToolCategories = {
-      read:             cfg.get('mcp.categories.read',             true),
-      tableWrite:       cfg.get('mcp.categories.tableWrite',       true),
-      tableDestructive: cfg.get('mcp.categories.tableDestructive', true),
-      fieldWrite:       cfg.get('mcp.categories.fieldWrite',       true),
-      fieldDestructive: cfg.get('mcp.categories.fieldDestructive', true),
-      viewWrite:        cfg.get('mcp.categories.viewWrite',        true),
-      viewDestructive:  cfg.get('mcp.categories.viewDestructive',  true),
-      extension:        cfg.get('mcp.categories.extension',        true),
+      read:                   cfg.get('mcp.categories.read',                   true),
+      tableWrite:             cfg.get('mcp.categories.tableWrite',             true),
+      tableDestructive:       cfg.get('mcp.categories.tableDestructive',       true),
+      fieldWrite:             cfg.get('mcp.categories.fieldWrite',             true),
+      fieldDestructive:       cfg.get('mcp.categories.fieldDestructive',       true),
+      viewWrite:              cfg.get('mcp.categories.viewWrite',              true),
+      viewDestructive:        cfg.get('mcp.categories.viewDestructive',        true),
+      viewSection:            cfg.get('mcp.categories.viewSection',            true),
+      viewSectionDestructive: cfg.get('mcp.categories.viewSectionDestructive', true),
+      formWrite:              cfg.get('mcp.categories.formWrite',              true),
+      extension:              cfg.get('mcp.categories.extension',              true),
     };
     return {
       profile,
@@ -248,7 +287,15 @@ export class ToolProfileManager implements vscode.Disposable {
       '',
     ];
     // Group by category file-key, preserving order
-    const categoryOrder = ['read', 'table-write', 'table-destructive', 'field-write', 'field-destructive', 'view-write', 'view-destructive', 'extension'];
+    const categoryOrder = [
+      'read',
+      'table-write', 'table-destructive',
+      'field-write', 'field-destructive',
+      'view-write', 'view-destructive',
+      'view-section', 'view-section-destructive',
+      'form-write',
+      'extension',
+    ];
     for (const cat of categoryOrder) {
       const label = CATEGORY_LABELS[cat] ?? cat;
       const tools = Object.entries(TOOL_CATEGORIES).filter(([, c]) => c === cat);

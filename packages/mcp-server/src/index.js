@@ -461,13 +461,13 @@ FILTER FORMAT:
 
 Filter IDs (flt-prefixed) are auto-generated — do NOT include them.
 
-OPERATORS by field type — verified against Airtable's internal API (2026-04-17 capture):
+OPERATORS by field type — verified against Airtable's internal API (2026-04-17 capture; user report 2026-04-30):
   Text / URL / Email / Phone:
     "=" (exact match — value: string)
     "!=" (not equal)
     "contains"            (value: string)
     "doesNotContain"
-    "isEmpty" / "isNotEmpty" (no value)
+    "isEmpty" / "isNotEmpty" — input-side; auto-rewritten to "=" / "!=" "" before sending (the internal API rejects them on text fields with FAILED_STATE_CHECK)
   Number / Percent / Currency:
     "=", "!=", "<", ">", "<=", ">=", "isEmpty", "isNotEmpty"
   Single select:
@@ -481,12 +481,28 @@ OPERATORS by field type — verified against Airtable's internal API (2026-04-17
     "=" (value: true|false)
   Date:
     "is", "isBefore", "isAfter", "isOnOrBefore", "isOnOrAfter", "isEmpty", "isNotEmpty"
+  Formula / Lookup / Rollup (text result type):
+    Same as Text. "isEmpty" / "isNotEmpty" are auto-rewritten to "=" / "!=" "".
+  Linked record (foreignKey):
+    "contains" (value: linked record name) works.
+    "isEmpty" / "isNotEmpty" do NOT work — the call throws a clear error directing
+    you to a helper formula like \`IF(LEN({Linked} & "")>0,"yes","")\` and a "=" / "!=" filter on that helper.
 
-AUTO-NORMALIZATION:
-  - "is"     → "="     (applied automatically — the internal API does not recognize "is")
-  - "isNot"  → "!="
+AUTO-NORMALIZATION (applied client-side before the request):
+  - "is"            → "="     (the internal API does not recognize "is")
+  - "isNot"         → "!="
   - "isAnyOf" with a single-element array or scalar value → "=" with scalar value
+  - "isEmpty"       → "="  ""   on text / formula(text) / lookup(text) / rollup(text) fields
+  - "isNotEmpty"    → "!=" ""   on text / formula(text) / lookup(text) / rollup(text) fields
   For single-select, value must be the choice ID (selXXX) — use get_base_schema to find IDs.
+
+NESTING LIMIT:
+  The internal API accepts at most 2 levels of nesting (top conjunction + one
+  layer of nested groups). Deeper trees are rejected with FAILED_STATE_CHECK.
+  Workaround: flatten by repeating shared conditions inside each leaf group,
+  e.g. \`(A AND B) OR (A AND C)\` instead of \`A AND (B OR C)\` if you need
+  another nested AND inside the OR. The error message returned by this tool
+  flags depth-related failures explicitly.
 
 EXAMPLES:
   Text equals:          { filterSet: [{ columnId: "fldXXX", operator: "=", value: "Prime" }], conjunction: "and" }
@@ -529,7 +545,7 @@ EXAMPLES:
   },
   {
     name: 'reorder_view_fields',
-    description: 'Reorder the fields (columns) displayed in a view. Provide a mapping of field IDs to their desired column index positions.',
+    description: 'Reorder the fields (columns) displayed in a view. Accepts a partial map: pass only the field IDs you want to move, e.g. `{ "fldX": 1 }` to move fldX to position 1. Other fields keep their relative order. Index 0 is the leftmost position after the primary field. Internally the tool reads the view\'s current columnOrder, applies the moves, and sends the complete map (the underlying internal API rejects single-key inputs with FAILED_STATE_CHECK — user report 2026-04-30 §2.6).',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -547,7 +563,7 @@ EXAMPLES:
   },
   {
     name: 'show_or_hide_view_columns',
-    description: 'Show or hide specific fields (columns) in a view. Unlike show_or_hide_all, this targets individual columns.',
+    description: 'Show or hide specific fields (columns) in a view. Pass an array of column IDs and a single visibility flag — every ID in the array is set to that visibility. To toggle many fields at once, send the full set in one call (no separate "show all" / "hide all" tool exists today; that lives in 2.4.0+).',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -641,6 +657,297 @@ EXAMPLES:
         debug: debugProp,
       },
       required: ['appId', 'viewId', 'rowHeight'],
+    },
+  },
+
+  // ── View Sections (sidebar grouping) ──
+  {
+    name: 'list_view_sections',
+    description: 'List all sidebar sections for a table. Sections are user-organized groupings of views in the Airtable left sidebar (e.g. "🚀 Posting workflow", "🗑️ Sold workflow"). Returns each section\'s id, name, and the views inside it. The table-level `tableViewOrder` is a mixed list of view IDs and section IDs at the top level — when a view is inside a section, it appears in that section\'s `viewOrder`, NOT in the table\'s.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableIdOrName: { type: 'string', description: 'Table ID (preferred) or unambiguous table name' },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableIdOrName'],
+    },
+  },
+  {
+    name: 'create_view_section',
+    description: 'Create a new sidebar section in a table. Returns the new section ID (vsc-prefixed). Use `move_view_to_section` to populate it with views.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID (tbl-prefixed)' },
+        name: { type: 'string', description: 'Section name (emojis allowed, e.g. "🚀 Posting workflow")' },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'name'],
+    },
+  },
+  {
+    name: 'rename_view_section',
+    description: 'Rename a sidebar section.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        sectionId: { type: 'string', description: 'The section ID (vsc-prefixed)' },
+        name: { type: 'string', description: 'New section name' },
+        debug: debugProp,
+      },
+      required: ['appId', 'sectionId', 'name'],
+    },
+  },
+  {
+    name: 'delete_view_section',
+    description: 'Delete a sidebar section. Views inside the section are NOT deleted — Airtable auto-promotes them to ungrouped at the table-level position the section used to occupy. Verified 2026-04-30.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        sectionId: { type: 'string', description: 'The section ID (vsc-prefixed)' },
+        debug: debugProp,
+      },
+      required: ['appId', 'sectionId'],
+    },
+  },
+  {
+    name: 'move_view_to_section',
+    description: `Move a view (or a section itself) within the sidebar. The single endpoint covers four user actions depending on the arguments:
+  - viewId + sectionId         → put the view INTO that section at targetIndex
+  - viewId + sectionId: null   → move the view OUT to ungrouped at table-level targetIndex
+  - sectionId-as-viewIdOrSectionId + targetIndex → reorder the section among other sections
+  - viewId + same section      → reorder the view within its current section
+For section reorders, targetIndex is into the table's top-level mixed viewOrder; for in-section moves, it's into that section's viewOrder.`,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID (tbl-prefixed)' },
+        viewIdOrSectionId: { type: 'string', description: 'A view ID (viw...) or section ID (vsc...) to move' },
+        targetIndex: { type: 'number', description: 'Destination index (0 = top). Per-section for in-section moves; per-table for section reorders.' },
+        targetSectionId: { type: 'string', description: 'Optional vsc-prefixed section ID to move INTO. Omit (or pass null) to move the view to ungrouped.' },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'viewIdOrSectionId', 'targetIndex'],
+    },
+  },
+
+  // ── View Columns (bulk visibility, ordering, freezing) ──
+  {
+    name: 'set_view_columns',
+    description: 'One-shot view-column setup. Hides every column in the view, then shows only `visibleColumnIds` in the order given (left-to-right), then optionally sets the frozen-column divider. Use this to turn a brand-new view from "all 168 fields visible" into a curated layout in a single tool call.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID (viw-prefixed)' },
+        visibleColumnIds: { type: 'array', items: { type: 'string' }, description: 'Field IDs to show, in left-to-right order. All other fields are hidden.' },
+        frozenColumnCount: { type: 'number', description: 'Optional. If set, freezes this many columns from the left.' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'visibleColumnIds'],
+    },
+  },
+  {
+    name: 'show_or_hide_all_columns',
+    description: 'Show or hide every column in a view in one call. Use `set_view_columns` for "hide all then show these specific ones" — this tool is the bulk all-or-nothing primitive.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        visibility: { type: 'boolean', description: 'true to show all, false to hide all' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'visibility'],
+    },
+  },
+  {
+    name: 'move_visible_columns',
+    description: 'Move one or more columns to a new position in the *visible-only* index. Index 0 is the leftmost visible column. Distinct from `reorder_view_fields` (which writes the full overall order — visible + hidden) and `move_overall_columns` (which also operates on overall index but accepts a partial array of columns to move).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        columnIds: { type: 'array', items: { type: 'string' }, description: 'Field IDs to move (move them as a contiguous group starting at targetVisibleIndex)' },
+        targetVisibleIndex: { type: 'number', description: 'Destination index in the visible-only column ordering (0 = leftmost visible)' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'columnIds', 'targetVisibleIndex'],
+    },
+  },
+  {
+    name: 'move_overall_columns',
+    description: 'Move one or more columns to a new position in the *overall* index (visible + hidden). Sibling of `move_visible_columns`. Index 0 is the leftmost column in the underlying full order.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        columnIds: { type: 'array', items: { type: 'string' }, description: 'Field IDs to move' },
+        targetOverallIndex: { type: 'number', description: 'Destination index in the overall (visible + hidden) ordering' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'columnIds', 'targetOverallIndex'],
+    },
+  },
+  {
+    name: 'update_frozen_column_count',
+    description: 'Set the frozen-column divider position for a grid view. The first N columns from the left are frozen and stay visible during horizontal scroll.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        frozenColumnCount: { type: 'number', description: 'Number of columns to freeze (counted from the left). 0 unfreezes all.' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'frozenColumnCount'],
+    },
+  },
+
+  // ── View Presentation (cover image, color rules, cell wrap) ──
+  {
+    name: 'set_view_cover',
+    description: 'Set the cover-image field and crop/fit mode for Kanban or Gallery views. Pass `coverColumnId: null` to remove the cover. Either field can be passed independently — the other is left untouched.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        coverColumnId: { type: ['string', 'null'], description: 'Attachment field ID to use as cover (or null to remove)' },
+        coverFitType: { type: 'string', enum: ['fit', 'crop'], description: 'How the cover image is displayed' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId'],
+    },
+  },
+  {
+    name: 'set_view_color_config',
+    description: 'Apply a color config to a view (Kanban / Gallery / Calendar). Currently supports `type: "selectColumn"` — card colors are taken from a single-select field\'s choice colors. Other types (e.g. rule-based coloring) exist in Airtable\'s UI but their payload shapes have not been fully captured yet — passing an unknown type is forwarded as-is so callers can experiment.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        colorConfig: {
+          type: 'object',
+          description: 'Color config object. Verified shape: { type: "selectColumn", selectColumnId: "fld...", colorDefinitions: null }.',
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'colorConfig'],
+    },
+  },
+  {
+    name: 'set_view_cell_wrap',
+    description: 'Toggle whether long cell values wrap (multi-line) or truncate (single-line with ellipsis).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The view ID' },
+        shouldWrapCellValues: { type: 'boolean', description: 'true to wrap, false to truncate' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'shouldWrapCellValues'],
+    },
+  },
+
+  // ── Calendar metadata ──
+  {
+    name: 'set_calendar_date_columns',
+    description: 'Set the date-column ranges shown on a Calendar view. Each entry is either { startColumnId } for single-point events or { startColumnId, endColumnId } for range events. The array form lets a single calendar overlay multiple date series at once (e.g. "Created date" + "Start → End range" together).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The Calendar view ID' },
+        dateColumnRanges: {
+          type: 'array',
+          description: 'Array of date-column-range entries.',
+          items: {
+            type: 'object',
+            properties: {
+              startColumnId: { type: 'string', description: 'Field ID of the (start) date column' },
+              endColumnId: { type: 'string', description: 'Optional. Field ID for range end — turns the entry into a range event.' },
+            },
+            required: ['startColumnId'],
+          },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'dateColumnRanges'],
+    },
+  },
+
+  // ── Form metadata (legacy form views only — Interfaces / "builder forms" are out of scope) ──
+  {
+    name: 'set_form_metadata',
+    description: `Update one or more legacy-form-view metadata properties in a single call. Unset properties are not touched. Each property fans out to its own atomic Airtable endpoint.
+
+Supported properties:
+  description                       — intro text shown above the form
+  afterSubmitMessage                — "thank you" text after submission
+  redirectUrl                       — URL to redirect to after submit
+  refreshAfterSubmit                — post-submit behavior (e.g. "REFRESH_BUTTON")
+  shouldAllowRequestCopyOfResponse  — boolean: show "send me a copy" toggle to respondents
+  shouldAttributeResponses          — boolean: track which user submitted (for signed-in respondents)
+  isAirtableBrandingRemoved         — boolean: hide Airtable branding (paid plans only)
+
+Note: "form title" is the view name itself — use rename_view to change it. "Field labels on the form" use a per-field endpoint that has not been captured yet.`,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The form view ID' },
+        description: { type: 'string', description: 'Intro text shown above the form (omit to leave unchanged)' },
+        afterSubmitMessage: { type: 'string', description: 'Confirmation text shown after submission' },
+        redirectUrl: { type: 'string', description: 'URL to redirect to after submit' },
+        refreshAfterSubmit: { type: 'string', description: 'Post-submit behavior (e.g. "REFRESH_BUTTON")' },
+        shouldAllowRequestCopyOfResponse: { type: 'boolean', description: 'Allow respondents to request a copy of their submission' },
+        shouldAttributeResponses: { type: 'boolean', description: 'Track which signed-in user submitted each response' },
+        isAirtableBrandingRemoved: { type: 'boolean', description: 'Hide the Airtable branding on the form (paid plans)' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId'],
+    },
+  },
+  {
+    name: 'set_form_submission_notification',
+    description: 'Toggle email-on-submit notifications for a specific user on a form view. Per-user, not per-form (separate from set_form_metadata).',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        viewId: { type: 'string', description: 'The form view ID' },
+        userId: { type: 'string', description: 'The Airtable user ID to enable/disable notifications for (usr-prefixed)' },
+        shouldEnable: { type: 'boolean', description: 'true to send email-on-submit, false to stop' },
+        debug: debugProp,
+      },
+      required: ['appId', 'viewId', 'userId', 'shouldEnable'],
     },
   },
 
@@ -1132,6 +1439,99 @@ const handlers = {
     );
   },
 
+  // ── View Sections ──
+
+  async list_view_sections({ appId, tableIdOrName, debug }) {
+    const result = await client.listViewSections(appId, tableIdOrName);
+    return ok(result, result, debug);
+  },
+
+  async create_view_section({ appId, tableId, name, debug }) {
+    const result = await client.createViewSection(appId, tableId, name);
+    return ok({ created: true, sectionId: result.id, name: result.name, tableId }, result, debug);
+  },
+
+  async rename_view_section({ appId, sectionId, name, debug }) {
+    const result = await client.renameViewSection(appId, sectionId, name);
+    return ok({ updated: true, sectionId, name }, result, debug);
+  },
+
+  async delete_view_section({ appId, sectionId, debug }) {
+    const result = await client.deleteViewSection(appId, sectionId);
+    return ok({ deleted: true, sectionId, note: 'Contained views auto-promoted to ungrouped at the section\'s former position.' }, result, debug);
+  },
+
+  async move_view_to_section({ appId, tableId, viewIdOrSectionId, targetIndex, targetSectionId, debug }) {
+    const result = await client.moveViewOrViewSection(
+      appId, tableId, viewIdOrSectionId, targetIndex,
+      targetSectionId === null || targetSectionId === undefined ? undefined : targetSectionId,
+    );
+    return ok({ updated: true, viewIdOrSectionId, targetIndex, targetSectionId: targetSectionId ?? null }, result, debug);
+  },
+
+  // ── View Columns (bulk) ──
+
+  async set_view_columns({ appId, viewId, visibleColumnIds, frozenColumnCount, debug }) {
+    const result = await client.setViewColumns(appId, viewId, { visibleColumnIds, frozenColumnCount });
+    return ok(result, result, debug);
+  },
+
+  async show_or_hide_all_columns({ appId, viewId, visibility, debug }) {
+    const result = await client.showOrHideAllColumns(appId, viewId, visibility);
+    return ok({ updated: true, viewId, visibility: !!visibility }, result, debug);
+  },
+
+  async move_visible_columns({ appId, viewId, columnIds, targetVisibleIndex, debug }) {
+    const result = await client.moveVisibleColumns(appId, viewId, columnIds, targetVisibleIndex);
+    return ok({ updated: true, viewId, columnIds, targetVisibleIndex }, result, debug);
+  },
+
+  async move_overall_columns({ appId, viewId, columnIds, targetOverallIndex, debug }) {
+    const result = await client.moveOverallColumns(appId, viewId, columnIds, targetOverallIndex);
+    return ok({ updated: true, viewId, columnIds, targetOverallIndex }, result, debug);
+  },
+
+  async update_frozen_column_count({ appId, viewId, frozenColumnCount, debug }) {
+    const result = await client.updateFrozenColumnCount(appId, viewId, frozenColumnCount);
+    return ok({ updated: true, viewId, frozenColumnCount }, result, debug);
+  },
+
+  // ── View Presentation ──
+
+  async set_view_cover({ appId, viewId, coverColumnId, coverFitType, debug }) {
+    const result = await client.setViewCover(appId, viewId, { coverColumnId, coverFitType });
+    return ok(result, result, debug);
+  },
+
+  async set_view_color_config({ appId, viewId, colorConfig, debug }) {
+    const result = await client.setViewColorConfig(appId, viewId, colorConfig);
+    return ok({ updated: true, viewId, colorConfig }, result, debug);
+  },
+
+  async set_view_cell_wrap({ appId, viewId, shouldWrapCellValues, debug }) {
+    const result = await client.setViewCellWrap(appId, viewId, shouldWrapCellValues);
+    return ok({ updated: true, viewId, shouldWrapCellValues: !!shouldWrapCellValues }, result, debug);
+  },
+
+  // ── Calendar ──
+
+  async set_calendar_date_columns({ appId, viewId, dateColumnRanges, debug }) {
+    const result = await client.setCalendarDateColumns(appId, viewId, dateColumnRanges);
+    return ok({ updated: true, viewId, dateColumnRanges }, result, debug);
+  },
+
+  // ── Form metadata ──
+
+  async set_form_metadata({ appId, viewId, debug, ...props }) {
+    const result = await client.setFormMetadata(appId, viewId, props);
+    return ok(result, result, debug);
+  },
+
+  async set_form_submission_notification({ appId, viewId, userId, shouldEnable, debug }) {
+    const result = await client.setFormSubmissionNotification(appId, viewId, userId, shouldEnable);
+    return ok({ updated: true, viewId, userId, shouldEnable: !!shouldEnable }, result, debug);
+  },
+
   // ── Field Extra ──
 
   async update_field_description({ appId, fieldId, description, debug }) {
@@ -1237,15 +1637,26 @@ const handlers = {
         return ok({ ...result, enabledTools: enabledCount, totalTools: Object.keys(TOOL_CATEGORIES).length });
       }
 
-      case 'get_tool_status':
+      case 'get_tool_status': {
+        const status = toolConfig.getToolStatus();
+        const disabledByCategory = {};
+        for (const t of status) {
+          if (!t.enabled) (disabledByCategory[t.category] ??= []).push(t.name);
+        }
         return ok({
           activeProfile: toolConfig.activeProfile,
-          tools: toolConfig.getToolStatus(),
+          tools: status,
           summary: {
             total: Object.keys(TOOL_CATEGORIES).length,
             enabled: toolConfig.enabledToolNames().size,
+            disabledByCategory,
           },
+          hint: Object.keys(disabledByCategory).length
+            ? `${Object.values(disabledByCategory).flat().length} tool(s) are hidden. ` +
+              `Use switch_profile (full = all tools) or toggle_category to enable them.`
+            : 'All tools are enabled.',
         });
+      }
 
       case 'toggle_tool': {
         if (!tool) return err('Missing "tool" parameter');
@@ -1270,9 +1681,32 @@ const handlers = {
 // ─── Request Handlers ─────────────────────────────────────────
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  // Filter tools based on active profile, always include manage_tools
+  // Filter tools based on active profile, always include manage_tools.
+  // Build a dynamic manage_tools description that names every tool currently
+  // hidden by the active profile so an LLM that scans the listing can still
+  // discover them (e.g. delete_table / delete_field / delete_view in
+  // safe-write). Without this, hidden tools look "missing" — the actual
+  // problem behind 2026-04-30 user report §1.2.
   const enabledTools = toolConfig.filterTools(TOOLS);
-  return { tools: [...enabledTools, MANAGE_TOOLS_DEF] };
+  const enabledNames = new Set(enabledTools.map(t => t.name));
+  const hiddenByCategory = {};
+  for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
+    if (!enabledNames.has(tool)) {
+      (hiddenByCategory[cat] ??= []).push(tool);
+    }
+  }
+  const hiddenSummary = Object.entries(hiddenByCategory)
+    .map(([cat, tools]) => `${cat}: ${tools.join(', ')}`)
+    .join(' | ');
+  const manageDef = {
+    ...MANAGE_TOOLS_DEF,
+    description: hiddenSummary
+      ? `${MANAGE_TOOLS_DEF.description}\n\nActive profile: "${toolConfig.activeProfile}". ` +
+        `Hidden by current profile (call get_tool_status to inspect, switch_profile or ` +
+        `toggle_category to enable): ${hiddenSummary}.`
+      : `${MANAGE_TOOLS_DEF.description}\n\nActive profile: "${toolConfig.activeProfile}" — all tools enabled.`,
+  };
+  return { tools: [...enabledTools, manageDef] };
 });
 
 // Cap on concurrent tool calls. All Airtable-bound calls funnel through the

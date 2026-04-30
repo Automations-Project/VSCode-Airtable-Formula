@@ -86,14 +86,17 @@ export interface IdeStatus {
 export type ToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
 
 export interface ToolCategories {
-  read:             boolean;
-  tableWrite:       boolean;
-  tableDestructive: boolean;
-  fieldWrite:       boolean;
-  fieldDestructive: boolean;
-  viewWrite:        boolean;
-  viewDestructive:  boolean;
-  extension:        boolean;
+  read:                    boolean;
+  tableWrite:              boolean;
+  tableDestructive:        boolean;
+  fieldWrite:              boolean;
+  fieldDestructive:        boolean;
+  viewWrite:               boolean;
+  viewDestructive:         boolean;
+  viewSection:             boolean;
+  viewSectionDestructive:  boolean;
+  formWrite:               boolean;
+  extension:               boolean;
 }
 
 export interface ToolProfileSnapshot {

@@ -6,6 +6,49 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP Server 2.4.0 — Sidebar sections, view setup, non-grid metadata, user-report bug fixes (user report 2026-04-30)
+
+**16 net-new tools (52 total, was 36).** All endpoints captured against Airtable's internal API on 2026-04-30 with `pnpm capture:cdp:mutations`.
+
+#### New features (user report §1.3, §1.4, §3.1)
+
+**View sections (sidebar grouping) — new `view-section` category, defaults on in `safe-write`:**
+- `list_view_sections` — read all sections in a table with their view membership and the table-level mixed `viewOrder` (mixes view IDs and section IDs)
+- `create_view_section` — generate a `vsc...` ID and create a section
+- `rename_view_section` — change a section's name
+- `move_view_to_section` — single tool covering four user actions: move view INTO section, move view OUT to ungrouped, reorder sections among each other, reorder views within a section. Maps to one Airtable endpoint (`moveViewOrViewSection`)
+- `delete_view_section` — destroy a section. Verified behavior: views inside the section are NOT deleted — Airtable auto-promotes them into the table-level `viewOrder` at the position the section used to occupy. Lives in the new `view-section-destructive` category, gated to `full` profile
+
+**View column setup — extend `view-write`:**
+- `set_view_columns` — one-shot tool that hides every column, shows only `visibleColumnIds`, places them in left-to-right order, and optionally sets `frozenColumnCount`. Solves the user report's §1.4 "new views show all 168 fields, unusable until manually trimmed" problem in a single call
+- `show_or_hide_all_columns` — bulk on/off. Closes the §3.2 doc-promised-but-missing tool
+- `move_visible_columns` — move columns to a target index in the *visible-only* ordering
+- `move_overall_columns` — same, but in the *overall* (visible + hidden) ordering. Distinct from existing `reorder_view_fields` (which writes the full map) and from `move_visible_columns` (different index space)
+- `update_frozen_column_count` — set the frozen-column divider position
+
+**View presentation (Kanban / Gallery / Calendar) — extend `view-write`:**
+- `set_view_cover` — set or clear the cover-image field and choose `fit` vs `crop`. Same endpoints work for both Kanban and Gallery (verified)
+- `set_view_color_config` — apply a color config. Currently supports `type: "selectColumn"` (cards colored by a single-select field's choice colors); other types pass through for forward compatibility
+- `set_view_cell_wrap` — toggle whether long values wrap (multi-line) or truncate (single-line)
+- `set_calendar_date_columns` — set `dateColumnRanges`. Each entry is `{ startColumnId }` for single-point events or `{ startColumnId, endColumnId }` for ranges; the array form lets a Calendar overlay multiple date series at once
+
+**Form metadata (legacy form views only) — new `form-write` category, opt-in (gated to `full` profile since changes are visible to anyone with the form URL):**
+- `set_form_metadata` — bundled tool that fans out to atomic Airtable endpoints for `description`, `afterSubmitMessage`, `redirectUrl`, `refreshAfterSubmit`, `shouldAllowRequestCopyOfResponse`, `shouldAttributeResponses`, `isAirtableBrandingRemoved`. Unset properties are not touched
+- `set_form_submission_notification` — per-user email-on-submit toggle (separate because it's per-user, not per-form)
+
+Note on builder forms: Airtable's "Interfaces" / page-based forms (`page/{pageId}/*` endpoints, layout-engine element trees) are intentionally out of scope — they're a separate product surface that warrants a dedicated tool family. Filed as a follow-up.
+
+**Categories now in `safe-write`:** `read`, `table-write`, `field-write`, `view-write`, `view-section`. Categories opt-in only via `full` or `custom`: `*-destructive`, `view-section-destructive`, `form-write`, `extension`.
+
+#### Bug fixes (user report §1.2, §2.x, §4.3)
+
+- **`isEmpty` / `isNotEmpty` on text + formula(text) + lookup/rollup(text) fields** — auto-rewritten to `=` / `!=` `""` before sending. The internal API rejects the documented operators with `FAILED_STATE_CHECK` on these field types; the rewrite happens client-side using the cached table schema (§2.1, §2.2)
+- **`isEmpty` / `isNotEmpty` on linked-record (foreignKey) fields** — now throws a clear error pointing at the helper-formula workaround instead of letting Airtable's opaque `422` through (§2.3)
+- **3-level nested filter rejection** — `updateViewFilters` errors now annotate the depth, the leaf operators that failed, and the recommended flatten pattern (`(A AND B) OR (A AND C)` instead of `A AND (B OR C)`) (§2.4, §2.5)
+- **`reorder_view_fields` accepts partial maps** — pass only the field IDs you want to move; the tool reads the current `columnOrder`, applies moves in ascending target-position order, and sends the complete map. Avoids the `FAILED_STATE_CHECK` Airtable's internal API returns for single-key payloads (§2.6)
+- **`manage_tools` discoverability** — `ListTools` response now includes a dynamic description on `manage_tools` listing every tool hidden by the active profile (e.g. `delete_table` / `delete_field` / `delete_view` in `safe-write`). `get_tool_status` also returns a `disabledByCategory` summary so an LLM can show the user what to enable (root-cause behind §1.2 — the delete tools always existed, they were just filtered)
+- **Tool docstring audit** — corrected `update_view_filters`, `show_or_hide_view_columns`, and `reorder_view_fields` descriptions to match actual behavior (§4.3)
+
 ### Fixed (Audit Round 3)
 - **Formatter version setting was inert** — Dashboard's "Formatter version" dropdown now actually switches engines. Extension consolidated on `airtableFormula.formula.formatterVersion` and reads this key from all four load sites; legacy `beautifierVersion` / `minifierVersion` remain as fallback for user settings migrated from prior versions
 - **Browser-choice changes didn't propagate to IDE MCP configs** — Selecting a different browser (or picking a custom path) now re-writes the MCP entry for every already-configured IDE, so the new `AIRTABLE_BROWSER_CHANNEL` / `AIRTABLE_BROWSER_PATH` env vars take effect immediately instead of staying stale until the next Setup

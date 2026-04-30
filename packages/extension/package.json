@@ -359,9 +359,9 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection and formula validation only (7 tools)",
-            "Read + create/update tables, fields, and views, no deletes (26 tools)",
-            "All tools enabled including destructive and extensions (36 tools)",
+            "Schema inspection and formula validation only (8 tools)",
+            "Read + create/update tables, fields, views, and sidebar sections, no deletes, no form metadata (39 tools)",
+            "All tools enabled including destructive ops, form metadata, and extensions (52 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -369,7 +369,7 @@
         "airtableFormula.mcp.categories.read": {
           "type": "boolean",
           "default": true,
-          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula."
+          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections."
         },
         "airtableFormula.mcp.categories.tableWrite": {
           "type": "boolean",
@@ -394,12 +394,27 @@
         "airtableFormula.mcp.categories.viewWrite": {
           "type": "boolean",
           "default": true,
-          "description": "View Write tools: create_view, duplicate_view, rename_view, update_view_description, update_view_filters, reorder_view_fields, show_or_hide_view_columns, apply_view_sorts, update_view_group_levels, update_view_row_height."
+          "description": "View Write tools: create_view, duplicate_view, rename_view, update_view_description, update_view_filters, reorder_view_fields, show_or_hide_view_columns, apply_view_sorts, update_view_group_levels, update_view_row_height, set_view_columns, show_or_hide_all_columns, move_visible_columns, move_overall_columns, update_frozen_column_count, set_view_cover, set_view_color_config, set_view_cell_wrap, set_calendar_date_columns."
         },
         "airtableFormula.mcp.categories.viewDestructive": {
           "type": "boolean",
           "default": true,
           "description": "View Destructive tool: delete_view."
+        },
+        "airtableFormula.mcp.categories.viewSection": {
+          "type": "boolean",
+          "default": true,
+          "description": "View Section tools (sidebar grouping, non-destructive): create_view_section, rename_view_section, move_view_to_section."
+        },
+        "airtableFormula.mcp.categories.viewSectionDestructive": {
+          "type": "boolean",
+          "default": true,
+          "description": "View Section destructive tool: delete_view_section. Views inside a deleted section are auto-promoted to ungrouped (Airtable behavior)."
+        },
+        "airtableFormula.mcp.categories.formWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Form metadata tools (legacy form views — public-facing artifacts gated separately from view-write): set_form_metadata, set_form_submission_notification."
         },
         "airtableFormula.mcp.categories.extension": {
           "type": "boolean",
@@ -437,7 +452,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 36 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup), view configuration (filters / sorts / groups / visibility — with merge-safe append mode), formula validation, and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 52 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
