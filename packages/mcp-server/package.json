@@ -1,6 +1,6 @@
 {
   "name": "airtable-user-mcp",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "mcpName": "io.github.Automations-Project/airtable-user-mcp",
   "description": "Community MCP server for Airtable. Schema inspection, table / field / view CRUD (including merge-safe filter / sort / group updates), formula validation, and extension management. Not affiliated with Airtable Inc.",
   "main": "src/index.js",
