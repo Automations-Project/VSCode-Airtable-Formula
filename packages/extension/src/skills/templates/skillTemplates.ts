@@ -453,22 +453,23 @@ move_visible_columns({ columnIds: ["fldB"], targetVisibleIndex: 3 })
 
 ### Relative Date Filters (\`isWithin\`)
 
-For date fields with dynamic/rolling windows, use \`isWithin\` with a value object instead of a date string:
+For date fields with dynamic/rolling windows, use \`isWithin\` with a value object.
+Always include \`timeZone\` (IANA string) and \`shouldUseCorrectTimeZoneForFormulaicColumn: true\`:
 \`\`\`json
-{ "columnId": "fldXXX", "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "exactDate": null, "numberOfDays": 7 } }
+{ "columnId": "fldXXX", "operator": "isWithin", "value": { "mode": "pastWeek", "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
+{ "columnId": "fldXXX", "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "numberOfDays": 7, "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
 \`\`\`
 
-Available \`mode\` values:
+Available \`mode\` values (verified via API capture 2026-05-01):
 | Mode | numberOfDays required? | Meaning |
 |------|----------------------|---------|
-| \`"today"\` | no | Today only |
-| \`"thisWeek"\` / \`"thisMonth"\` / \`"thisYear"\` | no | Current calendar period |
 | \`"pastWeek"\` / \`"pastMonth"\` / \`"pastYear"\` | no | Rolling past period |
 | \`"nextWeek"\` / \`"nextMonth"\` / \`"nextYear"\` | no | Rolling next period |
+| \`"thisCalendarMonth"\` / \`"thisCalendarYear"\` | no | Current calendar period |
 | \`"pastNumberOfDays"\` | yes | Past N days |
 | \`"nextNumberOfDays"\` | yes | Next N days |
 
-Set \`"exactDate": null\` and \`"numberOfDays": null\` for modes that don't use them.
+Do NOT use \`exactDate\`, \`thisMonth\`, or \`thisYear\` — these are not valid API values.
 
 ---
 

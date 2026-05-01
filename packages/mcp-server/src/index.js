@@ -507,13 +507,15 @@ OPERATORS by field type — verified against Airtable's internal API (2026-04-17
     "is", "isBefore", "isAfter", "isOnOrBefore", "isOnOrAfter", "isEmpty", "isNotEmpty"
     value: ISO date string e.g. "2026-01-15"
   Date (relative) — "isWithin":
-    value: { "mode": "<mode>", "exactDate": null, "numberOfDays": <n> }
-    Modes without numberOfDays: "today", "thisWeek", "thisMonth", "thisYear",
-                                "pastWeek", "pastMonth", "pastYear",
-                                "nextWeek", "nextMonth", "nextYear"
-    Modes with numberOfDays:    "pastNumberOfDays", "nextNumberOfDays"
-    Example — past 7 days:  { "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "exactDate": null, "numberOfDays": 7 } }
-    Example — this month:   { "operator": "isWithin", "value": { "mode": "thisMonth", "exactDate": null, "numberOfDays": null } }
+    value: { "mode": "<mode>", "timeZone": "<tz>", "shouldUseCorrectTimeZoneForFormulaicColumn": true }
+    timeZone: IANA string e.g. "Europe/Istanbul", "America/New_York", "UTC"
+    Modes (no numberOfDays): "pastWeek", "pastMonth", "pastYear",
+                             "nextWeek", "nextMonth", "nextYear",
+                             "thisCalendarMonth", "thisCalendarYear"
+    Modes (add numberOfDays key): "pastNumberOfDays", "nextNumberOfDays"
+    Example — past week:   { "operator": "isWithin", "value": { "mode": "pastWeek", "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
+    Example — past N days: { "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "numberOfDays": 7, "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
+    Example — this month:  { "operator": "isWithin", "value": { "mode": "thisCalendarMonth", "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
   Formula / Lookup / Rollup (text result type):
     Same as Text. "isEmpty" / "isNotEmpty" are auto-rewritten to "=" / "!=" "".
   Linked record (foreignKey):

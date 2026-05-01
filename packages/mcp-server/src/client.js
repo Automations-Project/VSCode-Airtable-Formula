@@ -1463,10 +1463,17 @@ export class AirtableClient {
     await this.showOrHideAllColumns(appId, viewId, false);
     // 2. Show the requested set in one batched call.
     await this.showOrHideColumns(appId, viewId, visibleColumnIds, true);
-    // 3. Single batched move — places the entire ordered list starting at
-    //    visible index 1 (after the pinned primary column at index 0).
-    await this.moveVisibleColumns(appId, viewId, visibleColumnIds, 1);
-    // 4. Optional frozen-column divider.
+    // 3. Identify the primary column (always index 0, immovable) so we can
+    //    exclude it from the move call — including it causes FAILED_STATE_CHECK.
+    const view = await this.getView(appId, viewId);
+    const primaryId = view.columnOrder?.[0]?.columnId;
+    const moveIds = primaryId ? visibleColumnIds.filter(id => id !== primaryId) : visibleColumnIds;
+    // 4. Single batched move — places the ordered list starting at visible
+    //    index 1 (after the pinned primary column at index 0).
+    if (moveIds.length > 0) {
+      await this.moveVisibleColumns(appId, viewId, moveIds, 1);
+    }
+    // 5. Optional frozen-column divider.
     if (Number.isFinite(frozenColumnCount) && frozenColumnCount >= 0) {
       await this.updateFrozenColumnCount(appId, viewId, frozenColumnCount);
     }

@@ -215,12 +215,12 @@ describe('setViewColumns one-shot (§1.4 — Bug 1 hotfix 2026-05-01)', () => {
     assert.deepEqual(show.columnIds, ['fldB', 'fldA']);
     assert.equal(show.visibility, true);
 
-    // 3. ONE batched moveVisibleColumns call — entire list, target index 1
-    //    (after the pinned primary column). Per-id loops 422'd in v2.4.0.
+    // 3. ONE batched moveVisibleColumns call — primary column (fldA) excluded
+    //    because it is immovable (always at index 0). Only non-primary ids move.
     const moves = auth.calls.filter(c => c.url.includes('/moveVisibleColumns'));
     assert.equal(moves.length, 1);
     const movePayload = JSON.parse(moves[0].params.stringifiedObjectParams);
-    assert.deepEqual(movePayload.columnIds, ['fldB', 'fldA']);
+    assert.deepEqual(movePayload.columnIds, ['fldB']);
     assert.equal(movePayload.targetVisibleIndex, 1);
 
     // 4. updateFrozenColumnCount(1)
