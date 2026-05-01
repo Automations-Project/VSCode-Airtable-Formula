@@ -1870,6 +1870,124 @@ export class AirtableClient {
     return res.json();
   }
 
+  // ─── Row Templates ──────────────────────────────────────────────────────────
+  // Endpoints captured 2026-05-01. Template IDs are rtp-prefixed and generated
+  // client-side (same pattern as view sections).
+
+  async listRowTemplates(appId, tableId) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    const raw = await this.getScaffoldingData(appId);
+    const tableData = raw?.data?.tableById?.[tableId]
+      || raw?.data?.tableDatas?.[tableId]
+      || raw?.data?.tableSchemas?.find(t => t.id === tableId);
+    const templates = tableData?.rowTemplates
+      || raw?.data?.rowTemplatesByTableId?.[tableId]
+      || [];
+    return { tableId, templates, _raw: raw };
+  }
+
+  async createRowTemplate(appId, tableId, name) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    const templateId = 'rtp' + this._genRandomId();
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/create`;
+    const res = await this.auth.postForm(url, this._mutationParams({ tableId, name: name || 'New template' }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`createRowTemplate failed (${res.status}): ${errBody}`);
+    }
+    return { templateId, ...(await res.json()) };
+  }
+
+  async renameRowTemplate(appId, templateId, name) {
+    assertAirtableId(appId, 'appId');
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateName`;
+    const res = await this.auth.postForm(url, this._mutationParams({ name }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`renameRowTemplate failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  async updateRowTemplateDescription(appId, templateId, description) {
+    assertAirtableId(appId, 'appId');
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateDescription`;
+    const res = await this.auth.postForm(url, this._mutationParams({ description }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`updateRowTemplateDescription failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  async setRowTemplateCell(appId, templateId, columnId, cellObject) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(columnId, 'columnId');
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateCell`;
+    const res = await this.auth.postForm(url, this._mutationParams({ columnId, cellObject }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`setRowTemplateCell failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  async setRowTemplateVisibleColumns(appId, templateId, columnIds, isPartialSelection = true) {
+    assertAirtableId(appId, 'appId');
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateVisibleColumns`;
+    const res = await this.auth.postForm(
+      url,
+      this._mutationParams({ isPartialSelection, orderedVisibleColumnIds: columnIds }, appId),
+      appId,
+    );
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`setRowTemplateVisibleColumns failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  async duplicateRowTemplate(appId, sourceTemplateId, tableId, newName) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    const newTemplateId = 'rtp' + this._genRandomId();
+    const url = `https://airtable.com/v0.3/rowTemplate/${sourceTemplateId}/duplicate`;
+    const res = await this.auth.postForm(
+      url,
+      this._mutationParams({ tableId, newRowTemplateId: newTemplateId, newRowTemplateName: newName ?? null }, appId),
+      appId,
+    );
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`duplicateRowTemplate failed (${res.status}): ${errBody}`);
+    }
+    return { newTemplateId, ...(await res.json()) };
+  }
+
+  async applyRowTemplate(appId, templateId) {
+    assertAirtableId(appId, 'appId');
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/instantiate`;
+    const res = await this.auth.postForm(url, this._mutationParams({}, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`applyRowTemplate failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
+  async deleteRowTemplate(appId, templateId) {
+    assertAirtableId(appId, 'appId');
+    const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/destroy`;
+    const res = await this.auth.postForm(url, this._mutationParams({ shouldDestroyRecursively: true }, appId), appId);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`deleteRowTemplate failed (${res.status}): ${errBody}`);
+    }
+    return res.json();
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────
 
   _genRequestId() {

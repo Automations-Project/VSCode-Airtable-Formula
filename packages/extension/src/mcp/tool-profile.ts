@@ -38,11 +38,20 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   get_view:                  'read',
   validate_formula:          'read',
   list_view_sections:        'read',
+  list_record_templates:     'read',
   // Table mutations (non-destructive)
   create_table:              'table-write',
   rename_table:              'table-write',
+  create_record_template:              'table-write',
+  rename_record_template:              'table-write',
+  update_record_template_description:  'table-write',
+  set_record_template_cell:            'table-write',
+  set_record_template_visible_columns: 'table-write',
+  duplicate_record_template:           'table-write',
+  apply_record_template:               'table-write',
   // Table destructive
   delete_table:              'table-destructive',
+  delete_record_template:    'table-destructive',
   // Field mutations (non-destructive)
   create_field:              'field-write',
   create_formula_field:      'field-write',
@@ -116,7 +125,7 @@ interface ProfileDef {
 
 export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', ProfileDef> = {
   'read-only': { description: 'Schema inspection and formula validation only', categories: ['read'] },
-  'safe-write':{ description: 'Read + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
+  'safe-write':{ description: 'Read + create/update tables, fields, views, sidebar sections, and record templates (no deletes, no form metadata)',
                  categories: ['read', 'table-write', 'field-write', 'view-write', 'view-section'] },
   full:        { description: 'All tools enabled including destructive ops, form metadata, and extensions',
                  categories: [

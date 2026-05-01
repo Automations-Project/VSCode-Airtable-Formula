@@ -359,9 +359,9 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection and formula validation only (8 tools)",
-            "Read + create/update tables, fields, views, and sidebar sections, no deletes, no form metadata (39 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (52 tools)",
+            "Schema inspection and formula validation only (9 tools)",
+            "Read + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (47 tools)",
+            "All tools enabled including destructive ops, form metadata, and extensions (61 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -374,7 +374,7 @@
         "airtableFormula.mcp.categories.tableWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Table Write tools: create_table, rename_table."
+          "description": "Table Write tools: create_table, rename_table, create_record_template, rename_record_template, update_record_template_description, set_record_template_cell, set_record_template_visible_columns, duplicate_record_template, apply_record_template."
         },
         "airtableFormula.mcp.categories.tableDestructive": {
           "type": "boolean",
@@ -452,7 +452,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 52 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 61 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },

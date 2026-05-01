@@ -239,6 +239,165 @@ Fields:
     },
   },
 
+  // ── Record Templates ──────────────────────────────────────────────────────
+
+  {
+    name: 'list_record_templates',
+    description: 'List all record templates for a table. Templates are embedded in the base scaffolding data. If the templates array is empty, pass debug:true and inspect the raw response to locate the templates key — the API path may vary by base.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:   { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID (tblXXX)' },
+        debug:   debugProp,
+      },
+      required: ['appId', 'tableId'],
+    },
+  },
+  {
+    name: 'create_record_template',
+    description: 'Create a new record template for a table. Returns the generated templateId (rtp-prefixed). After creating, use set_record_template_cell to pre-fill field values.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:   { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID (tblXXX)' },
+        name:    { type: 'string', description: 'Template name. Default: "New template"' },
+        debug:   debugProp,
+      },
+      required: ['appId', 'tableId'],
+    },
+  },
+  {
+    name: 'rename_record_template',
+    description: 'Rename an existing record template.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:       { type: 'string', description: 'The Airtable base/application ID' },
+        templateId:  { type: 'string', description: 'The template ID (rtpXXX)' },
+        name:        { type: 'string', description: 'New template name' },
+        debug:       debugProp,
+      },
+      required: ['appId', 'templateId', 'name'],
+    },
+  },
+  {
+    name: 'update_record_template_description',
+    description: 'Set or update the description text of a record template.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:       { type: 'string', description: 'The Airtable base/application ID' },
+        templateId:  { type: 'string', description: 'The template ID (rtpXXX)' },
+        description: { type: 'string', description: 'Description text (pass empty string to clear)' },
+        debug:       debugProp,
+      },
+      required: ['appId', 'templateId', 'description'],
+    },
+  },
+  {
+    name: 'set_record_template_cell',
+    description: `Pre-fill a field value on a record template.
+
+CELL OBJECT TYPES (verified via API capture 2026-05-01):
+
+Static value (text, number, boolean, single-select choice ID):
+  { "type": "static", "value": "some text" }
+  { "type": "static", "value": 42 }
+  { "type": "static", "value": true }
+  { "type": "static", "value": "selXXXXXXXXXXXXXX" }   ← single-select: pass choice ID
+
+Linked record(s):
+  { "type": "linkedRows", "value": [{ "foreignRowId": "recXXX", "foreignRowDisplayName": "Record Name" }] }
+
+To clear a field, omit the cellObject or pass null value.`,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:      { type: 'string', description: 'The Airtable base/application ID' },
+        templateId: { type: 'string', description: 'The template ID (rtpXXX)' },
+        columnId:   { type: 'string', description: 'Field ID (fldXXX)' },
+        cellObject: {
+          type: 'object',
+          description: 'Cell value object. Must have "type" ("static" or "linkedRows") and "value".',
+          properties: {
+            type:  { type: 'string', enum: ['static', 'linkedRows'], description: '"static" for text/number/bool/select, "linkedRows" for linked record fields' },
+            value: { description: 'The field value. String/number/boolean for static. Array of {foreignRowId, foreignRowDisplayName} for linkedRows.' },
+          },
+          required: ['type', 'value'],
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'templateId', 'columnId', 'cellObject'],
+    },
+  },
+  {
+    name: 'set_record_template_visible_columns',
+    description: 'Set which columns are shown (pre-fillable) on a record template. Pass an empty array to show all columns. isPartialSelection:true means only listed columns are shown; false means all are shown.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:              { type: 'string', description: 'The Airtable base/application ID' },
+        templateId:         { type: 'string', description: 'The template ID (rtpXXX)' },
+        columnIds:          { type: 'array', items: { type: 'string' }, description: 'Ordered list of field IDs to show. Empty array shows all.' },
+        isPartialSelection: { type: 'boolean', description: 'true = show only listed columns; false = show all. Default: true' },
+        debug:              debugProp,
+      },
+      required: ['appId', 'templateId', 'columnIds'],
+    },
+  },
+  {
+    name: 'duplicate_record_template',
+    description: 'Duplicate a record template within the same or a different table. Returns the new template ID.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:            { type: 'string', description: 'The Airtable base/application ID' },
+        sourceTemplateId: { type: 'string', description: 'Source template ID (rtpXXX)' },
+        tableId:          { type: 'string', description: 'Target table ID (tblXXX) — can be the same table or a different one' },
+        newName:          { type: 'string', description: 'Optional name for the copy. Defaults to the original name.' },
+        debug:            debugProp,
+      },
+      required: ['appId', 'sourceTemplateId', 'tableId'],
+    },
+  },
+  {
+    name: 'apply_record_template',
+    description: 'Apply (instantiate) a record template to create a new record pre-filled with the template\'s field values. Returns the new record data.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:      { type: 'string', description: 'The Airtable base/application ID' },
+        templateId: { type: 'string', description: 'The template ID (rtpXXX) to instantiate' },
+        debug:      debugProp,
+      },
+      required: ['appId', 'templateId'],
+    },
+  },
+  {
+    name: 'delete_record_template',
+    description: '⚠️ DESTRUCTIVE — Permanently delete a record template. This cannot be undone.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId:      { type: 'string', description: 'The Airtable base/application ID' },
+        templateId: { type: 'string', description: 'The template ID (rtpXXX) to delete' },
+        debug:      debugProp,
+      },
+      required: ['appId', 'templateId'],
+    },
+  },
+
   // ── Field Mutation Tools ──
   {
     name: 'create_field',
@@ -1272,6 +1431,53 @@ const handlers = {
       result,
       debug,
     );
+  },
+
+  // ── Record Template Mutations ──
+
+  async list_record_templates({ appId, tableId, debug }) {
+    const raw = await client.listRowTemplates(appId, tableId);
+    return ok(raw.templates, raw._raw, debug);
+  },
+
+  async create_record_template({ appId, tableId, name, debug }) {
+    const result = await client.createRowTemplate(appId, tableId, name);
+    return ok({ created: true, templateId: result.templateId }, result, debug);
+  },
+
+  async rename_record_template({ appId, templateId, name, debug }) {
+    const result = await client.renameRowTemplate(appId, templateId, name);
+    return ok({ updated: true, templateId, name }, result, debug);
+  },
+
+  async update_record_template_description({ appId, templateId, description, debug }) {
+    const result = await client.updateRowTemplateDescription(appId, templateId, description);
+    return ok({ updated: true, templateId }, result, debug);
+  },
+
+  async set_record_template_cell({ appId, templateId, columnId, cellObject, debug }) {
+    const result = await client.setRowTemplateCell(appId, templateId, columnId, cellObject);
+    return ok({ updated: true, templateId, columnId }, result, debug);
+  },
+
+  async set_record_template_visible_columns({ appId, templateId, columnIds, isPartialSelection, debug }) {
+    const result = await client.setRowTemplateVisibleColumns(appId, templateId, columnIds, isPartialSelection ?? true);
+    return ok({ updated: true, templateId, columnCount: columnIds.length }, result, debug);
+  },
+
+  async duplicate_record_template({ appId, sourceTemplateId, tableId, newName, debug }) {
+    const result = await client.duplicateRowTemplate(appId, sourceTemplateId, tableId, newName);
+    return ok({ duplicated: true, newTemplateId: result.newTemplateId }, result, debug);
+  },
+
+  async apply_record_template({ appId, templateId, debug }) {
+    const result = await client.applyRowTemplate(appId, templateId);
+    return ok({ applied: true, templateId }, result, debug);
+  },
+
+  async delete_record_template({ appId, templateId, debug }) {
+    const result = await client.deleteRowTemplate(appId, templateId);
+    return ok({ deleted: true, templateId }, result, debug);
   },
 
   // ── Field Mutations ──

@@ -29,6 +29,17 @@ export const TOOL_CATEGORIES = {
   create_table:           'table-write',
   rename_table:           'table-write',
 
+  // Record Templates
+  list_record_templates:               'read',
+  create_record_template:              'table-write',
+  rename_record_template:              'table-write',
+  update_record_template_description:  'table-write',
+  set_record_template_cell:            'table-write',
+  set_record_template_visible_columns: 'table-write',
+  duplicate_record_template:           'table-write',
+  apply_record_template:               'table-write',
+  delete_record_template:              'table-destructive',
+
   // Table destructive
   delete_table:           'table-destructive',
 

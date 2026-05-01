@@ -17,7 +17,7 @@ import {
 describe('TOOL_CATEGORIES', () => {
   it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
-    assert.equal(tools.length, 52, `Expected 52 tools, got ${tools.length}`);
+    assert.equal(tools.length, 61, `Expected 61 tools, got ${tools.length}`);
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       assert.ok(CATEGORY_LABELS[cat], `Tool "${tool}" has unknown category "${cat}"`);
     }
@@ -28,7 +28,7 @@ describe('TOOL_CATEGORIES', () => {
       .filter(([, cat]) => cat === 'read')
       .map(([name]) => name);
     assert.deepEqual(readTools.sort(), [
-      'get_base_schema', 'get_table_schema', 'get_view', 'list_fields', 'list_tables', 'list_view_sections', 'list_views', 'validate_formula',
+      'get_base_schema', 'get_table_schema', 'get_view', 'list_fields', 'list_record_templates', 'list_tables', 'list_view_sections', 'list_views', 'validate_formula',
     ]);
   });
 
@@ -83,9 +83,9 @@ describe('ToolConfigManager', () => {
       assert.equal(mgr.activeProfile, 'full');
     });
 
-    it('enables all 52 tools on full profile', () => {
+    it('enables all 61 tools on full profile', () => {
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 52);
+      assert.equal(enabled.size, 61);
     });
 
     it('manage_tools is always enabled', () => {
@@ -94,10 +94,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('enabledToolNames() for each profile', () => {
-    it('read-only enables only 8 read tools', async () => {
+    it('read-only enables only 9 read tools', async () => {
       await mgr.switchProfile('read-only');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 8);
+      assert.equal(enabled.size, 9);
       assert.ok(enabled.has('get_base_schema'));
       assert.ok(enabled.has('get_view'));
       assert.ok(enabled.has('validate_formula'));
@@ -121,10 +121,10 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('create_extension'));
     });
 
-    it('full enables all 52 tools', async () => {
+    it('full enables all 61 tools', async () => {
       await mgr.switchProfile('full');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 52);
+      assert.equal(enabled.size, 61);
     });
   });
 
@@ -194,10 +194,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('getToolStatus()', () => {
-    it('returns status for all 52 tools', async () => {
+    it('returns status for all 61 tools', async () => {
       await mgr.switchProfile('full');
       const status = mgr.getToolStatus();
-      assert.equal(status.length, 52);
+      assert.equal(status.length, 61);
       assert.ok(status.every(s => s.enabled === true));
     });
 
