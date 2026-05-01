@@ -131,17 +131,18 @@ This monorepo ships **two products** from one source tree:
 - **Dashboard** — React webview with Overview, Setup, and Settings tabs
 
 
-### MCP Server (52 Tools)
+### MCP Server (61 Tools)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
 | Category | Tools | Highlights |
 |:---------|:-----:|:-----------|
-| **Schema Read** | 8 | Full schema inspection — bases, tables, fields, views, sidebar sections |
+| **Schema Read** | 9 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates |
 | **Table Management** | 3 | create / rename / delete tables |
 | **Field Management** | 8 | Create formula / rollup / lookup / count fields, validate formulas, update descriptions, delete |
 | **View Configuration** | 20 | Filters, sorts, grouping, columns, freezing, row height, covers, color rules, calendar dates, create / duplicate / rename / delete |
 | **Sidebar Sections** | 4 | Create, rename, move-into-section, delete (auto-promotes contained views to ungrouped) |
+| **Record Templates** | 8 | Create / rename / describe / set cells / set columns / duplicate / apply / delete saved row scaffolds |
 | **Form Metadata** | 2 | Description, redirect URL, attribution, copy-to-respondent, branding (legacy form views) |
 | **Extension Management** | 7 | Create, install, enable/disable, rename, duplicate, remove extensions |
 

@@ -91,7 +91,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 52 tools.
+That's it. Your MCP client connects via **stdio** and gets access to all 61 tools.
 
 ---
 
@@ -208,7 +208,7 @@ Add the `airtable` entry to `mcpServers`:
 }
 ```
 
-Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 52 tools.
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 61 tools.
 
 </details>
 
@@ -231,7 +231,7 @@ Verify:
 claude mcp list
 ```
 
-You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 52 tools are available.
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 61 tools are available.
 
 </details>
 
@@ -332,9 +332,9 @@ npx airtable-user-mcp --help           Show this help
 
 ---
 
-## Tools (52)
+## Tools (61)
 
-### Schema Read (8)
+### Schema Read (9)
 
 | Tool | Description |
 |:-----|:------------|
@@ -346,6 +346,7 @@ npx airtable-user-mcp --help           Show this help
 | `get_view` | Read a single view's full state — filters, sorts, grouping, visibility, description |
 | `validate_formula` | Validate a formula expression before applying |
 | `list_view_sections` | List sidebar sections for a table with their view membership |
+| `list_record_templates` | List record templates (saved row scaffolds) for a table |
 
 ### Table Management (3)
 
@@ -401,6 +402,21 @@ npx airtable-user-mcp --help           Show this help
 | `rename_view_section` | Rename a sidebar section |
 | `move_view_to_section` | Move view INTO a section, OUT to ungrouped, reorder within a section, or reorder sections among each other |
 | `delete_view_section` | Destroy a section. Contained views are auto-promoted to ungrouped at the section's former position |
+
+### Record Templates (8)
+
+Saved row scaffolds Airtable surfaces under "+ Add record" and the row-create extension. Cell values can be static, linked rows, or references to other templates.
+
+| Tool | Description |
+|:-----|:------------|
+| `create_record_template` | Create a new record template (client-side `rtp...` ID) |
+| `rename_record_template` | Rename a template |
+| `update_record_template_description` | Set or clear a template's description |
+| `set_record_template_cell` | Set a cell value — `static` (text/number/select), `linkedRows`, or `linkedTemplates` |
+| `set_record_template_visible_columns` | Choose which columns the template surfaces in its UI |
+| `duplicate_record_template` | Clone an existing template |
+| `apply_record_template` | Apply a template to create a new record using its cell defaults |
+| `delete_record_template` | Delete a template |
 
 ### Form Metadata (2 — legacy form views only)
 

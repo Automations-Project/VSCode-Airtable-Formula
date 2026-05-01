@@ -6,6 +6,51 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP Server 2.5.0 — Record Templates (9 new tools) + round-4 user-report fixes (2026-05-01)
+
+Promotes record templates to a first-class MCP capability. Templates are
+the saved row scaffolds that Airtable surfaces under the "+ Add record"
+flyout and inside the row-create extension — previously not addressable
+through any public or internal API client we had. Discovered by capturing
+the rowTemplate endpoints with `pnpm capture:cdp:mutations` while the
+reporter exercised every template UI path.
+
+**New tools (9):**
+
+| Tool | Category | Purpose |
+|:-----|:---------|:--------|
+| `list_record_templates` | read | List record templates for a table |
+| `create_record_template` | table-write | Create a template (client-side `rtp...` ID like view sections use `vsc...`) |
+| `rename_record_template` | table-write | Rename a template |
+| `update_record_template_description` | table-write | Set or clear a template's description |
+| `set_record_template_cell` | table-write | Set a cell value in a template (static, linked rows, or linked templates) |
+| `set_record_template_visible_columns` | table-write | Choose which columns the template surfaces in its UI |
+| `duplicate_record_template` | table-write | Clone an existing template |
+| `apply_record_template` | table-write | Apply a template — creates a new record using the template's cell defaults |
+| `delete_record_template` | table-destructive | Delete a template |
+
+**Round-4 fixes (carried into 2.5.0 from interim 2.4.4 work):**
+
+- `set_view_columns` now filters the primary column out of the move step
+  before calling `moveVisibleColumns` — Airtable rejects any move that
+  displaces the pinned primary at index 0.
+- `reorder_view_fields` `mergePartialFieldOrder` protects the primary
+  column at index 0; user-requested moves to index 0 are clamped to 1.
+- `update_view_group_levels` always sends `emptyGroupState: 'hidden'`;
+  Airtable's API rejects `'visible'` with INVALID_REQUEST.
+- `list_tables` now reads `data.tableById` as a fallback when
+  `tableSchemas` / `tables` / `tableDatas` are absent (matches the shape
+  the reporter saw).
+- `update_view_filters` `isWithin` corrected: requires `timeZone` (IANA)
+  and `shouldUseCorrectTimeZoneForFormulaicColumn: true`, no `exactDate`,
+  modes are `thisCalendarMonth` / `thisCalendarYear` (not `thisMonth` /
+  `thisYear`). Tool description and AI skill template updated.
+
+**Counts:** 52 → **61 tools**. `read-only` profile: 8 → 9. `safe-write`
+profile: 39 → 47. `full` profile: 52 → 61.
+
+mcp-server: 2.4.4 → 2.5.0.
+
 ### MCP Server 2.4.3 — `list_view_sections` full fix (carry-over from 2.4.2)
 
 Probed the schema read response with a fresh patchright session against

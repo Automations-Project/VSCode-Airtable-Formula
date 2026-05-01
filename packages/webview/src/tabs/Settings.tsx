@@ -557,9 +557,9 @@ export function Settings() {
 
           {settings.mcp.toolProfile.profile === 'custom' && (
             <div className="stack stack-sm" style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, list_view_sections (8 tools)"     value={settings.mcp.toolProfile.categories.read}                   settingKey="mcp.categories.read" />
-              <SettingToggle label="Table Write"          desc="create_table, rename_table (2 tools)"                                         value={settings.mcp.toolProfile.categories.tableWrite}             settingKey="mcp.categories.tableWrite" />
-              <SettingToggle label="Table Destructive"    desc="delete_table (1 tool)"                                                        value={settings.mcp.toolProfile.categories.tableDestructive}       settingKey="mcp.categories.tableDestructive" />
+              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (9 tools)" value={settings.mcp.toolProfile.categories.read}                   settingKey="mcp.categories.read" />
+              <SettingToggle label="Table Write"          desc="Tables + record templates: create / rename / update / set cells / duplicate / apply (9 tools)" value={settings.mcp.toolProfile.categories.tableWrite}             settingKey="mcp.categories.tableWrite" />
+              <SettingToggle label="Table Destructive"    desc="delete_table, delete_record_template (2 tools)"                              value={settings.mcp.toolProfile.categories.tableDestructive}       settingKey="mcp.categories.tableDestructive" />
               <SettingToggle label="Field Write"          desc="Create / update / rename / duplicate fields (7 tools)"                        value={settings.mcp.toolProfile.categories.fieldWrite}             settingKey="mcp.categories.fieldWrite" />
               <SettingToggle label="Field Destructive"    desc="delete_field (1 tool)"                                                        value={settings.mcp.toolProfile.categories.fieldDestructive}       settingKey="mcp.categories.fieldDestructive" />
               <SettingToggle label="View Write"           desc="Views, filters, sorts, columns, freezing, covers, calendar dates (19 tools)" value={settings.mcp.toolProfile.categories.viewWrite}              settingKey="mcp.categories.viewWrite" />
