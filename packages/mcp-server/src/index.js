@@ -503,8 +503,17 @@ OPERATORS by field type — verified against Airtable's internal API (2026-04-17
     "hasAnyOf", "hasAllOf", "hasNoneOf", "isExactly", "isEmpty", "isNotEmpty"
   Checkbox:
     "=" (value: true|false)
-  Date:
+  Date (absolute):
     "is", "isBefore", "isAfter", "isOnOrBefore", "isOnOrAfter", "isEmpty", "isNotEmpty"
+    value: ISO date string e.g. "2026-01-15"
+  Date (relative) — "isWithin":
+    value: { "mode": "<mode>", "exactDate": null, "numberOfDays": <n> }
+    Modes without numberOfDays: "today", "thisWeek", "thisMonth", "thisYear",
+                                "pastWeek", "pastMonth", "pastYear",
+                                "nextWeek", "nextMonth", "nextYear"
+    Modes with numberOfDays:    "pastNumberOfDays", "nextNumberOfDays"
+    Example — past 7 days:  { "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "exactDate": null, "numberOfDays": 7 } }
+    Example — this month:   { "operator": "isWithin", "value": { "mode": "thisMonth", "exactDate": null, "numberOfDays": null } }
   Formula / Lookup / Rollup (text result type):
     Same as Text. "isEmpty" / "isNotEmpty" are auto-rewritten to "=" / "!=" "".
   Linked record (foreignKey):
@@ -652,7 +661,7 @@ EXAMPLES:
             properties: {
               columnId: { type: 'string', description: 'Field ID to group by' },
               order: { type: 'string', description: '"ascending" or "descending". Default: "ascending"' },
-              emptyGroupState: { type: 'string', description: '"hidden" or "visible". Default: "hidden"' },
+              emptyGroupState: { type: 'string', description: '"hidden" only — the Airtable API rejects "visible" with INVALID_REQUEST. Omit this field or pass "hidden". Default: "hidden".' },
             },
             required: ['columnId'],
           },
@@ -807,7 +816,7 @@ For section reorders, targetIndex is into the table's top-level mixed viewOrder;
       properties: {
         appId: { type: 'string', description: 'The Airtable base/application ID' },
         viewId: { type: 'string', description: 'The view ID' },
-        columnIds: { type: 'array', items: { type: 'string' }, description: 'Field IDs to move (move them as a contiguous group starting at targetVisibleIndex)' },
+        columnIds: { type: 'array', items: { type: 'string' }, description: 'Field IDs to move as a contiguous block to targetVisibleIndex. ⚠️ The Airtable API preserves existing relative order of the supplied IDs — it does NOT re-sequence them by input array order. To place columns in a specific custom sequence, issue separate single-column calls with incrementing targets (e.g. ["fldA"]→1, ["fldB"]→2, ["fldC"]→3).' },
         targetVisibleIndex: { type: 'number', description: 'Destination index in the visible-only column ordering (0 = leftmost visible)' },
         debug: debugProp,
       },
@@ -1179,10 +1188,12 @@ const handlers = {
 
   async list_tables({ appId, debug }) {
     const raw = await client.getScaffoldingData(appId);
-    const tables = raw?.data?.tableSchemas || raw?.data?.tables || raw?.data?.tableOrder?.map(id => {
-      const t = raw?.data?.tableDatas?.[id] || {};
-      return { id, name: t.name || id };
-    }) || [];
+    const tables = raw?.data?.tableSchemas || raw?.data?.tables ||
+      raw?.data?.tableOrder?.map(id => {
+        const t = raw?.data?.tableDatas?.[id] || raw?.data?.tableById?.[id] || {};
+        return { id, name: t.name || id };
+      }) ||
+      Object.values(raw?.data?.tableById || {});
     const summary = tables.map(t => ({
       id: t.id,
       name: t.name,

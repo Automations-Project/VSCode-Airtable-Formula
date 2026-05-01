@@ -131,10 +131,10 @@ function nestingDepth(filterSet, current = 1) {
  * so multiple moves with overlapping positions resolve deterministically.
  */
 function mergePartialFieldOrder(currentOrder, partial) {
-  // Strip the moved fields from a working copy of the current order, then
-  // splice them in at their target positions in priority order.
-  const movedIds = Object.keys(partial).filter(id => currentOrder.includes(id));
-  const remaining = currentOrder.filter(id => !movedIds.includes(id));
+  const primaryColumnId = currentOrder[0];
+  // Primary column is immovable — never displace it from index 0
+  const movedIds = Object.keys(partial).filter(id => id !== primaryColumnId && currentOrder.includes(id));
+  const remaining = currentOrder.filter(id => !movedIds.includes(id)); // primaryColumnId is always first
   const moves = movedIds
     .map(id => ({ id, target: Number(partial[id]) }))
     .filter(m => Number.isFinite(m.target))
@@ -142,7 +142,8 @@ function mergePartialFieldOrder(currentOrder, partial) {
 
   const result = remaining.slice();
   for (const { id, target } of moves) {
-    const insertAt = Math.max(0, Math.min(target, result.length));
+    // Clamp to [1, result.length] — index 0 is locked to the primary column
+    const insertAt = Math.max(1, Math.min(target, result.length));
     result.splice(insertAt, 0, id);
   }
   const indices = {};
@@ -1171,7 +1172,7 @@ export class AirtableClient {
       id: g.id || ('glv' + this._genRandomId()),
       columnId: g.columnId,
       order: g.order || 'ascending',
-      emptyGroupState: g.emptyGroupState || 'hidden',
+      emptyGroupState: 'hidden', // API only accepts "hidden"; "visible" causes INVALID_REQUEST
     }));
     const payload = { groupLevels: levels };
 

@@ -303,11 +303,11 @@ When user wants to convert an Excel formula to Airtable.
 
 export const MCP_TOOLS_GUIDE = `# Airtable User MCP — Tools Guide
 
-> **Server**: airtable-user-mcp v2.1.0
+> **Server**: airtable-user-mcp v2.4.x
 > **Protocol**: Model Context Protocol (MCP) over stdio
 > **Transport**: JSON-RPC 2.0
 
-This MCP server provides **30 tools** for managing Airtable bases, organized into 5 categories.
+This MCP server provides **36 tools** for managing Airtable bases, organized into 5 categories.
 All tools require an \`appId\` (e.g. \`"appXXX"\`) as their first parameter.
 All tools accept an optional \`debug: true\` parameter to include raw Airtable responses.
 
@@ -417,6 +417,24 @@ Use these tools to **create, configure, and manage** views.
 | \`update_view_group_levels\` | Set grouping. Pass empty array \`[]\` to clear grouping. |
 | \`update_view_row_height\` | Change row height: \`"small"\`, \`"medium"\`, \`"large"\`, \`"xlarge"\`. |
 
+### Column Ordering — Critical Behavior
+
+**\`move_visible_columns\`**: The Airtable API moves columns as a block but **preserves their existing relative order** — it does NOT re-sequence by input array order. To place columns in a specific custom sequence, make separate calls per column with incrementing \`targetVisibleIndex\`:
+\`\`\`
+// ❌ WRONG — array order is ignored by the API:
+move_visible_columns({ columnIds: ["fldC", "fldA", "fldB"], targetVisibleIndex: 1 })
+// Result: fldA, fldB, fldC (original relative order preserved)
+
+// ✅ CORRECT — sequential single-column moves:
+move_visible_columns({ columnIds: ["fldC"], targetVisibleIndex: 1 })
+move_visible_columns({ columnIds: ["fldA"], targetVisibleIndex: 2 })
+move_visible_columns({ columnIds: ["fldB"], targetVisibleIndex: 3 })
+\`\`\`
+
+**\`set_view_columns\`**: One-shot setup — hides all columns then shows only the specified IDs in the given order. Prefer this over manual show/hide + move sequences when setting up a view from scratch.
+
+**\`reorder_view_fields\`**: Operates on the *overall* (visible + hidden) column index. The primary field (first field) always stays at index 0 — do not include it in \`fieldOrder\`. Provide a partial map of field IDs → target indices; the tool merges with the current order automatically.
+
 ### Filter Syntax
 \`\`\`json
 {
@@ -432,6 +450,25 @@ Use these tools to **create, configure, and manage** views.
 \`contains\`, \`doesNotContain\`, \`is\`, \`isNot\`, \`isEmpty\`, \`isNotEmpty\`,
 \`isGreaterThan\`, \`isLessThan\`, \`isGreaterThanOrEqualTo\`, \`isLessThanOrEqualTo\`,
 \`isWithin\`, \`isAfter\`, \`isBefore\`, \`hasAnyOf\`, \`hasAllOf\`, \`hasNoneOf\`
+
+### Relative Date Filters (\`isWithin\`)
+
+For date fields with dynamic/rolling windows, use \`isWithin\` with a value object instead of a date string:
+\`\`\`json
+{ "columnId": "fldXXX", "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "exactDate": null, "numberOfDays": 7 } }
+\`\`\`
+
+Available \`mode\` values:
+| Mode | numberOfDays required? | Meaning |
+|------|----------------------|---------|
+| \`"today"\` | no | Today only |
+| \`"thisWeek"\` / \`"thisMonth"\` / \`"thisYear"\` | no | Current calendar period |
+| \`"pastWeek"\` / \`"pastMonth"\` / \`"pastYear"\` | no | Rolling past period |
+| \`"nextWeek"\` / \`"nextMonth"\` / \`"nextYear"\` | no | Rolling next period |
+| \`"pastNumberOfDays"\` | yes | Past N days |
+| \`"nextNumberOfDays"\` | yes | Next N days |
+
+Set \`"exactDate": null\` and \`"numberOfDays": null\` for modes that don't use them.
 
 ---
 
@@ -505,10 +542,10 @@ These rules apply whenever you interact with Airtable bases via the MCP tools.
 ## Server Identity
 
 - **Name**: airtable-user-mcp
-- **Version**: 2.1.0
+- **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (stdio, JSON-RPC 2.0)
 - **Capabilities**: Schema read, field CRUD, view CRUD, formula validation, extension management
-- **Tool Count**: 30 tools across 5 categories
+- **Tool Count**: 36 tools across 5 categories
 
 ## Mandatory Workflows
 
@@ -555,6 +592,7 @@ These rules apply whenever you interact with Airtable bases via the MCP tools.
 | "Sort/group this view by..." | \`apply_view_sorts\` or \`update_view_group_levels\` |
 | "Hide these columns" | \`show_or_hide_view_columns\` with \`visibility: false\` |
 | "Install an extension" | \`create_extension\` then \`create_extension_dashboard\` then \`install_extension\` |
+| "Set column order to X, Y, Z" | \`set_view_columns\` (full reset) or sequential \`move_visible_columns\` calls |
 
 ## Filter Operators Quick Reference
 
@@ -569,4 +607,6 @@ These rules apply whenever you interact with Airtable bases via the MCP tools.
 3. **Forgetting expectedName on delete_field** — deletion will be refused
 4. **Passing field names instead of field IDs to view tools** — view tools use \`fldXXX\` IDs, not names
 5. **Deleting the last view in a table** — will fail; tables must have at least one view
+6. **Passing multiple IDs to \`move_visible_columns\` expecting ordered placement** — the API ignores input array order; make sequential single-column calls instead
+7. **Using \`emptyGroupState: "visible"\` in \`update_view_group_levels\`** — the API rejects "visible"; omit this field (defaults to "hidden")
 `;

@@ -211,13 +211,19 @@ describe('reorderViewFields — partial-map merge (§2.6)', () => {
   it('handles multiple moves applied in ascending target-order', async () => {
     const auth = createMockAuth();
     const client = new AirtableClient(auth);
+    // Request position 0 for fldNumber — primary column (fldText) is immovable at 0,
+    // so the move is clamped to position 1. fldFK is then inserted at 1 (ascending),
+    // pushing fldNumber to 2.
     await client.reorderViewFields('appXXX', 'viwTEST', { fldNumber: 0, fldFK: 1 });
 
     const post = auth.calls.find(c => c.method === 'POST' && c.url.includes('updateMultipleViewConfigs'));
     const sentPayload = JSON.parse(post.params.stringifiedObjectParams);
     const indices = sentPayload.targetOverallColumnIndicesById;
-    assert.equal(indices.fldNumber, 0);
+    // Primary column always stays at index 0
+    assert.equal(indices.fldText, 0);
+    // fldNumber requested at 0 but clamped to 1; fldFK at 1 pushes fldNumber to 2
     assert.equal(indices.fldFK, 1);
+    assert.equal(indices.fldNumber, 2);
     // Total should still cover every field
     assert.equal(Object.keys(indices).length, 6);
   });
