@@ -4,7 +4,7 @@
 
 # airtable-user-mcp
 
-**Community add-on to the official Airtable MCP — 36 extra tools your AI assistant can't get from the public REST API**
+**Community add-on to the official Airtable MCP — 62 tools your AI assistant can't get from the public REST API**
 
 <p align="center">
   <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
@@ -57,7 +57,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| Total tools | ~17 | **36** |
+| Total tools | ~17 | **62** |
 | Auth | PAT or OAuth, per-scope | **Log in once with your normal account** (SSO/2FA supported) |
 | Transport | HTTP (remote) | stdio (local, private) |
 | Data routing | Through `mcp.airtable.com` | **Direct from your machine** |
@@ -74,7 +74,12 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Change column order | ❌ | ✅ |
 | Show / hide columns | ❌ | ✅ |
 | Duplicate a view with full config | ❌ | ✅ |
+| View descriptions, cell wrap, covers, color config, calendar dates, frozen columns | ❌ | ✅ |
+| Sidebar sections (create, rename, move, delete) | ❌ | ✅ |
+| Record templates (create, pre-fill, duplicate, apply, delete) | ❌ | ✅ |
+| Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
+| Tool profiles & per-tool toggles | ❌ | ✅ read-only / safe-write / full / custom |
 | `filterByFormula` on record queries | ❌ Explicitly disallowed | ✅ |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
@@ -85,13 +90,23 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 
 ---
 
+## Demo
+
+<div align="center">
+
+[![Using Claude Code to manage base views, computed fields & extensions — Reddit demo](https://img.shields.io/badge/▶_Watch_Demo-Reddit-FF4500?style=for-the-badge&logo=reddit&logoColor=white)](https://www.reddit.com/r/Airtable/comments/1skmqe1/using_claude_code_to_manage_base_views_computed/)
+
+</div>
+
+---
+
 ## Quick Start
 
 ```bash
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 61 tools.
+That's it. Your MCP client connects via **stdio** and gets access to all 62 tools.
 
 ---
 
@@ -208,7 +223,7 @@ Add the `airtable` entry to `mcpServers`:
 }
 ```
 
-Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 61 tools.
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 62 tools.
 
 </details>
 
@@ -231,7 +246,7 @@ Verify:
 claude mcp list
 ```
 
-You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 61 tools are available.
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 62 tools are available.
 
 </details>
 

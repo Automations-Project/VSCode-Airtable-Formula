@@ -51,7 +51,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| **Total tools** | ~17 | **36** |
+| **Total tools** | ~17 | **62** |
 | **Auth model** | Personal Access Token or OAuth, per-scope setup | **Log in once with your normal Airtable account** (SSO/2FA supported) |
 | **Transport** | HTTP (remote) | stdio (local, private) |
 | **Data never leaves your machine** | ❌ Requests go through `mcp.airtable.com` | ✅ Runs locally against Airtable's API |
@@ -71,8 +71,13 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Show/hide columns in a view** | ❌ | ✅ |
 | **Change row height** | ❌ | ✅ |
 | **Duplicate a view with its full configuration** | ❌ | ✅ |
+| **View descriptions, cell wrap, covers, color config, calendar dates, frozen columns** | ❌ | ✅ |
+| **Sidebar sections (create, rename, move, delete)** | ❌ | ✅ |
+| **Record templates (create, pre-fill, duplicate, apply, delete)** | ❌ | ✅ |
+| **Form metadata (description, redirect, attribution, branding)** | ❌ | ✅ |
 | **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
 | **Create dashboard pages** | ❌ | ✅ |
+| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only / safe-write / full / custom |
 | **`filterByFormula` on record queries** | ❌ Explicitly disallowed | ✅ |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
@@ -120,6 +125,16 @@ This monorepo ships **two products** from one source tree:
 
 ---
 
+## Demo
+
+<div align="center">
+
+[![Using Claude Code to manage base views, computed fields & extensions — Reddit demo](https://img.shields.io/badge/▶_Watch_Demo-Reddit-FF4500?style=for-the-badge&logo=reddit&logoColor=white)](https://www.reddit.com/r/Airtable/comments/1skmqe1/using_claude_code_to_manage_base_views_computed/)
+
+</div>
+
+---
+
 ## Features
 
 ### VS Code Extension
@@ -131,7 +146,7 @@ This monorepo ships **two products** from one source tree:
 - **Dashboard** — React webview with Overview, Setup, and Settings tabs
 
 
-### MCP Server (61 Tools)
+### MCP Server (62 Tools)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
@@ -145,6 +160,7 @@ Manage Airtable bases with capabilities **not available through the official RES
 | **Record Templates** | 8 | Create / rename / describe / set cells / set columns / duplicate / apply / delete saved row scaffolds |
 | **Form Metadata** | 2 | Description, redirect URL, attribution, copy-to-respondent, branding (legacy form views) |
 | **Extension Management** | 7 | Create, install, enable/disable, rename, duplicate, remove extensions |
+| **Tool Management** | 1 | List profiles, switch profile, toggle tools/categories (meta-tool, always enabled) |
 
 See the full tool reference in [`packages/mcp-server/README.md`](packages/mcp-server/README.md).
 
@@ -183,6 +199,7 @@ npx airtable-user-mcp
 | **Glama** | [glama.ai/mcp/servers](https://glama.ai/mcp/servers/Automations-Project/VSCode-Airtable-Formula) |
 | **PulseMCP** | [pulsemcp.com](https://www.pulsemcp.com/servers/automations-project-airtable-user) |
 | **MCP.so** | [mcp.so](https://mcp.so/client/airtable-user-mcp/Automations-Project) |
+| **Reddit** | [Video demo — managing views, computed fields & extensions with Claude Code](https://www.reddit.com/r/Airtable/comments/1skmqe1/using_claude_code_to_manage_base_views_computed/) |
 
 </div>
 
