@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.32",
+  "version": "2.0.34",
   "publisher": "Nskha",
   "displayName": "Airtable Formula",
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
