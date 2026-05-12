@@ -61,6 +61,18 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
 
+  packages/language-services:
+    devDependencies:
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
+
   packages/mcp-server:
     dependencies:
       '@modelcontextprotocol/sdk':
