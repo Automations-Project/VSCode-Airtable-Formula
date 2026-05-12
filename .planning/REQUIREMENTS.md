@@ -23,16 +23,16 @@
 - [ ] **SCRIPT-01**: The `airtable-script` language ID is registered for `.script` files with JS syntax highlighting (TextMate grammar that includes `source.js`) and a language configuration (comment toggling, bracket pairs, folding)
 - [ ] **SCRIPT-02**: Dot-triggered completions surface all Scripting Extension globals and their methods: `base`, `table`, `cursor`, `input`, `output`, `session`, `fetch`, `remoteFetchAsync`
 - [ ] **SCRIPT-03**: Hover documentation is shown for all Scripting Extension globals and their methods
-- [ ] **SCRIPT-04**: A diagnostic is raised for `*Async` calls not preceded by `await` (most common Airtable scripting mistake)
-- [ ] **SCRIPT-05**: A diagnostic is raised when an identifier is not in the Scripting Extension globals list
+- [ ] **SCRIPT-04**: A diagnostic (warning) is raised when a `*Async`-suffixed method call is not preceded by `await` in the same expression — accepted patterns that must NOT trigger: `return expr.xAsync()`, `.then(...)` chains, `Promise.all([...])`, assignment to a variable declared as holding a Promise
+- [ ] **SCRIPT-05**: A diagnostic is raised when a bare top-level identifier followed by `.` or `()` does not match any known Airtable Scripting Extension global — JS built-ins (`console`, `Math`, `JSON`, `Date`, `Promise`, `Array`, `Object`, `Error`, `parseInt`, `parseFloat`, `setTimeout`, `clearTimeout`) and locally-declared identifiers (variables, parameters, functions, classes) must NOT be flagged
 - [ ] **SCRIPT-06**: `.script` files display a custom light/dark SVG file type icon in VS Code
 
 ### Automation Engine (`.automation` files)
 
 - [ ] **AUTO-01**: The `airtable-automation` language ID is registered for `.automation` files with JS syntax highlighting and a language configuration
-- [ ] **AUTO-02**: Completions are scoped to the automation context — `input.` shows only `input.config()`, `output.` shows only `output.set()`; interactive input methods, `cursor`, and `session` are absent
+- [ ] **AUTO-02**: Completions are scoped to the automation context — `base`, `table`, and `fetch` are available with full method completions; `input.` shows only `input.config()` and `output.` shows only `output.set()`; `cursor`, `session`, `remoteFetchAsync`, and interactive `input.*Async()`/`output.text/markdown/table` are absent from completions *(Note: exact automation global surface requires verification against Airtable automation docs before Phase 4 implementation — see Phase 4 prerequisite gate)*
 - [ ] **AUTO-03**: Hover documentation is shown for all automation globals and their methods
-- [ ] **AUTO-04**: A diagnostic is raised when a scripting-extension-only global (`cursor`, `session`, `remoteFetchAsync`, interactive `input.*Async()`, `output.text/markdown/table`) is used in an automation file
+- [ ] **AUTO-04**: A diagnostic is raised when a scripting-extension-only global is used in an `.automation` file — confirmed forbidden list: `cursor`, `session`, interactive `input.*Async()` methods, `output.text/markdown/table`; `remoteFetchAsync` should be a warning ("not needed server-side, use fetch") rather than an error *(subject to verification gate)*
 - [ ] **AUTO-05**: `.automation` files display a custom light/dark SVG file type icon in VS Code
 
 ## v2 Requirements
@@ -56,6 +56,7 @@
 | Script file execution / REPL | Editor support only — no runtime integration |
 | `@types/airtable` npm package | Covers REST API client only; hand-rolled `.d.ts` files required for scripting globals |
 | Automation timeout static analysis (this milestone) | High false-positive risk; defer to v2 |
+| Formula file icon (`.formula`) | Formula language ID already registered; icon not included in this milestone — add as FORMULA-04 if user provides a `.formula` SVG |
 
 ## Traceability
 

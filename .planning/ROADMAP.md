@@ -36,9 +36,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Requirements**: FORMULA-01, FORMULA-02, FORMULA-03
 **Success Criteria** (what must be TRUE):
   1. `diagnostics.ts`, `completions.ts`, `hover.ts`, `signature.ts`, and `functions.ts` no longer exist in `packages/extension/src/` — their logic lives in `language-services/engines/formula/`
-  2. Formula diagnostics, completions, hover, and signature help behave identically to before the migration (no user-visible behavioral regression)
-  3. A single `FUNCTION_REGISTRY` is the source of truth — the private duplicate function list that previously existed in `completions.ts` is eliminated
-  4. Known formula feature gaps are resolved: missing functions are added to the registry and incorrect or missing diagnostics are fixed
+  2. `codeActions.ts` import updated from `./functions` to the new `language-services` registry export — no dead imports remain in the extension
+  3. Formula diagnostics, completions, hover, and signature help behave identically to before the migration (no user-visible behavioral regression)
+  4. A single `FUNCTION_REGISTRY` is the source of truth — the private duplicate function list that previously existed in `completions.ts` is eliminated
+  5. Known formula feature gaps are resolved: missing functions are added to the registry and incorrect or missing diagnostics are fixed
 **Plans**: TBD
 
 ### Phase 3: Script Engine
@@ -57,6 +58,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 4: Automation Engine
 **Goal**: `.automation` files have full language support scoped to the Automation Script context — completions and hover are limited to automation-available globals, and diagnostics flag use of scripting-extension-only APIs; a custom file icon is registered
 **Depends on**: Phase 3
+**Prerequisite gate (must be resolved before planning Phase 4)**: Verify the complete Airtable Automation Script global surface against the official Airtable automation docs — specifically: (a) confirm `base`/`table`/`fetch` availability, (b) confirm exact `remoteFetchAsync` status (absent vs. deprecated-warning), (c) confirm `input.config()` field-type enum shape. Research confidence is MEDIUM for automation globals.
 **Requirements**: AUTO-01, AUTO-02, AUTO-03, AUTO-04, AUTO-05
 **Success Criteria** (what must be TRUE):
   1. A file with `.automation` extension opens in VS Code with JS syntax highlighting and `airtable-automation` language ID; comment toggling, bracket pairs, and code folding work

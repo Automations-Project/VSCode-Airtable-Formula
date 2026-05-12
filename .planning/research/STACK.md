@@ -19,15 +19,15 @@ The `language-services` package is a pure TS library that exposes framework-agno
 | Item | Value | Rationale |
 |------|-------|-----------|
 | Package name | `@airtable-formula/language-services` | Consistent with existing `@airtable-formula/shared` naming |
-| `type` in package.json | `"module"` | Consistent with `shared`; extension uses tsup CJS bundler so it handles ESM-to-CJS at bundle time |
+| `type` in package.json | `"module"` | ESM-primary; dual output provides CJS entrypoint for direct-require paths |
 | Build tool | `tsup` (already in workspace) | Zero new tooling; mirrors how `shared` is built |
-| Output format | ESM only (`--format esm`) | Extension builds via tsup which resolves ESM workspace deps; no need for dual CJS/ESM here since this package is never published to npm |
+| Output format | **Dual CJS+ESM** (`--format cjs,esm`) | Although tsup bundles the dep inline at extension build time, dual output is required: ESM for future consumers and to match the import map, CJS for any direct-require paths and d.ts compatibility. ESM-only risks `ERR_REQUIRE_ESM` if the dep is ever resolved at runtime rather than bundled (e.g. tests, tooling). See PITFALLS.md Pitfall #1. |
 | `declaration: true` (`--dts`) | Yes | Extension imports types directly; `.d.ts` must exist |
 | TypeScript version | Same as workspace (`^5.4.0`) | No upgrade needed |
 
 **tsup build command for package.json:**
 ```
-tsup src/index.ts --format esm --dts --out-dir dist
+tsup src/index.ts --format cjs,esm --dts --out-dir dist
 ```
 
 **Root build script change needed:** Add `pnpm -F language-services build` between `pnpm -F shared build` and `pnpm -F webview build` in the root `package.json` build script, and similarly in the test script.

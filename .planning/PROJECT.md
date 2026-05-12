@@ -32,13 +32,13 @@ Airtable-aware language intelligence directly in VS Code — so users get accura
 - [ ] Shared `language-services` package — pure TS, framework-agnostic, powers all 3 engines
 - [ ] Formula engine migrated to language-services architecture (refactor existing providers)
 - [ ] Formula feature gaps resolved (missing functions, wrong/missing diagnostics)
-- [ ] Scripting Extension engine (`.script` files) — JS globals, diagnostics, completions, hover, signature help
-- [ ] Automation Script engine (`.automation` files) — separate global typings (`input.config`, `output.set`, `remoteFetchAsync` differences)
-- [ ] File type icons for all 3 engines (user-provided SVGs registered in extension)
+- [ ] Scripting Extension engine (`.script` files) — JS globals, static diagnostics, completions, hover
+- [ ] Automation Script engine (`.automation` files) — separate global typings (`input.config`, `output.set`; no `cursor`/`session`)
+- [ ] File type icons for `.script` and `.automation` files (user-provided SVGs)
 
 ### Out of Scope
 
-- Separate LSP node process (JSON-RPC) — in-process shared service layer chosen for simplicity; can be extracted later if portability is needed
+- Separate LSP node process (JSON-RPC) — architecture is in-process language-services layer (LSP-extractable later); all language intelligence is static analysis, no scripts are executed by the extension
 - Full TypeScript type checking for script files — Airtable-specific global typings only, not a TS language server replacement
 - Script file execution / REPL — editor support only, not runtime integration
 
