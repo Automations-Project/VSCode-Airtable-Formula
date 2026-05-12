@@ -26,7 +26,11 @@
 !scripts/
 !scripts/**
 
-# 5. Allow packages directory structure
+# 5. Allow planning directory
+!.planning/
+!.planning/**
+
+# 6. Allow packages directory structure
 !packages/
 !packages/extension/
 !packages/extension/**
