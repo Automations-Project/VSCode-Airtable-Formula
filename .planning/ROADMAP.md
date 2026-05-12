@@ -28,7 +28,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. `pnpm build` completes without regressions — existing formula features still work identically in VS Code after the adapter layer is wired in
   3. `LsDiagnostic`, `LsPosition`, `LsRange`, `LsCompletionItem`, and `LsHover` types are importable from `language-services` without triggering a `vscode` module resolution
   4. `packages/extension/src/language/convert.ts` exists and translates between VS Code types and language-services types; `registration.ts` exists and calls `registerLanguageProviders(context)`
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 01-01-PLAN.md — Create packages/language-services package scaffold with dual CJS+ESM build, framework-agnostic types, and test suite (INFRA-01, INFRA-02)
+- [ ] 01-02-PLAN.md — Wire VS Code adapter layer: convert.ts, registration.ts, extension.ts integration, and build script updates (INFRA-03)
 
 ### Phase 2: Formula Engine Migration
 **Goal**: All formula language intelligence lives in `language-services/engines/formula/` — the five existing provider files in the extension are deleted and replaced by thin VS Code adapter wrappers, a single `FUNCTION_REGISTRY` drives all formula providers, and known feature gaps are fixed
@@ -78,7 +81,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Language Services Scaffold | 0/? | Not started | - |
+| 1. Language Services Scaffold | 0/2 | Not started | - |
 | 2. Formula Engine Migration | 0/? | Not started | - |
 | 3. Script Engine | 0/? | Not started | - |
 | 4. Automation Engine | 0/? | Not started | - |
