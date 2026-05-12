@@ -13,7 +13,7 @@ This milestone transforms the existing single-engine formula editor into a 3-eng
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Language Services Scaffold** - New `packages/language-services` workspace package with dual CJS+ESM build, framework-agnostic types, and VS Code adapter layer
-- [ ] **Phase 2: Formula Engine Migration** - Extract all formula providers into `language-services/engines/formula/`, unify the function registry, fix feature gaps
+- [ ] **Phase 2: Formula Engine Migration** - Extract all formula providers into `language-services/engines/formula/`, unify the function registry, fix feature gaps, add formula file icon
 - [ ] **Phase 3: Script Engine** - `airtable-script` language ID, globals completions/hover, missing-await and unknown-global diagnostics, file icon for `.script` files
 - [ ] **Phase 4: Automation Engine** - `airtable-automation` language ID, automation-scoped globals, cross-context diagnostics, file icon for `.automation` files
 
@@ -33,13 +33,14 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 2: Formula Engine Migration
 **Goal**: All formula language intelligence lives in `language-services/engines/formula/` — the five existing provider files in the extension are deleted and replaced by thin VS Code adapter wrappers, a single `FUNCTION_REGISTRY` drives all formula providers, and known feature gaps are fixed
 **Depends on**: Phase 1
-**Requirements**: FORMULA-01, FORMULA-02, FORMULA-03
+**Requirements**: FORMULA-01, FORMULA-02, FORMULA-03, FORMULA-04
 **Success Criteria** (what must be TRUE):
   1. `diagnostics.ts`, `completions.ts`, `hover.ts`, `signature.ts`, and `functions.ts` no longer exist in `packages/extension/src/` — their logic lives in `language-services/engines/formula/`
   2. `codeActions.ts` import updated from `./functions` to the new `language-services` registry export — no dead imports remain in the extension
   3. Formula diagnostics, completions, hover, and signature help behave identically to before the migration (no user-visible behavioral regression)
   4. A single `FUNCTION_REGISTRY` is the source of truth — the private duplicate function list that previously existed in `completions.ts` is eliminated
   5. Known formula feature gaps are resolved: missing functions are added to the registry and incorrect or missing diagnostics are fixed
+  6. `.formula` files display a custom light/dark SVG file type icon via `contributes.languages[].icon`
 **Plans**: TBD
 
 ### Phase 3: Script Engine

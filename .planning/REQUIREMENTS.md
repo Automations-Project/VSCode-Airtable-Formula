@@ -17,6 +17,7 @@
 - [ ] **FORMULA-01**: Existing formula diagnostics, completions, hover, and signature help are migrated to `engines/formula/` inside `language-services` with no user-visible behavioral change
 - [ ] **FORMULA-02**: A single unified `FUNCTION_REGISTRY` drives all formula providers — the private duplicate function list in `completions.ts` is eliminated
 - [ ] **FORMULA-03**: Known formula engine feature gaps are resolved — missing functions added, incorrect or missing diagnostics fixed
+- [ ] **FORMULA-04**: `.formula` files display a custom light/dark SVG file type icon in VS Code via `contributes.languages[].icon`
 
 ### Script Engine (`.script` files)
 
@@ -56,7 +57,7 @@
 | Script file execution / REPL | Editor support only — no runtime integration |
 | `@types/airtable` npm package | Covers REST API client only; hand-rolled `.d.ts` files required for scripting globals |
 | Automation timeout static analysis (this milestone) | High false-positive risk; defer to v2 |
-| Formula file icon (`.formula`) | Formula language ID already registered; icon not included in this milestone — add as FORMULA-04 if user provides a `.formula` SVG |
+| Multi-pack icon switching | VS Code has no API to inject icons into an existing theme at runtime; `contributes.languages[].icon` is single-pack only — multi-pack deferred to future milestone |
 
 ## Traceability
 
@@ -68,6 +69,7 @@
 | FORMULA-01 | Phase 2 | Pending |
 | FORMULA-02 | Phase 2 | Pending |
 | FORMULA-03 | Phase 2 | Pending |
+| FORMULA-04 | Phase 2 | Pending |
 | SCRIPT-01 | Phase 3 | Pending |
 | SCRIPT-02 | Phase 3 | Pending |
 | SCRIPT-03 | Phase 3 | Pending |
@@ -81,10 +83,10 @@
 | AUTO-05 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 17 total
-- Mapped to phases: 17
+- v1 requirements: 18 total
+- Mapped to phases: 18
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 — Traceability filled after roadmap creation*
+*Last updated: 2026-05-12 — Added FORMULA-04 (formula file icon); multi-pack icon switching moved to Out of Scope*
