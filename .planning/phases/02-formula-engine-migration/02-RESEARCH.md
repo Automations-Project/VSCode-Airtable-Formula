@@ -703,7 +703,7 @@ Minimal valid SVGs for the placeholder icons:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **relatedInformation URI threading**
    - What we know: `LsDiagnostic.relatedInformation[].location.uri` is a string. The engine must populate it to emit bracket/paren `relatedInformation`. The wrapper has `document.uri.toString()`.

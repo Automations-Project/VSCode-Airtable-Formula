@@ -47,13 +47,22 @@ Plans:
   7. `.formula` and `.fx` files display a custom light/dark SVG file type icon via `contributes.languages[].icon`
 **Plans**: 8 plans
 Plans:
+**Wave 1**
 - [ ] 02-01-PLAN.md — Add LsSignatureHelp types to types.ts, fix WR-04 package.json exports ordering, create 5 Wave-0 test scaffolds (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
 - [ ] 02-02-PLAN.md — Create engines/formula/registry.ts (unified FUNCTION_REGISTRY + gap fixes + helpers) and engines/formula/index.ts barrel (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 02-03-PLAN.md — Create engines/formula/diagnostics.ts pure engine (migrate from extension/src/diagnostics.ts) (FORMULA-01, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
 - [ ] 02-04-PLAN.md — Create engines/formula/completions.ts and engines/formula/hover.ts pure engines (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
 - [ ] 02-05-PLAN.md — Create engines/formula/signature.ts pure engine with findFunctionContext (FORMULA-01) [Wave 2, depends_on: 02-01, 02-02, autonomous]
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 02-06-PLAN.md — Fix convert.ts (WR-01, WR-02) and add toVscodeCompletionItem + toVscodeSignatureHelp; extend language-services/src/index.ts (FORMULA-01, FORMULA-02) [Wave 3, depends_on: 02-03, 02-04, 02-05, autonomous]
+
+**Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 02-07-PLAN.md — Create all 4 VS Code wrapper classes in extension/src/language/formula/ (FORMULA-01) [Wave 4, depends_on: 02-06, autonomous]
+
+**Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 02-08-PLAN.md — Wire registration.ts + codeActions.ts imports; delete 5 old source files; create SVG icons; update package.json (.fx + icon) (FORMULA-01, FORMULA-02, FORMULA-04, FORMULA-05) [Wave 5, depends_on: 02-07, autonomous]
 
 ### Phase 3: Script Engine
