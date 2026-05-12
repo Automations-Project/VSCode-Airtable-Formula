@@ -48,13 +48,13 @@ Plans:
 **Plans**: 8 plans
 Plans:
 **Wave 1**
-- [ ] 02-01-PLAN.md — Add LsSignatureHelp types to types.ts, fix WR-04 package.json exports ordering, create 5 Wave-0 test scaffolds (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
-- [ ] 02-02-PLAN.md — Create engines/formula/registry.ts (unified FUNCTION_REGISTRY + gap fixes + helpers) and engines/formula/index.ts barrel (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
+- [x] 02-01-PLAN.md — Add LsSignatureHelp types to types.ts, fix WR-04 package.json exports ordering, create 5 Wave-0 test scaffolds (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
+- [x] 02-02-PLAN.md — Create engines/formula/registry.ts (unified FUNCTION_REGISTRY + gap fixes + helpers) and engines/formula/index.ts barrel (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 02-03-PLAN.md — Create engines/formula/diagnostics.ts pure engine (migrate from extension/src/diagnostics.ts) (FORMULA-01, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
-- [ ] 02-04-PLAN.md — Create engines/formula/completions.ts and engines/formula/hover.ts pure engines (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
-- [ ] 02-05-PLAN.md — Create engines/formula/signature.ts pure engine with findFunctionContext (FORMULA-01) [Wave 2, depends_on: 02-01, 02-02, autonomous]
+- [x] 02-04-PLAN.md — Create engines/formula/completions.ts and engines/formula/hover.ts pure engines (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
+- [x] 02-05-PLAN.md — Create engines/formula/signature.ts pure engine with findFunctionContext (FORMULA-01) [Wave 2, depends_on: 02-01, 02-02, autonomous]
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 02-06-PLAN.md — Fix convert.ts (WR-01, WR-02) and add toVscodeCompletionItem + toVscodeSignatureHelp; extend language-services/src/index.ts (FORMULA-01, FORMULA-02) [Wave 3, depends_on: 02-03, 02-04, 02-05, autonomous]
@@ -100,6 +100,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Language Services Scaffold | 0/2 | Not started | - |
-| 2. Formula Engine Migration | 0/8 | Not started | - |
+| 2. Formula Engine Migration | 4/8 | In Progress|  |
 | 3. Script Engine | 0/? | Not started | - |
 | 4. Automation Engine | 0/? | Not started | - |
