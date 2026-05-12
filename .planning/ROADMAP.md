@@ -45,7 +45,16 @@ Plans:
   5. Known formula feature gaps are resolved: missing functions are added to the registry and incorrect or missing diagnostics are fixed
   6. `.fx` opens with `airtable-formula` language ID — identical diagnostics, completions, hover, and icon as `.formula`
   7. `.formula` and `.fx` files display a custom light/dark SVG file type icon via `contributes.languages[].icon`
-**Plans**: TBD
+**Plans**: 8 plans
+Plans:
+- [ ] 02-01-PLAN.md — Add LsSignatureHelp types to types.ts, fix WR-04 package.json exports ordering, create 5 Wave-0 test scaffolds (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
+- [ ] 02-02-PLAN.md — Create engines/formula/registry.ts (unified FUNCTION_REGISTRY + gap fixes + helpers) and engines/formula/index.ts barrel (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 1, autonomous]
+- [ ] 02-03-PLAN.md — Create engines/formula/diagnostics.ts pure engine (migrate from extension/src/diagnostics.ts) (FORMULA-01, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
+- [ ] 02-04-PLAN.md — Create engines/formula/completions.ts and engines/formula/hover.ts pure engines (FORMULA-01, FORMULA-02, FORMULA-03) [Wave 2, depends_on: 02-02, autonomous]
+- [ ] 02-05-PLAN.md — Create engines/formula/signature.ts pure engine with findFunctionContext (FORMULA-01) [Wave 2, depends_on: 02-01, 02-02, autonomous]
+- [ ] 02-06-PLAN.md — Fix convert.ts (WR-01, WR-02) and add toVscodeCompletionItem + toVscodeSignatureHelp; extend language-services/src/index.ts (FORMULA-01, FORMULA-02) [Wave 3, depends_on: 02-03, 02-04, 02-05, autonomous]
+- [ ] 02-07-PLAN.md — Create all 4 VS Code wrapper classes in extension/src/language/formula/ (FORMULA-01) [Wave 4, depends_on: 02-06, autonomous]
+- [ ] 02-08-PLAN.md — Wire registration.ts + codeActions.ts imports; delete 5 old source files; create SVG icons; update package.json (.fx + icon) (FORMULA-01, FORMULA-02, FORMULA-04, FORMULA-05) [Wave 5, depends_on: 02-07, autonomous]
 
 ### Phase 3: Script Engine
 **Goal**: `.script` files have full language support in VS Code — JS syntax highlighting, dot-triggered completions for all Scripting Extension globals, hover documentation, missing-`await` and unknown-global diagnostics, and a custom file icon
@@ -82,6 +91,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Language Services Scaffold | 0/2 | Not started | - |
-| 2. Formula Engine Migration | 0/? | Not started | - |
+| 2. Formula Engine Migration | 0/8 | Not started | - |
 | 3. Script Engine | 0/? | Not started | - |
 | 4. Automation Engine | 0/? | Not started | - |
