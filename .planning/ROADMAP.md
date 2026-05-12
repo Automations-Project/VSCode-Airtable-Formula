@@ -30,8 +30,8 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. `packages/extension/src/language/convert.ts` exists and translates between VS Code types and language-services types; `registration.ts` exists and calls `registerLanguageProviders(context)`
 **Plans**: 2 plans
 Plans:
-- [ ] 01-01-PLAN.md — Create packages/language-services package scaffold with dual CJS+ESM build, framework-agnostic types, and test suite (INFRA-01, INFRA-02)
-- [ ] 01-02-PLAN.md — Wire VS Code adapter layer: convert.ts, registration.ts, extension.ts integration, and build script updates (INFRA-03)
+- [ ] 01-01-PLAN.md — Create packages/language-services package scaffold with dual CJS+ESM build, framework-agnostic types, and test suite (INFRA-01, INFRA-02) [Wave 1, autonomous]
+- [ ] 01-02-PLAN.md — Wire VS Code adapter layer: convert.ts, registration.ts, extension.ts integration, and build script updates (INFRA-03) [Wave 2, depends_on: 01-01, autonomous]
 
 ### Phase 2: Formula Engine Migration
 **Goal**: All formula language intelligence lives in `language-services/engines/formula/` — the five existing provider files in the extension are deleted and replaced by thin VS Code adapter wrappers, a single `FUNCTION_REGISTRY` drives all formula providers, and known feature gaps are fixed
