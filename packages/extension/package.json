@@ -469,7 +469,8 @@
     "test:e2e": "node ./dist/test/runTest.js"
   },
   "dependencies": {
-    "@airtable-formula/shared": "workspace:*"
+    "@airtable-formula/shared": "workspace:*",
+    "@airtable-formula/language-services": "workspace:*"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",

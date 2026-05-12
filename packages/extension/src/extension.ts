@@ -2,17 +2,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { AirtableFormulaDiagnosticsProvider } from './diagnostics';
-import { AirtableFormulaCompletionProvider } from './completions';
-import { AirtableFormulaHoverProvider } from './hover';
-import { AirtableFormulaSignatureHelpProvider } from './signature';
-import { AirtableFormulaCodeActionProvider } from './codeActions';
 // Skill install/uninstall is now driven exclusively through `installAiFiles`
 // from `./skills/installer.js` (invoked by the dashboard and by the
 // `airtable-formula.installAISkills` command below). The legacy detectIDE()
 // path in `./skills/skillInstaller.ts` has been removed — it was running in
 // parallel with the dashboard path with divergent template content.
 import { DashboardProvider } from './webview/DashboardProvider.js';
+import { registerLanguageProviders } from './language/registration.js';
 import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
 import { BrowserDownloadManager } from './mcp/browser-download.js';
@@ -180,65 +176,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         })();
     }
 
-    // Initialize diagnostics provider
-    const diagnosticsProvider = new AirtableFormulaDiagnosticsProvider();
-    context.subscriptions.push(diagnosticsProvider);
-
-    // Update diagnostics on document change
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument((event) => {
-            if (event.document.languageId === 'airtable-formula') {
-                diagnosticsProvider.updateDiagnostics(event.document);
-            }
-        })
-    );
-
-    // Update diagnostics on document open
-    context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument((document) => {
-            if (document.languageId === 'airtable-formula') {
-                diagnosticsProvider.updateDiagnostics(document);
-            }
-        })
-    );
-
-    // Register hover provider
-    const hoverProvider = vscode.languages.registerHoverProvider(
-        'airtable-formula',
-        new AirtableFormulaHoverProvider()
-    );
-    context.subscriptions.push(hoverProvider);
-
-    // Register signature help provider
-    const signatureHelpProvider = vscode.languages.registerSignatureHelpProvider(
-        'airtable-formula',
-        new AirtableFormulaSignatureHelpProvider(),
-        '(', ','
-    );
-    context.subscriptions.push(signatureHelpProvider);
-
-    // Register code actions provider
-    const codeActionsProvider = vscode.languages.registerCodeActionsProvider(
-        'airtable-formula',
-        new AirtableFormulaCodeActionProvider(),
-        { providedCodeActionKinds: AirtableFormulaCodeActionProvider.providedCodeActionKinds }
-    );
-    context.subscriptions.push(codeActionsProvider);
-
-    // Update diagnostics for all open documents
-    vscode.workspace.textDocuments.forEach((document) => {
-        if (document.languageId === 'airtable-formula') {
-            diagnosticsProvider.updateDiagnostics(document);
-        }
-    });
-
-    // Register completion provider
-    const completionProvider = vscode.languages.registerCompletionItemProvider(
-        'airtable-formula',
-        new AirtableFormulaCompletionProvider(),
-        '(', '{', "'", '"'
-    );
-    context.subscriptions.push(completionProvider);
+    registerLanguageProviders(context);
 
     // Register document formatter for .formula language (beautify)
     const formatter = vscode.languages.registerDocumentFormattingEditProvider('airtable-formula', {
