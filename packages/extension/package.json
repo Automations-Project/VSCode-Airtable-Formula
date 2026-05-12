@@ -64,9 +64,14 @@
         "extensions": [
           ".formula",
           ".min.formula",
-          ".ultra-min.formula"
+          ".ultra-min.formula",
+          ".fx"
         ],
-        "configuration": "./language-configuration/airtable-formula-language-configuration.json"
+        "configuration": "./language-configuration/airtable-formula-language-configuration.json",
+        "icon": {
+          "light": "./icons/formula-light.svg",
+          "dark": "./icons/formula-dark.svg"
+        }
       }
     ],
     "grammars": [

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ALL_CALLABLE, FUNCTION_REGISTRY } from './functions';
+import { ALL_CALLABLE, FUNCTION_REGISTRY } from '@airtable-formula/language-services';
 
 /**
  * Provides code actions (quick fixes) for Airtable formula diagnostics

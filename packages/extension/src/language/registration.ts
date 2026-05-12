@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { AirtableFormulaDiagnosticsProvider } from '../diagnostics';
-import { AirtableFormulaCompletionProvider } from '../completions';
-import { AirtableFormulaHoverProvider } from '../hover';
-import { AirtableFormulaSignatureHelpProvider } from '../signature';
+import { AirtableFormulaDiagnosticsProvider } from './formula/formula-diagnostics';
+import { AirtableFormulaCompletionProvider } from './formula/formula-completions';
+import { AirtableFormulaHoverProvider } from './formula/formula-hover';
+import { AirtableFormulaSignatureHelpProvider } from './formula/formula-signature';
 import { AirtableFormulaCodeActionProvider } from '../codeActions';
 
 export function registerLanguageProviders(context: vscode.ExtensionContext): void {
