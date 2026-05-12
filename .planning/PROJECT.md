@@ -29,7 +29,7 @@ Airtable-aware language intelligence directly in VS Code — so users get accura
 
 <!-- Current milestone v1.0 — Language Platform -->
 
-- [ ] Shared `language-services` package — pure TS, framework-agnostic, powers all 3 engines
+- ✓ Shared `language-services` package — pure TS, framework-agnostic, dual CJS+ESM, VS Code adapter layer wired — Phase 1
 - [ ] Formula engine migrated to language-services architecture (refactor existing providers)
 - [ ] Formula feature gaps resolved (missing functions, wrong/missing diagnostics)
 - [ ] Scripting Extension engine (`.script` files) — JS globals, static diagnostics, completions, hover
@@ -61,10 +61,12 @@ Airtable-aware language intelligence directly in VS Code — so users get accura
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| In-process shared service layer over separate LSP process | VS Code-only target; existing architecture is in-process; avoids JSON-RPC overhead and process lifecycle complexity; portable to true LSP later | — Pending |
-| Single `language-services` package for all 3 engines | Shared parser primitives, shared function/API metadata, consistent testing surface | — Pending |
+| In-process shared service layer over separate LSP process | VS Code-only target; existing architecture is in-process; avoids JSON-RPC overhead and process lifecycle complexity; portable to true LSP later | Validated — Phase 1 |
+| Single `language-services` package for all 3 engines | Shared parser primitives, shared function/API metadata, consistent testing surface | Validated — Phase 1 |
 
 ## Evolution
+
+Last updated: 2026-05-12 (Phase 1 complete)
 
 This document evolves at phase transitions and milestone boundaries.
 
