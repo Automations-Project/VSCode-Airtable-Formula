@@ -34,6 +34,8 @@
 !packages/
 !packages/extension/
 !packages/extension/**
+!packages/language-services/
+!packages/language-services/**
 !packages/mcp-server/
 !packages/mcp-server/**
 !packages/shared/
