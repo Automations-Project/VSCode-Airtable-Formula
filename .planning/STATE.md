@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-05-12T13:28:45.877Z"
 last_activity: 2026-05-12
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -15,9 +15,63 @@ progress:
 
 # Project State
 
+## Project Reference
+
+See: .planning/PROJECT.md (updated 2026-05-12)
+
+**Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
+**Current focus:** Phase 1 — Language Services Scaffold
+
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-05-12 — Milestone v1.0 started
+Phase: 1 of 4 (Language Services Scaffold)
+Plan: — (ready to plan)
+Status: Ready to plan
+Last activity: 2026-05-12 — Roadmap created, 4 phases defined, 17/17 requirements mapped
+
+Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 0
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
+**Recent Trend:**
+- Last 5 plans: —
+- Trend: —
+
+*Updated after each plan completion*
+
+## Accumulated Context
+
+### Decisions
+
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- Phase 1: In-process shared service layer chosen over separate LSP process (VS Code-only target, avoids JSON-RPC complexity)
+- Phase 1: Single `language-services` package for all 3 engines (shared parser primitives, consistent test surface)
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+- Phase 1: Dual CJS+ESM build must be validated before Phase 2 begins (ESM-only crash risk in extension host)
+- Phase 3: `cursor.selectedRecordIds` / `cursor.selectedFieldIds` — LOW confidence, verify against Airtable scripting docs before implementing
+- Phase 4: `input.config()` field type enum + exact `base.*` methods blocked in automation — MEDIUM confidence, verify before implementing
+
+## Session Continuity
+
+Last session: 2026-05-12
+Stopped at: Roadmap created — ready to plan Phase 1
+Resume file: None

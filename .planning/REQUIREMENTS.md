@@ -59,33 +59,31 @@
 
 ## Traceability
 
-*(Populated by roadmapper)*
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | — | Pending |
-| INFRA-02 | — | Pending |
-| INFRA-03 | — | Pending |
-| FORMULA-01 | — | Pending |
-| FORMULA-02 | — | Pending |
-| FORMULA-03 | — | Pending |
-| SCRIPT-01 | — | Pending |
-| SCRIPT-02 | — | Pending |
-| SCRIPT-03 | — | Pending |
-| SCRIPT-04 | — | Pending |
-| SCRIPT-05 | — | Pending |
-| SCRIPT-06 | — | Pending |
-| AUTO-01 | — | Pending |
-| AUTO-02 | — | Pending |
-| AUTO-03 | — | Pending |
-| AUTO-04 | — | Pending |
-| AUTO-05 | — | Pending |
+| INFRA-01 | Phase 1 | Pending |
+| INFRA-02 | Phase 1 | Pending |
+| INFRA-03 | Phase 1 | Pending |
+| FORMULA-01 | Phase 2 | Pending |
+| FORMULA-02 | Phase 2 | Pending |
+| FORMULA-03 | Phase 2 | Pending |
+| SCRIPT-01 | Phase 3 | Pending |
+| SCRIPT-02 | Phase 3 | Pending |
+| SCRIPT-03 | Phase 3 | Pending |
+| SCRIPT-04 | Phase 3 | Pending |
+| SCRIPT-05 | Phase 3 | Pending |
+| SCRIPT-06 | Phase 3 | Pending |
+| AUTO-01 | Phase 4 | Pending |
+| AUTO-02 | Phase 4 | Pending |
+| AUTO-03 | Phase 4 | Pending |
+| AUTO-04 | Phase 4 | Pending |
+| AUTO-05 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 17 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 17 ⚠️
+- Mapped to phases: 17
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 after initial definition*
+*Last updated: 2026-05-12 — Traceability filled after roadmap creation*
