@@ -41,6 +41,23 @@ export interface LsHover {
   range?: LsRange;
 }
 
+export interface LsParameterInformation {
+  label: string;
+  documentation?: string;
+}
+
+export interface LsSignatureInformation {
+  label: string;
+  documentation?: string;
+  parameters: LsParameterInformation[];
+}
+
+export interface LsSignatureHelp {
+  signatures: LsSignatureInformation[];
+  activeSignature: number;
+  activeParameter: number;
+}
+
 // D-09: Numeric values mirror vscode.DiagnosticSeverity exactly — convert.ts casts directly
 // Note: using regular enum (not const enum) for vitest/esbuild compatibility at test time
 export enum LsSeverity {
