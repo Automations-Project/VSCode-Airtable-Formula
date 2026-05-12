@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Language Platform
-status: planning
+status: executing
 stopped_at: Phase 1 planned — 2 plans ready for execution
-last_updated: "2026-05-12T18:00:00.000Z"
-last_activity: 2026-05-12 — Phase 1 plans created (01-01: INFRA-01+INFRA-02, Wave 1; 01-02: INFRA-03, Wave 2)
+last_updated: "2026-05-12T18:09:49.237Z"
+last_activity: 2026-05-12 -- Phase 01 execution started
 progress:
   total_phases: 4
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 1 — Language Services Scaffold
+**Current focus:** Phase 01 — language-services-scaffold
 
 ## Current Position
 
-Phase: 1 of 4 (Language Services Scaffold)
-Plan: — (planned, ready to execute)
-Status: Planned
-Last activity: 2026-05-12 — Phase 1 plans created (01-01: INFRA-01+INFRA-02, Wave 1; 01-02: INFRA-03, Wave 2)
+Phase: 01 (language-services-scaffold) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 01
+Last activity: 2026-05-12 -- Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
