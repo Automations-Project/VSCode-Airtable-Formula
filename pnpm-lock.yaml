@@ -20,6 +20,9 @@ importers:
 
   packages/extension:
     dependencies:
+      '@airtable-formula/language-services':
+        specifier: workspace:*
+        version: link:../language-services
       '@airtable-formula/shared':
         specifier: workspace:*
         version: link:../shared
