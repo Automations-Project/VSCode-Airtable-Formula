@@ -153,6 +153,22 @@ function findStatementStart(text: string, pos: number): number {
   return 0;
 }
 
+/**
+ * Like findStatementStart but only stops at semicolons and newlines (not braces).
+ * Used for the Promise combinator check so that inner async calls inside
+ * `Promise.all([a.xAsync(), b.yAsync()])` can see the outer Promise context
+ * even when `findStatementStart` would stop at the `{`/`}` of an arg literal.
+ */
+function findLineStart(text: string, pos: number): number {
+  for (let i = pos - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === ';' || ch === '\n') {
+      return i + 1;
+    }
+  }
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // SCRIPT-04: Missing-await check
 // T-03-01: linear -- \w+ single char-class repetition, no nested quantifiers
@@ -186,7 +202,14 @@ function checkMissingAwait(
       // Is assigned to a variable (const/let/var x = ...)
       /\b(?:const|let|var)\s+\w/.test(stmtContext) ||
       // Followed by .then( chain -- check text after the match
-      /\)\s*\.then\s*\(/.test(text.slice(match.index));
+      /\)\s*\.then\s*\(/.test(text.slice(match.index)) ||
+      // Inside a Promise combinator call (Promise.all/allSettled/race/any).
+      // Uses findLineStart (semicolon/newline only, not braces) so that inner async
+      // calls inside Promise.all([a.xAsync(), b.yAsync()]) can see the outer Promise
+      // context even when findStatementStart stops at a brace inside an arg literal.
+      /\bPromise\s*\.\s*(?:all|allSettled|race|any)\s*\(/.test(
+        text.slice(findLineStart(text, match.index), match.index)
+      );
 
     if (!isAccepted) {
       diagnostics.push({

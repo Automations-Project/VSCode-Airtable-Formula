@@ -39,6 +39,11 @@ describe('scriptDiagnostics — SCRIPT-04 missing await', () => {
     const diags = scriptDiagnostics('await base.getTable("X").selectRecordsAsync({})');
     expect(diags.filter(d => d.code === 'missing-await')).toHaveLength(0);
   });
+
+  it('does NOT flag async calls inside Promise.all([])', () => {
+    const code = 'const results = await Promise.all([table.selectRecordsAsync({}), base.getTableAsync("x")]);';
+    expect(scriptDiagnostics(code).filter(d => d.code === 'missing-await')).toHaveLength(0);
+  });
 });
 
 describe('scriptDiagnostics — SCRIPT-05 unknown global', () => {
