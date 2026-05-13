@@ -106,16 +106,16 @@ Plans:
 **Plans**: 7 plans
 Plans:
 **Wave 1** *(parallel — no dependencies between plans)*
-- [ ] 04-01-PLAN.md — Create 4 Wave-0 test scaffold files in test/automation/ (AUTO-02, AUTO-03, AUTO-04) [Wave 1, autonomous]
-- [ ] 04-02-PLAN.md — Create engines/automation/registry.ts (AUTOMATION_GLOBALS + helpers) and engines/automation/index.ts stub barrel (AUTO-02, AUTO-03) [Wave 1, autonomous]
+- [x] 04-01-PLAN.md — Create 4 Wave-0 test scaffold files in test/automation/ (AUTO-02, AUTO-03, AUTO-04) [Wave 1, autonomous]
+- [x] 04-02-PLAN.md — Create engines/automation/registry.ts (AUTOMATION_GLOBALS + helpers) and engines/automation/index.ts stub barrel (AUTO-02, AUTO-03) [Wave 1, autonomous]
 
 **Wave 2** *(04-03 and 04-04 depend on 04-02; 04-05 is independent)*
-- [ ] 04-03-PLAN.md — Create engines/automation/completions.ts and engines/automation/hover.ts (AUTO-02, AUTO-03) [Wave 2, depends_on: 04-02, autonomous]
-- [ ] 04-04-PLAN.md — Create engines/automation/diagnostics.ts — wrong-context only, 15 forbidden patterns (AUTO-04) [Wave 2, depends_on: 04-02, autonomous]
-- [ ] 04-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (AUTO-01, AUTO-05) [Wave 2, autonomous]
+- [x] 04-03-PLAN.md — Create engines/automation/completions.ts and engines/automation/hover.ts (AUTO-02, AUTO-03) [Wave 2, depends_on: 04-02, autonomous]
+- [x] 04-04-PLAN.md — Create engines/automation/diagnostics.ts — wrong-context only, 15 forbidden patterns (AUTO-04) [Wave 2, depends_on: 04-02, autonomous]
+- [x] 04-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (AUTO-01, AUTO-05) [Wave 2, autonomous]
 
 **Wave 3** *(depends on 04-03 and 04-04)*
-- [ ] 04-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/automation/ (AUTO-01 through AUTO-04) [Wave 3, depends_on: 04-03, 04-04, autonomous]
+- [x] 04-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/automation/ (AUTO-01 through AUTO-04) [Wave 3, depends_on: 04-03, 04-04, autonomous]
 
 **Wave 4** *(depends on 04-05 and 04-06)*
 - [ ] 04-07-PLAN.md — Wire registration.ts + language-services index.ts + package.json airtable-automation contributions (AUTO-01 through AUTO-05) [Wave 4, depends_on: 04-05, 04-06, autonomous]
@@ -130,4 +130,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Language Services Scaffold | 2/2 | Complete | 2026-05-13 |
 | 2. Formula Engine Migration | 8/8 | Complete | 2026-05-13 |
 | 3. Script Engine | 7/7 | Complete | 2026-05-13 |
-| 4. Automation Engine | 0/7 | Not started | - |
+| 4. Automation Engine | 6/7 | In Progress|  |

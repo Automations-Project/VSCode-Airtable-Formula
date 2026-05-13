@@ -31,10 +31,10 @@
 
 ### Automation Engine (`.automation` files)
 
-- [ ] **AUTO-01**: The `airtable-automation` language ID is registered for `.automation` and `.ata` files with JS syntax highlighting and a language configuration — both extensions get identical language support and icon
-- [ ] **AUTO-02**: Completions are scoped to the automation context — `base`, `table`, and `fetch` are available with full method completions; `input.` shows only `input.config()` and `output.` shows only `output.set()`; `cursor`, `session`, `remoteFetchAsync`, and interactive `input.*Async()`/`output.text/markdown/table` are absent from completions *(Note: exact automation global surface requires verification against Airtable automation docs before Phase 4 implementation — see Phase 4 prerequisite gate)*
-- [ ] **AUTO-03**: Hover documentation is shown for all automation globals and their methods
-- [ ] **AUTO-04**: A diagnostic is raised when a scripting-extension-only global is used in an `.automation` file — confirmed forbidden list: `cursor`, `session`, interactive `input.*Async()` methods, `output.text/markdown/table`; `remoteFetchAsync` should be a warning ("not needed server-side, use fetch") rather than an error *(subject to verification gate)*
+- [x] **AUTO-01**: The `airtable-automation` language ID is registered for `.automation` and `.ata` files with JS syntax highlighting and a language configuration — both extensions get identical language support and icon
+- [x] **AUTO-02**: Completions are scoped to the automation context — `base`, `table`, and `fetch` are available with full method completions; `input.` shows only `input.config()` and `output.` shows only `output.set()`; `cursor`, `session`, `remoteFetchAsync`, and interactive `input.*Async()`/`output.text/markdown/table` are absent from completions *(Note: exact automation global surface requires verification against Airtable automation docs before Phase 4 implementation — see Phase 4 prerequisite gate)*
+- [x] **AUTO-03**: Hover documentation is shown for all automation globals and their methods
+- [x] **AUTO-04**: A diagnostic is raised when a scripting-extension-only global is used in an `.automation` file — confirmed forbidden list: `cursor`, `session`, interactive `input.*Async()` methods, `output.text/markdown/table`; `remoteFetchAsync` should be a warning ("not needed server-side, use fetch") rather than an error *(subject to verification gate)*
 - [ ] **AUTO-05**: `.automation` files display a custom light/dark SVG file type icon in VS Code
 
 ## v2 Requirements
@@ -78,10 +78,10 @@
 | SCRIPT-04 | Phase 3 | Pending |
 | SCRIPT-05 | Phase 3 | Pending |
 | SCRIPT-06 | Phase 3 | Pending |
-| AUTO-01 | Phase 4 | Pending |
-| AUTO-02 | Phase 4 | Pending |
-| AUTO-03 | Phase 4 | Pending |
-| AUTO-04 | Phase 4 | Pending |
+| AUTO-01 | Phase 4 | Complete |
+| AUTO-02 | Phase 4 | Complete |
+| AUTO-03 | Phase 4 | Complete |
+| AUTO-04 | Phase 4 | Complete |
 | AUTO-05 | Phase 4 | Pending |
 
 **Coverage:**
