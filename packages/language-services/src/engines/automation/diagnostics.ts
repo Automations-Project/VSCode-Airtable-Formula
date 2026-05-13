@@ -22,42 +22,75 @@ function makeRange(text: string, start: number, end: number): LsRange {
 }
 
 // ---------------------------------------------------------------------------
-// Exclusion ranges helper (verbatim from script/diagnostics.ts)
+// Exclusion ranges helper — single-pass tokenizer (same fix as script/diagnostics.ts).
+// Comments consume quote chars before string scanners see them, preventing a
+// lone apostrophe in a // comment from anchoring a fake multi-line "string".
+// Single/double-quoted strings stop at newlines; template literals may span them.
 // ---------------------------------------------------------------------------
 
 function getExclusionRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
+  const len = text.length;
+  let i = 0;
 
-  const fieldRefRegex = /\{[^{}]*\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = fieldRefRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+  while (i < len) {
+    const ch = text[i];
 
-  const doubleQuoteRegex = /"(?:[^"\\]|\\.)*"/g;
-  while ((match = doubleQuoteRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    if (ch === '/' && i + 1 < len && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const commentEnd = end !== -1 ? end + 2 : len;
+      ranges.push({ start: i, end: commentEnd });
+      i = commentEnd;
+      continue;
+    }
 
-  const singleQuoteRegex = /'(?:[^'\\]|\\.)*'/g;
-  while ((match = singleQuoteRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    if (ch === '/' && i + 1 < len && text[i + 1] === '/') {
+      let j = i + 2;
+      while (j < len && text[j] !== '\n') j++;
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  // T-03-01: negated-class alternation -- linear, no ambiguity
-  const templateLiteralRegex = /`(?:[^`\\]|\\.)*`/g;
-  while ((match = templateLiteralRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    if (ch === '`') {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '`') { j++; break; }
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  const singleLineCommentRegex = /\/\/.*/g;
-  while ((match = singleLineCommentRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '"') { j++; break; }
+        if (text[j] === '\n') break;
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
-  while ((match = blockCommentRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+    if (ch === "'") {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === "'") { j++; break; }
+        if (text[j] === '\n') break;
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
+
+    i++;
   }
 
   return ranges;

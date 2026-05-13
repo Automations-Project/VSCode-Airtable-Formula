@@ -38,46 +38,83 @@ function makeRange(text: string, start: number, end: number): LsRange {
 }
 
 // ---------------------------------------------------------------------------
-// Exclusion ranges helper
+// Exclusion ranges helper — single-pass tokenizer.
+//
+// Processes the formula left-to-right so that characters inside comments
+// and field-ref bodies are consumed before the string scanners see them.
+// This prevents a " inside 'regex_pattern' from opening a spurious
+// double-quoted "string" that spans a newline and swallows the opening "
+// of a real string on the next line (root cause of dl-in-"dl=1" false positive).
+//
+// Single and double-quoted strings stop at newlines: Airtable formula
+// strings cannot span lines (use CHAR(10) for embedded newlines).
 // ---------------------------------------------------------------------------
 
-/**
- * Get character-offset ranges to exclude from function validation.
- * Covers: field references {}, strings "", '', and comments.
- * Pitfall 2: offsets are into the raw string -- do NOT split by line first.
- */
 function getExclusionRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
+  const len = text.length;
+  let i = 0;
 
-  // Field references: {...}
-  const fieldRefRegex = /\{[^{}]*\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = fieldRefRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+  while (i < len) {
+    const ch = text[i];
 
-  // Double-quoted strings: "..."
-  const doubleQuoteRegex = /"(?:[^"\\]|\\.)*"/g;
-  while ((match = doubleQuoteRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Block comment  /* ... */
+    if (ch === '/' && i + 1 < len && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const commentEnd = end !== -1 ? end + 2 : len;
+      ranges.push({ start: i, end: commentEnd });
+      i = commentEnd;
+      continue;
+    }
 
-  // Single-quoted strings: '...'
-  const singleQuoteRegex = /'(?:[^'\\]|\\.)*'/g;
-  while ((match = singleQuoteRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Single-line comment  // ...
+    if (ch === '/' && i + 1 < len && text[i + 1] === '/') {
+      let j = i + 2;
+      while (j < len && text[j] !== '\n') j++;
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  // Single-line comments: //...
-  const singleLineCommentRegex = /\/\/.*/g;
-  while ((match = singleLineCommentRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Field reference  { ... }  (no nesting)
+    if (ch === '{') {
+      let j = i + 1;
+      while (j < len && text[j] !== '}') j++;
+      if (j < len) j++;
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  // Block comments: /*...*/
-  const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
-  while ((match = blockCommentRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+    // Double-quoted string  " ... "  (stops at newline)
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '"') { j++; break; }
+        if (text[j] === '\n') break;
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
+
+    // Single-quoted string  ' ... '  (stops at newline)
+    if (ch === "'") {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === "'") { j++; break; }
+        if (text[j] === '\n') break;
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
+
+    i++;
   }
 
   return ranges;
@@ -535,6 +572,76 @@ function checkTrailingOperators(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
+function checkUnknownTokens(text: string): LsDiagnostic[] {
+  const diagnostics: LsDiagnostic[] = [];
+  const exclusionRanges = getExclusionRanges(text);
+  const knownUpper = new Set(ALL_CALLABLE.map(n => n.toUpperCase()));
+
+  for (const m of text.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g)) {
+    if (isInsideExclusionRange(m.index!, exclusionRanges)) continue;
+
+    const ident = m[1];
+    const afterIdent = m.index! + ident.length;
+
+    // Skip purely-uppercase identifiers — checkFunctions already handles them
+    if (ident === ident.toUpperCase()) continue;
+
+    // Skip known callables regardless of case (TRUE/true, IF/if, etc.)
+    if (knownUpper.has(ident.toUpperCase())) continue;
+
+    const isCall = /^\s*\(/.test(text.slice(afterIdent));
+
+    if (isCall) {
+      // Lowercase function call — always invalid; Airtable functions must be UPPERCASE
+      const suggestion = findClosestFunction(ident);
+      const message = suggestion
+        ? `Unknown function '${ident}'. Airtable functions are UPPERCASE — did you mean '${suggestion}'?`
+        : `Unknown function '${ident}'. Airtable function names must be UPPERCASE.`;
+      diagnostics.push({
+        range: makeRange(text, m.index!, afterIdent),
+        message,
+        severity: LsSeverity.Error,
+        code: 'unknown-token',
+        source: 'airtable-formula',
+      });
+      continue;
+    }
+
+    // For non-call bare identifiers: Airtable allows bare field names without {}
+    // (e.g. FUNC(fieldName, ...) is valid). Only flag when the identifier is
+    // directly adjacent to another expression token with no operator/separator
+    // between them — that indicates invalid syntax, not a field reference.
+    //
+    // Flagged:     testbug {field}  — next='{'
+    //              "str"testbug     — prev='"'
+    //              {field}testbug   — prev='}'
+    //              )testbug         — prev=')'
+    // Not flagged: FUNC(fieldName, ...) — prev='(', next=','
+    let prevIdx = m.index! - 1;
+    while (prevIdx >= 0 && (text[prevIdx] === ' ' || text[prevIdx] === '\t')) prevIdx--;
+    const prevChar = prevIdx >= 0 ? text[prevIdx] : '';
+
+    let nextIdx = afterIdent;
+    while (nextIdx < text.length && (text[nextIdx] === ' ' || text[nextIdx] === '\t')) nextIdx++;
+    const nextChar = nextIdx < text.length ? text[nextIdx] : '';
+
+    const suspiciousPrev = prevChar === '"' || prevChar === "'" || prevChar === '}' || prevChar === ')';
+    const suspiciousNext = nextChar === '"' || nextChar === "'" || nextChar === '{';
+
+    if (!suspiciousPrev && !suspiciousNext) continue;
+
+    diagnostics.push({
+      range: makeRange(text, m.index!, afterIdent),
+      message: `'${ident}' is not a valid formula token. Use a field reference {${ident}} or a string literal "${ident}".`,
+      severity: LsSeverity.Error,
+      code: 'unknown-token',
+      source: 'airtable-formula',
+    });
+  }
+
+  return diagnostics;
+}
+
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
@@ -560,5 +667,6 @@ export function formulaDiagnostics(text: string, uri?: string): LsDiagnostic[] {
   diagnostics.push(...checkDivisionByZero(text));
   diagnostics.push(...checkNestedIfs(text));
   diagnostics.push(...checkTrailingOperators(text));
+  diagnostics.push(...checkUnknownTokens(text));
   return diagnostics;
 }

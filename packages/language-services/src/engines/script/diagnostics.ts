@@ -31,49 +31,88 @@ function makeRange(text: string, start: number, end: number): LsRange {
 }
 
 // ---------------------------------------------------------------------------
-// Exclusion ranges helper (from formula diagnostics.ts lines 49-91,
-// extended with template-literal exclusion for backtick strings)
+// Exclusion ranges helper — single-pass tokenizer.
+//
+// Processes the file in one left-to-right pass so that comment delimiters
+// consume any quote characters they contain before the string scanners can
+// misinterpret them.  This prevents a lone apostrophe inside a // comment
+// (e.g. "it's") from acting as an opening-quote that swallows the next real
+// string's opening delimiter and leaves its content unprotected.
+//
+// Single-quoted and double-quoted strings are intentionally stopped at
+// newlines: JavaScript strings can't span lines without a backslash
+// continuation, so any apparent multi-line match would be a false parse.
+// Template literals may span lines and are handled without a newline stop.
 // ---------------------------------------------------------------------------
 
 function getExclusionRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
+  const len = text.length;
+  let i = 0;
 
-  // Field references: {...}
-  const fieldRefRegex = /\{[^{}]*\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = fieldRefRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+  while (i < len) {
+    const ch = text[i];
 
-  // Double-quoted strings
-  const doubleQuoteRegex = /"(?:[^"\\]|\\.)*"/g;
-  while ((match = doubleQuoteRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Block comment  /* ... */
+    if (ch === '/' && i + 1 < len && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const commentEnd = end !== -1 ? end + 2 : len;
+      ranges.push({ start: i, end: commentEnd });
+      i = commentEnd;
+      continue;
+    }
 
-  // Single-quoted strings
-  const singleQuoteRegex = /'(?:[^'\\]|\\.)*'/g;
-  while ((match = singleQuoteRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Single-line comment  // ...
+    if (ch === '/' && i + 1 < len && text[i + 1] === '/') {
+      let j = i + 2;
+      while (j < len && text[j] !== '\n') j++;
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  // Template literals -- safe negated-class pattern (T-03-01)
-  // Alternation: non-backtick-non-backslash OR backslash+any -- linear, no ambiguity
-  const templateLiteralRegex = /`(?:[^`\\]|\\.)*`/g;
-  while ((match = templateLiteralRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Template literal  ` ... ` (may span multiple lines)
+    if (ch === '`') {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '`') { j++; break; }
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  // Single-line comments: //...
-  const singleLineCommentRegex = /\/\/.*/g;
-  while ((match = singleLineCommentRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
-  }
+    // Double-quoted string  " ... "  (stops at newline — no multiline)
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '"') { j++; break; }
+        if (text[j] === '\n') break;
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
 
-  // Block comments
-  const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
-  while ((match = blockCommentRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+    // Single-quoted string  ' ... '  (stops at newline — no multiline)
+    if (ch === "'") {
+      let j = i + 1;
+      while (j < len) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === "'") { j++; break; }
+        if (text[j] === '\n') break;
+        j++;
+      }
+      ranges.push({ start: i, end: j });
+      i = j;
+      continue;
+    }
+
+    i++;
   }
 
   return ranges;
@@ -119,6 +158,18 @@ const KNOWN_SAFE = new Set<string>([
 
   // Runtime timing functions
   'setInterval', 'clearInterval', 'queueMicrotask',
+
+  // Web APIs available in Airtable scripting environment
+  'AbortController', 'AbortSignal',
+  'URL', 'URLSearchParams',
+  'TextEncoder', 'TextDecoder',
+  'FormData', 'Blob', 'File', 'FileReader',
+  'Headers', 'Request', 'Response',
+  'ReadableStream', 'WritableStream', 'TransformStream',
+  'Event', 'EventTarget', 'CustomEvent',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
+  'Performance', 'performance',
+  'crypto',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -133,6 +184,8 @@ const JS_KEYWORDS = new Set<string>([
   'import', 'export', 'default', 'case', 'yield', 'async', 'await',
   'debugger', 'with', 'static', 'let', 'const', 'var', 'function',
   'true', 'false', 'null',
+  // Class method name — appears as `constructor(` in class bodies but is not a global
+  'constructor',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -239,73 +292,70 @@ function checkMissingAwait(
  *
  * T-03-01: all declaration patterns use simple character-class repetitions -- linear.
  */
+/** Extract simple identifiers from a comma-separated binding list. */
+function extractBindings(str: string): string[] {
+  return str.split(',')
+    .map(s => s.trim().replace(/^\.\.\./, '').replace(/\s*[=:].*$/, '').trim())
+    .filter(s => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+}
+
+/** Extract identifiers from an array or object destructuring pattern. */
+function extractDestructuredBindings(pattern: string): string[] {
+  const inner = pattern.replace(/^[\[{]/, '').replace(/[\]}]$/, '');
+  return extractBindings(inner);
+}
+
 function buildLocalSymbols(text: string): Set<string> {
   const symbols = new Set<string>(KNOWN_SAFE);
 
-  // const/let/var x (best-effort simple name only -- destructuring not detected)
-  const varDeclRegex = /\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-  let match: RegExpExecArray | null;
-  while ((match = varDeclRegex.exec(text)) !== null) {
-    symbols.add(match[1]);
+  // const/let/var x or const/let/var [a, b] or const/let/var {a, b}
+  for (const m of text.matchAll(/\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])/g)) {
+    const binding = m[1];
+    if (/^[a-zA-Z_$]/.test(binding)) {
+      symbols.add(binding);
+    } else {
+      for (const id of extractDestructuredBindings(binding)) symbols.add(id);
+    }
   }
 
   // function foo( -- collect function name and parameters
-  const funcDeclRegex = /\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
-  while ((match = funcDeclRegex.exec(text)) !== null) {
-    symbols.add(match[1]);
-    // Collect function parameters from the parameter list
-    const parenStart = match.index + match[0].length - 1; // position of opening (
+  for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
+    symbols.add(m[1]);
+    const parenStart = m.index + m[0].length - 1;
     const parenEnd = text.indexOf(')', parenStart);
     if (parenEnd !== -1) {
-      const paramStr = text.slice(parenStart + 1, parenEnd);
-      const params = paramStr.split(',');
-      for (const param of params) {
-        const trimmed = param.trim().replace(/\s*=.*$/, ''); // strip default values
-        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(trimmed)) {
-          symbols.add(trimmed);
-        }
-      }
+      for (const id of extractBindings(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
     }
   }
 
   // class Foo
-  const classDeclRegex = /\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
-  while ((match = classDeclRegex.exec(text)) !== null) {
-    symbols.add(match[1]);
+  for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
+    symbols.add(m[1]);
   }
 
-  // for (const/let/var item of ...)
-  const forOfRegex = /\bfor\s*\(\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+of\b/g;
-  while ((match = forOfRegex.exec(text)) !== null) {
-    symbols.add(match[1]);
+  // for (const/let/var item of/in ...) or for (const/let/var [a, b] of ...)
+  for (const m of text.matchAll(/\bfor\s*\(\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])\s+(?:of|in)\b/g)) {
+    const binding = m[1];
+    if (/^[a-zA-Z_$]/.test(binding)) {
+      symbols.add(binding);
+    } else {
+      for (const id of extractDestructuredBindings(binding)) symbols.add(id);
+    }
   }
 
   // catch (e)
-  const catchRegex = /\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g;
-  while ((match = catchRegex.exec(text)) !== null) {
-    symbols.add(match[1]);
+  for (const m of text.matchAll(/\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g)) {
+    symbols.add(m[1]);
   }
 
-  // Arrow function params -- best-effort for single and multi-param forms:
-  // Single param: identifier =>  (T-03-01: linear identifier pattern)
-  const singleArrowRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g;
-  while ((match = singleArrowRegex.exec(text)) !== null) {
-    if (!JS_KEYWORDS.has(match[1])) {
-      symbols.add(match[1]);
-    }
+  // Arrow function params — single param: identifier =>
+  for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
+    if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
   }
 
-  // Multi-param: (param1, param2) =>  (T-03-01: [^)] is linear negated-class)
-  const multiArrowRegex = /\(([^)]*)\)\s*=>/g;
-  while ((match = multiArrowRegex.exec(text)) !== null) {
-    const paramStr = match[1];
-    const params = paramStr.split(',');
-    for (const param of params) {
-      const trimmed = param.trim().replace(/\s*=.*$/, ''); // strip default values
-      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(trimmed)) {
-        symbols.add(trimmed);
-      }
-    }
+  // Arrow function params — multi-param: (param1, param2) =>
+  for (const m of text.matchAll(/\(([^)]*)\)\s*=>/g)) {
+    for (const id of extractBindings(m[1])) symbols.add(id);
   }
 
   return symbols;
