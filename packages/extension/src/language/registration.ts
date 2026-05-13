@@ -4,6 +4,9 @@ import { AirtableFormulaCompletionProvider } from './formula/formula-completions
 import { AirtableFormulaHoverProvider } from './formula/formula-hover';
 import { AirtableFormulaSignatureHelpProvider } from './formula/formula-signature';
 import { AirtableFormulaCodeActionProvider } from '../codeActions';
+import { AirtableScriptDiagnosticsProvider } from './script/script-diagnostics';
+import { AirtableScriptCompletionProvider } from './script/script-completions';
+import { AirtableScriptHoverProvider } from './script/script-hover';
 
 export function registerLanguageProviders(context: vscode.ExtensionContext): void {
     // Initialize diagnostics provider (per D-01, D-02)
@@ -52,6 +55,38 @@ export function registerLanguageProviders(context: vscode.ExtensionContext): voi
     vscode.workspace.textDocuments.forEach((document) => {
         if (document.languageId === 'airtable-formula') {
             diagnosticsProvider.updateDiagnostics(document);
+        }
+    });
+
+    // Script providers — same lifecycle pattern as formula providers above
+    const scriptDiagnosticsProvider = new AirtableScriptDiagnosticsProvider();
+    context.subscriptions.push(scriptDiagnosticsProvider);
+
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument((event) => {
+            if (event.document.languageId === 'airtable-script') {
+                scriptDiagnosticsProvider.updateDiagnostics(event.document);
+            }
+        }),
+        vscode.workspace.onDidOpenTextDocument((document) => {
+            if (document.languageId === 'airtable-script') {
+                scriptDiagnosticsProvider.updateDiagnostics(document);
+            }
+        }),
+        vscode.languages.registerHoverProvider(
+            'airtable-script',
+            new AirtableScriptHoverProvider()
+        ),
+        vscode.languages.registerCompletionItemProvider(
+            'airtable-script',
+            new AirtableScriptCompletionProvider(),
+            '.'   // dot trigger for method completions
+        ),
+    );
+
+    vscode.workspace.textDocuments.forEach((document) => {
+        if (document.languageId === 'airtable-script') {
+            scriptDiagnosticsProvider.updateDiagnostics(document);
         }
     });
 }
