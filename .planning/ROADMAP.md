@@ -118,7 +118,7 @@ Plans:
 - [x] 04-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/automation/ (AUTO-01 through AUTO-04) [Wave 3, depends_on: 04-03, 04-04, autonomous]
 
 **Wave 4** *(depends on 04-05 and 04-06)*
-- [ ] 04-07-PLAN.md — Wire registration.ts + language-services index.ts + package.json airtable-automation contributions (AUTO-01 through AUTO-05) [Wave 4, depends_on: 04-05, 04-06, autonomous]
+- [x] 04-07-PLAN.md — Wire registration.ts + language-services index.ts + package.json airtable-automation contributions (AUTO-01 through AUTO-05) [Wave 4, depends_on: 04-05, 04-06, autonomous]
 
 ## Progress
 
@@ -130,4 +130,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Language Services Scaffold | 2/2 | Complete | 2026-05-13 |
 | 2. Formula Engine Migration | 8/8 | Complete | 2026-05-13 |
 | 3. Script Engine | 7/7 | Complete | 2026-05-13 |
-| 4. Automation Engine | 6/7 | In Progress|  |
+| 4. Automation Engine | 7/7 | Complete | 2026-05-13 |
