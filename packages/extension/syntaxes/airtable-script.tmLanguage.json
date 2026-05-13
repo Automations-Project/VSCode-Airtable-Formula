@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "scopeName": "source.airtable-script",
+  "name": "Airtable Script",
+  "fileTypes": ["script", "ats"],
+  "patterns": [
+    { "include": "source.js" }
+  ]
+}
