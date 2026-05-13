@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Language Services Scaffold** - New `packages/language-services` workspace package with dual CJS+ESM build, framework-agnostic types, and VS Code adapter layer
 - [x] **Phase 2: Formula Engine Migration** - Extract all formula providers into `language-services/engines/formula/`, unify the function registry, fix feature gaps, add formula file icon
-- [ ] **Phase 3: Script Engine** - `airtable-script` language ID, globals completions/hover, missing-await and unknown-global diagnostics, file icon for `.script` files
+- [x] **Phase 3: Script Engine** - `airtable-script` language ID, globals completions/hover, missing-await and unknown-global diagnostics, file icon for `.script` files
 - [ ] **Phase 4: Automation Engine** - `airtable-automation` language ID, automation-scoped globals, cross-context diagnostics, file icon for `.automation` files
 
 ## Phase Details
@@ -115,5 +115,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Language Services Scaffold | 2/2 | Complete | 2026-05-13 |
 | 2. Formula Engine Migration | 8/8 | Complete | 2026-05-13 |
-| 3. Script Engine | 0/7 | Not started | - |
+| 3. Script Engine | 7/7 | Complete | 2026-05-13 |
 | 4. Automation Engine | 0/? | Not started | - |
