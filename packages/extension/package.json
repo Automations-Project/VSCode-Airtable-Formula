@@ -82,6 +82,16 @@
           "light": "./icons/script-light.svg",
           "dark": "./icons/script-dark.svg"
         }
+      },
+      {
+        "id": "airtable-automation",
+        "aliases": ["Airtable Automation", "automation"],
+        "extensions": [".automation", ".ata"],
+        "configuration": "./language-configuration/airtable-automation-language-configuration.json",
+        "icon": {
+          "light": "./icons/automation-light.svg",
+          "dark": "./icons/automation-dark.svg"
+        }
       }
     ],
     "grammars": [
@@ -96,6 +106,14 @@
         "path": "./syntaxes/airtable-script.tmLanguage.json",
         "embeddedLanguages": {
           "source.airtable-script": "javascript"
+        }
+      },
+      {
+        "language": "airtable-automation",
+        "scopeName": "source.airtable-automation",
+        "path": "./syntaxes/airtable-automation.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.airtable-automation": "javascript"
         }
       }
     ],
