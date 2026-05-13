@@ -7,6 +7,9 @@ import { AirtableFormulaCodeActionProvider } from '../codeActions';
 import { AirtableScriptDiagnosticsProvider } from './script/script-diagnostics';
 import { AirtableScriptCompletionProvider } from './script/script-completions';
 import { AirtableScriptHoverProvider } from './script/script-hover';
+import { AirtableAutomationDiagnosticsProvider } from './automation/automation-diagnostics';
+import { AirtableAutomationCompletionProvider } from './automation/automation-completions';
+import { AirtableAutomationHoverProvider } from './automation/automation-hover';
 
 export function registerLanguageProviders(context: vscode.ExtensionContext): void {
     // Initialize diagnostics provider (per D-01, D-02)
@@ -87,6 +90,38 @@ export function registerLanguageProviders(context: vscode.ExtensionContext): voi
     vscode.workspace.textDocuments.forEach((document) => {
         if (document.languageId === 'airtable-script') {
             scriptDiagnosticsProvider.updateDiagnostics(document);
+        }
+    });
+
+    // Automation providers — same lifecycle pattern as script providers above
+    const automationDiagnosticsProvider = new AirtableAutomationDiagnosticsProvider();
+    context.subscriptions.push(automationDiagnosticsProvider);
+
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument((event) => {
+            if (event.document.languageId === 'airtable-automation') {
+                automationDiagnosticsProvider.updateDiagnostics(event.document);
+            }
+        }),
+        vscode.workspace.onDidOpenTextDocument((document) => {
+            if (document.languageId === 'airtable-automation') {
+                automationDiagnosticsProvider.updateDiagnostics(document);
+            }
+        }),
+        vscode.languages.registerHoverProvider(
+            'airtable-automation',
+            new AirtableAutomationHoverProvider()
+        ),
+        vscode.languages.registerCompletionItemProvider(
+            'airtable-automation',
+            new AirtableAutomationCompletionProvider(),
+            '.'   // dot trigger for method completions
+        ),
+    );
+
+    vscode.workspace.textDocuments.forEach((document) => {
+        if (document.languageId === 'airtable-automation') {
+            automationDiagnosticsProvider.updateDiagnostics(document);
         }
     });
 }

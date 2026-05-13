@@ -5,17 +5,17 @@
  * No imports from engines/script/ — fully independent by D-01.
  */
 
-export interface ScriptMethodInfo {
+export interface AutomationMethodInfo {
     signature: string;
     description: string;
 }
 
-export interface ScriptGlobalInfo {
+export interface AutomationGlobalInfo {
     description: string;
-    methods: Record<string, ScriptMethodInfo>;
+    methods: Record<string, AutomationMethodInfo>;
 }
 
-export const AUTOMATION_GLOBALS: Record<string, ScriptGlobalInfo> = {
+export const AUTOMATION_GLOBALS: Record<string, AutomationGlobalInfo> = {
     base: {
         description: 'Represents the current Airtable base. Available in automation scripts.',
         methods: {
@@ -116,6 +116,6 @@ export const AUTOMATION_GLOBALS: Record<string, ScriptGlobalInfo> = {
 
 export const AUTOMATION_GLOBAL_NAMES: string[] = Object.keys(AUTOMATION_GLOBALS);
 
-export function getAutomationGlobal(name: string): ScriptGlobalInfo | undefined {
+export function getAutomationGlobal(name: string): AutomationGlobalInfo | undefined {
     return AUTOMATION_GLOBALS[name];
 }
