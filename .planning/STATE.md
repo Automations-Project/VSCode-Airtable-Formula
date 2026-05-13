@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Language Platform
-status: Phase 4 planned — ready for execution
+status: executing
 stopped_at: Phase 4 planning complete — 7 plans created and verified
-last_updated: "2026-05-13T18:46:00.048Z"
-last_activity: 2026-05-13 -- Phase 4 planned. AUTOMATION_GLOBALS fully specified (5 globals). 15 forbidden patterns. Plans verified.
+last_updated: "2026-05-13T18:51:31.546Z"
+last_activity: "2026-05-13 -- 04-07: automation providers wired in registration.ts, barrel-exported in language-services, package.json contributions added"
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 24
-  completed_plans: 23
-  percent: 96
+  completed_plans: 24
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 4 (execution in progress)
-Plan: 04-06 complete (6/7 plans done)
-Status: Phase 4 executing — 04-06 wrapper classes complete
-Last activity: 2026-05-13 -- 04-06: three automation VS Code wrapper classes created (AirtableAutomationDiagnosticsProvider, AirtableAutomationCompletionProvider, AirtableAutomationHoverProvider)
+Plan: 04-07 complete (7/7 plans done)
+Status: Phase 4 complete — all 7 plans executed
+Last activity: 2026-05-13 -- 04-07: automation providers wired in registration.ts, barrel-exported in language-services, package.json contributions added
 
-Progress: [████████░░] 75%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Recent decisions affecting current work:
 - Phase 4: AUTOMATION_GLOBALS fully independent of SCRIPT_GLOBALS (D-01); conservative inclusion only (D-02)
 - Phase 4: automationDiagnostics is wrong-context only — no missing-await, no unknown-global (D-04, D-05)
 - Phase 4: Prerequisite gate RESOLVED — base/table/fetch CONFIRMED; remoteFetchAsync ABSENT (runtime error, not deprecated); input.config() returns plain object (no field-type enum in automation)
+- Phase 4 (04-07): AutomationMethodInfo/AutomationGlobalInfo used as interface names to avoid DTS export collision with script engine when both are barrel-exported from language-services
 
 ### Pending Todos
 
@@ -89,7 +90,7 @@ From Phase 3 REVIEW.md — not fixed but documented:
 
 ## Session Continuity
 
-Last session: 2026-05-13T18:46:00.040Z
-Stopped at: Phase 4 planning complete — 7 plans created and verified
-Next: Phase 4 execution — `/gsd-execute-phase 4`
+Last session: 2026-05-13T21:58:00Z
+Stopped at: Completed 04-07-PLAN.md
+Next: None — all phases and plans complete
 Resume file: None
