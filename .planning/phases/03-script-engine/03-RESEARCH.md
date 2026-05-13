@@ -674,7 +674,7 @@ These must be excluded to avoid flagging `if (`, `for (`, `new Array`, etc.:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`output.set` availability in scripting context**
    - What we know: `output.set` appears in automation documentation
