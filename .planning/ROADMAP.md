@@ -95,16 +95,30 @@ Plans:
 ### Phase 4: Automation Engine
 **Goal**: `.automation` files have full language support scoped to the Automation Script context — completions and hover are limited to automation-available globals, and diagnostics flag use of scripting-extension-only APIs; a custom file icon is registered
 **Depends on**: Phase 3
-**Prerequisite gate (must be resolved before planning Phase 4)**: Verify the complete Airtable Automation Script global surface against the official Airtable automation docs — specifically: (a) confirm `base`/`table`/`fetch` availability, (b) confirm exact `remoteFetchAsync` status (absent vs. deprecated-warning), (c) confirm `input.config()` field-type enum shape. Research confidence is MEDIUM for automation globals.
+**Prerequisite gate**: RESOLVED — RESEARCH.md confirms (a) base/table/fetch available in automation, (b) remoteFetchAsync absent (runtime error), (c) input.config() returns plain object (no field-type enum in automation), (d) output.set(key, value) confirmed.
 **Requirements**: AUTO-01, AUTO-02, AUTO-03, AUTO-04, AUTO-05
 **Success Criteria** (what must be TRUE):
   1. Files with `.automation` and `.ata` extensions open in VS Code with JS syntax highlighting and `airtable-automation` language ID; comment toggling, bracket pairs, and code folding work
   2. Typing `input.` in an `.automation` file shows only `input.config()` — interactive input methods are absent; `output.` shows only `output.set()`
   3. Hovering over any automation global or method shows documentation text
-  4. Writing `cursor.selectedRecordIds` or using `session`, `remoteFetchAsync`, or interactive `input.*Async()` / `output.text/markdown/table` in an `.automation` file produces a diagnostic error identifying the API as scripting-extension-only
+  4. Writing `cursor.selectedRecordIds` or using `session`, `remoteFetchAsync`, or interactive `input.*Async()` / `output.text/markdown/table` in an `.automation` file produces a diagnostic warning identifying the API as scripting-extension-only
   5. `.automation` files display the custom file icon (light and dark variants) in VS Code's file explorer
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 7 plans
+Plans:
+**Wave 1** *(parallel — no dependencies between plans)*
+- [ ] 04-01-PLAN.md — Create 4 Wave-0 test scaffold files in test/automation/ (AUTO-02, AUTO-03, AUTO-04) [Wave 1, autonomous]
+- [ ] 04-02-PLAN.md — Create engines/automation/registry.ts (AUTOMATION_GLOBALS + helpers) and engines/automation/index.ts stub barrel (AUTO-02, AUTO-03) [Wave 1, autonomous]
+
+**Wave 2** *(04-03 and 04-04 depend on 04-02; 04-05 is independent)*
+- [ ] 04-03-PLAN.md — Create engines/automation/completions.ts and engines/automation/hover.ts (AUTO-02, AUTO-03) [Wave 2, depends_on: 04-02, autonomous]
+- [ ] 04-04-PLAN.md — Create engines/automation/diagnostics.ts — wrong-context only, 15 forbidden patterns (AUTO-04) [Wave 2, depends_on: 04-02, autonomous]
+- [ ] 04-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (AUTO-01, AUTO-05) [Wave 2, autonomous]
+
+**Wave 3** *(depends on 04-03 and 04-04)*
+- [ ] 04-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/automation/ (AUTO-01 through AUTO-04) [Wave 3, depends_on: 04-03, 04-04, autonomous]
+
+**Wave 4** *(depends on 04-05 and 04-06)*
+- [ ] 04-07-PLAN.md — Wire registration.ts + language-services index.ts + package.json airtable-automation contributions (AUTO-01 through AUTO-05) [Wave 4, depends_on: 04-05, 04-06, autonomous]
 
 ## Progress
 
@@ -116,4 +130,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Language Services Scaffold | 2/2 | Complete | 2026-05-13 |
 | 2. Formula Engine Migration | 8/8 | Complete | 2026-05-13 |
 | 3. Script Engine | 7/7 | Complete | 2026-05-13 |
-| 4. Automation Engine | 0/? | Not started | - |
+| 4. Automation Engine | 0/7 | Not started | - |
