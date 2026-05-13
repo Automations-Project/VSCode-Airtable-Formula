@@ -788,7 +788,7 @@ If A2 or A3 are wrong, the consequence is missing completions, not wrong complet
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Is remoteFetchAsync a ReferenceError (absent) or undefined (present but nulled)?**
    - What we know: Community threads report "remoteFetchAsync is not defined" — this is JavaScript's ReferenceError message, indicating the binding is truly absent.

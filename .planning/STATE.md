@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Language Platform
-status: completed
-stopped_at: Phase 4 context gathered
-last_updated: "2026-05-13T16:36:20.475Z"
-last_activity: 2026-05-13 -- Phase 3 fully verified. C-2 gap fixed (Promise.all guard). 86/86 tests GREEN.
+status: in-progress
+stopped_at: Phase 4 planning complete — 7 plans created and verified
+last_updated: "2026-05-13T17:30:00.000Z"
+last_activity: 2026-05-13 -- Phase 4 planned. 7 plans (04-01 through 04-07) created and checker-verified. Ready for execution.
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 17
+  total_plans: 24
   completed_plans: 17
-  percent: 100
+  percent: 75
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 3 (complete)
-Plan: All 7 plans complete. Verification passed (6/6 programmatic requirements).
-Status: Phase 3 complete — ready for Phase 4
-Last activity: 2026-05-13 -- Phase 3 fully verified. C-2 gap fixed (Promise.all guard). 86/86 tests GREEN.
+Phase: 4 (planning complete)
+Plan: 7 plans created (04-01 through 04-07), plan-checker PASSED.
+Status: Phase 4 planned — ready for execution
+Last activity: 2026-05-13 -- Phase 4 planned. AUTOMATION_GLOBALS fully specified (5 globals). 15 forbidden patterns. Plans verified.
 
 Progress: [████████░░] 75%
 
@@ -47,10 +47,11 @@ Progress: [████████░░] 75%
 | 01 | 2 | - | - |
 | 02 | 8 | - | - |
 | 03 | 7 | - | - |
+| 04 | 7 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 03-03, 03-04, 03-05, 03-06, 03-07
+- Last 5 plans: 03-05, 03-06, 03-07, 04-01..07 (all planned)
 - Trend: on track
 
 ## Accumulated Context
@@ -65,6 +66,9 @@ Recent decisions affecting current work:
 - Phase 3: Nested SCRIPT_GLOBALS registry (Record<globalName, {methods: Record<methodName, info>}>) — distinct from formula's flat registry
 - Phase 3: Two-level completions (top-level Variable kind + dot-trigger Method kind); two-level hover (80-char window method first, extractWordAt global second)
 - Phase 3: findLineStart (semicolon/newline only) used for Promise combinator guard, not findStatementStart (which stops at braces)
+- Phase 4: AUTOMATION_GLOBALS fully independent of SCRIPT_GLOBALS (D-01); conservative inclusion only (D-02)
+- Phase 4: automationDiagnostics is wrong-context only — no missing-await, no unknown-global (D-04, D-05)
+- Phase 4: Prerequisite gate RESOLVED — base/table/fetch CONFIRMED; remoteFetchAsync ABSENT (runtime error, not deprecated); input.config() returns plain object (no field-type enum in automation)
 
 ### Pending Todos
 
@@ -72,8 +76,7 @@ None.
 
 ### Blockers/Concerns
 
-- Phase 4: `input.config()` field type enum + exact `base.*` methods blocked in automation — MEDIUM confidence, verify before implementing
-- Phase 4: Prerequisite gate: verify complete Airtable Automation Script global surface against official docs — confirm `base`/`table`/`fetch` availability, `remoteFetchAsync` status, `input.config()` field-type enum
+None. Phase 4 prerequisite gate resolved by research.
 
 ### Known Advisory Issues (non-blocking)
 
@@ -86,7 +89,7 @@ From Phase 3 REVIEW.md — not fixed but documented:
 
 ## Session Continuity
 
-Last session: 2026-05-13T16:36:20.465Z
-Stopped at: Phase 4 context gathered
-Next: Phase 4 — Automation Engine (requires prerequisite gate: verify automation globals)
-Resume file: .planning/phases/04-automation-engine/04-CONTEXT.md
+Last session: 2026-05-13T17:30:00.000Z
+Stopped at: Phase 4 planning complete — 7 plans created and verified
+Next: Phase 4 execution — `/gsd-execute-phase 4`
+Resume file: .planning/phases/04-automation-engine/04-01-PLAN.md
