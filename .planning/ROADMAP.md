@@ -82,9 +82,9 @@ Plans:
 - [x] 03-02-PLAN.md — Create engines/script/registry.ts (SCRIPT_GLOBALS nested registry + helpers) and engines/script/index.ts stub barrel (SCRIPT-02, SCRIPT-03) [Wave 1, autonomous]
 
 **Wave 2** *(03-03 and 03-04 depend on 03-02; 03-05 is independent)*
-- [ ] 03-03-PLAN.md — Create engines/script/completions.ts and engines/script/hover.ts; update index.ts (SCRIPT-02, SCRIPT-03) [Wave 2, depends_on: 03-02, autonomous]
-- [ ] 03-04-PLAN.md — Create engines/script/diagnostics.ts (SCRIPT-04, SCRIPT-05); complete index.ts barrel (SCRIPT-04, SCRIPT-05) [Wave 2, depends_on: 03-02, autonomous]
-- [ ] 03-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (SCRIPT-01, SCRIPT-06) [Wave 2, autonomous]
+- [x] 03-03-PLAN.md — Create engines/script/completions.ts and engines/script/hover.ts; update index.ts (SCRIPT-02, SCRIPT-03) [Wave 2, depends_on: 03-02, autonomous]
+- [x] 03-04-PLAN.md — Create engines/script/diagnostics.ts (SCRIPT-04, SCRIPT-05); complete index.ts barrel (SCRIPT-04, SCRIPT-05) [Wave 2, depends_on: 03-02, autonomous]
+- [x] 03-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (SCRIPT-01, SCRIPT-06) [Wave 2, autonomous]
 
 **Wave 3** *(depends on 03-03 and 03-04)*
 - [ ] 03-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/script/ (SCRIPT-01 through SCRIPT-05) [Wave 3, depends_on: 03-03, 03-04, autonomous]
