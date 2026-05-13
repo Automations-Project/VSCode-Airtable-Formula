@@ -72,6 +72,16 @@
           "light": "./icons/formula-light.svg",
           "dark": "./icons/formula-dark.svg"
         }
+      },
+      {
+        "id": "airtable-script",
+        "aliases": ["Airtable Script", "script"],
+        "extensions": [".script", ".ats"],
+        "configuration": "./language-configuration/airtable-script-language-configuration.json",
+        "icon": {
+          "light": "./icons/script-light.svg",
+          "dark": "./icons/script-dark.svg"
+        }
       }
     ],
     "grammars": [
@@ -79,6 +89,14 @@
         "language": "airtable-formula",
         "scopeName": "source.airtable-formula",
         "path": "./syntaxes/airtable-formula.tmLanguage.json"
+      },
+      {
+        "language": "airtable-script",
+        "scopeName": "source.airtable-script",
+        "path": "./syntaxes/airtable-script.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.airtable-script": "javascript"
+        }
       }
     ],
     "snippets": [
