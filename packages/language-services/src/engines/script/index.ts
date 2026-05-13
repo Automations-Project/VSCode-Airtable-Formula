@@ -1,2 +1,4 @@
 export * from './registry.js';
-// diagnostics, completions, hover added in Wave 2
+export * from './completions.js';
+export * from './hover.js';
+export * from './diagnostics.js';
