@@ -41,7 +41,7 @@ function offsetToPosition(text: string, offset: number): { line: number; charact
 
 /**
  * Returns the word token containing the given offset, or null.
- * JS identifier regex: /[a-zA-Z_$][a-zA-Z0-9_$]*/g (case-sensitive; no toUpperCase).
+ * JS identifier regex (case-sensitive, no toUpperCase): [a-zA-Z_$][a-zA-Z0-9_$]*
  */
 function extractWordAt(
     text: string,
