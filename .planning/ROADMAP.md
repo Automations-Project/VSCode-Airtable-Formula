@@ -75,8 +75,22 @@ Plans:
   3. Hovering over any Scripting Extension global or method shows documentation text
   4. Writing `someAsyncCall()` without `await` on `*Async`-suffixed calls produces a diagnostic warning
   5. `.script` files display the custom file icon (light and dark variants) in VS Code's file explorer
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 7 plans
+Plans:
+**Wave 1** *(parallel — no dependencies between plans)*
+- [ ] 03-01-PLAN.md — Create 4 Wave-0 test scaffold files in test/script/ (SCRIPT-02, SCRIPT-03, SCRIPT-04, SCRIPT-05) [Wave 1, autonomous]
+- [ ] 03-02-PLAN.md — Create engines/script/registry.ts (SCRIPT_GLOBALS nested registry + helpers) and engines/script/index.ts stub barrel (SCRIPT-02, SCRIPT-03) [Wave 1, autonomous]
+
+**Wave 2** *(03-03 and 03-04 depend on 03-02; 03-05 is independent)*
+- [ ] 03-03-PLAN.md — Create engines/script/completions.ts and engines/script/hover.ts; update index.ts (SCRIPT-02, SCRIPT-03) [Wave 2, depends_on: 03-02, autonomous]
+- [ ] 03-04-PLAN.md — Create engines/script/diagnostics.ts (SCRIPT-04, SCRIPT-05); complete index.ts barrel (SCRIPT-04, SCRIPT-05) [Wave 2, depends_on: 03-02, autonomous]
+- [ ] 03-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (SCRIPT-01, SCRIPT-06) [Wave 2, autonomous]
+
+**Wave 3** *(depends on 03-03 and 03-04)*
+- [ ] 03-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/script/ (SCRIPT-01 through SCRIPT-05) [Wave 3, depends_on: 03-03, 03-04, autonomous]
+
+**Wave 4** *(depends on 03-05 and 03-06)*
+- [ ] 03-07-PLAN.md — Wire registration.ts + language-services index.ts + package.json airtable-script contributions (SCRIPT-01 through SCRIPT-06) [Wave 4, depends_on: 03-05, 03-06, autonomous]
 
 ### Phase 4: Automation Engine
 **Goal**: `.automation` files have full language support scoped to the Automation Script context — completions and hover are limited to automation-available globals, and diagnostics flag use of scripting-extension-only APIs; a custom file icon is registered
@@ -99,7 +113,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Language Services Scaffold | 0/2 | Not started | - |
-| 2. Formula Engine Migration | 4/8 | In Progress|  |
-| 3. Script Engine | 0/? | Not started | - |
+| 1. Language Services Scaffold | 2/2 | Complete | 2026-05-13 |
+| 2. Formula Engine Migration | 8/8 | Complete | 2026-05-13 |
+| 3. Script Engine | 0/7 | Not started | - |
 | 4. Automation Engine | 0/? | Not started | - |
