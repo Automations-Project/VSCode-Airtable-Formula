@@ -87,7 +87,7 @@ Plans:
 - [x] 03-05-PLAN.md — Create grammar JSON, language config JSON, SVG placeholder icons (SCRIPT-01, SCRIPT-06) [Wave 2, autonomous]
 
 **Wave 3** *(depends on 03-03 and 03-04)*
-- [ ] 03-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/script/ (SCRIPT-01 through SCRIPT-05) [Wave 3, depends_on: 03-03, 03-04, autonomous]
+- [x] 03-06-PLAN.md — Create 3 VS Code wrapper classes in extension/src/language/script/ (SCRIPT-01 through SCRIPT-05) [Wave 3, depends_on: 03-03, 03-04, autonomous]
 
 **Wave 4** *(depends on 03-05 and 03-06)*
 - [ ] 03-07-PLAN.md — Wire registration.ts + language-services index.ts + package.json airtable-script contributions (SCRIPT-01 through SCRIPT-06) [Wave 4, depends_on: 03-05, 03-06, autonomous]
