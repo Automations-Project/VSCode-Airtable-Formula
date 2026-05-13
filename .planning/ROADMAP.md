@@ -78,8 +78,8 @@ Plans:
 **Plans**: 7 plans
 Plans:
 **Wave 1** *(parallel — no dependencies between plans)*
-- [ ] 03-01-PLAN.md — Create 4 Wave-0 test scaffold files in test/script/ (SCRIPT-02, SCRIPT-03, SCRIPT-04, SCRIPT-05) [Wave 1, autonomous]
-- [ ] 03-02-PLAN.md — Create engines/script/registry.ts (SCRIPT_GLOBALS nested registry + helpers) and engines/script/index.ts stub barrel (SCRIPT-02, SCRIPT-03) [Wave 1, autonomous]
+- [x] 03-01-PLAN.md — Create 4 Wave-0 test scaffold files in test/script/ (SCRIPT-02, SCRIPT-03, SCRIPT-04, SCRIPT-05) [Wave 1, autonomous]
+- [x] 03-02-PLAN.md — Create engines/script/registry.ts (SCRIPT_GLOBALS nested registry + helpers) and engines/script/index.ts stub barrel (SCRIPT-02, SCRIPT-03) [Wave 1, autonomous]
 
 **Wave 2** *(03-03 and 03-04 depend on 03-02; 03-05 is independent)*
 - [ ] 03-03-PLAN.md — Create engines/script/completions.ts and engines/script/hover.ts; update index.ts (SCRIPT-02, SCRIPT-03) [Wave 2, depends_on: 03-02, autonomous]
