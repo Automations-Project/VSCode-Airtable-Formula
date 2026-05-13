@@ -86,4 +86,16 @@ for (const packageName of packagesToCopy) {
   console.log(`✓ Copied ${packageName} → dist/node_modules/${packageName}  (from ${realSource})`);
 }
 
+// Copy @airtable-formula/language-services (workspace package — not on npm,
+// so it cannot be resolved from the mcp-server scope like patchright/otpauth).
+// The extension's bundled extension.js require()s it at runtime; without this
+// copy the packaged VSIX fails to activate ("Cannot find module" error) and
+// the dashboard webview is stuck in a permanent loading loop.
+const lsSource = join(__dirname, '..', 'packages', 'language-services');
+const lsTarget = join(extensionNodeModules, '@airtable-formula', 'language-services');
+mkdirSync(dirname(lsTarget), { recursive: true });
+cpSync(join(lsSource, 'package.json'), join(lsTarget, 'package.json'));
+cpSync(join(lsSource, 'dist'), join(lsTarget, 'dist'), { recursive: true });
+console.log('✓ Copied @airtable-formula/language-services → dist/node_modules/@airtable-formula/language-services');
+
 console.log('✓ Package deps prepared');

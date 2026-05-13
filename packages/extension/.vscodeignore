@@ -11,6 +11,7 @@
 !snippets/**
 !language-configuration/**
 !themes/**
+!icons/**
 
 # Branding
 !images/icon.png

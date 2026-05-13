@@ -67,6 +67,7 @@ if (shouldBump) {
 
 // ── 2. Full monorepo build ──
 run('pnpm', ['-F', 'shared', 'build'], repoRoot);
+run('pnpm', ['-F', 'language-services', 'build'], repoRoot);
 run('pnpm', ['-F', 'webview', 'build'], repoRoot);
 run('node', ['scripts/bundle-mcp.mjs'], repoRoot);
 run('pnpm', ['-F', 'airtable-formula', 'build'], repoRoot);
