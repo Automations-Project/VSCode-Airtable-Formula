@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Language Platform
-status: executing
-stopped_at: Phase 4 planning complete — 7 plans created and verified
-last_updated: "2026-05-13T18:51:31.546Z"
-last_activity: "2026-05-13 -- 04-07: automation providers wired in registration.ts, barrel-exported in language-services, package.json contributions added"
+milestone: v2.0
+milestone_name: Daemon & LSP
+status: planning
+last_updated: "2026-05-14T15:23:15.919Z"
+last_activity: 2026-05-14
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 24
-  completed_plans: 24
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,12 +24,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 4 (execution in progress)
-Plan: 04-07 complete (7/7 plans done)
-Status: Phase 4 complete — all 7 plans executed
-Last activity: 2026-05-13 -- 04-07: automation providers wired in registration.ts, barrel-exported in language-services, package.json contributions added
-
-Progress: [██████████] 100%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-14 — Milestone v2.0 started
 
 ## Performance Metrics
 
