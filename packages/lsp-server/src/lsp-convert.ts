@@ -59,6 +59,7 @@ export function toLspCompletionItem(item: LsCompletionItem): CompletionItem {
   if (item.insertText !== undefined) ci.insertText = item.insertText;
   if (item.filterText !== undefined) ci.filterText = item.filterText;
   if (item.sortText !== undefined) ci.sortText = item.sortText;
+  if (item.commitCharacters !== undefined) ci.commitCharacters = item.commitCharacters;
   return ci;
 }
 
