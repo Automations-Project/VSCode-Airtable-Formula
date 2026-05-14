@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
-stopped_at: Phase 05 daemon-core complete — 7/7 plans done
-last_updated: "2026-05-14T20:28:00.000Z"
-last_activity: 2026-05-14 -- Phase 05 complete
+stopped_at: Phase 06 context gathered
+last_updated: "2026-05-14T21:30:00.000Z"
+last_activity: 2026-05-14 -- Phase 06 discuss-phase complete
 progress:
   total_phases: 5
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 05 — daemon-core
+**Current focus:** Phase 06 — lsp-server
 
 ## Current Position
 
-Phase: 05 (daemon-core) — COMPLETE ✓
-Plan: 7 of 7 (all done)
-Status: Ready for Phase 06 (LSP)
-Last activity: 2026-05-14 -- Phase 05 complete
+Phase: 06 (lsp-server) — CONTEXT GATHERED ✓
+Plan: 0 of TBD (not started)
+Status: Ready for planning
+Last activity: 2026-05-14 -- Phase 06 context gathered
 
 ```
 Progress: [██        ] 20% (1/5 phases complete)
@@ -98,7 +98,7 @@ From Phase 3 REVIEW.md (v1.0) — not fixed but documented:
 
 ## Session Continuity
 
-Last session: 2026-05-14 — Phase 05 daemon-core execution
-Stopped at: 7/7 plans complete — lockfile, token, server, launcher, attach-proxy, DaemonManager, extension wiring
-Next: `/gsd-plan-phase 6` — LSP (or `/gsd-discuss-phase 6`)
-Resume file: None
+Last session: 2026-05-14 — Phase 06 discuss-phase
+Stopped at: Phase 06 context gathered (8 decisions, 4 areas discussed)
+Next: `/gsd-plan-phase 6` — LSP Server
+Resume file: .planning/phases/06-lsp-server/06-CONTEXT.md
