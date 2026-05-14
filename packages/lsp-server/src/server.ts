@@ -65,7 +65,9 @@ export function registerHandlers(connection: Connection): void {
         triggerCharacters: ['(', '{', "'", '"', '.'],
       },
       hoverProvider: true,
-      // D-08: signatureHelp formula-engine only — trigger chars match extension registration.ts
+      // D-08: signatureHelp is advertised for all language IDs but is formula-engine only.
+      // Script and automation documents always return null — this is intentional per the LSP
+      // spec (null is a valid response) and avoids dynamic capability registration complexity.
       signatureHelpProvider: {
         triggerCharacters: ['(', ','],
       },
