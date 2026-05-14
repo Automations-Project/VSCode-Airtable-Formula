@@ -21,7 +21,10 @@ function toLsPosition(pos: { line: number; character: number }): LsPosition {
 /**
  * Register all LSP handlers on a connection.
  * Creates a new TextDocuments instance per call — each connection has independent document state.
- * Call connection.listen() after this function.
+ *
+ * IMPORTANT: Call connection.listen() AFTER this function returns, never before.
+ * Calling listen() before registerHandlers() means TextDocuments will not be attached
+ * to the connection's message dispatcher and all document-change events will be silently lost.
  *
  * Implements D-07 (routing), D-08 (signatureHelp formula-only), LSP-02.
  */
