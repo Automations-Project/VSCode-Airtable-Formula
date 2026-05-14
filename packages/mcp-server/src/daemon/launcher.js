@@ -268,6 +268,7 @@ export async function startDaemon(options = {}) {
     }
 
     let server;
+    let lspChild = null;
     let finalizePromise = null;
     let finalizeResolve;
     const closed = new Promise((resolve) => { finalizeResolve = resolve; });
@@ -295,6 +296,8 @@ export async function startDaemon(options = {}) {
           }
           process.off('SIGINT', signalHandler);
           process.off('SIGTERM', signalHandler);
+          // Send SIGTERM to LSP subprocess before releasing lockfile (D-02)
+          lspChild?.kill('SIGTERM');
           release({ lockPath, expectedUuid: uuid });
           finalizeResolve?.();
         })();
@@ -327,6 +330,51 @@ export async function startDaemon(options = {}) {
       });
 
       syncLockfile(server.bearerToken);
+
+      // Spawn airtable-user-lsp --tcp as a tracked child (D-02)
+      // LSP subprocess writes port_lsp to daemon.lock itself via lockfile-writer
+      // Hold reference for SIGTERM on daemon shutdown
+      try {
+        // Resolve lsp-server binary: check installed alongside mcp-server (bundled in extension dist),
+        // then check workspace/node_modules relative path (standalone users)
+        let lspBin = null;
+        const lspCandidates = [
+          // Extension bundles lsp-server dist next to mcp-server dist
+          join(__dirname, '..', '..', 'lsp', 'index.mjs'),
+          // Workspace install path (e.g. packages/lsp-server/dist/index.mjs)
+          fileURLToPath(new URL('../../lsp-server/dist/index.mjs', import.meta.url)),
+        ];
+        for (const candidate of lspCandidates) {
+          if (existsSync(candidate)) { lspBin = candidate; break; }
+        }
+
+        if (lspBin) {
+          lspChild = spawn(process.execPath, [lspBin, '--tcp'], {
+            stdio: 'ignore',
+            env: { ...process.env, AIRTABLE_USER_MCP_HOME: configDir },
+            // NOT detached — daemon holds reference for SIGTERM (D-02)
+          });
+          lspChild.on('error', (err) => {
+            console.error(`[airtable-mcp] LSP subprocess error: ${err.message}`);
+            lspChild = null;
+          });
+          lspChild.on('exit', (code, signal) => {
+            if (signal !== 'SIGTERM') {
+              // Unexpected exit — log but do not crash the daemon
+              console.error(`[airtable-mcp] LSP subprocess exited unexpectedly: code=${code} signal=${signal}`);
+            }
+            lspChild = null;
+          });
+          if (server.setLspChild) server.setLspChild(lspChild);
+        } else {
+          // LSP binary not found in expected locations — daemon continues without LSP
+          // port_lsp remains null in lockfile
+          console.error('[airtable-mcp] airtable-user-lsp binary not found; LSP features unavailable');
+        }
+      } catch (err) {
+        // Non-fatal: daemon works without LSP subprocess
+        console.error(`[airtable-mcp] Failed to spawn LSP subprocess: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       process.on('SIGINT', signalHandler);
       process.on('SIGTERM', signalHandler);
