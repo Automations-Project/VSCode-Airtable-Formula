@@ -161,7 +161,27 @@ This milestone upgrades the MCP server to a shared daemon with HTTP transport, e
   4. When the lockfile references a dead PID or an outdated version, the daemon restarts itself without any user prompt
   5. Calling `/daemon/health` returns a valid JSON response only when the correct bearer token is present in the Authorization header; calling `/daemon/events` streams SSE updates to authenticated clients
   6. The extension's MCP registration switches to an HTTP endpoint when the daemon is healthy and falls back to stdio when it is not
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+**Wave 1** *(parallel — no dependencies between plans)*
+- [ ] 05-01-PLAN.md — Create TDD scaffolds: 5 test files for lockfile, token, daemon server, attach proxy, and DaemonManager (EXT-01) [Wave 1, autonomous]
+
+**Wave 2** *(depends on 05-01)*
+- [ ] 05-02-PLAN.md — Create daemon/lockfile.js and daemon/token.js (DAEMON-04, DAEMON-07) [Wave 2, depends_on: 05-01, autonomous]
+
+**Wave 3** *(depends on 05-02)*
+- [ ] 05-03-PLAN.md — Create daemon/server.js — Express HTTP server with MCP, health, events, shutdown, rotate-token endpoints (DAEMON-02, DAEMON-05, DAEMON-07) [Wave 3, depends_on: 05-02, autonomous]
+
+**Wave 4** *(depends on 05-03)*
+- [ ] 05-04-PLAN.md — Create daemon/launcher.js (ensureDaemon/startDaemon/stopDaemon/getDaemonStatus/spawnDetachedDaemon), daemon/index.js barrel, add daemon subcommand to cli.js (DAEMON-03, DAEMON-04, DAEMON-06) [Wave 4, depends_on: 05-03, autonomous]
+
+**Wave 5** *(both parallel — no file overlap)*
+- [ ] 05-05-PLAN.md — Add attach-proxy block to packages/mcp-server/src/index.js (DAEMON-01) [Wave 5, depends_on: 05-04, autonomous]
+- [ ] 05-06-PLAN.md — Create extension DaemonManager class, add mcp.useDaemon to settings.ts and package.json (DAEMON-03, DAEMON-06, DAEMON-07, EXT-02, EXT-03) [Wave 5, depends_on: 05-01, autonomous]
+
+**Wave 6** *(depends on 05-05 and 05-06)*
+- [ ] 05-07-PLAN.md — Wire registration.ts HTTP branch + AIRTABLE_NO_DAEMON stdio fallback; inject DaemonManager into extension.ts; add stop/restart commands (DAEMON-01, DAEMON-02, DAEMON-03, EXT-01, EXT-02, EXT-03) [Wave 6, depends_on: 05-05, 05-06, autonomous]
+
 **UI hint**: no
 
 #### Phase 6: LSP Server
@@ -220,7 +240,7 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 5. Daemon Core | 0/? | Not started | - |
+| 5. Daemon Core | 0/7 | Not started | - |
 | 6. LSP Server | 0/? | Not started | - |
 | 7. Tunnel Support | 0/? | Not started | - |
 | 8. Setup Tab UI | 0/? | Not started | - |
