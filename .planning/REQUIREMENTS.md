@@ -1,94 +1,119 @@
-# Requirements: VSCode-Airtable-Formula — Language Platform
+# Requirements: VSCode-Airtable-Formula — Daemon & LSP
 
-**Defined:** 2026-05-12
-**Milestone:** v1.0 Language Platform
-**Core Value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts.
+**Defined:** 2026-05-14
+**Milestone:** v2.0 Daemon & LSP
+**Core Value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
 
-## v1 Requirements
+## v2.0 Requirements
 
-### Infrastructure — Language Services Package
+### Daemon Core
 
-- [ ] **INFRA-01**: The `packages/language-services` workspace package exists with a dual CJS+ESM tsup build and zero VS Code runtime dependency
-- [ ] **INFRA-02**: Framework-agnostic types are defined (`LsDiagnostic`, `LsPosition`, `LsRange`, `LsCompletionItem`, `LsHover`) so engines never import from `vscode`
-- [ ] **INFRA-03**: VS Code adapter layer exists in the extension (`convert.ts`, `registration.ts`) that translates between VS Code types and language-services types for all 3 engines
+- [ ] **DAEMON-01**: User's existing `npx airtable-user-mcp` stdio config keeps working unchanged after daemon is introduced (stdio-daemon-proxy fallback)
+- [ ] **DAEMON-02**: When daemon is running, multiple MCP clients share one session (one Chromium process, one auth context)
+- [ ] **DAEMON-03**: Daemon starts automatically when VS Code extension activates (detached, survives extension reload)
+- [ ] **DAEMON-04**: Daemon recovers from stale lockfile (dead PID, version drift) without user intervention
+- [ ] **DAEMON-05**: Daemon exposes `/daemon/health` and `/daemon/events` (SSE) endpoints guarded by bearer token
+- [ ] **DAEMON-06**: User can stop/restart daemon from VS Code extension (Setup tab button)
+- [ ] **DAEMON-07**: Bearer token persists across daemon restarts; token rotation command available
 
-### Formula Engine Migration
+### Tunnel
 
-- [ ] **FORMULA-01**: Existing formula diagnostics, completions, hover, and signature help are migrated to `engines/formula/` inside `language-services` with no user-visible behavioral change
-- [ ] **FORMULA-02**: A single unified `FUNCTION_REGISTRY` drives all formula providers — the private duplicate function list in `completions.ts` is eliminated
-- [ ] **FORMULA-03**: Known formula engine feature gaps are resolved — missing functions added, incorrect or missing diagnostics fixed
-- [ ] **FORMULA-04**: `.fx` is registered as a short alias for the `airtable-formula` language ID — identical language support and icon as `.formula`
-- [ ] **FORMULA-05**: `.formula` and `.fx` files display a custom light/dark SVG file type icon in VS Code via `contributes.languages[].icon`
+- [ ] **TUNNEL-01**: User can enable a Cloudflare or ngrok tunnel from the VS Code extension Setup tab
+- [ ] **TUNNEL-02**: Tunnel URL is written to lockfile and surfaced in the Setup tab dashboard
+- [ ] **TUNNEL-03**: Tunnel auto-disables on repeated auth failures (401 burst) and surfaces warning in UI
+- [ ] **TUNNEL-04**: User can switch tunnel provider (Cloudflare / ngrok) from settings
 
-### Script Engine (`.script` files)
+### LSP Server
 
-- [ ] **SCRIPT-01**: The `airtable-script` language ID is registered for `.script` and `.ats` files with JS syntax highlighting (TextMate grammar that includes `source.js`) and a language configuration (comment toggling, bracket pairs, folding) — both extensions get identical language support and icon
-- [ ] **SCRIPT-02**: Dot-triggered completions surface all Scripting Extension globals and their methods: `base`, `table`, `cursor`, `input`, `output`, `session`, `fetch`, `remoteFetchAsync`
-- [ ] **SCRIPT-03**: Hover documentation is shown for all Scripting Extension globals and their methods
-- [ ] **SCRIPT-04**: A diagnostic (warning) is raised when a `*Async`-suffixed method call is not preceded by `await` in the same expression — accepted patterns that must NOT trigger: `return expr.xAsync()`, `.then(...)` chains, `Promise.all([...])`, assignment to a variable declared as holding a Promise
-- [ ] **SCRIPT-05**: A diagnostic is raised when a bare top-level identifier followed by `.` or `()` does not match any known Airtable Scripting Extension global — JS built-ins (`console`, `Math`, `JSON`, `Date`, `Promise`, `Array`, `Object`, `Error`, `parseInt`, `parseFloat`, `setTimeout`, `clearTimeout`) and locally-declared identifiers (variables, parameters, functions, classes) must NOT be flagged
-- [ ] **SCRIPT-06**: `.script` files display a custom light/dark SVG file type icon in VS Code
+- [ ] **LSP-01**: `airtable-user-lsp` npm package is publicly installable (`npx airtable-user-lsp --stdio`)
+- [ ] **LSP-02**: LSP server provides diagnostics, completions, hover for `.formula`, `.ats`, `.ata` files
+- [ ] **LSP-03**: LSP server runs standalone (no daemon required) in stdio mode
+- [ ] **LSP-04**: When daemon is running, LSP clients attach to daemon's LSP TCP port (shared instance)
+- [ ] **LSP-05**: Daemon lockfile includes `port_lsp` field so clients can discover the LSP port
 
-### Automation Engine (`.automation` files)
+### VS Code Extension
 
-- [x] **AUTO-01**: The `airtable-automation` language ID is registered for `.automation` and `.ata` files with JS syntax highlighting and a language configuration — both extensions get identical language support and icon
-- [x] **AUTO-02**: Completions are scoped to the automation context — `base`, `table`, and `fetch` are available with full method completions; `input.` shows only `input.config()` and `output.` shows only `output.set()`; `cursor`, `session`, `remoteFetchAsync`, and interactive `input.*Async()`/`output.text/markdown/table` are absent from completions *(Note: exact automation global surface requires verification against Airtable automation docs before Phase 4 implementation — see Phase 4 prerequisite gate)*
-- [x] **AUTO-03**: Hover documentation is shown for all automation globals and their methods
-- [x] **AUTO-04**: A diagnostic is raised when a scripting-extension-only global is used in an `.automation` file — confirmed forbidden list: `cursor`, `session`, interactive `input.*Async()` methods, `output.text/markdown/table`; `remoteFetchAsync` should be a warning ("not needed server-side, use fetch") rather than an error *(subject to verification gate)*
-- [ ] **AUTO-05**: `.automation` files display a custom light/dark SVG file type icon in VS Code
+- [ ] **EXT-01**: Extension's `McpServerDefinitionProvider` returns HTTP definition when daemon is healthy, stdio otherwise
+- [ ] **EXT-02**: `auth-manager.ts` extended to spawn/monitor daemon instead of direct MCP process
+- [ ] **EXT-03**: Extension passes auth env vars (bearer token, config dir) to daemon via `buildDaemonEnv` pattern
 
-## v2 Requirements
+### Setup Tab UI
 
-### Script & Automation — Advanced Features
+- [ ] **UI-01**: Setup tab shows unified daemon status block (MCP port, LSP port, tunnel URL, uptime)
+- [ ] **UI-02**: Setup tab shows copy-paste config snippets for MCP per supported IDE (Claude Code, Claude Desktop, Cursor, Windsurf, Cline)
+- [ ] **UI-03**: Setup tab shows copy-paste config snippets for LSP per supported IDE (Claude Code, OpenCode, Zed, Neovim)
+
+### Documentation
+
+- [ ] **DOCS-01**: CHANGELOG updated with v2.0 daemon + LSP features
+- [ ] **DOCS-02**: `packages/mcp-server/README.md` updated with daemon transport modes and `--no-daemon` flag
+- [ ] **DOCS-03**: Root README updated with LSP setup section
+- [ ] **DOCS-04**: `CLAUDE.md` updated with daemon architecture section and new file locations
+
+## Future Requirements
+
+### Security (v3+)
+
+- **SEC-01**: OAuth 2.1 authorization server in daemon for public tunnel multi-user access
+- **SEC-02**: Per-client rate limiting on tunnel-exposed MCP endpoint
+
+### LSP Advanced (v3+)
+
+- **LSP-ADV-01**: LSP workspace/didChangeConfiguration support for hot-reload of settings
+- **LSP-ADV-02**: LSP code actions (quick fix for known formula errors)
+
+### Script & Automation Advanced (carried from v1.0)
 
 - **SCRIPT-ADV-01**: Signature help (parameter hints) for script engine method calls
-- **SCRIPT-ADV-02**: `input.config()` field-type string-literal completions (`{type: 'number', label: ...}`)
+- **SCRIPT-ADV-02**: `input.config()` field-type string-literal completions
 - **SCRIPT-ADV-03**: Quick-fix code action to insert `await` for missing-await diagnostic
-- **SCRIPT-ADV-04**: Cross-context paste hint when automation file uses scripting-extension-only globals
-- **AUTO-ADV-01**: Signature help for automation engine method calls
 - **INT-01**: Go-to-definition for field and table names (requires live MCP API integration)
-- **INT-02**: Automation runtime limit static analysis (30s limit, 50 fetch/30 selectRecords per run)
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Separate LSP node process (JSON-RPC) | VS Code-only target; in-process service layer achieves the same goals with far less complexity; extractable later |
-| Full TypeScript type checking for script files | Would conflict with/duplicate the built-in TS language server; Airtable-specific globals only |
-| Script file execution / REPL | Editor support only — no runtime integration |
-| `@types/airtable` npm package | Covers REST API client only; hand-rolled `.d.ts` files required for scripting globals |
-| Automation timeout static analysis (this milestone) | High false-positive risk; defer to v2 |
-| Multi-pack icon switching | VS Code has no API to inject icons into an existing theme at runtime; `contributes.languages[].icon` is single-pack only — multi-pack deferred to future milestone |
+| OAuth 2.1 server in daemon | Airtable auth is browser-session-based; bearer token sufficient for loopback; OAuth only for public multi-user scenario |
+| Full TypeScript type checking for script files | Airtable-specific globals only; not a TS language server replacement |
+| Script file execution / REPL | Editor support only, not runtime integration |
+| Cross-platform system daemon (launchd/systemd/Windows Service) | VS Code extension manages lifecycle; standalone users accept per-session startup |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | Phase 1 | Pending |
-| INFRA-02 | Phase 1 | Pending |
-| INFRA-03 | Phase 1 | Pending |
-| FORMULA-01 | Phase 2 | Pending |
-| FORMULA-02 | Phase 2 | Pending |
-| FORMULA-03 | Phase 2 | Pending |
-| FORMULA-04 | Phase 2 | Pending |
-| FORMULA-05 | Phase 2 | Pending |
-| SCRIPT-01 | Phase 3 | Pending |
-| SCRIPT-02 | Phase 3 | Pending |
-| SCRIPT-03 | Phase 3 | Pending |
-| SCRIPT-04 | Phase 3 | Pending |
-| SCRIPT-05 | Phase 3 | Pending |
-| SCRIPT-06 | Phase 3 | Pending |
-| AUTO-01 | Phase 4 | Complete |
-| AUTO-02 | Phase 4 | Complete |
-| AUTO-03 | Phase 4 | Complete |
-| AUTO-04 | Phase 4 | Complete |
-| AUTO-05 | Phase 4 | Pending |
+| DAEMON-01 | — | Pending |
+| DAEMON-02 | — | Pending |
+| DAEMON-03 | — | Pending |
+| DAEMON-04 | — | Pending |
+| DAEMON-05 | — | Pending |
+| DAEMON-06 | — | Pending |
+| DAEMON-07 | — | Pending |
+| TUNNEL-01 | — | Pending |
+| TUNNEL-02 | — | Pending |
+| TUNNEL-03 | — | Pending |
+| TUNNEL-04 | — | Pending |
+| LSP-01 | — | Pending |
+| LSP-02 | — | Pending |
+| LSP-03 | — | Pending |
+| LSP-04 | — | Pending |
+| LSP-05 | — | Pending |
+| EXT-01 | — | Pending |
+| EXT-02 | — | Pending |
+| EXT-03 | — | Pending |
+| UI-01 | — | Pending |
+| UI-02 | — | Pending |
+| UI-03 | — | Pending |
+| DOCS-01 | — | Pending |
+| DOCS-02 | — | Pending |
+| DOCS-03 | — | Pending |
+| DOCS-04 | — | Pending |
 
 **Coverage:**
-- v1 requirements: 20 total
-- Mapped to phases: 20
-- Unmapped: 0 ✓
+- v2.0 requirements: 26 total
+- Mapped to phases: 0 (pending roadmap)
+- Unmapped: 26
 
 ---
-*Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 — Added short aliases (.fx, .ats, .ata) and formula file icon*
+*Requirements defined: 2026-05-14*
+*Last updated: 2026-05-14 — Initial v2.0 requirements*
