@@ -5,6 +5,7 @@ status: draft
 shadcn_initialized: false
 preset: none
 created: 2026-05-15
+revised: 2026-05-15
 ---
 
 # Phase 7 — UI Design Contract
@@ -36,18 +37,16 @@ Declared values (all multiples of 4):
 | Token | Value | Usage |
 |-------|-------|-------|
 | xs | 4px | Icon gaps, chip padding, inline spacing |
-| sm | 8px | Button padding horizontal, stack-sm gap (6px actual — existing exception) |
-| md | 12px | glass-panel internal padding, section-header margin-bottom |
+| sm | 8px | Button padding horizontal, stack-sm gap, section-header margin-bottom |
+| md | 12px | glass-panel internal padding — approved codebase exception (existing `.glass-panel` padding value in `styles.css`; changing to 16px would require global restyling beyond Phase 7 scope) |
 | lg | 16px | stack-lg gap, section-to-section spacing |
 | xl | 24px | Empty state vertical padding |
 | 2xl | 32px | — |
 | 3xl | 48px | — |
 
 Exceptions:
-- `stack-sm` gap is 6px (existing codebase value — do not change)
 - `stack-md` gap is 12px (existing codebase value — do not change)
 - glass-panel border-radius: 14px (existing — do not change)
-- section-header margin-bottom: 10px (existing — do not change)
 
 _Source: `packages/webview/src/styles.css` — match exactly, do not introduce new spacing values._
 
@@ -58,12 +57,11 @@ _Source: `packages/webview/src/styles.css` — match exactly, do not introduce n
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
 | Body (base) | 13px | 400 | 1.5 | Default text, descriptions |
-| Label / chip | 0.68rem (~8.8px) | 500 | 1.0 | Chip labels, status badges |
 | Detail | 0.75rem (~9.75px) | 400 | 1.4 | section-header `.detail`, secondary copy |
 | Title | 0.85rem (~11px) | 600 | 1.2 | section-header `.title`, panel headings |
-| Eyebrow | 0.6rem (~7.8px) | 400 | 1.0 | Uppercase, letter-spacing 0.2em, muted |
-| Button | 0.7rem (~9.1px) | 500 | 1.0 | `.btn` text |
-| Mono | 0.7rem (~9.1px) | 400 | 1.4 | Tunnel URL display, authtoken input |
+| Small UI | 0.7rem (~9.1px) | 400 | 1.0 | Eyebrow (uppercase, letter-spacing 0.2em, muted), chip labels, button text, mono URL/input |
+
+Weight scheme: 400 (body, detail, small UI) + 600 (title/emphasis). No third weight.
 
 _Source: `packages/webview/src/styles.css` — use existing classes only. Do not introduce new font-size values._
 
@@ -86,6 +84,8 @@ Accent reserved for:
 2. Provider radio/select focus ring
 3. Toggle-switch checked state (already handled by `.toggle-switch` CSS)
 4. focus-visible outline on interactive elements (2px solid `var(--at-blue)`)
+
+**Focal point:** The Enable Tunnel button is the primary visual anchor of the panel — the only accent-colored element in the section. All other interactive elements use ghost/muted styles to keep emphasis on this single CTA.
 
 _Source: `packages/webview/src/styles.css` CSS custom properties — use semantic tokens, never raw hex._
 
@@ -132,12 +132,12 @@ font-family: var(--font-mono);
 background: var(--bg-input);
 border: 1px solid var(--border);
 border-radius: var(--radius-md);
-padding: 5px 10px;
+padding: 4px 8px;
 color: var(--fg);
 width: 100%;
 ```
 On focus: `border-color: var(--at-blue)`.
-Label: "ngrok Auth Token" (eyebrow style, `0.6rem`, uppercase).
+Label: "ngrok Auth Token" (eyebrow style, `0.7rem`, uppercase).
 Placeholder: "paste token from ngrok dashboard".
 
 ### ngrok Optional Domain Input
@@ -160,6 +160,7 @@ Use existing `.chip` variants:
 - Disabled: `.chip .chip-muted` — "Disabled"
 - Starting: `.chip .chip-info` — "Starting..."
 - Auto-disabled: `.chip .chip-warn` — "Auto-disabled"
+- Error: `.chip .chip-err` — "Error"
 
 ### 401-Burst Warning Banner
 
@@ -171,7 +172,7 @@ background: var(--bg-warn);
 color: var(--fg-warn);
 border: 1px solid rgba(255,186,5,0.2);
 border-radius: var(--radius-md);
-padding: 10px 12px;
+padding: 8px 12px;
 font-size: 0.72rem;
 ```
 Content: "Tunnel auto-disabled: {failures} auth failures from {ip} in {windowMs/1000}s. Re-enable when ready."
@@ -207,6 +208,7 @@ Content: "Tunnel auto-disabled: {failures} auth failures from {ip} in {windowMs/
 | Chip: disabled | "Disabled" |
 | Chip: starting | "Starting..." |
 | Chip: auto-disabled | "Auto-disabled" |
+| Chip: error | "Error" |
 | Warning banner | "Tunnel auto-disabled: {N} auth failures from {ip} in {N}s. Re-enable when ready." |
 | Empty (no daemon) | "Start the daemon to enable tunnel support" |
 | cf-named not configured | "Cloudflare Named Tunnel requires initial setup. Run: daemon install-tunnel" |
@@ -226,7 +228,7 @@ _No destructive confirmation required — tunnel disable is reversible (user cli
 5. Webview sends `{ type: 'tunnel:enable', provider, authtoken?, domain? }` to extension.
 6. Extension calls `POST /daemon/enable-tunnel`.
 7. On `daemon:tunnel-started` SSE: chip → `.chip-ok "Active"`, URL row appears, button → `.btn-ghost "Disable Tunnel"`.
-8. On error: chip → `.chip-err`, button re-enables with "Enable Tunnel".
+8. On error: chip → `.chip-err "Error"`, button re-enables with "Enable Tunnel".
 
 ### Tunnel Disable Flow
 
