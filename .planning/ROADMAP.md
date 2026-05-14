@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Language Services Scaffold** - New `packages/language-services` workspace package with dual CJS+ESM build, framework-agnostic types, and VS Code adapter layer
 - [x] **Phase 2: Formula Engine Migration** - Extract all formula providers into `language-services/engines/formula/`, unify the function registry, fix feature gaps, add formula file icon
 - [x] **Phase 3: Script Engine** - `airtable-script` language ID, globals completions/hover, missing-await and unknown-global diagnostics, file icon for `.script` files
-- [ ] **Phase 4: Automation Engine** - `airtable-automation` language ID, automation-scoped globals, cross-context diagnostics, file icon for `.automation` files
+- [x] **Phase 4: Automation Engine** - `airtable-automation` language ID, automation-scoped globals, cross-context diagnostics, file icon for `.automation` files
 
 ## Phase Details
 
@@ -131,3 +131,97 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 2. Formula Engine Migration | 8/8 | Complete | 2026-05-13 |
 | 3. Script Engine | 7/7 | Complete | 2026-05-13 |
 | 4. Automation Engine | 7/7 | Complete | 2026-05-13 |
+
+---
+
+## Milestone v2.0 — Daemon & LSP
+
+### Overview
+
+This milestone upgrades the MCP server to a shared daemon with HTTP transport, exposes language intelligence as a public LSP server, adds tunnel support for remote MCP access, and updates the Setup UI and documentation. Phases execute in strict dependency order: daemon core first, then LSP server and tunnel in parallel, then UI consuming both, then documentation last.
+
+### Phases
+
+- [ ] **Phase 5: Daemon Core** - Daemon lockfile, HTTP MCP server, stdio-daemon-proxy, launcher, and VS Code extension wiring
+- [ ] **Phase 6: LSP Server** - New `packages/lsp-server/` workspace package published as `airtable-user-lsp` npm package
+- [ ] **Phase 7: Tunnel Support** - Cloudflare/ngrok tunnel integration added to daemon server
+- [ ] **Phase 8: Setup Tab UI** - Unified daemon status block, MCP config snippets, and LSP config snippets in webview
+- [ ] **Phase 9: Documentation** - CHANGELOG, READMEs, and CLAUDE.md updated for v2.0 features
+
+### Phase Details
+
+#### Phase 5: Daemon Core
+**Goal**: The MCP server runs as a shared daemon that multiple clients can connect to simultaneously, VS Code manages its lifecycle automatically, and existing stdio clients continue working without any config changes
+**Depends on**: Phase 4 (v1.0 complete)
+**Requirements**: DAEMON-01, DAEMON-02, DAEMON-03, DAEMON-04, DAEMON-05, DAEMON-06, DAEMON-07, EXT-01, EXT-02, EXT-03
+**Success Criteria** (what must be TRUE):
+  1. An existing user who connects via `npx airtable-user-mcp` stdio config sees no change in behavior — the attach proxy transparently routes to the running daemon or falls back to in-process stdio
+  2. Two MCP clients connecting simultaneously share one Chromium session — there is only one `daemon.lock` file and one daemon process running
+  3. Opening VS Code starts the daemon automatically in the background; reloading the extension window does not spawn a second daemon process
+  4. When the lockfile references a dead PID or an outdated version, the daemon restarts itself without any user prompt
+  5. Calling `/daemon/health` returns a valid JSON response only when the correct bearer token is present in the Authorization header; calling `/daemon/events` streams SSE updates to authenticated clients
+  6. The extension's MCP registration switches to an HTTP endpoint when the daemon is healthy and falls back to stdio when it is not
+**Plans**: TBD
+**UI hint**: no
+
+#### Phase 6: LSP Server
+**Goal**: Language intelligence is available to any LSP-capable editor via a publicly installable npm package, with a shared daemon instance for multi-client efficiency
+**Depends on**: Phase 5
+**Requirements**: LSP-01, LSP-02, LSP-03, LSP-04, LSP-05
+**Success Criteria** (what must be TRUE):
+  1. A developer running `npx airtable-user-lsp --stdio` in any terminal gets a working LSP server without installing anything beyond Node.js
+  2. An editor connected to the LSP server receives diagnostics, completions, and hover for `.formula`, `.ats`, and `.ata` files identical to what VS Code provides
+  3. The LSP server starts and serves requests with no daemon running — it works fully standalone
+  4. When a daemon is already running, a second LSP client discovers the daemon's `port_lsp` from the lockfile and attaches to the shared LSP TCP port instead of spawning a new process
+  5. The daemon lockfile contains a `port_lsp` field that LSP clients can read to discover the shared LSP port
+**Plans**: TBD
+**UI hint**: no
+
+#### Phase 7: Tunnel Support
+**Goal**: Users can expose their local MCP server to remote AI clients via a public URL managed entirely from within VS Code
+**Depends on**: Phase 5
+**Requirements**: TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04
+**Success Criteria** (what must be TRUE):
+  1. A user can click a button in the VS Code Setup tab to start a Cloudflare or ngrok tunnel and get a public HTTPS URL for their MCP server
+  2. The tunnel URL appears in the Setup tab dashboard immediately after activation and persists across extension reloads (read from lockfile)
+  3. When the tunnel receives a burst of 401 responses, it disables automatically and a warning banner appears in the Setup tab without requiring user action
+  4. A user can switch between Cloudflare and ngrok tunnel providers from VS Code settings without manual CLI steps
+**Plans**: TBD
+**UI hint**: yes
+
+#### Phase 8: Setup Tab UI
+**Goal**: The Setup tab gives users a complete, actionable view of their daemon state — MCP connectivity, LSP connectivity, tunnel status, and copy-paste config snippets for every supported IDE
+**Depends on**: Phase 5, Phase 6, Phase 7
+**Requirements**: UI-01, UI-02, UI-03
+**Success Criteria** (what must be TRUE):
+  1. Opening the Setup tab shows a live status block with MCP port, LSP port, tunnel URL (if active), and daemon uptime — all sourced from the running daemon lockfile
+  2. A user setting up a new MCP client in Claude Code, Claude Desktop, Cursor, Windsurf, or Cline can copy a ready-to-paste config snippet directly from the Setup tab
+  3. A user setting up LSP in Claude Code, OpenCode, Zed, or Neovim can copy a ready-to-paste config snippet directly from the Setup tab
+**Plans**: TBD
+**UI hint**: yes
+
+#### Phase 9: Documentation
+**Goal**: All user-facing documentation accurately describes the v2.0 daemon and LSP architecture so users can self-serve setup and troubleshooting without filing issues
+**Depends on**: Phase 8
+**Requirements**: DOCS-01, DOCS-02, DOCS-03, DOCS-04
+**Success Criteria** (what must be TRUE):
+  1. The CHANGELOG entry for v2.0 lists daemon transport, LSP server, and tunnel support as new features with enough detail for a user to understand what changed
+  2. A user reading `packages/mcp-server/README.md` understands the three transport modes (stdio standalone, stdio-proxy to daemon, HTTP) and can use `--no-daemon` to opt out
+  3. A user reading the root README can find the LSP setup section and follow it to configure their editor without any additional research
+  4. A developer reading `CLAUDE.md` can find the daemon architecture section, understand the new file layout in `packages/mcp-server/src/daemon/`, and know which files were ported from the Perplexity project
+**Plans**: TBD
+**UI hint**: no
+
+### Progress
+
+**Execution Order:**
+Phases execute in numeric order: 5 → 6 → 7 → 8 → 9
+Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 5. Daemon Core | 0/? | Not started | - |
+| 6. LSP Server | 0/? | Not started | - |
+| 7. Tunnel Support | 0/? | Not started | - |
+| 8. Setup Tab UI | 0/? | Not started | - |
+| 9. Documentation | 0/? | Not started | - |

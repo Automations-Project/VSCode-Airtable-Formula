@@ -82,38 +82,38 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DAEMON-01 | — | Pending |
-| DAEMON-02 | — | Pending |
-| DAEMON-03 | — | Pending |
-| DAEMON-04 | — | Pending |
-| DAEMON-05 | — | Pending |
-| DAEMON-06 | — | Pending |
-| DAEMON-07 | — | Pending |
-| TUNNEL-01 | — | Pending |
-| TUNNEL-02 | — | Pending |
-| TUNNEL-03 | — | Pending |
-| TUNNEL-04 | — | Pending |
-| LSP-01 | — | Pending |
-| LSP-02 | — | Pending |
-| LSP-03 | — | Pending |
-| LSP-04 | — | Pending |
-| LSP-05 | — | Pending |
-| EXT-01 | — | Pending |
-| EXT-02 | — | Pending |
-| EXT-03 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
-| DOCS-01 | — | Pending |
-| DOCS-02 | — | Pending |
-| DOCS-03 | — | Pending |
-| DOCS-04 | — | Pending |
+| DAEMON-01 | Phase 5 | Pending |
+| DAEMON-02 | Phase 5 | Pending |
+| DAEMON-03 | Phase 5 | Pending |
+| DAEMON-04 | Phase 5 | Pending |
+| DAEMON-05 | Phase 5 | Pending |
+| DAEMON-06 | Phase 5 | Pending |
+| DAEMON-07 | Phase 5 | Pending |
+| EXT-01 | Phase 5 | Pending |
+| EXT-02 | Phase 5 | Pending |
+| EXT-03 | Phase 5 | Pending |
+| LSP-01 | Phase 6 | Pending |
+| LSP-02 | Phase 6 | Pending |
+| LSP-03 | Phase 6 | Pending |
+| LSP-04 | Phase 6 | Pending |
+| LSP-05 | Phase 6 | Pending |
+| TUNNEL-01 | Phase 7 | Pending |
+| TUNNEL-02 | Phase 7 | Pending |
+| TUNNEL-03 | Phase 7 | Pending |
+| TUNNEL-04 | Phase 7 | Pending |
+| UI-01 | Phase 8 | Pending |
+| UI-02 | Phase 8 | Pending |
+| UI-03 | Phase 8 | Pending |
+| DOCS-01 | Phase 9 | Pending |
+| DOCS-02 | Phase 9 | Pending |
+| DOCS-03 | Phase 9 | Pending |
+| DOCS-04 | Phase 9 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 26 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 26
+- Mapped to phases: 26 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-14*
-*Last updated: 2026-05-14 — Initial v2.0 requirements*
+*Last updated: 2026-05-14 — Traceability mapped to phases 5–9*

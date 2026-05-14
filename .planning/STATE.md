@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Daemon & LSP
 status: planning
-last_updated: "2026-05-14T15:23:15.919Z"
+last_updated: "2026-05-14T00:00:00.000Z"
 last_activity: 2026-05-14
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,27 +17,31 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-12)
+See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 04 — automation-engine
+**Current focus:** Phase 05 — daemon-core (not started)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap defined, ready for planning)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-14 — Milestone v2.0 started
+Status: Roadmap created — ready for `/gsd-plan-phase 5`
+Last activity: 2026-05-14 — Milestone v2.0 roadmap created (5 phases, 26 requirements)
+
+```
+Progress: [          ] 0% (0/5 phases complete)
+```
 
 ## Performance Metrics
 
-**Velocity:**
+**Velocity (v1.0 baseline):**
 
-- Total plans completed: 17
+- Total plans completed (v1.0): 24
 - Average duration: —
 - Total execution time: —
 
-**By Phase:**
+**By Phase (v1.0):**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
@@ -46,9 +50,19 @@ Last activity: 2026-05-14 — Milestone v2.0 started
 | 03 | 7 | - | - |
 | 04 | 7 | - | - |
 
+**v2.0 phases (pending):**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 05 | TBD | - | - |
+| 06 | TBD | - | - |
+| 07 | TBD | - | - |
+| 08 | TBD | - | - |
+| 09 | TBD | - | - |
+
 **Recent Trend:**
 
-- Last 5 plans: 03-05, 03-06, 03-07, 04-01..07 (all planned)
+- Last session: Roadmap definition (2026-05-14)
 - Trend: on track
 
 ## Accumulated Context
@@ -58,15 +72,11 @@ Last activity: 2026-05-14 — Milestone v2.0 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Phase 1: In-process shared service layer chosen over separate LSP process (VS Code-only target, avoids JSON-RPC complexity)
-- Phase 1: Single `language-services` package for all 3 engines (shared parser primitives, consistent test surface)
-- Phase 3: Nested SCRIPT_GLOBALS registry (Record<globalName, {methods: Record<methodName, info>}>) — distinct from formula's flat registry
-- Phase 3: Two-level completions (top-level Variable kind + dot-trigger Method kind); two-level hover (80-char window method first, extractWordAt global second)
-- Phase 3: findLineStart (semicolon/newline only) used for Promise combinator guard, not findStatementStart (which stops at braces)
-- Phase 4: AUTOMATION_GLOBALS fully independent of SCRIPT_GLOBALS (D-01); conservative inclusion only (D-02)
-- Phase 4: automationDiagnostics is wrong-context only — no missing-await, no unknown-global (D-04, D-05)
-- Phase 4: Prerequisite gate RESOLVED — base/table/fetch CONFIRMED; remoteFetchAsync ABSENT (runtime error, not deprecated); input.config() returns plain object (no field-type enum in automation)
-- Phase 4 (04-07): AutomationMethodInfo/AutomationGlobalInfo used as interface names to avoid DTS export collision with script engine when both are barrel-exported from language-services
+- v2.0: Daemon over separate-process-per-client — shared Chromium session, faster auth, reduced resource usage; existing stdio clients attach transparently via proxy
+- v2.0: `language-services` stays private; only LSP transport binary is public (`airtable-user-lsp`)
+- v2.0: No OAuth 2.1 in Airtable daemon — bearer token sufficient for local loopback; OAuth only for public multi-user scenario
+- v2.0: Port source is `C:\Users\admin\github-repos\VSCode-Perplexity-MCP` — lockfile.ts, launcher.ts, server.ts, attach.ts are direct port sources
+- v2.0: Phase 6 (LSP) and Phase 7 (Tunnel) can execute in parallel after Phase 5 (Daemon Core) completes
 
 ### Pending Todos
 
@@ -74,11 +84,11 @@ None.
 
 ### Blockers/Concerns
 
-None. Phase 4 prerequisite gate resolved by research.
+None. Roadmap defined and ready.
 
 ### Known Advisory Issues (non-blocking)
 
-From Phase 3 REVIEW.md — not fixed but documented:
+From Phase 3 REVIEW.md (v1.0) — not fixed but documented:
 
 - C-1: `.then()` suppression uses unbounded `text.slice(match.index)` — false negatives possible
 - I-1: Property-type members get `($0)` snippet insertText (invalid for non-callable props)
@@ -87,7 +97,7 @@ From Phase 3 REVIEW.md — not fixed but documented:
 
 ## Session Continuity
 
-Last session: 2026-05-13T21:58:00Z
-Stopped at: Completed 04-07-PLAN.md
-Next: None — all phases and plans complete
+Last session: 2026-05-14 — Roadmap definition
+Stopped at: ROADMAP.md created with 5 phases (5–9), REQUIREMENTS.md traceability updated, STATE.md initialized
+Next: `/gsd-plan-phase 5` — Daemon Core
 Resume file: None
