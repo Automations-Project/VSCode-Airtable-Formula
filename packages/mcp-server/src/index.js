@@ -8,6 +8,72 @@ if (cliArgs.length > 0) {
   if (handled) process.exit(process.exitCode || 0);
 }
 
+// ─── Attach-proxy logic (D-01) ─────────────────────────────────────
+// Skip when a CLI subcommand was already handled above, or when
+// AIRTABLE_NO_DAEMON is set (VS Code stdio fallback sets this env var
+// via registration.ts to prevent the 15s polling delay — Pitfall 6).
+if (cliArgs.length === 0 && !process.env.AIRTABLE_NO_DAEMON) {
+  const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+  const { ensureDaemon } = await import('./daemon/launcher.js');
+  const { read: readLockfile } = await import('./daemon/lockfile.js');
+  const { getHomeDir } = await import('./paths.js');
+
+  const configDir = getHomeDir();
+  // Only try attaching if a lockfile exists — avoids the 15s poll when no
+  // daemon was ever started (first time running 'npx airtable-user-mcp').
+  const existing = readLockfile({ lockPath: configDir + '/daemon.lock' });
+
+  if (existing) {
+    let attached = false;
+    try {
+      const daemon = await ensureDaemon({ configDir, startTimeoutMs: 15_000 });
+
+      const stdioTransport = new StdioServerTransport(process.stdin, process.stdout);
+      const httpTransport = new StreamableHTTPClientTransport(
+        new URL(daemon.url + '/mcp'),
+        {
+          requestInit: {
+            headers: {
+              Authorization: 'Bearer ' + daemon.bearerToken,
+              'x-airtable-client-id': 'daemon-attach-' + process.pid,
+            },
+          },
+        }
+      );
+
+      stdioTransport.onmessage = (msg) => { void httpTransport.send(msg); };
+      httpTransport.onmessage = (msg) => { void stdioTransport.send(msg); };
+
+      let settled = false;
+      const settle = async () => {
+        if (settled) return;
+        settled = true;
+        await Promise.allSettled([stdioTransport.close(), httpTransport.close()]);
+        process.exitCode = 0;
+        process.exit();
+      };
+
+      stdioTransport.onclose = settle;
+      httpTransport.onclose = settle;
+      stdioTransport.onerror = settle;
+      httpTransport.onerror = settle;
+
+      await Promise.all([stdioTransport.start(), httpTransport.start()]);
+      attached = true;
+
+      // Block until a transport fires onclose/onerror (settle calls process.exit)
+      await new Promise((_resolve) => { /* resolved by settle() */ });
+    } catch (_err) {
+      if (!attached) {
+        process.stderr.write('[airtable-mcp] daemon unreachable; falling back to in-process stdio\n');
+      }
+      // Fall through to existing in-process MCP server code below
+    }
+  }
+}
+// ─── End of attach-proxy block ─────────────────────────────────────
+
 // Original MCP server code continues below...
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
