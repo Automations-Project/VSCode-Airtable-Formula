@@ -58,7 +58,12 @@ export async function startTcpServer(options: StartTcpServerOptions = {}): Promi
     tcpServer.once('listening', () => {
       tcpServer.removeAllListeners('error');
       // MUST read port inside 'listening' callback — server.address() is null before this
-      const addr = tcpServer.address() as net.AddressInfo;
+      const rawAddr = tcpServer.address();
+      if (!rawAddr || typeof rawAddr === 'string') {
+        reject(new Error('TCP server address is unavailable after listen'));
+        return;
+      }
+      const addr = rawAddr as net.AddressInfo;
       // Write port_lsp to daemon.lock so daemon can discover this TCP server
       writeLspPort(lockPath, addr.port);
       resolve();
