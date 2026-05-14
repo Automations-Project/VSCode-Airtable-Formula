@@ -1,0 +1,288 @@
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import express from 'express';
+import { AirtableAuth } from '../auth.js';
+import { AirtableClient } from '../client.js';
+import { ToolConfigManager } from '../tool-config.js';
+import { ensureToken, rotateToken, getTokenPath } from './token.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+
+function resolveServerVersion() {
+  try {
+    const versionFile = path.join(__dirname, '..', 'version.json');
+    const raw = readFileSync(versionFile, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.mcpServer === 'string') return parsed.mcpServer;
+  } catch { /* fall through */ }
+  try {
+    return require('../../package.json').version;
+  } catch { /* unknown */ }
+  return 'unknown';
+}
+
+const FETCH_BLOCKED_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79,
+  87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137,
+  139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+  540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723,
+  2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679,
+  6697, 10080,
+]);
+
+async function listenAvoidingBlockedPorts(server, requestedPort, host) {
+  const maxAttempts = requestedPort === 0 ? 5 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise((resolve, reject) => {
+      const onError = (error) => {
+        server.removeListener('listening', onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        server.removeListener('error', onError);
+        resolve();
+      };
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(requestedPort, host);
+    });
+
+    const boundPort = getBoundPort(server);
+    if (!FETCH_BLOCKED_PORTS.has(boundPort)) {
+      return;
+    }
+
+    await new Promise((resolve) => server.close(() => resolve()));
+  }
+}
+
+function getBoundPort(server) {
+  const address = server?.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Daemon server is not listening on a TCP port.');
+  }
+  return address.port;
+}
+
+export async function startDaemonServer(options = {}) {
+  const host = options.host ?? '127.0.0.1';
+  const requestedPort = options.port ?? 0;
+  const version = options.version ?? resolveServerVersion();
+  const tokenPath = getTokenPath(options.configDir);
+  const initialToken = options.bearerToken
+    ? {
+        bearerToken: options.bearerToken,
+        version: 1,
+        createdAt: new Date().toISOString(),
+        rotatedAt: new Date().toISOString(),
+      }
+    : ensureToken({ tokenPath });
+
+  let currentToken = initialToken;
+  let closed = false;
+  let auth;
+  let client;
+  let clientInitPromise = null;
+
+  const getClient = async () => {
+    if (!auth) { auth = new AirtableAuth(); }
+    if (!client) { client = new AirtableClient(auth); }
+    if (!clientInitPromise) {
+      const pending = auth.init();
+      pending.catch(() => { client = undefined; clientInitPromise = null; });
+      clientInitPromise = pending;
+    }
+    await clientInitPromise;
+    return client;
+  };
+
+  const toolConfig = new ToolConfigManager();
+  const startedAt = Date.now();
+  const sseClients = new Set();
+  const activeMcpClosers = new Set();
+
+  const expressFactory = express;
+  const app = expressFactory();
+  app.use(expressFactory.json({ limit: '1mb' }));
+
+  const requireBearer = (req, res, next) => {
+    const header = req.headers?.authorization ?? '';
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    const provided = match ? match[1] : null;
+    if (provided !== currentToken.bearerToken) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    next();
+  };
+
+  const getHealth = () => ({
+    ok: true,
+    pid: process.pid,
+    uuid: options.uuid ?? null,
+    version,
+    port: getBoundPort(httpServer),
+    uptimeMs: Date.now() - startedAt,
+    startedAt: new Date(startedAt).toISOString(),
+  });
+
+  const publishEvent = (event, payload) => {
+    const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const response of sseClients) {
+      response.write(frame);
+    }
+  };
+
+  app.get('/daemon/health', requireBearer, (_req, res) => {
+    res.json(getHealth());
+  });
+
+  app.get('/daemon/events', requireBearer, (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+    res.write(`event: daemon:ready\ndata: ${JSON.stringify(getHealth())}\n\n`);
+    sseClients.add(res);
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+  });
+
+  app.post('/daemon/heartbeat', requireBearer, (req, res) => {
+    const clientId = typeof req.body?.clientId === 'string' && req.body.clientId.length > 0
+      ? req.body.clientId
+      : 'daemon-client';
+    res.json({ ok: true, clientId });
+  });
+
+  app.post('/daemon/rotate-token', requireBearer, async (_req, res, next) => {
+    try {
+      currentToken = rotateToken({ tokenPath });
+      await options.onTokenRotated?.(currentToken);
+      publishEvent('daemon:token-rotated', {
+        rotatedAt: currentToken.rotatedAt,
+        version: currentToken.version,
+      });
+      res.json({ ok: true, rotatedAt: currentToken.rotatedAt, version: currentToken.version });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/daemon/shutdown', requireBearer, (req, res, next) => {
+    res.json({ ok: true });
+    setImmediate(() => {
+      stop().catch(next);
+    });
+  });
+
+  app.all('/mcp', requireBearer, async (req, res, next) => {
+    try {
+      const mcpServer = new Server(
+        { name: 'airtable-user-mcp', version },
+        { capabilities: { tools: { listChanged: true } } },
+      );
+      toolConfig.bindServer(mcpServer);
+      mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+        tools: options.getTools ? await options.getTools(toolConfig) : [],
+      }));
+      mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+        if (!options.callTool) {
+          return { content: [{ type: 'text', text: 'Daemon not fully initialized' }], isError: true };
+        }
+        return options.callTool(request, getClient, toolConfig);
+      });
+
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+
+      let cleanedUp = false;
+      const cleanup = async () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        activeMcpClosers.delete(cleanup);
+        await mcpServer.close().catch(() => undefined);
+      };
+      activeMcpClosers.add(cleanup);
+      res.on('close', () => { void cleanup(); });
+
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.use((error, _req, res, _next) => {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  });
+
+  let httpServer = createServer(app);
+  try {
+    await listenAvoidingBlockedPorts(httpServer, requestedPort, host);
+  } catch (error) {
+    try { httpServer.close(); } catch { /* ignore */ }
+    httpServer = undefined;
+    throw error;
+  }
+
+  const runShutdownStep = async (label, fn) => {
+    try {
+      await fn();
+    } catch (err) {
+      console.error(`[airtable-mcp] daemon shutdown step '${label}' failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const stop = async () => {
+    if (closed) return;
+    closed = true;
+
+    await runShutdownStep('sse-clients', () => {
+      for (const response of sseClients) {
+        try { response.end(); } catch { /* individual teardown is best-effort */ }
+      }
+      sseClients.clear();
+    });
+
+    for (const cleanup of Array.from(activeMcpClosers)) {
+      await runShutdownStep('mcp-cleanup', () => cleanup());
+    }
+
+    await runShutdownStep('on-shutdown', () => options.onShutdown?.() ?? undefined);
+
+    if (httpServer) {
+      await runShutdownStep('http-close', () =>
+        new Promise((resolve, reject) => {
+          httpServer.close((error) => {
+            if (error) { reject(error); return; }
+            resolve();
+          });
+        }),
+      );
+    }
+  };
+
+  return {
+    host,
+    port: getBoundPort(httpServer),
+    url: `http://${host}:${getBoundPort(httpServer)}`,
+    get bearerToken() {
+      return currentToken.bearerToken;
+    },
+    tokenPath,
+    stop,
+    publishEvent,
+    getHealth,
+  };
+}
