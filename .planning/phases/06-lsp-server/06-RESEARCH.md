@@ -793,22 +793,22 @@ No missing dependencies.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **lockfile.js cross-package import strategy**
+1. **lockfile.js cross-package import strategy** — **RESOLVED**
    - What we know: `lsp-server` needs to call `lockfile.replace()` to write `port_lsp`. `lockfile.js` lives in `packages/mcp-server/src/daemon/`.
    - What's unclear: Should lsp-server import from mcp-server (workspace dep) or duplicate the 30-line `replace()` function?
-   - Recommendation: Duplicate the minimal `replace()` into `lsp-server/src/lockfile-writer.ts` (write-only helper). Avoids circular workspace dependency and keeps packages independent.
+   - Resolution: Duplicate the minimal `replace()` into `lsp-server/src/lockfile-writer.ts` (write-only helper). Avoids circular workspace dependency and keeps packages independent. Implemented in Plan 06-03, Task 1.
 
-2. **LSP subprocess resolution from daemon**
+2. **LSP subprocess resolution from daemon** — **RESOLVED**
    - What we know: `launcher.js` needs to spawn `airtable-user-lsp --tcp`. The daemon process may be running in a context where lsp-server is not in PATH.
    - What's unclear: How does launcher.js find the lsp-server binary at runtime? Options: (A) `require.resolve('airtable-user-lsp/dist/index.mjs')` if installed alongside, (B) `npx airtable-user-lsp --tcp` (implies npm fetch on first run), (C) bundle lsp-server dist into mcp-server dist folder.
-   - Recommendation: Option C for VS Code extension context (bundle alongside MCP server). For standalone daemon, fall back to `npx`.
+   - Resolution: Use `resolveCliEntry()`-style resolution with candidate paths (extension dist, relative node_modules), falling back to `npx airtable-user-lsp` for standalone daemon users. Implemented in Plan 06-04, Task 1.
 
-3. **`--lockfile` flag vs env var for port_lsp path**
+3. **`--lockfile` flag vs env var for port_lsp path** — **RESOLVED**
    - What we know: LSP subprocess needs to know where to write `port_lsp`.
    - What's unclear: Pass lockfile path as `--lockfile <path>` CLI arg, or via env var `AIRTABLE_USER_MCP_HOME` (existing pattern)?
-   - Recommendation: Use `AIRTABLE_USER_MCP_HOME` env var (already passed to daemon subprocesses per existing pattern in `spawnDetachedDaemon`). lsp-server reads it to find config dir, derives lockfile path.
+   - Resolution: Use `AIRTABLE_USER_MCP_HOME` env var (already passed to daemon subprocesses per existing pattern in `spawnDetachedDaemon`). lsp-server reads it to find config dir, derives lockfile path. Implemented in Plan 06-03 (lockfile-writer.ts reads env var) and Plan 06-04 (launcher.js passes env var at spawn).
 
 ---
 

@@ -192,9 +192,9 @@ Plans:
   1. A developer running `npx airtable-user-lsp --stdio` in any terminal gets a working LSP server without installing anything beyond Node.js
   2. An editor connected to the LSP server receives diagnostics, completions, and hover for `.formula`, `.ats`, and `.ata` files identical to what VS Code provides
   3. The LSP server starts and serves requests with no daemon running — it works fully standalone
-  4. When a daemon is already running, a second LSP client discovers the daemon's `port_lsp` from the lockfile and attaches to the shared LSP TCP port instead of spawning a new process
+  4. When the daemon is running, external editors discover `port_lsp` from `~/.airtable-user-mcp/daemon.lock` and connect directly to the shared TCP LSP port — `npx airtable-user-lsp --stdio` always starts a fresh in-process instance (no proxy to daemon TCP)
   5. The daemon lockfile contains a `port_lsp` field that LSP clients can read to discover the shared LSP port
-**Plans**: 5 plans
+**Plans**: 5 plans *(PLANNED 2026-05-14 — ready for execution)*
 Plans:
 **Wave 1** *(no dependencies)*
 - [ ] 06-01-PLAN.md — Create packages/lsp-server/ workspace package scaffold: package.json, tsconfig.json, tsup.config.ts, vitest.config.ts, and 3 Wave 0 test scaffolds (LSP-01, LSP-02) [Wave 1, autonomous]
@@ -206,10 +206,10 @@ Plans:
 - [ ] 06-03-PLAN.md — Implement lockfile-writer.ts (atomic port_lsp write), tcp-server.ts (net.createServer port 0, 127.0.0.1), server.ts (registerHandlers per-connection), index.ts (--tcp/--stdio entry point) (LSP-03, LSP-04, LSP-05) [Wave 3, depends_on: 06-02, autonomous]
 
 **Wave 4** *(depends on 06-03)*
-- [ ] 06-04-PLAN.md — Daemon integration: spawn airtable-user-lsp --tcp in launcher.js startDaemon(); SIGTERM lspChild in finalize(); lsp-child shutdown step in server.js stop() (LSP-04, LSP-05) [Wave 4, depends_on: 06-03, autonomous]
+- [ ] 06-04-PLAN.md — Daemon integration: spawn airtable-user-lsp --tcp in launcher.js startDaemon(); SIGTERM lspChild in finalize(); setLspChild()+lsp-child shutdown step in server.js stop() (LSP-04, LSP-05) [Wave 4, depends_on: 06-03, autonomous]
 
 **Wave 5** *(depends on 06-03 and 06-04)*
-- [ ] 06-05-PLAN.md — Add lsp-server target to release.yml (version bump + npm publish + tag + GitHub Release); create packages/lsp-server/README.md (LSP-01) [Wave 5, depends_on: 06-03, 06-04, autonomous]
+- [ ] 06-05-PLAN.md — Build lsp-server + add lsp-server target to release.yml (version bump + build + npm publish + tag + GitHub Release); create packages/lsp-server/README.md (LSP-01) [Wave 5, depends_on: 06-03, 06-04, autonomous]
 
 **UI hint**: no
 
