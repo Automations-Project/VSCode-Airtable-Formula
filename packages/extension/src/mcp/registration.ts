@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { MCP_PROVIDER_ID, MCP_SERVER_LABEL } from '../constants.js';
 import { getBundledServerPath } from './server-path.js';
 import type { AuthManager } from './auth-manager.js';
+import type { DaemonManager } from './daemon-manager.js';
 import { getSettings } from '../settings.js';
 
 type McpCtor = new (...args: unknown[]) => unknown;
@@ -35,6 +36,7 @@ export function registerMcpProvider(
   context: vscode.ExtensionContext,
   onChanged: vscode.EventEmitter<void>,
   authManager?: AuthManager,
+  daemonManager?: DaemonManager,
 ): void {
   const lmApi = (vscode as unknown as {
     lm?: {
@@ -59,15 +61,30 @@ export function registerMcpProvider(
       onDidChangeMcpServerDefinitions: onChanged.event,
       provideMcpServerDefinitions: async () => {
         try {
+          // ── HTTP definition branch (D-03) ──────────────────────────────
+          const settings = getSettings();
+          if (settings.mcp.useDaemon && daemonManager) {
+            const daemonStatus = await daemonManager.getDaemonStatus();
+            if (daemonStatus.healthy && daemonStatus.port != null && daemonStatus.bearerToken != null) {
+              const httpDef = createHttpDefinition(
+                `http://127.0.0.1:${daemonStatus.port}/mcp`,
+                `Bearer ${daemonStatus.bearerToken}`,
+              );
+              if (httpDef) return [httpDef];
+            }
+          }
+
+          // ── Stdio fallback ─────────────────────────────────────────────
           const serverPath = getBundledServerPath(context);
           const nodeModulesPath = path.resolve(path.dirname(serverPath), '..', 'node_modules');
           const env: Record<string, string> = {
             AIRTABLE_HEADLESS_ONLY: '1',
             NODE_PATH: nodeModulesPath,
+            AIRTABLE_NO_DAEMON: '1',
           };
 
           // Propagate debug settings as env vars for the MCP debug-tracer
-          const debugSettings = getSettings().debug;
+          const debugSettings = settings.debug;
           if (debugSettings.enabled) {
             env.AIRTABLE_DEBUG = '1';
           }
@@ -77,7 +94,6 @@ export function registerMcpProvider(
 
           // Pass stored credentials so MCP server can auto-recover sessions
           if (authManager) {
-            const settings = getSettings();
             // Only forward credentials when loginMode is 'auto'
             if (settings.auth.loginMode === 'auto') {
               const credEnv = await authManager.getCredentialsEnv();

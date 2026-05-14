@@ -165,6 +165,14 @@
         "category": "Airtable Formula"
       },
       {
+        "command": "airtable-formula.stopDaemon",
+        "title": "Airtable Formula: Stop Daemon"
+      },
+      {
+        "command": "airtable-formula.restartDaemon",
+        "title": "Airtable Formula: Restart Daemon"
+      },
+      {
         "command": "airtable-formula.switchToolProfile",
         "title": "Airtable Formula: Switch MCP Tool Profile",
         "category": "Airtable Formula"

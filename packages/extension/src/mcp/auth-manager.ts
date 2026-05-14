@@ -6,6 +6,7 @@ import type { AuthState, BrowserDownloadState } from '@airtable-formula/shared';
 import { getSettings } from '../settings.js';
 import { detectBrowser, detectAllBrowsers, type BrowserProbe } from './browser-detect.js';
 import type { BrowserDownloadManager } from './browser-download.js';
+import type { DaemonManager } from './daemon-manager.js';
 import { processStderrChunk } from '../debug/stderr-parser.js';
 import type { DebugCollector } from '../debug/collector.js';
 
@@ -37,11 +38,15 @@ export class AuthManager implements vscode.Disposable {
   private _downloadManager?: BrowserDownloadManager;
   private _downloadListener?: vscode.Disposable;
   private _debugCollector?: DebugCollector;
+  private _daemonManager?: DaemonManager;
 
   constructor(
     private readonly secrets: vscode.SecretStorage,
     private readonly extensionPath: string,
-  ) {}
+    daemonManager?: DaemonManager,
+  ) {
+    this._daemonManager = daemonManager;
+  }
 
   /**
    * Attach an optional BrowserDownloadManager so the AuthManager can:
@@ -235,6 +240,10 @@ export class AuthManager implements vscode.Disposable {
    * Returns undefined if no credentials are stored.
    */
   async getCredentialsEnv(): Promise<Record<string, string> | undefined> {
+    // D-02: ensure daemon is running before handing off credentials
+    if (getSettings().mcp.useDaemon && this._daemonManager) {
+      await this._daemonManager.ensureDaemon();
+    }
     const email = await this.getEmail();
     const password = await this.getPassword();
     if (!email || !password) return undefined;

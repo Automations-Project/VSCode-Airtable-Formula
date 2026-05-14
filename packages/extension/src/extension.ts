@@ -11,8 +11,10 @@ import { DashboardProvider } from './webview/DashboardProvider.js';
 import { registerLanguageProviders } from './language/registration.js';
 import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
+import { DaemonManager } from './mcp/daemon-manager.js';
 import { BrowserDownloadManager } from './mcp/browser-download.js';
 import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES } from './mcp/tool-profile.js';
+import { scriptBeautify, scriptMinify, scriptBeautifyFile, scriptMinifyFile, formatScriptDocument } from './commands/scriptFormatter.js';
 
 // Inlined to avoid pulling shared/ESM types into the CJS extension DTS build.
 // These must mirror the ToolProfileName / ToolCategories definitions in
@@ -362,38 +364,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // ── Script / Automation formatter (Prettier + Terser) ───────────────────
     const scriptFormatter = vscode.languages.registerDocumentFormattingEditProvider(
         ['airtable-script', 'airtable-automation'],
-        {
-            async provideDocumentFormattingEdits(document) {
-                const { formatScriptDocument } = await import('./commands/scriptFormatter.js');
-                return formatScriptDocument(document);
-            },
-        }
+        { provideDocumentFormattingEdits: (document) => formatScriptDocument(document) }
     );
 
-    const scriptBeautifyCmd = vscode.commands.registerCommand('airtable-formula.script.beautify', async () => {
-        const { scriptBeautify } = await import('./commands/scriptFormatter.js');
-        await scriptBeautify();
-    });
-
-    const scriptMinifyCmd = vscode.commands.registerCommand('airtable-formula.script.minify', async () => {
-        const { scriptMinify } = await import('./commands/scriptFormatter.js');
-        await scriptMinify();
-    });
-
+    const scriptBeautifyCmd = vscode.commands.registerCommand('airtable-formula.script.beautify', () => scriptBeautify());
+    const scriptMinifyCmd   = vscode.commands.registerCommand('airtable-formula.script.minify',   () => scriptMinify());
     const scriptBeautifyFileCmd = vscode.commands.registerCommand(
         'airtable-formula.script.beautifyFile',
-        async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
-            const { scriptBeautifyFile } = await import('./commands/scriptFormatter.js');
-            await scriptBeautifyFile(uri, uris);
-        }
+        (uri?: vscode.Uri, uris?: vscode.Uri[]) => scriptBeautifyFile(uri, uris)
     );
-
     const scriptMinifyFileCmd = vscode.commands.registerCommand(
         'airtable-formula.script.minifyFile',
-        async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
-            const { scriptMinifyFile } = await import('./commands/scriptFormatter.js');
-            await scriptMinifyFile(uri, uris);
-        }
+        (uri?: vscode.Uri, uris?: vscode.Uri[]) => scriptMinifyFile(uri, uris)
     );
 
     context.subscriptions.push(
@@ -404,8 +386,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         scriptMinifyFileCmd,
     );
 
+    // ── Daemon Manager ───────────────────────────────────────────────────
+    const daemonConfigDir = path.join(os.homedir(), '.airtable-user-mcp');
+    const daemonManager = new DaemonManager(daemonConfigDir, context.extensionPath);
+    context.subscriptions.push(daemonManager);
+
     // ── Auth Manager + Browser Download Manager ──────────────────────────
-    const authManager = new AuthManager(context.secrets, context.extensionPath);
+    const authManager = new AuthManager(context.secrets, context.extensionPath, daemonManager);
     const browserDownloadManager = new BrowserDownloadManager(context, context.extensionPath);
     authManager.attachDownloadManager(browserDownloadManager);
     authManager.setDebugCollector(debugCollector);
@@ -570,6 +557,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('airtable-formula.openToolConfig', async () => {
             await toolProfileManager.openConfigFile();
         }),
+        vscode.commands.registerCommand('airtable-formula.stopDaemon', async () => {
+            await daemonManager.stopDaemon();
+            vscode.window.showInformationMessage('Airtable Formula: Daemon stopped.');
+            dashboardProvider.refresh();
+        }),
+        vscode.commands.registerCommand('airtable-formula.restartDaemon', async () => {
+            await daemonManager.restartDaemon();
+            vscode.window.showInformationMessage('Airtable Formula: Daemon restarted.');
+            dashboardProvider.refresh();
+        }),
         vscode.commands.registerCommand('airtable-formula.install-browser', async () => {
             vscode.window.withProgress(
                 { location: vscode.ProgressLocation.Notification, title: 'Airtable Formula: Downloading bundled Chromium...', cancellable: false },
@@ -668,7 +665,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // ── Native MCP registration ──────────────────────────────────────────
     const mcpChanged = new vscode.EventEmitter<void>();
     context.subscriptions.push(mcpChanged);
-    registerMcpProvider(context, mcpChanged, authManager);
+    registerMcpProvider(context, mcpChanged, authManager, daemonManager);
 
     // ── Auth init & auto-refresh ─────────────────────────────────────────
     await authManager.init();
