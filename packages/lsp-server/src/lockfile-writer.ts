@@ -19,7 +19,7 @@ export function writeLspPort(lockPath: string, port: number): boolean {
     return false;
   }
   const updated = { ...existing, port_lsp: port };
-  const tempPath = `${lockPath}.lsp.tmp`;
+  const tempPath = `${lockPath}.lsp.tmp`; // Must be same directory as lockPath for atomic rename
   mkdirSync(dirname(lockPath), { recursive: true });
   writeFileSync(tempPath, JSON.stringify(updated, null, 2) + '\n', 'utf8');
   renameSync(tempPath, lockPath); // atomic replace (lockfile.js lines 121-123 pattern)
