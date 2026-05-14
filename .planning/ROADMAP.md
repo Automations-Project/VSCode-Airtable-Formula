@@ -222,7 +222,33 @@ Plans:
   2. The tunnel URL appears in the Setup tab dashboard immediately after activation and persists across extension reloads (read from lockfile)
   3. When the tunnel receives a burst of 401 responses, it disables automatically and a warning banner appears in the Setup tab without requiring user action
   4. A user can switch between Cloudflare and ngrok tunnel providers from VS Code settings without manual CLI steps
-**Plans**: TBD
+**Plans**: 9 plans *(PLANNED 2026-05-15 — ready for execution)*
+Plans:
+**Wave 1** *(test scaffolds — no dependencies)*
+- [ ] 07-01-PLAN.md — Create 3 Wave-0 test stub files: test-tunnel-allowlist, test-tunnel-lifecycle, test-tunnel-settings (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 1, autonomous]
+
+**Wave 2** *(depends on 07-01)*
+- [ ] 07-02-PLAN.md — Create safe-write.js, cloudflared-pins.json, tunnel.js, install-tunnel.js (TUNNEL-01, TUNNEL-02) [Wave 2, depends_on: 07-01, autonomous]
+
+**Wave 3** *(07-03 and 07-04 parallel — no file overlap)*
+- [ ] 07-03-PLAN.md — Create tunnel-providers/types.js, cloudflared-quick.js, ngrok.js (TUNNEL-01, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
+- [ ] 07-04-PLAN.md — Create tunnel-providers/cloudflared-named.js, cloudflared-named-setup.js, index.js (TUNNEL-01, TUNNEL-03, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
+
+**Wave 4** *(depends on 07-03 and 07-04)*
+- [ ] 07-05-PLAN.md — Modify server.js: allowlist middleware + 401-burst tripwire + enable-tunnel/disable-tunnel endpoints + health tunnelUrl (TUNNEL-01, TUNNEL-03) [Wave 4, depends_on: 07-03, 07-04, autonomous]
+
+**Wave 5** *(depends on 07-05)*
+- [ ] 07-06-PLAN.md — Modify launcher.js: tunnel auto-start + finalize stop + lockfile tunnelUrl; update daemon/index.js barrel (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 5, depends_on: 07-05, autonomous]
+
+**Wave 6** *(depends on 07-06)*
+- [ ] 07-07-PLAN.md — Add TunnelState types to shared/types.ts; add tunnel messages to shared/messages.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 6, depends_on: 07-06, autonomous]
+
+**Wave 7** *(depends on 07-07)*
+- [ ] 07-08-PLAN.md — Add tunnel handlers + setDaemonManager + _computeTunnelState to DashboardProvider.ts; wire in extension.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03) [Wave 7, depends_on: 07-07, autonomous]
+
+**Wave 8** *(depends on 07-08)*
+- [ ] 07-09-PLAN.md — Add tunnel glass-panel to Setup.tsx + store.ts tunnel actions + package.json tunnel.disable command (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 8, depends_on: 07-08, autonomous]
+
 **UI hint**: yes
 
 #### Phase 8: Setup Tab UI
@@ -258,6 +284,6 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
 | 6. LSP Server | 5/5 | Complete | 2026-05-15 |
-| 7. Tunnel Support | 0/? | Not started | - |
+| 7. Tunnel Support | 0/9 | Planned | - |
 | 8. Setup Tab UI | 0/? | Not started | - |
 | 9. Documentation | 0/? | Not started | - |
