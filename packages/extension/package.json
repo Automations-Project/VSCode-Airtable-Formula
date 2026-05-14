@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.37",
+  "version": "2.0.47",
   "publisher": "Nskha",
   "displayName": "Airtable Formula",
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
@@ -347,6 +347,11 @@
           "default": true,
           "description": "Show notification when MCP server updates are available."
         },
+        "airtableFormula.mcp.useDaemon": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start and use a shared daemon process for MCP server. Disable to use a direct per-session process (legacy behavior)."
+        },
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",
@@ -612,12 +617,12 @@
   },
   "dependencies": {
     "@airtable-formula/shared": "workspace:*",
-    "@airtable-formula/language-services": "workspace:*",
-    "prettier": "^3.0.0",
-    "terser": "^5.0.0"
+    "@airtable-formula/language-services": "workspace:*"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
+    "prettier": "3.8.3",
+    "terser": "^5.0.0",
     "@types/archiver": "^7.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.100.0",

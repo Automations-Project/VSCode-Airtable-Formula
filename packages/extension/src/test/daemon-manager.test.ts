@@ -7,6 +7,7 @@ import * as fs from 'fs';
 vi.mock('vscode', () => ({
   EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),
   Disposable: vi.fn(),
+  McpHttpServerDefinition: undefined,
 }));
 
 // RED state — DaemonManager import will fail (module not yet created in 05-06-PLAN.md)

@@ -8,6 +8,16 @@ import { getSettings } from '../settings.js';
 
 type McpCtor = new (...args: unknown[]) => unknown;
 
+export function createHttpDefinition(url: string, authHeader: string): unknown | null {
+  const httpCtor = (vscode as unknown as { McpHttpServerDefinition?: McpCtor }).McpHttpServerDefinition;
+  if (!httpCtor) return null;
+  try {
+    return new httpCtor({ url, headers: { Authorization: authHeader } });
+  } catch {
+    return new httpCtor(url, { Authorization: authHeader });
+  }
+}
+
 function createStdioDefinition(
   label: string, command: string, args: string[],
   env: Record<string, string>, version: string
