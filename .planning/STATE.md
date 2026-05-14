@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
-stopped_at: Phase 06 planning complete
-last_updated: "2026-05-14T23:00:00.000Z"
-last_activity: 2026-05-14 -- Phase 06 plan-phase complete (5 plans, VERIFICATION PASSED)
+stopped_at: Phase 06 complete — 3 code review criticals pending fix
+last_updated: "2026-05-15T00:00:00.000Z"
+last_activity: 2026-05-15 -- Phase 06 execution complete (5/5 plans, 21 tests green)
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 7
-  completed_plans: 7
-  percent: 20
+  completed_phases: 2
+  total_plans: 12
+  completed_plans: 12
+  percent: 40
 ---
 
 # Project State
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 06 — lsp-server
+**Current focus:** Phase 06 complete — Phase 07 (Tunnel Support) or Phase 08 (Setup Tab UI) next
 
 ## Current Position
 
-Phase: 06 (lsp-server) — PLANNING COMPLETE ✓
-Plan: 0 of 5 (ready for execution)
-Status: Ready for execution
-Last activity: 2026-05-14 -- Phase 06 plan-phase complete (VERIFICATION PASSED)
+Phase: 06 (lsp-server) — EXECUTION COMPLETE ✓
+Plan: 5 of 5 (all plans done)
+Status: Human verification pending (npm publish) + 3 code review criticals to fix
+Last activity: 2026-05-15 -- Phase 06 execution complete
 
 ```
-Progress: [██        ] 20% (1/5 phases complete)
+Progress: [████      ] 40% (2/5 phases complete)
 ```
 
 ## Performance Metrics
@@ -51,7 +51,7 @@ Progress: [██        ] 20% (1/5 phases complete)
 | 03 | 7 | - | - |
 | 04 | 7 | - | - |
 
-**v2.0 phases (pending):**
+**v2.0 phases:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
@@ -63,7 +63,7 @@ Progress: [██        ] 20% (1/5 phases complete)
 
 **Recent Trend:**
 
-- Last session: Roadmap definition (2026-05-14)
+- Last session: Phase 06 execution (2026-05-15)
 - Trend: on track
 
 ## Accumulated Context
@@ -81,11 +81,12 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None.
+- Fix 3 code review criticals from 06-REVIEW.md (CR-01 socket error handler, CR-02 release.yml `both` target, CR-03 double SIGTERM)
+- Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
 
 ### Blockers/Concerns
 
-None. Roadmap defined and ready.
+None blocking. Phase 06 criticals are safety/correctness fixes for pre-release.
 
 ### Known Advisory Issues (non-blocking)
 
@@ -96,9 +97,15 @@ From Phase 3 REVIEW.md (v1.0) — not fixed but documented:
 - I-2: Destructured bindings not collected in buildLocalSymbols (best-effort per D-04)
 - I-3: Method hover missing `range` field
 
+From Phase 6 REVIEW.md — criticals pending fix:
+
+- CR-01: tcp-server.ts missing socket.on('error') handler — ECONNRESET kills whole server
+- CR-02: release.yml `both` target doesn't include lsp-server
+- CR-03: launcher.js double SIGTERM / dual lspChild reference
+
 ## Session Continuity
 
-Last session: 2026-05-14 — Phase 06 plan-phase complete
-Stopped at: Phase 06 planning complete — 5 plans (06-01 through 06-05), VERIFICATION PASSED
-Next: `/gsd-execute-phase 6` — Execute Phase 06 LSP Server
-Resume file: .planning/phases/06-lsp-server/ (all 5 PLAN.md files ready)
+Last session: 2026-05-15 — Phase 06 execution complete
+Stopped at: All 5 plans executed, 21 tests green, code review complete
+Next: Fix CR-01/CR-02/CR-03 from 06-REVIEW.md, then publish airtable-user-lsp to npm
+Resume file: .planning/phases/06-lsp-server/06-REVIEW.md

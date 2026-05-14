@@ -143,7 +143,7 @@ This milestone upgrades the MCP server to a shared daemon with HTTP transport, e
 ### Phases
 
 - [ ] **Phase 5: Daemon Core** - Daemon lockfile, HTTP MCP server, stdio-daemon-proxy, launcher, and VS Code extension wiring
-- [ ] **Phase 6: LSP Server** - New `packages/lsp-server/` workspace package published as `airtable-user-lsp` npm package
+- [x] **Phase 6: LSP Server** - New `packages/lsp-server/` workspace package published as `airtable-user-lsp` npm package
 - [ ] **Phase 7: Tunnel Support** - Cloudflare/ngrok tunnel integration added to daemon server
 - [ ] **Phase 8: Setup Tab UI** - Unified daemon status block, MCP config snippets, and LSP config snippets in webview
 - [ ] **Phase 9: Documentation** - CHANGELOG, READMEs, and CLAUDE.md updated for v2.0 features
@@ -197,19 +197,19 @@ Plans:
 **Plans**: 5 plans *(PLANNED 2026-05-14 — ready for execution)*
 Plans:
 **Wave 1** *(no dependencies)*
-- [ ] 06-01-PLAN.md — Create packages/lsp-server/ workspace package scaffold: package.json, tsconfig.json, tsup.config.ts, vitest.config.ts, and 3 Wave 0 test scaffolds (LSP-01, LSP-02) [Wave 1, autonomous]
+- [x] 06-01-PLAN.md — Create packages/lsp-server/ workspace package scaffold: package.json, tsconfig.json, tsup.config.ts, vitest.config.ts, and 3 Wave 0 test scaffolds (LSP-01, LSP-02) [Wave 1, autonomous]
 
 **Wave 2** *(depends on 06-01)*
-- [ ] 06-02-PLAN.md — Implement lsp-convert.ts (6 LsXxx→LSP conversion functions, +1 offset) and router.ts (routeDocument with D-07 language ID + extension map) (LSP-02, LSP-03) [Wave 2, depends_on: 06-01, autonomous]
+- [x] 06-02-PLAN.md — Implement lsp-convert.ts (6 LsXxx→LSP conversion functions, +1 offset) and router.ts (routeDocument with D-07 language ID + extension map) (LSP-02, LSP-03) [Wave 2, depends_on: 06-01, autonomous]
 
 **Wave 3** *(depends on 06-02)*
-- [ ] 06-03-PLAN.md — Implement lockfile-writer.ts (atomic port_lsp write), tcp-server.ts (net.createServer port 0, 127.0.0.1), server.ts (registerHandlers per-connection), index.ts (--tcp/--stdio entry point) (LSP-03, LSP-04, LSP-05) [Wave 3, depends_on: 06-02, autonomous]
+- [x] 06-03-PLAN.md — Implement lockfile-writer.ts (atomic port_lsp write), tcp-server.ts (net.createServer port 0, 127.0.0.1), server.ts (registerHandlers per-connection), index.ts (--tcp/--stdio entry point) (LSP-03, LSP-04, LSP-05) [Wave 3, depends_on: 06-02, autonomous]
 
 **Wave 4** *(depends on 06-03)*
-- [ ] 06-04-PLAN.md — Daemon integration: spawn airtable-user-lsp --tcp in launcher.js startDaemon(); SIGTERM lspChild in finalize(); setLspChild()+lsp-child shutdown step in server.js stop() (LSP-04, LSP-05) [Wave 4, depends_on: 06-03, autonomous]
+- [x] 06-04-PLAN.md — Daemon integration: spawn airtable-user-lsp --tcp in launcher.js startDaemon(); SIGTERM lspChild in finalize(); setLspChild()+lsp-child shutdown step in server.js stop() (LSP-04, LSP-05) [Wave 4, depends_on: 06-03, autonomous]
 
 **Wave 5** *(depends on 06-03 and 06-04)*
-- [ ] 06-05-PLAN.md — Build lsp-server + add lsp-server target to release.yml (version bump + build + npm publish + tag + GitHub Release); create packages/lsp-server/README.md (LSP-01) [Wave 5, depends_on: 06-03, 06-04, autonomous]
+- [x] 06-05-PLAN.md — Build lsp-server + add lsp-server target to release.yml (version bump + build + npm publish + tag + GitHub Release); create packages/lsp-server/README.md (LSP-01) [Wave 5, depends_on: 06-03, 06-04, autonomous]
 
 **UI hint**: no
 
@@ -257,7 +257,7 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
-| 6. LSP Server | 0/5 | Not started | - |
+| 6. LSP Server | 5/5 | Complete | 2026-05-15 |
 | 7. Tunnel Support | 0/? | Not started | - |
 | 8. Setup Tab UI | 0/? | Not started | - |
 | 9. Documentation | 0/? | Not started | - |
