@@ -25,7 +25,18 @@ findings:
   warning: 7
   info: 4
   total: 14
-status: issues_found
+status: fixed
+fixed:
+  - CR-01
+  - CR-02
+  - CR-03
+  - WR-01
+  - WR-02
+  - WR-03
+  - WR-04
+  - WR-05
+  - WR-06
+  - WR-07
 ---
 
 # Phase 06: LSP Server — Code Review Report
