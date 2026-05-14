@@ -23,6 +23,9 @@ Usage:
   npx airtable-user-mcp status           Show session & browser info
   npx airtable-user-mcp doctor           Run diagnostics
   npx airtable-user-mcp install-browser  Download Chromium (~170MB)
+  npx airtable-user-mcp daemon start     Start the shared daemon process
+  npx airtable-user-mcp daemon stop      Stop the running daemon
+  npx airtable-user-mcp daemon status    Show daemon status (JSON)
   npx airtable-user-mcp --version        Print version
   npx airtable-user-mcp --help           Show this help
 
@@ -31,6 +34,7 @@ Environment:
   AIRTABLE_NO_BROWSER       Skip patchright, use manual session only
   AIRTABLE_HEADLESS_ONLY    Run browser in headless mode
   AIRTABLE_LOG_LEVEL        debug | info | warn | error
+  AIRTABLE_NO_DAEMON        Skip daemon; run in-process stdio directly
 \n`);
 }
 
@@ -132,6 +136,31 @@ export async function runCli(args) {
       process.stderr.write('Make sure patchright is installed: npm install patchright\n');
       process.exitCode = 1;
     }
+    return true;
+  }
+
+  if (cmd === 'daemon') {
+    const subcmd = args[1];
+    if (subcmd === 'start') {
+      const { startDaemon } = await import('./daemon/launcher.js');
+      await startDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
+      return true;
+    }
+    if (subcmd === 'stop') {
+      const { stopDaemon } = await import('./daemon/launcher.js');
+      await stopDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
+      process.stdout.write('Daemon stopped.\n');
+      return true;
+    }
+    if (subcmd === 'status') {
+      const { getDaemonStatus } = await import('./daemon/launcher.js');
+      const status = await getDaemonStatus({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
+      process.stdout.write(JSON.stringify(status, null, 2) + '\n');
+      return true;
+    }
+    process.stderr.write('Unknown daemon subcommand: ' + (subcmd ?? '(none)') + '\n');
+    process.stderr.write('Usage: airtable-user-mcp daemon [start|stop|status]\n');
+    process.exitCode = 1;
     return true;
   }
 
