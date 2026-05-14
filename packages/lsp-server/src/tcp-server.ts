@@ -31,6 +31,14 @@ export async function startTcpServer(options: StartTcpServerOptions = {}): Promi
   const lockPath = resolveLockPath(options);
 
   const tcpServer = net.createServer((socket) => {
+    // Isolate per-socket errors — without this, ECONNRESET/EPIPE are uncaught exceptions
+    socket.on('error', (err) => {
+      // ECONNRESET is expected when editors close abruptly — not worth logging
+      if ((err as NodeJS.ErrnoException).code !== 'ECONNRESET') {
+        process.stderr.write(`[airtable-user-lsp] socket error: ${err.message}\n`);
+      }
+      socket.destroy();
+    });
     const reader = new StreamMessageReader(socket);
     const writer = new StreamMessageWriter(socket);
     // Each connection gets its OWN Connection instance (RESEARCH.md Pitfall 5)
