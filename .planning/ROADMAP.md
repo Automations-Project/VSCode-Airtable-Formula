@@ -194,7 +194,23 @@ Plans:
   3. The LSP server starts and serves requests with no daemon running — it works fully standalone
   4. When a daemon is already running, a second LSP client discovers the daemon's `port_lsp` from the lockfile and attaches to the shared LSP TCP port instead of spawning a new process
   5. The daemon lockfile contains a `port_lsp` field that LSP clients can read to discover the shared LSP port
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+**Wave 1** *(no dependencies)*
+- [ ] 06-01-PLAN.md — Create packages/lsp-server/ workspace package scaffold: package.json, tsconfig.json, tsup.config.ts, vitest.config.ts, and 3 Wave 0 test scaffolds (LSP-01, LSP-02) [Wave 1, autonomous]
+
+**Wave 2** *(depends on 06-01)*
+- [ ] 06-02-PLAN.md — Implement lsp-convert.ts (6 LsXxx→LSP conversion functions, +1 offset) and router.ts (routeDocument with D-07 language ID + extension map) (LSP-02, LSP-03) [Wave 2, depends_on: 06-01, autonomous]
+
+**Wave 3** *(depends on 06-02)*
+- [ ] 06-03-PLAN.md — Implement lockfile-writer.ts (atomic port_lsp write), tcp-server.ts (net.createServer port 0, 127.0.0.1), server.ts (registerHandlers per-connection), index.ts (--tcp/--stdio entry point) (LSP-03, LSP-04, LSP-05) [Wave 3, depends_on: 06-02, autonomous]
+
+**Wave 4** *(depends on 06-03)*
+- [ ] 06-04-PLAN.md — Daemon integration: spawn airtable-user-lsp --tcp in launcher.js startDaemon(); SIGTERM lspChild in finalize(); lsp-child shutdown step in server.js stop() (LSP-04, LSP-05) [Wave 4, depends_on: 06-03, autonomous]
+
+**Wave 5** *(depends on 06-03 and 06-04)*
+- [ ] 06-05-PLAN.md — Add lsp-server target to release.yml (version bump + npm publish + tag + GitHub Release); create packages/lsp-server/README.md (LSP-01) [Wave 5, depends_on: 06-03, 06-04, autonomous]
+
 **UI hint**: no
 
 #### Phase 7: Tunnel Support
@@ -241,7 +257,7 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
-| 6. LSP Server | 0/? | Not started | - |
+| 6. LSP Server | 0/5 | Not started | - |
 | 7. Tunnel Support | 0/? | Not started | - |
 | 8. Setup Tab UI | 0/? | Not started | - |
 | 9. Documentation | 0/? | Not started | - |
