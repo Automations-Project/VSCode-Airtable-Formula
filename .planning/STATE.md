@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
-stopped_at: Phase 07 context gathered — ready for /gsd-ui-phase 7 then /gsd-plan-phase 7
+stopped_at: Phase 07 UI-SPEC approved — ready for /gsd-plan-phase 7
 last_updated: "2026-05-15T00:00:00.000Z"
-last_activity: 2026-05-15 -- Phase 07 discuss-phase complete (7 decisions captured in 07-CONTEXT.md)
+last_activity: 2026-05-15 -- Phase 07 UI-SPEC approved (6/6 dimensions, 2 non-blocking flags)
 progress:
   total_phases: 5
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 07 (Tunnel Support) — discuss-phase complete, UI design + planning next
+**Current focus:** Phase 07 (Tunnel Support) — UI-SPEC approved, planning next
 
 ## Current Position
 
-Phase: 07 (tunnel-support) — DISCUSS-PHASE COMPLETE ✓
+Phase: 07 (tunnel-support) — UI-SPEC APPROVED ✓
 Plan: 0 of TBD (planning not yet started)
-Status: Ready for /gsd-ui-phase 7 → /gsd-plan-phase 7
-Last activity: 2026-05-15 -- Phase 07 discuss-phase complete (7 decisions captured)
+Status: Ready for /gsd-plan-phase 7
+Last activity: 2026-05-15 -- Phase 07 UI-SPEC approved (6/6 dimensions, 2 non-blocking flags)
 
 ```
 Progress: [████      ] 40% (2/5 phases complete)
@@ -83,7 +83,6 @@ Recent decisions affecting current work:
 
 - Fix 3 code review criticals from 06-REVIEW.md (CR-01 socket error handler, CR-02 release.yml `both` target, CR-03 double SIGTERM)
 - Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
-- Run /gsd-ui-phase 7 — generate UI design contract for Setup tab tunnel section
 - Run /gsd-plan-phase 7 — plan Phase 7 execution
 
 ### Blockers/Concerns
@@ -107,7 +106,7 @@ From Phase 6 REVIEW.md — criticals pending fix:
 
 ## Session Continuity
 
-Last session: 2026-05-15 — Phase 07 discuss-phase complete
-Stopped at: 7 decisions captured in 07-CONTEXT.md; UI design and planning not yet started
-Next: /gsd-ui-phase 7 → /gsd-plan-phase 7
-Resume file: .planning/phases/07-tunnel-support/07-CONTEXT.md
+Last session: 2026-05-15 — Phase 07 UI-SPEC approved
+Stopped at: UI-SPEC complete; planning not yet started
+Next: /gsd-plan-phase 7
+Resume file: .planning/phases/07-tunnel-support/07-UI-SPEC.md
