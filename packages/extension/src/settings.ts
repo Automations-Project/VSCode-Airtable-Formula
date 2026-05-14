@@ -6,6 +6,7 @@ export interface Settings {
   mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx' };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
+  script: { beautifyStyle: string; minifyLevel: string };
   auth: { autoRefresh: boolean; refreshIntervalHours: number; loginMode: 'manual' | 'auto'; browserChoice?: { mode: 'auto' | 'custom'; channel?: string; executablePath?: string; label?: string } };
   debug: { enabled: boolean; bufferSize: number; verboseHttp: boolean };
 }
@@ -26,6 +27,10 @@ export function getSettings(): Settings {
     formula: {
       formatterVersion:      cfg.get('formula.formatterVersion', 'v2') as 'v1' | 'v2',
       defaultBeautifyStyle:  cfg.get('formula.defaultBeautifyStyle', 'readable'),
+    },
+    script: {
+      beautifyStyle: cfg.get('script.beautifyStyle', 'default'),
+      minifyLevel:   cfg.get('script.minifyLevel', 'standard'),
     },
     auth: {
       autoRefresh:           cfg.get('auth.autoRefresh', true),

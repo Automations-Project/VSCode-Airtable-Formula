@@ -238,6 +238,28 @@
         "command": "airtable-formula.minifyFile",
         "title": "Minify .formula File",
         "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.script.beautify",
+        "title": "Airtable Script: Beautify (Pick Style…)",
+        "category": "Airtable Script",
+        "enablement": "editorLangId == airtable-script || editorLangId == airtable-automation"
+      },
+      {
+        "command": "airtable-formula.script.minify",
+        "title": "Airtable Script: Minify (Pick Level…)",
+        "category": "Airtable Script",
+        "enablement": "editorLangId == airtable-script || editorLangId == airtable-automation"
+      },
+      {
+        "command": "airtable-formula.script.beautifyFile",
+        "title": "Beautify Script/Automation File",
+        "category": "Airtable Script"
+      },
+      {
+        "command": "airtable-formula.script.minifyFile",
+        "title": "Minify Script/Automation File",
+        "category": "Airtable Script"
       }
     ],
     "viewsContainers": {
@@ -274,6 +296,14 @@
         {
           "command": "airtable-formula.minifyFile",
           "when": "false"
+        },
+        {
+          "command": "airtable-formula.script.beautifyFile",
+          "when": "false"
+        },
+        {
+          "command": "airtable-formula.script.minifyFile",
+          "when": "false"
         }
       ],
       "explorer/context": [
@@ -285,6 +315,16 @@
         {
           "command": "airtable-formula.minifyFile",
           "when": "resourceExtname == .formula",
+          "group": "7_modification@2"
+        },
+        {
+          "command": "airtable-formula.script.beautifyFile",
+          "when": "resourceExtname == .ats || resourceExtname == .script || resourceExtname == .ata || resourceExtname == .automation",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "airtable-formula.script.minifyFile",
+          "when": "resourceExtname == .ats || resourceExtname == .script || resourceExtname == .ata || resourceExtname == .automation",
           "group": "7_modification@2"
         }
       ]
@@ -486,6 +526,67 @@
           "type": "boolean",
           "default": false,
           "description": "Include HTTP request/response events from the MCP server (high volume)."
+        },
+        "airtableFormula.script.beautifyStyle": {
+          "type": "string",
+          "default": "default",
+          "enum": ["default", "compact", "singleQuote", "tabIndent", "semicolonFree"],
+          "enumDescriptions": [
+            "Prettier defaults: 2-space indent, double quotes, trailing commas",
+            "printWidth: 120, no trailing commas",
+            "singleQuote: true",
+            "useTabs: true",
+            "semi: false"
+          ],
+          "description": "Default beautify style for Airtable Script and Automation formatters."
+        },
+        "airtableFormula.script.minifyLevel": {
+          "type": "string",
+          "default": "standard",
+          "enum": ["safe", "standard", "aggressive", "extreme"],
+          "enumDescriptions": [
+            "Whitespace removal only — no mangle, no compress",
+            "compress: true, mangle: false (good balance)",
+            "compress: true, mangle: true (safe for Airtable scripts — field/table names are string literals)",
+            "Aggressive + passes: 2, unsafe compress options"
+          ],
+          "description": "Default minify level for Airtable Script and Automation minifier."
+        },
+        "airtableFormula.script.prettier.printWidth": {
+          "type": "number",
+          "default": 80,
+          "description": "Prettier printWidth for Script/Automation beautifier."
+        },
+        "airtableFormula.script.prettier.tabWidth": {
+          "type": "number",
+          "default": 2,
+          "description": "Prettier tabWidth for Script/Automation beautifier."
+        },
+        "airtableFormula.script.prettier.useTabs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prettier useTabs for Script/Automation beautifier."
+        },
+        "airtableFormula.script.prettier.singleQuote": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prettier singleQuote for Script/Automation beautifier."
+        },
+        "airtableFormula.script.prettier.semi": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prettier semi (semicolons) for Script/Automation beautifier."
+        },
+        "airtableFormula.script.prettier.trailingComma": {
+          "type": "string",
+          "default": "all",
+          "enum": ["all", "es5", "none"],
+          "description": "Prettier trailingComma for Script/Automation beautifier."
+        },
+        "airtableFormula.script.terser.mangle": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Terser identifier mangling in aggressive/extreme levels."
         }
       }
     },
@@ -511,7 +612,9 @@
   },
   "dependencies": {
     "@airtable-formula/shared": "workspace:*",
-    "@airtable-formula/language-services": "workspace:*"
+    "@airtable-formula/language-services": "workspace:*",
+    "prettier": "^3.0.0",
+    "terser": "^5.0.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",

@@ -119,6 +119,7 @@ export interface SettingsSnapshot {
   };
   ai:      { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2' };
+  script:  { beautifyStyle: string; minifyLevel: string };
   auth:    {
     autoRefresh: boolean;
     refreshIntervalHours: number;

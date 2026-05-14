@@ -463,6 +463,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         },
         ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
         formula: { formatterVersion: settings.formula.formatterVersion },
+        script:  { beautifyStyle: settings.script.beautifyStyle, minifyLevel: settings.script.minifyLevel },
         auth:    {
           autoRefresh: settings.auth.autoRefresh,
           refreshIntervalHours: settings.auth.refreshIntervalHours,

@@ -359,6 +359,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ...minifyLevelCmds
     );
 
+    // ── Script / Automation formatter (Prettier + Terser) ───────────────────
+    const scriptFormatter = vscode.languages.registerDocumentFormattingEditProvider(
+        ['airtable-script', 'airtable-automation'],
+        {
+            async provideDocumentFormattingEdits(document) {
+                const { formatScriptDocument } = await import('./commands/scriptFormatter.js');
+                return formatScriptDocument(document);
+            },
+        }
+    );
+
+    const scriptBeautifyCmd = vscode.commands.registerCommand('airtable-formula.script.beautify', async () => {
+        const { scriptBeautify } = await import('./commands/scriptFormatter.js');
+        await scriptBeautify();
+    });
+
+    const scriptMinifyCmd = vscode.commands.registerCommand('airtable-formula.script.minify', async () => {
+        const { scriptMinify } = await import('./commands/scriptFormatter.js');
+        await scriptMinify();
+    });
+
+    const scriptBeautifyFileCmd = vscode.commands.registerCommand(
+        'airtable-formula.script.beautifyFile',
+        async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+            const { scriptBeautifyFile } = await import('./commands/scriptFormatter.js');
+            await scriptBeautifyFile(uri, uris);
+        }
+    );
+
+    const scriptMinifyFileCmd = vscode.commands.registerCommand(
+        'airtable-formula.script.minifyFile',
+        async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+            const { scriptMinifyFile } = await import('./commands/scriptFormatter.js');
+            await scriptMinifyFile(uri, uris);
+        }
+    );
+
+    context.subscriptions.push(
+        scriptFormatter,
+        scriptBeautifyCmd,
+        scriptMinifyCmd,
+        scriptBeautifyFileCmd,
+        scriptMinifyFileCmd,
+    );
+
     // ── Auth Manager + Browser Download Manager ──────────────────────────
     const authManager = new AuthManager(context.secrets, context.extensionPath);
     const browserDownloadManager = new BrowserDownloadManager(context, context.extensionPath);

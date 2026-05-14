@@ -26,6 +26,12 @@ importers:
       '@airtable-formula/shared':
         specifier: workspace:*
         version: link:../shared
+      prettier:
+        specifier: ^3.0.0
+        version: 3.8.3
+      terser:
+        specifier: ^5.0.0
+        version: 5.47.1
     devDependencies:
       '@types/adm-zip':
         specifier: ^0.5.8
@@ -62,7 +68,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
+        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
 
   packages/language-services:
     devDependencies:
@@ -74,7 +80,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
+        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
 
   packages/mcp-server:
     dependencies:
@@ -114,7 +120,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
+        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
 
   packages/webview:
     dependencies:
@@ -139,7 +145,7 @@ importers:
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.0.0
-        version: 4.2.2(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0))
+        version: 4.2.2(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1))
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.14
@@ -148,7 +154,7 @@ importers:
         version: 19.2.3(@types/react@19.2.14)
       '@vitejs/plugin-react':
         specifier: ^4.0.0
-        version: 4.7.0(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0))
+        version: 4.7.0(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1))
       tailwindcss:
         specifier: ^4.0.0
         version: 4.2.2
@@ -157,10 +163,10 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^6.0.0
-        version: 6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)
+        version: 6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1)
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
+        version: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
 
 packages:
 
@@ -774,6 +780,9 @@ packages:
   '@jridgewell/resolve-uri@3.1.2':
     resolution: {integrity: sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw==}
     engines: {node: '>=6.0.0'}
+
+  '@jridgewell/source-map@0.3.11':
+    resolution: {integrity: sha512-ZMp1V8ZFcPG5dIWnQLr3NSI1MiCU7UETdS/A0G8V/XWHvJv3ZsFqutJn1Y5RPmAPX6F3BiE397OqveU/9NCuIA==}
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
@@ -1422,6 +1431,9 @@ packages:
   buffer-equal-constant-time@1.0.1:
     resolution: {integrity: sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==}
 
+  buffer-from@1.1.2:
+    resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
+
   buffer@5.7.1:
     resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
 
@@ -1512,6 +1524,9 @@ packages:
   commander@12.1.0:
     resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
     engines: {node: '>=18'}
+
+  commander@2.20.3:
+    resolution: {integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==}
 
   commander@4.1.1:
     resolution: {integrity: sha512-NOKm8xhkzAjzFx8B2v5OAHT+u5pRQc2UCa2Vq9jYL/31o2wi9mxBA7LIFs3sV5VSC49z6pEhfbMULvShKj26WA==}
@@ -2654,6 +2669,11 @@ packages:
     deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
     hasBin: true
 
+  prettier@3.8.3:
+    resolution: {integrity: sha512-7igPTM53cGHMW8xWuVTydi2KO233VFiTNyF5hLJqpilHfmn8C8gPf+PS7dUT64YcXFbiMGZxS9pCSxL/Dxm/Jw==}
+    engines: {node: '>=14'}
+    hasBin: true
+
   pretty-format@29.7.0:
     resolution: {integrity: sha512-Pdlw/oPxN+aXdmM9R00JVC9WVFoCLTKJvDVLgmJ+qAffBMxsV85l/Lu7sNx4zSzPyoL2euImuEwHhOXdEgNFZQ==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
@@ -2890,6 +2910,13 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  source-map-support@0.5.21:
+    resolution: {integrity: sha512-uBHU3L3czsIyYXKX88fdrGovxdSCoTGDRZ6SYXtSRxLZUzHg5P/66Ht6uoUlHu9EZod+inXhKo3qQgwXUT/y1w==}
+
+  source-map@0.6.1:
+    resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
+    engines: {node: '>=0.10.0'}
+
   source-map@0.7.6:
     resolution: {integrity: sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ==}
     engines: {node: '>= 12'}
@@ -3003,6 +3030,11 @@ packages:
   terminal-link@4.0.0:
     resolution: {integrity: sha512-lk+vH+MccxNqgVqSnkMVKx4VLJfnLjDBGzH16JVZjKE2DoxP57s6/vt6JmXV5I3jBcfGrxNrYtC+mPtU7WJztA==}
     engines: {node: '>=18'}
+
+  terser@5.47.1:
+    resolution: {integrity: sha512-tPbLXTI6ohPASb/1YViL428oEHu6/qv1OxqYnfaonVCFHqx4+wCd95pHrQWsL5X4pl90CTyW9piSAsS2L0VoMw==}
+    engines: {node: '>=10'}
+    hasBin: true
 
   text-decoder@1.2.7:
     resolution: {integrity: sha512-vlLytXkeP4xvEq2otHeJfSQIRyWxo/oZGEbXrtEEF9Hnmrdly59sUbzZ/QgyWuLYHctCHxFF4tRQZNQ9k60ExQ==}
@@ -3840,6 +3872,11 @@ snapshots:
 
   '@jridgewell/resolve-uri@3.1.2': {}
 
+  '@jridgewell/source-map@0.3.11':
+    dependencies:
+      '@jridgewell/gen-mapping': 0.3.13
+      '@jridgewell/trace-mapping': 0.3.31
+
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
   '@jridgewell/trace-mapping@0.3.31':
@@ -4103,12 +4140,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.2.2
       '@tailwindcss/oxide-win32-x64-msvc': 4.2.2
 
-  '@tailwindcss/vite@4.2.2(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0))':
+  '@tailwindcss/vite@4.2.2(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1))':
     dependencies:
       '@tailwindcss/node': 4.2.2
       '@tailwindcss/oxide': 4.2.2
       tailwindcss: 4.2.2
-      vite: 6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)
+      vite: 6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1)
 
   '@textlint/ast-node-types@15.5.2': {}
 
@@ -4200,7 +4237,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vitejs/plugin-react@4.7.0(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0))':
+  '@vitejs/plugin-react@4.7.0(vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1))':
     dependencies:
       '@babel/core': 7.29.0
       '@babel/plugin-transform-react-jsx-self': 7.27.1(@babel/core@7.29.0)
@@ -4208,7 +4245,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-beta.27
       '@types/babel__core': 7.20.5
       react-refresh: 0.17.0
-      vite: 6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)
+      vite: 6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -4515,6 +4552,8 @@ snapshots:
 
   buffer-equal-constant-time@1.0.1: {}
 
+  buffer-from@1.1.2: {}
+
   buffer@5.7.1:
     dependencies:
       base64-js: 1.5.1
@@ -4621,6 +4660,8 @@ snapshots:
       delayed-stream: 1.0.0
 
   commander@12.1.0: {}
+
+  commander@2.20.3: {}
 
   commander@4.1.1: {}
 
@@ -5768,6 +5809,8 @@ snapshots:
       tunnel-agent: 0.6.0
     optional: true
 
+  prettier@3.8.3: {}
+
   pretty-format@29.7.0:
     dependencies:
       '@jest/schemas': 29.6.3
@@ -6067,6 +6110,13 @@ snapshots:
 
   source-map-js@1.2.1: {}
 
+  source-map-support@0.5.21:
+    dependencies:
+      buffer-from: 1.1.2
+      source-map: 0.6.1
+
+  source-map@0.6.1: {}
+
   source-map@0.7.6: {}
 
   spdx-correct@3.2.0:
@@ -6217,6 +6267,13 @@ snapshots:
     dependencies:
       ansi-escapes: 7.3.0
       supports-hyperlinks: 3.2.0
+
+  terser@5.47.1:
+    dependencies:
+      '@jridgewell/source-map': 0.3.11
+      acorn: 8.16.0
+      commander: 2.20.3
+      source-map-support: 0.5.21
 
   text-decoder@1.2.7:
     dependencies:
@@ -6381,13 +6438,13 @@ snapshots:
 
   version-range@4.15.0: {}
 
-  vite-node@1.6.1(@types/node@20.19.37)(lightningcss@1.32.0):
+  vite-node@1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3
       pathe: 1.1.2
       picocolors: 1.1.1
-      vite: 5.4.21(@types/node@20.19.37)(lightningcss@1.32.0)
+      vite: 5.4.21(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
     transitivePeerDependencies:
       - '@types/node'
       - less
@@ -6399,7 +6456,7 @@ snapshots:
       - supports-color
       - terser
 
-  vite@5.4.21(@types/node@20.19.37)(lightningcss@1.32.0):
+  vite@5.4.21(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1):
     dependencies:
       esbuild: 0.21.5
       postcss: 8.5.8
@@ -6408,8 +6465,9 @@ snapshots:
       '@types/node': 20.19.37
       fsevents: 2.3.3
       lightningcss: 1.32.0
+      terser: 5.47.1
 
-  vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0):
+  vite@6.4.1(@types/node@20.19.37)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.47.1):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.3)
@@ -6422,8 +6480,9 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.6.1
       lightningcss: 1.32.0
+      terser: 5.47.1
 
-  vitest@1.6.1(@types/node@20.19.37)(lightningcss@1.32.0):
+  vitest@1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1):
     dependencies:
       '@vitest/expect': 1.6.1
       '@vitest/runner': 1.6.1
@@ -6442,8 +6501,8 @@ snapshots:
       strip-literal: 2.1.1
       tinybench: 2.9.0
       tinypool: 0.8.4
-      vite: 5.4.21(@types/node@20.19.37)(lightningcss@1.32.0)
-      vite-node: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)
+      vite: 5.4.21(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
+      vite-node: 1.6.1(@types/node@20.19.37)(lightningcss@1.32.0)(terser@5.47.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 20.19.37

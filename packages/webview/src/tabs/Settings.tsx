@@ -616,6 +616,49 @@ export function Settings() {
         </div>
       </div>
 
+      {/* Script & Automation formatter */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Configuration</div>
+          <div className="title">Script &amp; Automation</div>
+        </div>
+        <div className="stack stack-sm">
+          <div className="toggle-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Beautify style</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>Prettier preset for Shift+Alt+F and beautify commands</div>
+            </div>
+            <select
+              className="select-input"
+              value={settings.script.beautifyStyle}
+              onChange={e => sendToExtension({ type: 'setting:change', key: 'script.beautifyStyle', value: e.target.value })}
+            >
+              <option value="default">Default</option>
+              <option value="compact">Compact (printWidth: 120)</option>
+              <option value="singleQuote">Single Quote</option>
+              <option value="tabIndent">Tab Indent</option>
+              <option value="semicolonFree">Semicolon-free</option>
+            </select>
+          </div>
+          <div className="toggle-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Minify level</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>Terser aggressiveness for minify commands</div>
+            </div>
+            <select
+              className="select-input"
+              value={settings.script.minifyLevel}
+              onChange={e => sendToExtension({ type: 'setting:change', key: 'script.minifyLevel', value: e.target.value })}
+            >
+              <option value="safe">Safe (whitespace only)</option>
+              <option value="standard">Standard (compress)</option>
+              <option value="aggressive">Aggressive (compress + mangle)</option>
+              <option value="extreme">Extreme (passes: 2)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       {/* Debug & Diagnostics */}
       <div className="glass-panel">
         <div className="section-header">

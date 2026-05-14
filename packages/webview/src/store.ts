@@ -52,6 +52,7 @@ const defaultSettings: SettingsSnapshot = {
   },
   ai:      { autoInstallFiles: true, includeAgents: false },
   formula: { formatterVersion: 'v2' },
+  script:  { beautifyStyle: 'default', minifyLevel: 'standard' },
   auth:    { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' as const, browserChoice: undefined },
   debug:   { enabled: false, verboseHttp: false, bufferSize: 1000 },
 };

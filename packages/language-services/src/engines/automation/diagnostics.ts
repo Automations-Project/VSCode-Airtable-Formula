@@ -1,5 +1,6 @@
 import type { LsDiagnostic, LsRange } from '../../types.js';
 import { LsSeverity } from '../../types.js';
+import { SCRIPT_GLOBAL_NAMES } from '../script/registry.js';
 
 // ---------------------------------------------------------------------------
 // Position helpers (verbatim from script/diagnostics.ts)
@@ -101,6 +102,213 @@ function isInsideExclusionRange(
   ranges: Array<{ start: number; end: number }>
 ): boolean {
   return ranges.some(range => position >= range.start && position < range.end);
+}
+
+// ---------------------------------------------------------------------------
+// JS keywords — appear before ( or . but are NOT function/variable calls.
+// ---------------------------------------------------------------------------
+
+const JS_KEYWORDS = new Set<string>([
+  'if', 'for', 'while', 'do', 'switch', 'try', 'catch', 'finally',
+  'return', 'throw', 'break', 'continue', 'new', 'delete', 'typeof',
+  'instanceof', 'void', 'in', 'of', 'class', 'extends', 'super', 'this',
+  'import', 'export', 'default', 'case', 'yield', 'async', 'await',
+  'debugger', 'with', 'static', 'let', 'const', 'var', 'function',
+  'true', 'false', 'null',
+  'constructor',
+]);
+
+// ---------------------------------------------------------------------------
+// Automation globals allowlist (same JS built-ins as script, plus fetch).
+// ---------------------------------------------------------------------------
+
+const KNOWN_SAFE = new Set<string>([
+  ...SCRIPT_GLOBAL_NAMES,
+  'console', 'Math', 'JSON', 'Date', 'Promise', 'Array', 'Object', 'Error',
+  'parseInt', 'parseFloat', 'setTimeout', 'clearTimeout',
+  'undefined', 'NaN', 'Infinity', 'globalThis',
+  'eval', 'isNaN', 'isFinite',
+  'encodeURI', 'encodeURIComponent', 'decodeURI', 'decodeURIComponent',
+  'Function', 'Boolean', 'Symbol', 'Number', 'BigInt', 'String', 'RegExp',
+  'Map', 'Set', 'WeakMap', 'WeakSet',
+  'ArrayBuffer', 'DataView',
+  'Uint8Array', 'Int8Array', 'Uint16Array', 'Int16Array',
+  'Uint32Array', 'Int32Array', 'Float32Array', 'Float64Array',
+  'BigInt64Array', 'BigUint64Array',
+  'Reflect', 'Proxy',
+  'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError',
+  'EvalError', 'URIError', 'AggregateError',
+  'WeakRef', 'FinalizationRegistry',
+  'setInterval', 'clearInterval', 'queueMicrotask',
+  'AbortController', 'AbortSignal',
+  'URL', 'URLSearchParams',
+  'TextEncoder', 'TextDecoder',
+  'FormData', 'Blob', 'File', 'FileReader',
+  'Headers', 'Request', 'Response',
+  'ReadableStream', 'WritableStream', 'TransformStream',
+  'Event', 'EventTarget', 'CustomEvent',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
+  'Performance', 'performance',
+  'crypto',
+  'fetch',
+]);
+
+// ---------------------------------------------------------------------------
+// Local symbol extractor helpers
+// ---------------------------------------------------------------------------
+
+function extractBindings(str: string): string[] {
+  return str.split(',')
+    .map(s => s.trim().replace(/^\.\.\./, '').replace(/\s*[=:].*$/, '').trim())
+    .filter(s => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+}
+
+function extractDestructuredBindings(pattern: string): string[] {
+  const inner = pattern.replace(/^[\[{]/, '').replace(/[\]}]$/, '');
+  return extractBindings(inner);
+}
+
+function buildLocalSymbols(text: string): Set<string> {
+  const symbols = new Set<string>(KNOWN_SAFE);
+
+  for (const m of text.matchAll(/\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])/g)) {
+    const binding = m[1];
+    if (/^[a-zA-Z_$]/.test(binding)) {
+      symbols.add(binding);
+    } else {
+      for (const id of extractDestructuredBindings(binding)) symbols.add(id);
+    }
+  }
+
+  for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
+    symbols.add(m[1]);
+    const parenStart = m.index! + m[0].length - 1;
+    const parenEnd = text.indexOf(')', parenStart);
+    if (parenEnd !== -1) {
+      for (const id of extractBindings(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
+    }
+  }
+
+  for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
+    symbols.add(m[1]);
+  }
+
+  for (const m of text.matchAll(/\bfor\s*\(\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])\s+(?:of|in)\b/g)) {
+    const binding = m[1];
+    if (/^[a-zA-Z_$]/.test(binding)) {
+      symbols.add(binding);
+    } else {
+      for (const id of extractDestructuredBindings(binding)) symbols.add(id);
+    }
+  }
+
+  for (const m of text.matchAll(/\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g)) {
+    symbols.add(m[1]);
+  }
+
+  for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
+    if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
+  }
+
+  for (const m of text.matchAll(/\(([^)]*)\)\s*=>/g)) {
+    for (const id of extractBindings(m[1])) symbols.add(id);
+  }
+
+  return symbols;
+}
+
+// ---------------------------------------------------------------------------
+// Statement boundary helpers for missing-await check
+// ---------------------------------------------------------------------------
+
+function findStatementStart(text: string, pos: number): number {
+  for (let i = pos - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === ';' || ch === '{' || ch === '}' || ch === '\n') return i + 1;
+  }
+  return 0;
+}
+
+function findLineStart(text: string, pos: number): number {
+  for (let i = pos - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === ';' || ch === '\n') return i + 1;
+  }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Missing-await check (D-04)
+// ---------------------------------------------------------------------------
+
+function checkMissingAwait(
+  text: string,
+  exclusionRanges: Array<{ start: number; end: number }>
+): LsDiagnostic[] {
+  const diagnostics: LsDiagnostic[] = [];
+
+  for (const match of text.matchAll(/\b(\w+Async)\s*\(/g)) {
+    if (isInsideExclusionRange(match.index!, exclusionRanges)) continue;
+
+    const fnName = match[1];
+    const stmtStart = findStatementStart(text, match.index!);
+    const stmtContext = text.slice(stmtStart, match.index!);
+
+    const isAccepted =
+      /\bawait\b/.test(stmtContext) ||
+      /\breturn\b/.test(stmtContext) ||
+      /\b(?:const|let|var)\s+\w/.test(stmtContext) ||
+      /\)\s*\.then\s*\(/.test(text.slice(match.index!)) ||
+      /\bPromise\s*\.\s*(?:all|allSettled|race|any)\s*\(/.test(
+        text.slice(findLineStart(text, match.index!), match.index!)
+      );
+
+    if (!isAccepted) {
+      diagnostics.push({
+        range: makeRange(text, match.index!, match.index! + fnName.length),
+        message: `'${fnName}' is an async function. Add 'await' before calling it.`,
+        severity: LsSeverity.Warning,
+        code: 'missing-await',
+        source: 'airtable-automation',
+      });
+    }
+  }
+
+  return diagnostics;
+}
+
+// ---------------------------------------------------------------------------
+// Unknown-global check (D-04)
+// ---------------------------------------------------------------------------
+
+function checkUnknownGlobals(
+  text: string,
+  exclusionRanges: Array<{ start: number; end: number }>
+): LsDiagnostic[] {
+  const diagnostics: LsDiagnostic[] = [];
+  const localSymbols = buildLocalSymbols(text);
+
+  for (const match of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g)) {
+    if (isInsideExclusionRange(match.index!, exclusionRanges)) continue;
+
+    const ident = match[1];
+    if (JS_KEYWORDS.has(ident)) continue;
+    if (localSymbols.has(ident)) continue;
+
+    let precIdx = match.index! - 1;
+    while (precIdx >= 0 && (text[precIdx] === ' ' || text[precIdx] === '\t')) precIdx--;
+    if (precIdx >= 0 && text[precIdx] === '.') continue;
+
+    diagnostics.push({
+      range: makeRange(text, match.index!, match.index! + ident.length),
+      message: `'${ident}' is not a known global. Declare it locally or check the spelling.`,
+      severity: LsSeverity.Warning,
+      code: 'unknown-global',
+      source: 'airtable-automation',
+    });
+  }
+
+  return diagnostics;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,5 +418,9 @@ function checkWrongContext(
 
 export function automationDiagnostics(text: string, _uri?: string): LsDiagnostic[] {
     const exclusionRanges = getExclusionRanges(text);
-    return checkWrongContext(text, exclusionRanges);
+    return [
+        ...checkMissingAwait(text, exclusionRanges),
+        ...checkUnknownGlobals(text, exclusionRanges),
+        ...checkWrongContext(text, exclusionRanges),
+    ];
 }
