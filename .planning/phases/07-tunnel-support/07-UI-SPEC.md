@@ -110,6 +110,15 @@ Structure follows the exact pattern of existing Setup tab glass-panels:
 </div>
 ```
 
+The `.detail` slot renders different text depending on `tunnelState.status`:
+
+| `tunnelState.status` | `.detail` text |
+|----------------------|----------------|
+| `undefined` / no tunnel | "Expose your local MCP server via a public HTTPS URL" |
+| `'active'` | "Your MCP server is publicly accessible" |
+| `'auto-disabled'` | "Tunnel disabled after repeated auth failures" |
+| `'error'` | "Tunnel failed to start — check the Output panel" |
+
 ### Provider Picker
 
 Use existing `.select-input` class (already styled in `styles.css`).
@@ -192,6 +201,7 @@ Content: "Tunnel auto-disabled: {failures} auth failures from {ip} in {windowMs/
 | Section detail — no tunnel | "Expose your local MCP server via a public HTTPS URL" |
 | Section detail — active | "Your MCP server is publicly accessible" |
 | Section detail — auto-disabled | "Tunnel disabled after repeated auth failures" |
+| Section detail — error | "Tunnel failed to start — check the Output panel" |
 | Provider picker label | "Provider" |
 | Provider option: cf-quick | "Cloudflare Quick Tunnel" |
 | Provider option: ngrok | "ngrok" |
