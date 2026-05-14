@@ -261,12 +261,6 @@ export async function startDaemonServer(options = {}) {
 
     await runShutdownStep('on-shutdown', () => options.onShutdown?.() ?? undefined);
 
-    await runShutdownStep('lsp-child', () => {
-      if (options.lspChild && typeof options.lspChild.kill === 'function') {
-        options.lspChild.kill('SIGTERM');
-      }
-    });
-
     if (httpServer) {
       await runShutdownStep('http-close', () =>
         new Promise((resolve, reject) => {
@@ -290,7 +284,5 @@ export async function startDaemonServer(options = {}) {
     stop,
     publishEvent,
     getHealth,
-    // Registers the LSP subprocess so stop() can SIGTERM it on HTTP shutdown
-    setLspChild(child) { options.lspChild = child; },
   };
 }

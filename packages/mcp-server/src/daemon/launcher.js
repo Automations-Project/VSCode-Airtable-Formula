@@ -365,7 +365,6 @@ export async function startDaemon(options = {}) {
             }
             lspChild = null;
           });
-          if (server.setLspChild) server.setLspChild(lspChild);
         } else {
           // LSP binary not found in expected locations — daemon continues without LSP
           // port_lsp remains null in lockfile
