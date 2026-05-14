@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
-stopped_at: Phase 06 complete — 3 code review criticals pending fix
+stopped_at: Phase 07 context gathered — ready for /gsd-ui-phase 7 then /gsd-plan-phase 7
 last_updated: "2026-05-15T00:00:00.000Z"
-last_activity: 2026-05-15 -- Phase 06 execution complete (5/5 plans, 21 tests green)
+last_activity: 2026-05-15 -- Phase 07 discuss-phase complete (7 decisions captured in 07-CONTEXT.md)
 progress:
   total_phases: 5
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 06 complete — Phase 07 (Tunnel Support) or Phase 08 (Setup Tab UI) next
+**Current focus:** Phase 07 (Tunnel Support) — discuss-phase complete, UI design + planning next
 
 ## Current Position
 
-Phase: 06 (lsp-server) — EXECUTION COMPLETE ✓
-Plan: 5 of 5 (all plans done)
-Status: Human verification pending (npm publish) + 3 code review criticals to fix
-Last activity: 2026-05-15 -- Phase 06 execution complete
+Phase: 07 (tunnel-support) — DISCUSS-PHASE COMPLETE ✓
+Plan: 0 of TBD (planning not yet started)
+Status: Ready for /gsd-ui-phase 7 → /gsd-plan-phase 7
+Last activity: 2026-05-15 -- Phase 07 discuss-phase complete (7 decisions captured)
 
 ```
 Progress: [████      ] 40% (2/5 phases complete)
@@ -83,6 +83,8 @@ Recent decisions affecting current work:
 
 - Fix 3 code review criticals from 06-REVIEW.md (CR-01 socket error handler, CR-02 release.yml `both` target, CR-03 double SIGTERM)
 - Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
+- Run /gsd-ui-phase 7 — generate UI design contract for Setup tab tunnel section
+- Run /gsd-plan-phase 7 — plan Phase 7 execution
 
 ### Blockers/Concerns
 
@@ -105,7 +107,7 @@ From Phase 6 REVIEW.md — criticals pending fix:
 
 ## Session Continuity
 
-Last session: 2026-05-15 — Phase 06 execution complete
-Stopped at: All 5 plans executed, 21 tests green, code review complete
-Next: Fix CR-01/CR-02/CR-03 from 06-REVIEW.md, then publish airtable-user-lsp to npm
-Resume file: .planning/phases/06-lsp-server/06-REVIEW.md
+Last session: 2026-05-15 — Phase 07 discuss-phase complete
+Stopped at: 7 decisions captured in 07-CONTEXT.md; UI design and planning not yet started
+Next: /gsd-ui-phase 7 → /gsd-plan-phase 7
+Resume file: .planning/phases/07-tunnel-support/07-CONTEXT.md
