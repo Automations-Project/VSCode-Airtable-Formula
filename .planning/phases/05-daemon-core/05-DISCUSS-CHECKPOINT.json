@@ -1,0 +1,29 @@
+{
+  "phase": 5,
+  "phase_name": "daemon-core",
+  "timestamp": "2026-05-14",
+  "areas_total": 4,
+  "areas_completed": 1,
+  "decisions": [
+    {
+      "area": 1,
+      "title": "Daemon entry point migration",
+      "decision": "Replace index.mjs default — index.mjs becomes the attach proxy by default. `npx airtable-user-mcp` auto-attaches to running daemon or falls back to in-process stdio. No separate `attach.ts` CLI entry needed.",
+      "fallback": "Poll up to 15s then fall back to in-process stdio (same as Perplexity pattern). No --no-daemon flag needed at entry; fallback is automatic."
+    }
+  ],
+  "pending_areas": [
+    {
+      "area": 2,
+      "title": "AuthManager vs DaemonManager"
+    },
+    {
+      "area": 3,
+      "title": "HTTP MCP definition fallback"
+    },
+    {
+      "area": 4,
+      "title": "Daemon opt-out UX"
+    }
+  ]
+}
