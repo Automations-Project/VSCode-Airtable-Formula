@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as prettier from 'prettier';
+import { minify as terserMinify } from 'terser';
 
 const BEAUTIFY_STYLES = [
     { label: 'Default', value: 'default', description: 'Prettier defaults: 2-space indent, double quotes, trailing commas' },
@@ -84,16 +86,13 @@ function buildTerserOptions(level: string, cfg: ScriptConfig): Record<string, un
 async function formatText(text: string, style: string, scope?: vscode.Uri): Promise<string> {
     const cfg = getScriptConfig(scope);
     const options = buildPrettierOptions(style, cfg);
-    // prettier v3 is ESM — dynamic import works in both bundled CJS and native ESM contexts
-    const prettier = await import('prettier');
     return prettier.format(text, options as Parameters<typeof prettier.format>[1]);
 }
 
 async function minifyText(text: string, level: string, scope?: vscode.Uri): Promise<string> {
     const cfg = getScriptConfig(scope);
     const options = buildTerserOptions(level, cfg);
-    const { minify } = await import('terser');
-    const result = await minify(text, options as Parameters<typeof minify>[1]);
+    const result = await terserMinify(text, options as Parameters<typeof terserMinify>[1]);
     return result.code ?? text;
 }
 

@@ -109,7 +109,7 @@ function isInsideExclusionRange(
 // ---------------------------------------------------------------------------
 
 const JS_KEYWORDS = new Set<string>([
-  'if', 'for', 'while', 'do', 'switch', 'try', 'catch', 'finally',
+  'if', 'else', 'for', 'while', 'do', 'switch', 'try', 'catch', 'finally',
   'return', 'throw', 'break', 'continue', 'new', 'delete', 'typeof',
   'instanceof', 'void', 'in', 'of', 'class', 'extends', 'super', 'this',
   'import', 'export', 'default', 'case', 'yield', 'async', 'await',
@@ -180,6 +180,12 @@ function buildLocalSymbols(text: string): Set<string> {
     }
   }
 
+  // Multi-declaration continuations: const a = 1, b = 2, c = 3
+  // (?![>=]) excludes == === and => (arrow functions / comparisons).
+  for (const m of text.matchAll(/,\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=(?![>=])/g)) {
+    if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
+  }
+
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index! + m[0].length - 1;
@@ -210,7 +216,8 @@ function buildLocalSymbols(text: string): Set<string> {
     if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
   }
 
-  for (const m of text.matchAll(/\(([^)]*)\)\s*=>/g)) {
+  // Negative lookbehind excludes the outer call-paren in map((x) => ...).
+  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^)]*)\)\s*=>/g)) {
     for (const id of extractBindings(m[1])) symbols.add(id);
   }
 
