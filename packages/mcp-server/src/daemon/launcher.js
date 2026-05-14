@@ -273,16 +273,23 @@ export async function startDaemon(options = {}) {
     let finalizeResolve;
     const closed = new Promise((resolve) => { finalizeResolve = resolve; });
 
-    const buildRecord = (bearerToken = server?.bearerToken ?? token.bearerToken) => ({
-      pid: process.pid,
-      uuid,
-      port: server?.port ?? provisional.port,
-      port_lsp: null,
-      bearerToken,
-      version,
-      startedAt,
-      tunnelUrl: null,
-    });
+    const buildRecord = (bearerToken = server?.bearerToken ?? token.bearerToken) => {
+      let currentPortLsp = null;
+      try {
+        const existing = JSON.parse(readFileSync(lockPath, 'utf8'));
+        currentPortLsp = existing.port_lsp ?? null;
+      } catch { /* lockfile may not exist yet */ }
+      return {
+        pid: process.pid,
+        uuid,
+        port: server?.port ?? provisional.port,
+        port_lsp: currentPortLsp,
+        bearerToken,
+        version,
+        startedAt,
+        tunnelUrl: null,
+      };
+    };
 
     const syncLockfile = (bearerToken = server?.bearerToken ?? token.bearerToken) => {
       replace(buildRecord(bearerToken), { lockPath, expectedUuid: uuid });
