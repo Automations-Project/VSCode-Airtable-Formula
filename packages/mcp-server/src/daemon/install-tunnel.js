@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import pins from "./cloudflared-pins.json" assert { type: "json" };
+import pins from "./cloudflared-pins.json" with { type: "json" };
 import { getHomeDir } from "../paths.js";
 
 export async function installCloudflared(options = {}) {
