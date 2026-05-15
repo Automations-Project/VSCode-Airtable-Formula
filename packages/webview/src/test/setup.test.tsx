@@ -125,4 +125,15 @@ describe('getLspSnippet lsp port snippet', () => {
     expect(text).toContain('--tcp-client');
     expect(text).toContain('2087');
   });
+
+  it('OpenCode TCP snippet does not include --stdio', () => {
+    const text = getLspSnippet('opencode', 'tcp', 2087);
+    expect(text).toContain('2087');
+    expect(text).not.toContain('--stdio');
+  });
+
+  it('OpenCode stdio snippet does not contain initialization block', () => {
+    const text = getLspSnippet('opencode', 'stdio', '{LSP_PORT}');
+    expect(text).not.toContain('initialization');
+  });
 });
