@@ -63,6 +63,23 @@ export function getLspSnippet(_ide: string, _variant: 'tcp' | 'stdio', _port: nu
   return '';
 }
 
+// ---------------------------------------------------------------------------
+// Module-level constants — defined outside component to avoid re-creation per render
+// ---------------------------------------------------------------------------
+
+const MCP_IDE_TABS = [
+  { id: 'claude-code',    label: 'Claude Code' },
+  { id: 'claude-desktop', label: 'Claude Desktop' },
+  { id: 'cursor',         label: 'Cursor' },
+  { id: 'windsurf',       label: 'Windsurf' },
+  { id: 'cline',          label: 'Cline' },
+] as const;
+
+const MCP_VARIANT_TABS = [
+  { id: 'http',  label: 'HTTP (daemon)' },
+  { id: 'stdio', label: 'stdio (npx)' },
+] as const;
+
 export function Setup() {
   const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon } = useStore();
 
@@ -76,6 +93,15 @@ export function Setup() {
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
   const [isTunnelPending, setIsTunnelPending] = React.useState(false);
   const [copiedUrl, setCopiedUrl] = React.useState(false);
+
+  // MCP snippet state
+  const [mcpActiveIde, setMcpActiveIde] = React.useState('claude-code');
+  const [mcpActiveVariant, setMcpActiveVariant] = React.useState<'http' | 'stdio'>('http');
+  // LSP snippet state (used by Plan 05 — declared here to co-locate all tab state)
+  const [lspActiveIde, setLspActiveIde] = React.useState('claude-code');
+  const [lspActiveVariant, setLspActiveVariant] = React.useState<'tcp' | 'stdio'>('tcp');
+  // Shared copy state for all snippet copy buttons
+  const [copiedKeys, setCopiedKeys] = React.useState<Record<string, boolean>>({});
 
   React.useEffect(() => {
     if (tunnel?.provider) setSelectedProvider(tunnel.provider);
@@ -109,6 +135,14 @@ export function Setup() {
       setTimeout(() => setCopiedUrl(false), 1500);
     }
   };
+
+  const handleCopySnippet = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).catch(() => undefined);
+    setCopiedKeys(k => ({ ...k, [key]: true }));
+    setTimeout(() => setCopiedKeys(k => ({ ...k, [key]: false })), 1500);
+  };
+
+  const mcpPort = daemon?.port ?? '{MCP_PORT}';
 
   const tunnelDetail = tunnel?.status === 'active'
     ? 'Your MCP server is publicly accessible'
@@ -396,6 +430,85 @@ export function Setup() {
           No IDE data available yet. Loading...
         </div>
       )}
+
+      {/* MCP Config Snippets — D-06, D-07, D-08, D-12, D-13 */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Config Snippets</div>
+          <div className="title">MCP Server</div>
+          <div className="detail">Paste the server entry block into your IDE&apos;s MCP config file</div>
+        </div>
+
+        {/* Outer IDE tab bar — primary visual anchor (D-12) */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 8, gap: 0 }}>
+          {MCP_IDE_TABS.map(tab => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={mcpActiveIde === tab.id}
+              onClick={() => setMcpActiveIde(tab.id)}
+              style={{
+                padding: '8px 12px', fontSize: '0.7rem',
+                fontWeight: mcpActiveIde === tab.id ? 600 : 500,
+                color: mcpActiveIde === tab.id ? 'var(--fg)' : 'var(--fg-muted)',
+                borderBottom: `2px solid ${mcpActiveIde === tab.id ? 'var(--at-blue)' : 'transparent'}`,
+                background: 'none', border: 'none', borderBottomStyle: 'solid', borderBottomWidth: 2,
+                cursor: 'pointer', whiteSpace: 'nowrap', marginBottom: 0,
+                transition: 'color 120ms ease, border-color 120ms ease',
+              }}
+            >{tab.label}</button>
+          ))}
+        </div>
+
+        {/* Inner variant sub-tab bar (D-13) */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 8, gap: 0 }}>
+          {MCP_VARIANT_TABS.map(tab => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={mcpActiveVariant === tab.id}
+              onClick={() => setMcpActiveVariant(tab.id as 'http' | 'stdio')}
+              style={{
+                padding: '4px 8px', fontSize: '0.7rem',
+                fontWeight: mcpActiveVariant === tab.id ? 600 : 500,
+                color: mcpActiveVariant === tab.id ? 'var(--fg)' : 'var(--fg-muted)',
+                borderBottom: `2px solid ${mcpActiveVariant === tab.id ? 'var(--at-blue)' : 'transparent'}`,
+                background: 'none', border: 'none', borderBottomStyle: 'solid', borderBottomWidth: 2,
+                cursor: 'pointer', whiteSpace: 'nowrap', marginBottom: 0,
+                transition: 'color 120ms ease, border-color 120ms ease',
+              }}
+            >{tab.label}</button>
+          ))}
+        </div>
+
+        {/* Snippet code block — changes with active outer+inner tab */}
+        <div role="tabpanel">
+          {(() => {
+            const snippetText = getMcpSnippet(mcpActiveIde, mcpActiveVariant, mcpPort);
+            const copyKey = `mcp-${mcpActiveIde}-${mcpActiveVariant}`;
+            return (
+              <div style={{ position: 'relative' }}>
+                <pre style={{
+                  background: 'var(--bg-input)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem', lineHeight: 1.5,
+                  color: 'var(--fg)', overflowX: 'auto', whiteSpace: 'pre', margin: 0,
+                }}>
+                  <code>{snippetText}</code>
+                </pre>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => handleCopySnippet(snippetText, copyKey)}
+                  aria-label={`Copy ${mcpActiveIde} ${mcpActiveVariant} snippet`}
+                  style={{ position: 'absolute', top: 8, right: 8 }}
+                >
+                  {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
 
     </div>
   );
