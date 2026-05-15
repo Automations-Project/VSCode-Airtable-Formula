@@ -7,7 +7,7 @@ import { IdeCard } from '../components/IdeCard.js';
 // ---------------------------------------------------------------------------
 
 export function formatUptime(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined) return '—';
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
   if (ms < 60_000) return '< 1m';
   if (ms < 3_600_000) {
     const m = Math.floor(ms / 60_000);
