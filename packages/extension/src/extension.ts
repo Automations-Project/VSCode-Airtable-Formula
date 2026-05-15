@@ -21,7 +21,7 @@ import { scriptBeautify, scriptMinify, scriptBeautifyFile, scriptMinifyFile, for
 // packages/shared/src/types.ts.
 type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
 type LocalToolCategoryKey = 'read' | 'tableWrite' | 'tableDestructive' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
-import { getSettings, updateSetting } from './settings.js';
+import { getSettings } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { installAiFiles } from './skills/installer.js';
 import { getBundledServerPath, getServerEntry } from './mcp/server-path.js';
