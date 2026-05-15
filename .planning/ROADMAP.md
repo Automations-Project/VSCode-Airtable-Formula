@@ -231,7 +231,7 @@ Plans:
 - [x] 07-02-PLAN.md — Create safe-write.js, cloudflared-pins.json, tunnel.js, install-tunnel.js (TUNNEL-01, TUNNEL-02) [Wave 2, depends_on: 07-01, autonomous]
 
 **Wave 3** *(07-03 and 07-04 parallel — no file overlap)*
-- [ ] 07-03-PLAN.md — Create tunnel-providers/types.js, cloudflared-quick.js, ngrok.js (TUNNEL-01, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
+- [x] 07-03-PLAN.md — Create tunnel-providers/types.js, cloudflared-quick.js, ngrok.js (TUNNEL-01, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
 - [ ] 07-04-PLAN.md — Create tunnel-providers/cloudflared-named.js, cloudflared-named-setup.js, index.js (TUNNEL-01, TUNNEL-03, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
 
 **Wave 4** *(depends on 07-03 and 07-04)*
@@ -284,6 +284,6 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
 | 6. LSP Server | 5/5 | Complete | 2026-05-15 |
-| 7. Tunnel Support | 0/9 | Planned | - |
+| 7. Tunnel Support | 3/9 | In Progress|  |
 | 8. Setup Tab UI | 0/? | Not started | - |
 | 9. Documentation | 0/? | Not started | - |
