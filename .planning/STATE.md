@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
 stopped_at: 07-01 complete (Wave 0 tunnel test stubs committed c2c6d8a)
-last_updated: "2026-05-15T00:45:51.304Z"
+last_updated: "2026-05-15T00:50:25.206Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 21
-  completed_plans: 16
-  percent: 76
+  completed_plans: 17
+  percent: 81
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-14)
 ## Current Position
 
 Phase: 07 (tunnel-support) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-05-15
 
