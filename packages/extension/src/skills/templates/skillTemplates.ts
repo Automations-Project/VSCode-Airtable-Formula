@@ -301,87 +301,126 @@ When user wants to convert an Excel formula to Airtable.
 
 // ─── MCP Tools Guide ─────────────────────────────────────────
 
-export const MCP_TOOLS_GUIDE = `# Airtable User MCP — Tools Guide
+export const MCP_TOOLS_GUIDE = `# Airtable MCP — Tools Guide
 
-> **Server**: airtable-user-mcp v2.4.x
-> **Protocol**: Model Context Protocol (MCP) over stdio
-> **Transport**: JSON-RPC 2.0
+> **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
+> **Tools**: 61 tools across 11 categories + \`manage_tools\`
 
-This MCP server provides **36 tools** for managing Airtable bases, organized into 5 categories.
-All tools require an \`appId\` (e.g. \`"appXXX"\`) as their first parameter.
+---
+
+## Which MCP to Use
+
+Two MCPs are available and designed to work together:
+
+| Task | Which MCP |
+|------|-----------|
+| Read, create, update, delete **records** | **Official** \`mcp.airtable.com\` |
+| List all bases you have access to | **Official** \`mcp.airtable.com\` |
+| Create / rename / delete **tables** | **airtable-user-mcp** |
+| Create / update / delete **fields** (including formula fields) | **airtable-user-mcp** |
+| **Validate a formula** before applying it | **airtable-user-mcp** |
+| Configure **views** (filters, sorts, groups, column order) | **airtable-user-mcp** |
+| Manage **view sections** (sidebar grouping) | **airtable-user-mcp** |
+| Manage **form metadata** and submission notifications | **airtable-user-mcp** |
+| Manage **extensions / blocks** | **airtable-user-mcp** |
+| Manage **record templates** | **airtable-user-mcp** |
+
+### Common combined workflow
+\`\`\`
+1. Use airtable-user-mcp to create tables, fields, and views (schema setup)
+2. Use Official MCP to populate records (data CRUD)
+3. Use airtable-user-mcp to refine view filters/sorts after data is in
+\`\`\`
+
+### Authentication
+- **Official MCP**: requires a Personal Access Token (PAT) or OAuth — configure in IDE MCP settings
+- **airtable-user-mcp**: uses a browser session (login once via the VS Code extension) OR uses a PAT if configured via the extension's Official Airtable MCP panel
+
+---
+
+## airtable-user-mcp Tool Reference
+
 All tools accept an optional \`debug: true\` parameter to include raw Airtable responses.
+Most schema tools require \`appId\` (e.g. \`"appXXX"\`) as their first parameter.
 
 ---
 
-## Category 1: Schema Read Tools (5 tools)
+### Category 1: Read / Inspect (9 tools)
 
-Use these tools to **discover and inspect** base structure before making changes.
-These are **read-only** and safe to call at any time.
+Read-only. Safe to call at any time. Always call a read tool before mutating.
 
 | Tool | When to Use |
 |------|-------------|
-| \`get_base_schema\` | Get full schema of all tables, fields, and views in a base. Use as the first step when exploring an unknown base. |
-| \`list_tables\` | Lightweight listing of table IDs and names. Prefer over \`get_base_schema\` when you only need table names. |
-| \`get_table_schema\` | Get full schema for a single table (fields + views). Use when you know which table to work with. |
-| \`list_fields\` | List all fields/columns in a table with types and typeOptions. Use before creating formulas to check field names and types. |
-| \`list_views\` | List all views in a table with IDs, names, and types. Use before modifying views. |
-
-### Key Parameters
-- \`appId\` (required): The Airtable base ID, always starts with \`"app"\`
-- \`tableIdOrName\`: Accepts either table ID (\`"tblXXX"\`) or exact table name (case-sensitive)
-
-### Best Practice
-> **Always call a read tool before a mutation tool.** For example, call \`list_fields\` before \`create_field\` to verify field names and avoid duplicates.
+| \`get_base_schema\` | Full schema of all tables, fields, and views. Use first when exploring an unknown base. |
+| \`list_tables\` | Lightweight table ID + name listing. Prefer over \`get_base_schema\` when you only need table names. |
+| \`get_table_schema\` | Full schema for one table (fields + views). Use when you know the table. |
+| \`list_fields\` | All fields with types and typeOptions. Call before creating formulas or mutations. |
+| \`list_views\` | All views with IDs, names, types. Call before modifying views. |
+| \`get_view\` | Live view state: filters, sorts, groups, column order, frozen cols, color config. |
+| \`validate_formula\` | **Always call before** \`create_formula_field\` or \`update_formula_field\`. Returns validity + result type. |
+| \`list_view_sections\` | List sidebar view sections (groups) in a table. |
+| \`list_record_templates\` | List record templates defined in a table. |
 
 ---
 
-## Category 2: Field Mutation Tools (8 tools)
+### Category 2: Table Write (9 tools)
 
-Use these tools to **create, update, rename, delete, and duplicate** fields (columns).
-
-### Creating Fields
+Non-destructive table and record-template operations.
 
 | Tool | When to Use |
 |------|-------------|
-| \`create_field\` | Create any field type (text, number, checkbox, formula, rollup, lookup, count, etc.). Supports computed fields not available via the official API. |
-| \`create_formula_field\` | Shorthand for creating a formula field. Use when you only need a formula — saves specifying \`fieldType\` and \`typeOptions\` wrapper. |
+| \`create_table\` | Create a new table with initial fields. |
+| \`rename_table\` | Rename an existing table. |
+| \`create_record_template\` | Create a record template (pre-filled row). |
+| \`rename_record_template\` | Rename a record template. |
+| \`update_record_template_description\` | Set or clear a template's description. |
+| \`set_record_template_cell\` | Set a field value in a record template. |
+| \`set_record_template_visible_columns\` | Choose which fields are visible when using a template. |
+| \`duplicate_record_template\` | Clone an existing record template. |
+| \`apply_record_template\` | Stamp a template onto a new record. |
 
-### Validating & Updating Formulas
+---
+
+### Category 3: Table Destructive (2 tools)
+
+⚠️ Always confirm with the user before calling.
 
 | Tool | When to Use |
 |------|-------------|
-| \`validate_formula\` | **Always call this before** \`create_formula_field\` or \`update_formula_field\`. Returns whether the formula is valid and what result type it produces. Catches syntax errors early. |
-| \`update_formula_field\` | Update the formula text of an existing formula field. Shorthand for \`update_field_config\`. |
-| \`update_field_config\` | Update configuration of any computed field (formula, rollup, lookup, count). Use for non-formula computed fields. |
+| \`delete_table\` | Permanently delete a table and all its records. |
+| \`delete_record_template\` | Delete a record template. |
 
-### Renaming & Deleting
+---
+
+### Category 4: Field Write (7 tools)
+
+Non-destructive field operations.
 
 | Tool | When to Use |
 |------|-------------|
-| \`rename_field\` | Rename a field. Pre-validates the field exists. |
-| \`delete_field\` | **⚠️ DESTRUCTIVE** — Delete a field. Requires both \`fieldId\` AND \`expectedName\` as safety guard. Checks for downstream dependencies first. |
-| \`duplicate_field\` | Clone a field structure. Optionally copies cell values with \`duplicateCells: true\`. |
+| \`create_field\` | Create any field type (text, number, checkbox, formula, rollup, lookup, count, …). |
+| \`create_formula_field\` | Shorthand for creating a formula field. |
+| \`update_formula_field\` | Update the formula text of an existing formula field. |
+| \`update_field_config\` | Update config of any computed field (rollup, lookup, count, formula). |
+| \`rename_field\` | Rename a field. |
+| \`update_field_description\` | Set or clear a field's description/documentation. |
+| \`duplicate_field\` | Clone a field. Pass \`duplicateCells: true\` to copy values too. |
 
-### Required Workflow: Formula Creation
+#### Required Workflow: Formula Creation
 \`\`\`
-1. list_fields          → verify field names and types exist
-2. validate_formula     → check syntax and result type
-3. create_formula_field → create the field if validation passes
-\`\`\`
-
-### Required Workflow: Formula Update
-\`\`\`
-1. list_fields          → get the fieldId of the formula field
-2. validate_formula     → validate the new formula text
-3. update_formula_field → apply the update if validation passes
+1. list_fields          → check field names and types
+2. validate_formula     → verify syntax and result type
+3. create_formula_field → create only if validation passes
 \`\`\`
 
-### Safety Rules for Field Mutations
-- **Never delete a field without user confirmation.** Always show the field name and ask.
-- \`delete_field\` checks for downstream dependencies (other fields referencing it). If dependencies exist, it returns dependency info instead of deleting. Set \`force: true\` only if the user explicitly confirms.
-- \`expectedName\` must match exactly (case-sensitive) or deletion is refused.
+#### Required Workflow: Formula Update
+\`\`\`
+1. list_fields          → get the fieldId
+2. validate_formula     → validate new formula text
+3. update_formula_field → apply if valid
+\`\`\`
 
-### typeOptions Reference
+#### typeOptions Reference
 | Field Type | typeOptions |
 |------------|-------------|
 | formula | \`{ formulaText: "IF({A},1,0)" }\` |
@@ -392,50 +431,65 @@ Use these tools to **create, update, rename, delete, and duplicate** fields (col
 
 ---
 
-## Category 3: View Tools (10 tools)
+### Category 5: Field Destructive (1 tool)
 
-Use these tools to **create, configure, and manage** views.
-
-### Creating & Managing Views
+⚠️ Always confirm with the user before calling.
 
 | Tool | When to Use |
 |------|-------------|
-| \`create_view\` | Create a new view. Types: \`"grid"\`, \`"form"\`, \`"kanban"\`, \`"calendar"\`, \`"gallery"\`, \`"gantt"\`, \`"levels"\` (list). Can copy config from an existing view. |
-| \`duplicate_view\` | Clone a view with all its configuration (filters, sorts, field visibility). |
+| \`delete_field\` | Delete a field. Requires \`fieldId\` + \`expectedName\` (exact match). Auto-checks dependencies first; set \`force: true\` only after user reviews them. |
+
+---
+
+### Category 6: View Write (19 tools)
+
+Non-destructive view creation and configuration.
+
+#### Creating & Cloning
+| Tool | When to Use |
+|------|-------------|
+| \`create_view\` | Create a view. Types: \`grid\`, \`form\`, \`kanban\`, \`calendar\`, \`gallery\`, \`gantt\`, \`levels\`. |
+| \`duplicate_view\` | Clone a view with all its config (filters, sorts, field visibility). |
 | \`rename_view\` | Rename a view. |
-| \`delete_view\` | **⚠️ DESTRUCTIVE** — Delete a view. Cannot delete the last remaining view in a table. |
+| \`update_view_description\` | Set or clear a view's description. |
 
-### Configuring Views
-
+#### Configuring Data Display
 | Tool | When to Use |
 |------|-------------|
-| \`update_view_description\` | Set or clear a view's description text. |
-| \`update_view_filters\` | Set filter conditions on a view. Supports AND/OR conjunctions. |
-| \`reorder_view_fields\` | Change column order in a view. Provide a map of field IDs → column index. |
-| \`show_or_hide_view_columns\` | Show or hide specific columns in a view. |
-| \`apply_view_sorts\` | Set sort conditions. Pass empty array \`[]\` to clear sorts. |
-| \`update_view_group_levels\` | Set grouping. Pass empty array \`[]\` to clear grouping. |
-| \`update_view_row_height\` | Change row height: \`"small"\`, \`"medium"\`, \`"large"\`, \`"xlarge"\`. |
+| \`update_view_filters\` | Set filter conditions. Supports AND/OR conjunctions. |
+| \`apply_view_sorts\` | Set sort conditions. Pass \`[]\` to clear. |
+| \`update_view_group_levels\` | Set grouping. Pass \`[]\` to clear. |
+| \`update_view_row_height\` | Row height: \`small\`, \`medium\`, \`large\`, \`xlarge\`. |
+| \`set_view_cover\` | Set gallery/kanban cover field. |
+| \`set_view_color_config\` | Set row coloring rules. |
+| \`set_view_cell_wrap\` | Toggle cell text wrap. |
+| \`set_calendar_date_columns\` | Set the date columns for calendar views. |
 
-### Column Ordering — Critical Behavior
+#### Column Layout
+| Tool | When to Use |
+|------|-------------|
+| \`show_or_hide_view_columns\` | Show or hide specific columns by field ID. |
+| \`show_or_hide_all_columns\` | Show or hide every column at once. |
+| \`set_view_columns\` | **One-shot reset**: hides all, then shows only specified IDs in order. Prefer this for fresh view setup. |
+| \`reorder_view_fields\` | Reorder by overall index (visible + hidden). Primary field always stays at 0. |
+| \`move_visible_columns\` | Move visible columns to a target index. ⚠️ See critical behavior below. |
+| \`move_overall_columns\` | Move any column (visible or hidden) to a target overall index. |
+| \`update_frozen_column_count\` | Set how many leftmost columns are frozen. |
 
-**\`move_visible_columns\`**: The Airtable API moves columns as a block but **preserves their existing relative order** — it does NOT re-sequence by input array order. To place columns in a specific custom sequence, make separate calls per column with incrementing \`targetVisibleIndex\`:
+#### \`move_visible_columns\` — Critical Behavior
+The API moves a block of columns but **preserves their existing relative order** — input array order is ignored. For a specific sequence, make one call per column:
 \`\`\`
-// ❌ WRONG — array order is ignored by the API:
-move_visible_columns({ columnIds: ["fldC", "fldA", "fldB"], targetVisibleIndex: 1 })
-// Result: fldA, fldB, fldC (original relative order preserved)
+// ❌ WRONG — array order ignored:
+move_visible_columns({ columnIds: ["fldC","fldA","fldB"], targetVisibleIndex: 1 })
+// Result: fldA, fldB, fldC  (original relative order kept)
 
-// ✅ CORRECT — sequential single-column moves:
+// ✅ CORRECT — one column at a time:
 move_visible_columns({ columnIds: ["fldC"], targetVisibleIndex: 1 })
 move_visible_columns({ columnIds: ["fldA"], targetVisibleIndex: 2 })
 move_visible_columns({ columnIds: ["fldB"], targetVisibleIndex: 3 })
 \`\`\`
 
-**\`set_view_columns\`**: One-shot setup — hides all columns then shows only the specified IDs in the given order. Prefer this over manual show/hide + move sequences when setting up a view from scratch.
-
-**\`reorder_view_fields\`**: Operates on the *overall* (visible + hidden) column index. The primary field (first field) always stays at index 0 — do not include it in \`fieldOrder\`. Provide a partial map of field IDs → target indices; the tool merges with the current order automatically.
-
-### Filter Syntax
+#### Filter Syntax
 \`\`\`json
 {
   "filterSet": [
@@ -446,73 +500,106 @@ move_visible_columns({ columnIds: ["fldB"], targetVisibleIndex: 3 })
 }
 \`\`\`
 
-### Available Filter Operators
-\`contains\`, \`doesNotContain\`, \`is\`, \`isNot\`, \`isEmpty\`, \`isNotEmpty\`,
+Available operators: \`contains\`, \`doesNotContain\`, \`is\`, \`isNot\`, \`isEmpty\`, \`isNotEmpty\`,
 \`isGreaterThan\`, \`isLessThan\`, \`isGreaterThanOrEqualTo\`, \`isLessThanOrEqualTo\`,
 \`isWithin\`, \`isAfter\`, \`isBefore\`, \`hasAnyOf\`, \`hasAllOf\`, \`hasNoneOf\`
 
-### Relative Date Filters (\`isWithin\`)
-
-For date fields with dynamic/rolling windows, use \`isWithin\` with a value object.
-Always include \`timeZone\` (IANA string) and \`shouldUseCorrectTimeZoneForFormulaicColumn: true\`:
+#### Relative Date Filters (\`isWithin\`)
 \`\`\`json
-{ "columnId": "fldXXX", "operator": "isWithin", "value": { "mode": "pastWeek", "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
-{ "columnId": "fldXXX", "operator": "isWithin", "value": { "mode": "pastNumberOfDays", "numberOfDays": 7, "timeZone": "UTC", "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
+{ "columnId": "fldXXX", "operator": "isWithin",
+  "value": { "mode": "pastWeek", "timeZone": "UTC",
+              "shouldUseCorrectTimeZoneForFormulaicColumn": true } }
 \`\`\`
-
-Available \`mode\` values (verified via API capture 2026-05-01):
-| Mode | numberOfDays required? | Meaning |
-|------|----------------------|---------|
-| \`"pastWeek"\` / \`"pastMonth"\` / \`"pastYear"\` | no | Rolling past period |
-| \`"nextWeek"\` / \`"nextMonth"\` / \`"nextYear"\` | no | Rolling next period |
-| \`"thisCalendarMonth"\` / \`"thisCalendarYear"\` | no | Current calendar period |
-| \`"pastNumberOfDays"\` | yes | Past N days |
-| \`"nextNumberOfDays"\` | yes | Next N days |
-
-Do NOT use \`exactDate\`, \`thisMonth\`, or \`thisYear\` — these are not valid API values.
+Valid \`mode\` values: \`pastWeek\`, \`pastMonth\`, \`pastYear\`, \`nextWeek\`, \`nextMonth\`, \`nextYear\`,
+\`thisCalendarMonth\`, \`thisCalendarYear\`, \`pastNumberOfDays\` (+ \`numberOfDays\`), \`nextNumberOfDays\` (+ \`numberOfDays\`).
+Do **NOT** use \`exactDate\`, \`thisMonth\`, or \`thisYear\` — these are rejected by the API.
 
 ---
 
-## Category 4: Field Description Tool (1 tool)
+### Category 7: View Destructive (1 tool)
+
+⚠️ Cannot delete the last view in a table.
 
 | Tool | When to Use |
 |------|-------------|
-| \`update_field_description\` | Set or update the description text of any field. Use to document field purpose, formula logic, or data source. |
+| \`delete_view\` | Permanently delete a view. |
 
 ---
 
-## Category 5: Extension/Block Tools (6 tools)
+### Category 8: View Sections (3 tools)
 
-Use these tools to manage Airtable extensions (blocks) and dashboard pages.
+Manage the sidebar view groupings (sections/folders).
 
 | Tool | When to Use |
 |------|-------------|
-| \`create_extension\` | Register a new extension in a base. Returns a \`blockId\` needed for installation. |
-| \`create_extension_dashboard\` | Create a new dashboard page. Extensions are installed onto pages. |
-| \`install_extension\` | Install an extension onto a dashboard page. Requires \`blockId\` + \`pageId\`. |
-| \`update_extension_state\` | Enable or disable an installed extension (\`"enabled"\` / \`"disabled"\`). |
+| \`create_view_section\` | Create a new sidebar section. |
+| \`rename_view_section\` | Rename a sidebar section. |
+| \`move_view_to_section\` | Move a view into a sidebar section. |
+
+---
+
+### Category 9: View Sections — Destructive (1 tool)
+
+| Tool | When to Use |
+|------|-------------|
+| \`delete_view_section\` | Delete a sidebar section (views inside are NOT deleted). |
+
+---
+
+### Category 10: Form Metadata (2 tools)
+
+Configure legacy form views (public-facing, so gated separately from other view-write ops).
+
+| Tool | When to Use |
+|------|-------------|
+| \`set_form_metadata\` | Set form title, description, cover, and field labels. |
+| \`set_form_submission_notification\` | Configure who gets notified on form submission. |
+
+---
+
+### Category 11: Extension Management (7 tools)
+
+| Tool | When to Use |
+|------|-------------|
+| \`create_extension\` | Register a new extension. Returns \`blockId\` needed for installation. |
+| \`create_extension_dashboard\` | Create a dashboard page. Returns \`pageId\`. |
+| \`install_extension\` | Install extension onto a page. Requires \`blockId\` + \`pageId\`. |
+| \`update_extension_state\` | Enable or disable an extension (\`enabled\` / \`disabled\`). |
 | \`rename_extension\` | Rename an installed extension. |
-| \`duplicate_extension\` | Clone an installed extension to a dashboard page. |
+| \`duplicate_extension\` | Clone an extension to a dashboard page. |
 | \`remove_extension\` | **⚠️ DESTRUCTIVE** — Remove an extension from a dashboard. |
 
-### Required Workflow: Extension Installation
+#### Required Workflow: Extension Installation
 \`\`\`
 1. create_extension           → get blockId
 2. create_extension_dashboard → get pageId
-3. install_extension          → install block onto page
+3. install_extension          → install onto page
 \`\`\`
+
+---
+
+### Meta-Tool: manage_tools
+
+Built-in tool always available regardless of active profile.
+Use to inspect or change the active tool profile without leaving your AI session.
+
+| Action | What it does |
+|--------|-------------|
+| \`get_tool_status\` | Show current profile, enabled/disabled counts, and which tools are hidden. |
+| \`switch_profile\` | Switch to \`read-only\`, \`safe-write\`, or \`full\` profile. |
+| \`toggle_category\` | Enable or disable a specific category when profile is \`custom\`. |
 
 ---
 
 ## Global Rules
 
-1. **Read before write**: Always call a read tool to understand current state before mutating.
-2. **Validate before create**: Always \`validate_formula\` before creating or updating formula fields.
-3. **Confirm destructive ops**: Never call \`delete_field\`, \`delete_view\`, or \`remove_extension\` without explicit user confirmation.
-4. **Use exact IDs**: Airtable IDs are case-sensitive. Copy them exactly from read tool results.
-5. **Prefer shorthands**: Use \`create_formula_field\` over \`create_field\` with type formula. Use \`update_formula_field\` over \`update_field_config\`.
-6. **Check dependencies**: Before deleting a field, the tool automatically checks for downstream dependencies. Review the response before forcing deletion.
-7. **Use debug sparingly**: Only pass \`debug: true\` when troubleshooting — it returns large raw payloads.
+1. **Read before write** — always inspect current state before mutating.
+2. **Validate before formula** — always call \`validate_formula\` before creating or updating formula fields.
+3. **Confirm destructive ops** — never call delete tools without explicit user confirmation.
+4. **Exact IDs** — Airtable IDs are case-sensitive. Always copy from read tool results, never guess.
+5. **Prefer shorthands** — \`create_formula_field\` over \`create_field\` with formula type; \`update_formula_field\` over \`update_field_config\`.
+6. **Check dependencies** — \`delete_field\` auto-checks downstream deps; show them to the user before \`force: true\`.
+7. **debug sparingly** — \`debug: true\` returns large raw payloads; only use when troubleshooting.
 
 ## ID Format Reference
 
@@ -531,53 +618,65 @@ Use these tools to manage Airtable extensions (blocks) and dashboard pages.
 // ─── MCP Rules (always-on) ──────────────────────────────────
 
 export const MCP_RULES = `---
-description: Rules for using the Airtable User MCP server tools
+description: Rules for using the Airtable MCP servers (airtable-user-mcp + official mcp.airtable.com)
 globs: ["**/*"]
 alwaysApply: true
 ---
 
-# Airtable MCP Server — Tool Usage Rules
+# Airtable MCP — Tool Usage Rules
 
-These rules apply whenever you interact with Airtable bases via the MCP tools.
+## Two MCPs, Complementary Roles
 
-## Server Identity
+| Need | Use |
+|------|-----|
+| Read / create / update / delete **records** | **Official MCP** (\`mcp.airtable.com\`) |
+| List bases you have access to | **Official MCP** |
+| **Schema work** — tables, fields, formulas, views | **airtable-user-mcp** |
+| **Formula validation** before applying | **airtable-user-mcp** (\`validate_formula\`) |
+| **View config** — filters, sorts, groups, column order | **airtable-user-mcp** |
+| **View sections**, form metadata, extensions | **airtable-user-mcp** |
+| **Record templates** | **airtable-user-mcp** |
 
-- **Name**: airtable-user-mcp
-- **Version**: 2.4.x
-- **Protocol**: Model Context Protocol (stdio, JSON-RPC 2.0)
-- **Capabilities**: Schema read, field CRUD, view CRUD, formula validation, extension management
-- **Tool Count**: 36 tools across 5 categories
+Use them together: set up schema with airtable-user-mcp, populate records with the Official MCP.
+
+## airtable-user-mcp — Server Identity
+
+- **Name**: airtable-user-mcp  |  **Version**: 2.4.x
+- **Protocol**: Model Context Protocol (JSON-RPC 2.0)
+- **Tools**: 61 tools across 11 categories + \`manage_tools\`
+- **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ## Mandatory Workflows
 
 ### Before Creating a Formula Field
-1. Call \`list_fields\` to verify all referenced field names exist and check their types
-2. Call \`validate_formula\` to check syntax and result type
-3. Only then call \`create_formula_field\` or \`create_field\`
+1. \`list_fields\` — verify all referenced field names exist and check types
+2. \`validate_formula\` — confirm syntax and result type
+3. \`create_formula_field\` — only if validation passes
 
 ### Before Updating a Formula Field
-1. Call \`list_fields\` to get the \`fieldId\`
-2. Call \`validate_formula\` with the new formula text
-3. Only then call \`update_formula_field\`
+1. \`list_fields\` — get the \`fieldId\`
+2. \`validate_formula\` — validate new formula text
+3. \`update_formula_field\` — apply only if valid
 
-### Before Deleting a Field
-1. Call \`list_fields\` to confirm the field exists and get its exact name
-2. Call \`delete_field\` with both \`fieldId\` and \`expectedName\`
-3. If dependencies are returned, show them to the user and ask before using \`force: true\`
+### Before Deleting Any Field / View / Table
+1. Read tool first — confirm it exists and get exact name/ID
+2. Show the user what will be deleted and ask for confirmation
+3. Call the delete tool with required safety params (\`expectedName\` for fields)
+4. For \`delete_field\`: review any returned dependencies before setting \`force: true\`
 
 ### Before Installing an Extension
-1. \`create_extension\` to get blockId
-2. \`create_extension_dashboard\` to get pageId
-3. \`install_extension\` with both IDs
+1. \`create_extension\` → get \`blockId\`
+2. \`create_extension_dashboard\` → get \`pageId\`
+3. \`install_extension\` → install onto page
 
 ## Safety Rules
 
-- **NEVER** call \`delete_field\`, \`delete_view\`, or \`remove_extension\` without explicit user confirmation
-- **NEVER** set \`force: true\` on \`delete_field\` without showing dependencies to the user first
-- **ALWAYS** validate formulas before creating/updating them
+- **NEVER** call any delete tool (\`delete_field\`, \`delete_view\`, \`delete_table\`, \`delete_record_template\`, \`delete_view_section\`, \`remove_extension\`) without explicit user confirmation
+- **NEVER** set \`force: true\` on \`delete_field\` before showing the user the returned dependencies
+- **ALWAYS** validate formulas before creating or updating formula fields
 - **ALWAYS** use read tools to discover IDs — never guess or fabricate Airtable IDs
-- **PREFER** lightweight reads: use \`list_tables\` over \`get_base_schema\` when you only need table names
-- **PREFER** shorthands: use \`create_formula_field\` instead of \`create_field\` with type formula
+- **PREFER** lightweight reads: \`list_tables\` over \`get_base_schema\` when only table names are needed
+- **PREFER** shorthands: \`create_formula_field\` over \`create_field\` with formula type
 
 ## Tool Selection Guide
 
@@ -585,29 +684,28 @@ These rules apply whenever you interact with Airtable bases via the MCP tools.
 |-------------|----------------|
 | "Show me the tables" | \`list_tables\` |
 | "What fields does X have?" | \`list_fields\` or \`get_table_schema\` |
-| "Create a formula that..." | \`list_fields\` then \`validate_formula\` then \`create_formula_field\` |
-| "Update the formula in..." | \`list_fields\` then \`validate_formula\` then \`update_formula_field\` |
-| "Delete the field..." | \`list_fields\` then confirm with user then \`delete_field\` |
-| "Add a new text/number field" | \`create_field\` with appropriate fieldType |
-| "Create a view filtered by..." | \`list_fields\` then \`create_view\` then \`update_view_filters\` |
-| "Sort/group this view by..." | \`apply_view_sorts\` or \`update_view_group_levels\` |
-| "Hide these columns" | \`show_or_hide_view_columns\` with \`visibility: false\` |
-| "Install an extension" | \`create_extension\` then \`create_extension_dashboard\` then \`install_extension\` |
+| "What are the current filters on view Y?" | \`get_view\` |
+| "Create a formula that…" | \`list_fields\` → \`validate_formula\` → \`create_formula_field\` |
+| "Update the formula in…" | \`list_fields\` → \`validate_formula\` → \`update_formula_field\` |
+| "Delete the field…" | \`list_fields\` → confirm → \`delete_field\` |
+| "Add a text/number field" | \`create_field\` with appropriate \`fieldType\` |
+| "Create a view filtered by…" | \`list_fields\` → \`create_view\` → \`update_view_filters\` |
+| "Sort/group this view by…" | \`apply_view_sorts\` or \`update_view_group_levels\` |
+| "Hide these columns" | \`show_or_hide_view_columns\` |
 | "Set column order to X, Y, Z" | \`set_view_columns\` (full reset) or sequential \`move_visible_columns\` calls |
-
-## Filter Operators Quick Reference
-
-\`contains\`, \`doesNotContain\`, \`is\`, \`isNot\`, \`isEmpty\`, \`isNotEmpty\`,
-\`isGreaterThan\`, \`isLessThan\`, \`isGreaterThanOrEqualTo\`, \`isLessThanOrEqualTo\`,
-\`isWithin\`, \`isAfter\`, \`isBefore\`, \`hasAnyOf\`, \`hasAllOf\`, \`hasNoneOf\`
+| "Organise views into sections" | \`create_view_section\` → \`move_view_to_section\` |
+| "Install an extension" | \`create_extension\` → \`create_extension_dashboard\` → \`install_extension\` |
+| "Create records" | **Official MCP** — airtable-user-mcp has no record CRUD |
+| "What profiles/tools are active?" | \`manage_tools\` with action \`get_tool_status\` |
 
 ## Common Mistakes to Avoid
 
-1. **Creating a formula without validating** — may produce invalid formula errors in Airtable
-2. **Using table name instead of table ID for mutations** — some tools require \`tableId\` (tblXXX format)
-3. **Forgetting expectedName on delete_field** — deletion will be refused
+1. **Creating a formula without validating** — may silently produce an invalid field in Airtable
+2. **Using table name instead of ID for mutation tools** — some tools require \`tableId\` (\`tblXXX\` format)
+3. **Omitting \`expectedName\` on \`delete_field\`** — deletion will be refused
 4. **Passing field names instead of field IDs to view tools** — view tools use \`fldXXX\` IDs, not names
-5. **Deleting the last view in a table** — will fail; tables must have at least one view
-6. **Passing multiple IDs to \`move_visible_columns\` expecting ordered placement** — the API ignores input array order; make sequential single-column calls instead
-7. **Using \`emptyGroupState: "visible"\` in \`update_view_group_levels\`** — the API rejects "visible"; omit this field (defaults to "hidden")
+5. **Deleting the last view in a table** — will fail; a table must always have at least one view
+6. **Passing multiple IDs to \`move_visible_columns\` expecting ordered placement** — the API ignores input array order; make one call per column with incrementing \`targetVisibleIndex\`
+7. **Using \`emptyGroupState: "visible"\` in \`update_view_group_levels\`** — the API rejects this value; omit the field (defaults to "hidden")
+8. **Trying to use airtable-user-mcp for record CRUD** — it has no record read/write tools; use the Official MCP for that
 `;
