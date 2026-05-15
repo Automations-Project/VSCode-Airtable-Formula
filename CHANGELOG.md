@@ -214,6 +214,44 @@ Note on builder forms: Airtable's "Interfaces" / page-based forms (`page/{pageId
 - **CI matrix** — GitHub Actions now runs on `ubuntu-latest`, `windows-latest`, and `macos-latest`
 - **Build script robustness** — `check-tool-sync.mjs` now uses brace-counting instead of a fragile regex to parse the TypeScript mirror
 
+## [2.0.0] — Daemon & LSP
+
+### Daemon transport
+
+`airtable-user-mcp` now runs as a shared background daemon instead of per-client stdio processes.
+One Chromium session is shared across all MCP clients and editor LSP connections.
+
+- **HTTP MCP server** — `StreamableHTTPServerTransport` on a dynamic port; bearer token auth; SSE events
+- **stdio-proxy mode** — default `npx airtable-user-mcp` transparently bridges stdin/stdout to the daemon when a lock exists
+- **opt-out** — `AIRTABLE_NO_DAEMON=1` (or `--no-daemon`) forces in-process stdio (backwards-compatible)
+- **New CLI subcommands** — `daemon start`, `daemon stop`, `daemon status`
+- **Lockfile** — `~/.airtable-user-mcp/daemon.lock` carries `pid`, `port`, `port_lsp`, `bearerToken`, `tunnelUrl`
+
+### LSP server
+
+New `airtable-user-lsp` npm package — Airtable language server for formula, script, and automation files.
+
+- Works with any LSP-capable editor (Neovim, Zed, OpenCode, Helix, and more)
+- `npx airtable-user-lsp --stdio` for standalone use; `--tcp` for shared daemon instance
+- Daemon auto-spawns `airtable-user-lsp --tcp` and writes `port_lsp` to the lockfile
+
+### Tunnel support
+
+Cloudflare and ngrok tunnel integration lets remote AI clients reach the local MCP daemon.
+
+- Two providers: `cloudflared` (Quick Tunnel or Named Tunnel) and `ngrok`
+- Tunnel URL exposed in daemon lockfile and Setup tab
+- 401-burst auto-disable guard
+
+### Setup tab
+
+New Setup tab in the VS Code dashboard with one-click copy snippets for:
+- MCP configuration (5 IDEs × HTTP and stdio transport modes)
+- LSP configuration (4 IDEs × TCP and stdio modes)
+- Daemon status block with health indicators
+
+mcp-server: 2.4.5. Extension: 2.0.48.
+
 ## [2.0.11] - 2026-04-11
 
 ### Added
