@@ -225,10 +225,10 @@ Plans:
 **Plans**: 9 plans *(PLANNED 2026-05-15 — ready for execution)*
 Plans:
 **Wave 1** *(test scaffolds — no dependencies)*
-- [ ] 07-01-PLAN.md — Create 3 Wave-0 test stub files: test-tunnel-allowlist, test-tunnel-lifecycle, test-tunnel-settings (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 1, autonomous]
+- [x] 07-01-PLAN.md — Create 3 Wave-0 test stub files: test-tunnel-allowlist, test-tunnel-lifecycle, test-tunnel-settings (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 1, autonomous]
 
 **Wave 2** *(depends on 07-01)*
-- [ ] 07-02-PLAN.md — Create safe-write.js, cloudflared-pins.json, tunnel.js, install-tunnel.js (TUNNEL-01, TUNNEL-02) [Wave 2, depends_on: 07-01, autonomous]
+- [x] 07-02-PLAN.md — Create safe-write.js, cloudflared-pins.json, tunnel.js, install-tunnel.js (TUNNEL-01, TUNNEL-02) [Wave 2, depends_on: 07-01, autonomous]
 
 **Wave 3** *(07-03 and 07-04 parallel — no file overlap)*
 - [ ] 07-03-PLAN.md — Create tunnel-providers/types.js, cloudflared-quick.js, ngrok.js (TUNNEL-01, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
