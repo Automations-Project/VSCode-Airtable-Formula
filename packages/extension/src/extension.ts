@@ -23,6 +23,7 @@ type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
 type LocalToolCategoryKey = 'read' | 'tableWrite' | 'tableDestructive' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
 import { getSettings } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
+import { IDE_CONFIGS } from './auto-config/ide-configs.js';
 import { installAiFiles } from './skills/installer.js';
 import { getBundledServerPath, getServerEntry } from './mcp/server-path.js';
 import { DebugCollector, exportDebugLog, traceConfigChanges } from './debug/index.js';

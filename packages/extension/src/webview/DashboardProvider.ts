@@ -4,7 +4,8 @@ import * as path from 'path';
 import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot, DaemonStatusInfo } from '@airtable-formula/shared';
 import type { WebviewMessage } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
-import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde } from '../auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde } from '../auto-config/index.js';
+import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
 import { installAiFiles, checkAiFiles } from '../skills/installer.js';
 import { getSettings, updateSetting } from '../settings.js';
 import { getBundledServerPath, getServerEntry } from '../mcp/server-path.js';
@@ -74,8 +75,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const serverEntry = getServerEntry(this.context);
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
         const settings = getSettings();
-        await configureMcpForIde(msg.ideId, serverPath, serverEntry);
-        await installAiFiles(msg.ideId, workspaceRoot, false, settings.ai.includeAgents);
+        const caps = IDE_CONFIGS[msg.ideId].capabilities;
+        if (caps.includes('mcp')) await configureMcpForIde(msg.ideId, serverPath, serverEntry);
+        if (caps.includes('lsp')) await configureLspForIde(msg.ideId);
+        if (caps.includes('mcp')) await installAiFiles(msg.ideId, workspaceRoot, false, settings.ai.includeAgents);
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
@@ -92,10 +95,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const settings = getSettings();
         const statuses = await getAllIdeStatuses();
         await Promise.all(
-          statuses.filter(s => s.detected).map(s =>
-            configureMcpForIde(s.ideId, serverPath, serverEntry)
-              .then(() => installAiFiles(s.ideId, workspaceRoot, false, settings.ai.includeAgents))
-          )
+          statuses.filter(s => s.detected).map(async s => {
+            const caps = IDE_CONFIGS[s.ideId].capabilities;
+            if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
+            if (caps.includes('lsp')) await configureLspForIde(s.ideId);
+            if (caps.includes('mcp')) await installAiFiles(s.ideId, workspaceRoot, false, settings.ai.includeAgents);
+          })
         );
         await this.pushState();
         this.postResult(msg.id, true);
@@ -106,7 +111,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'action:unconfigureIde') {
       try {
-        await unconfigureMcpForIde(msg.ideId);
+        const caps = IDE_CONFIGS[msg.ideId].capabilities;
+        if (caps.includes('mcp')) await unconfigureMcpForIde(msg.ideId);
+        if (caps.includes('lsp')) await unconfigureLspForIde(msg.ideId);
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {

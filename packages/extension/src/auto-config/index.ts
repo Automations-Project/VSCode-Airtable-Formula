@@ -5,6 +5,7 @@ import type { IdeId, IdeStatus, AiFiles } from '@airtable-formula/shared';
 import { getSettings } from '../settings.js';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
+import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, isMcpTomlConfigured } from './lsp-config.js';
 
 const MCP_SERVER_NAME = 'airtable-user-mcp';
 
@@ -91,14 +92,27 @@ export function buildNpxServerEntry(): Record<string, unknown> {
 
 export async function configureMcpForIde(ideId: IdeId, serverPath: string, serverEntry?: Record<string, unknown>): Promise<void> {
   const cfg = IDE_CONFIGS[ideId];
+  if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return;
+
+  // Codex CLI uses TOML — delegate to the TOML handler
+  if (cfg.lspConfigFormat === undefined && ideId === 'codex-cli') {
+    return configureMcpToml(cfg.mcpConfigPath);
+  }
+  // codex-cli special-case: mcpConfigPath present but no mcpServersKey for JSON path
+  if (!cfg.mcpServersKey) return;
+
+  const base = serverEntry ?? buildServerEntry(serverPath);
+  const entry = cfg.mcpEntryExtras ? { ...cfg.mcpEntryExtras, ...base } : base;
   const existing = await readConfigFile(cfg.mcpConfigPath);
-  const entry = serverEntry ?? buildServerEntry(serverPath);
   const merged = mergeServerEntry(existing, cfg.mcpServersKey, MCP_SERVER_NAME, entry);
   await writeConfigAtomic(cfg.mcpConfigPath, merged);
 }
 
 export async function unconfigureMcpForIde(ideId: IdeId): Promise<void> {
   const cfg = IDE_CONFIGS[ideId];
+  if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return;
+  if (ideId === 'codex-cli') return unconfigureMcpToml(cfg.mcpConfigPath);
+  if (!cfg.mcpServersKey) return;
   const existing = await readConfigFile(cfg.mcpConfigPath);
   const cleaned = removeServerEntry(existing, cfg.mcpServersKey, MCP_SERVER_NAME);
   await writeConfigAtomic(cfg.mcpConfigPath, cleaned);
@@ -107,6 +121,9 @@ export async function unconfigureMcpForIde(ideId: IdeId): Promise<void> {
 export async function isMcpConfigured(ideId: IdeId): Promise<boolean> {
   try {
     const cfg = IDE_CONFIGS[ideId];
+    if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return false;
+    if (ideId === 'codex-cli') return isMcpTomlConfigured(cfg.mcpConfigPath);
+    if (!cfg.mcpServersKey) return false;
     const existing = await readConfigFile(cfg.mcpConfigPath);
     const parts = cfg.mcpServersKey.split('.');
     let cur: unknown = existing;
@@ -121,6 +138,12 @@ export async function isMcpConfigured(ideId: IdeId): Promise<boolean> {
 export async function getMcpHealth(ideId: IdeId): Promise<{ configured: boolean; healthy: boolean }> {
   try {
     const cfg = IDE_CONFIGS[ideId];
+    if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return { configured: false, healthy: false };
+    if (ideId === 'codex-cli') {
+      const ok = await isMcpTomlConfigured(cfg.mcpConfigPath);
+      return { configured: ok, healthy: ok };
+    }
+    if (!cfg.mcpServersKey) return { configured: false, healthy: false };
     const existing = await readConfigFile(cfg.mcpConfigPath);
     const parts = cfg.mcpServersKey.split('.');
     let cur: unknown = existing;
@@ -136,7 +159,6 @@ export async function getMcpHealth(ideId: IdeId): Promise<{ configured: boolean;
     const args = entry.args as string[] | undefined;
     if (args && args.length > 0) {
       const target = args[0];
-      // Launcher path is healthy if the launcher AND its config exist
       if (target === LAUNCHER_SCRIPT) {
         try {
           await fs.promises.access(LAUNCHER_SCRIPT);
@@ -146,7 +168,6 @@ export async function getMcpHealth(ideId: IdeId): Promise<{ configured: boolean;
           return { configured: true, healthy: false };
         }
       }
-      // Direct path (legacy or override) — check the file itself
       try {
         await fs.promises.access(target);
         return { configured: true, healthy: true };
@@ -165,13 +186,22 @@ function emptyAiFiles(): AiFiles {
 export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
   const cfg = IDE_CONFIGS[ideId];
   const detected = await isIdeInstalled(ideId);
-  const health = detected ? await getMcpHealth(ideId) : { configured: false, healthy: false };
+  const hasMcp = cfg.capabilities.includes('mcp');
+  const hasLsp = cfg.capabilities.includes('lsp');
+  const health = (detected && hasMcp)
+    ? await getMcpHealth(ideId)
+    : { configured: false, healthy: false };
+  const lspConfigured = (detected && hasLsp)
+    ? await isLspConfigured(ideId)
+    : undefined;
   return {
     ideId,
     label: cfg.label,
     detected,
     mcpConfigured: health.configured,
     mcpServerHealthy: health.configured ? health.healthy : undefined,
+    lspConfigured:   hasLsp ? lspConfigured : undefined,
+    lspManualStep:   cfg.lspManualStep,
     aiFiles: emptyAiFiles(),
   };
 }
@@ -184,3 +214,4 @@ export async function getAllIdeStatuses(): Promise<IdeStatus[]> {
 export { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
 export { IDE_CONFIGS } from './ide-configs.js';
 export type { IdeConfig } from './ide-configs.js';
+export { configureLspForIde, unconfigureLspForIde, isLspConfigured } from './lsp-config.js';

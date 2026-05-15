@@ -3,13 +3,16 @@ import type { IdeId, IdeStatus } from '@shared/types.js';
 import { Pill } from './Pill.js';
 import { IdeIcon } from './IdeIcon.js';
 
-// VS Code forks / extension-host environments: language features (LSP) are
-// provided automatically when the extension is installed in that IDE.
+// VS Code forks / extension-host environments: language features are provided
+// automatically when the Airtable Formula extension is installed in that IDE.
 const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
+
+// IDEs with dedicated LSP auto-config (Zed, Helix, Neovim).
+const LSP_EDITORS = new Set<IdeId>(['zed', 'helix', 'neovim']);
 
 // Install / docs URL per supported IDE, shown on undetected cards so the user
 // knows where to go. Kept local because it's presentation-only state.
-const IDE_DOCS_URL: Record<IdeId, string> = {
+const IDE_DOCS_URL: Partial<Record<IdeId, string>> = {
   'cursor':         'https://cursor.com/download',
   'windsurf':       'https://windsurf.com/download',
   'windsurf-next':  'https://windsurf.com/download',
@@ -17,18 +20,41 @@ const IDE_DOCS_URL: Record<IdeId, string> = {
   'claude-desktop': 'https://claude.ai/download',
   'cline':          'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
   'amp':            'https://ampcode.com/',
+  'opencode':       'https://opencode.ai',
+  'codex-cli':      'https://github.com/openai/codex',
+  'zed':            'https://zed.dev/download',
+  'helix':          'https://helix-editor.com',
+  'neovim':         'https://neovim.io',
 };
+
+function LspBadge({ active = true }: { active?: boolean }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '0.58rem', fontWeight: 700, fontFamily: 'var(--font-mono)',
+      color: active ? 'var(--fg-ok)' : 'var(--fg-err)',
+      background: active ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.1)',
+      border: `1px solid ${active ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+      borderRadius: 3, padding: '0 4px', lineHeight: '16px', flexShrink: 0,
+    }}>LSP</span>
+  );
+}
 
 interface IdeCardProps { status: IdeStatus; onSetup: () => void; onUnconfigure: () => void; loading: boolean; }
 
 export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProps) {
-  const allReady = status.mcpConfigured && Object.values(status.aiFiles).every(s => s === 'ok');
+  const isLspEditor = LSP_EDITORS.has(status.ideId);
+  const isVscodeFam = VSCODE_FAMILY.has(status.ideId);
+  const primaryConfigured = isLspEditor ? !!status.lspConfigured : status.mcpConfigured;
+  const allReady = primaryConfigured && (!isLspEditor
+    ? Object.values(status.aiFiles).every(s => s === 'ok')
+    : true);
 
   const chipClass = !status.detected
     ? 'chip chip-muted'
     : allReady
       ? 'chip chip-ok'
-      : status.mcpConfigured
+      : primaryConfigured
         ? 'chip chip-warn'
         : 'chip chip-err';
 
@@ -36,7 +62,7 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
     ? 'Not detected'
     : allReady
       ? 'All set'
-      : status.mcpConfigured
+      : primaryConfigured
         ? 'Partial'
         : 'Needs setup';
 
@@ -61,31 +87,47 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
       {/* Body — only for detected IDEs */}
       {status.detected && (
         <>
-          {/* MCP status row */}
-          <div className="list-row">
-            <IdeIcon ideId="mcp" size={13} color={status.mcpConfigured ? 'var(--fg-info)' : 'var(--fg-err)'} />
-            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: status.mcpConfigured ? 'var(--fg-info)' : 'var(--fg-err)', flex: 1 }}>
-              MCP {status.mcpConfigured ? 'configured' : 'not configured'}
-            </span>
-            <span className={status.mcpConfigured ? 'chip chip-ok chip' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
-              {status.mcpConfigured ? 'ready' : 'missing'}
-            </span>
-          </div>
-
-          {/* LSP row — VS Code family only */}
-          {VSCODE_FAMILY.has(status.ideId) && (
+          {/* MCP status row — MCP-capable IDEs only */}
+          {!isLspEditor && (
             <div className="list-row">
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.58rem', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                color: 'var(--fg-ok)', background: 'rgba(34,197,94,0.12)',
-                border: '1px solid rgba(34,197,94,0.3)', borderRadius: 3,
-                padding: '0 4px', lineHeight: '16px', flexShrink: 0,
-              }}>LSP</span>
+              <IdeIcon ideId="mcp" size={13} color={status.mcpConfigured ? 'var(--fg-info)' : 'var(--fg-err)'} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: status.mcpConfigured ? 'var(--fg-info)' : 'var(--fg-err)', flex: 1 }}>
+                MCP {status.mcpConfigured ? 'configured' : 'not configured'}
+              </span>
+              <span className={status.mcpConfigured ? 'chip chip-ok' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
+                {status.mcpConfigured ? 'ready' : 'missing'}
+              </span>
+            </div>
+          )}
+
+          {/* LSP row — VS Code family: always on via extension */}
+          {isVscodeFam && (
+            <div className="list-row">
+              <LspBadge />
               <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--fg-ok)', flex: 1 }}>
                 Formula · Script · Automation
               </span>
               <span className="chip chip-ok" style={{ fontSize: '0.6rem' }}>via extension</span>
+            </div>
+          )}
+
+          {/* LSP row — dedicated LSP editors (Zed, Helix, Neovim) */}
+          {isLspEditor && (
+            <div className="list-row">
+              <LspBadge active={!!status.lspConfigured} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: status.lspConfigured ? 'var(--fg-ok)' : 'var(--fg-err)', flex: 1 }}>
+                LSP {status.lspConfigured ? 'configured' : 'not configured'}
+              </span>
+              <span className={status.lspConfigured ? 'chip chip-ok' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
+                {status.lspConfigured ? 'ready' : 'missing'}
+              </span>
+            </div>
+          )}
+
+          {/* Neovim manual activation hint */}
+          {isLspEditor && status.lspConfigured && status.lspManualStep && (
+            <div className="list-row" style={{ background: 'rgba(99,179,237,0.08)', border: '1px solid rgba(99,179,237,0.22)', borderRadius: 'var(--radius-sm)' }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--fg-info)' }}>ℹ {status.lspManualStep}</span>
             </div>
           )}
 
@@ -96,20 +138,22 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
             </div>
           )}
 
-          {/* AI files row */}
-          <div className="list-row" style={{ flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.72rem', color: 'var(--fg-ai)', fontWeight: 600 }}>AI files</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginLeft: 'auto' }}>
-              <Pill label="skills" status={status.aiFiles.skills} />
-              <Pill label="rules" status={status.aiFiles.rules} />
-              <Pill label="workflows" status={status.aiFiles.workflows} />
-              <Pill label="agents" status={status.aiFiles.agents} />
+          {/* AI files row — MCP clients only */}
+          {!isLspEditor && (
+            <div className="list-row" style={{ flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--fg-ai)', fontWeight: 600 }}>AI files</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginLeft: 'auto' }}>
+                <Pill label="skills" status={status.aiFiles.skills} />
+                <Pill label="rules" status={status.aiFiles.rules} />
+                <Pill label="workflows" status={status.aiFiles.workflows} />
+                <Pill label="agents" status={status.aiFiles.agents} />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, paddingTop: 2 }}>
-            {!status.mcpConfigured ? (
+            {!primaryConfigured ? (
               <button className="btn btn-primary btn-sm" onClick={onSetup} disabled={loading} style={{ opacity: loading ? 0.6 : 1 }}>
                 {loading ? 'Setting up...' : 'Setup'}
               </button>

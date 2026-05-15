@@ -194,9 +194,14 @@ const LSP_VARIANT_TABS = [
 export function Setup() {
   const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon } = useStore();
 
+  const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
-  const pending = detected.filter(ide => !ide.mcpConfigured);
+  const detectedMcp = detected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId));
+  const detectedLsp = detected.filter(ide => LSP_EDITOR_IDS.has(ide.ideId));
+  const pending = detected.filter(ide =>
+    LSP_EDITOR_IDS.has(ide.ideId) ? !ide.lspConfigured : !ide.mcpConfigured
+  );
   const isLoading = pendingActions.size > 0;
   // Derive tunnel pending state from store pendingActions (consistent with IDE actions)
   const isTunnelPending = pendingActions.size > 0;
@@ -488,15 +493,16 @@ export function Setup() {
         </div>
       </div>
 
-      {/* Detected IDEs */}
-      {detected.length > 0 && (
+      {/* Detected — AI Clients / Code Assistants (MCP) */}
+      {detectedMcp.length > 0 && (
         <div className="glass-panel">
           <div className="section-header">
-            <div className="eyebrow">Detected</div>
-            <div className="title">Available IDEs</div>
+            <div className="eyebrow">Detected · AI Clients</div>
+            <div className="title">Code Assistants</div>
+            <div className="detail">Configured via MCP server entry</div>
           </div>
           <div className="stack stack-sm">
-            {detected.map(ide => (
+            {detectedMcp.map(ide => (
               <IdeCard
                 key={ide.ideId}
                 status={ide}
@@ -509,25 +515,58 @@ export function Setup() {
         </div>
       )}
 
-      {/* Undetected IDEs */}
-      {undetected.length > 0 && (
+      {/* Detected — Code Editors (LSP) */}
+      {detectedLsp.length > 0 && (
         <div className="glass-panel">
           <div className="section-header">
-            <div className="eyebrow">Not detected</div>
-            <div className="title">Other supported IDEs</div>
+            <div className="eyebrow">Detected · Code Editors</div>
+            <div className="title">LSP Editors</div>
+            <div className="detail">Configured via language server protocol</div>
           </div>
           <div className="stack stack-sm">
-            {undetected.map(ide => (
+            {detectedLsp.map(ide => (
               <IdeCard
                 key={ide.ideId}
                 status={ide}
-                onSetup={() => {}}
-                onUnconfigure={() => {}}
-                loading={false}
+                onSetup={() => setupIde(ide.ideId)}
+                onUnconfigure={() => unconfigureIde(ide.ideId)}
+                loading={pendingIdeActions.has(ide.ideId)}
               />
             ))}
           </div>
         </div>
+      )}
+
+      {/* Undetected — split by type */}
+      {undetected.length > 0 && (
+        <>
+          {undetected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId)).length > 0 && (
+            <div className="glass-panel">
+              <div className="section-header">
+                <div className="eyebrow">Not detected · AI Clients</div>
+                <div className="title">Other Code Assistants</div>
+              </div>
+              <div className="stack stack-sm">
+                {undetected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId)).map(ide => (
+                  <IdeCard key={ide.ideId} status={ide} onSetup={() => {}} onUnconfigure={() => {}} loading={false} />
+                ))}
+              </div>
+            </div>
+          )}
+          {undetected.filter(ide => LSP_EDITOR_IDS.has(ide.ideId)).length > 0 && (
+            <div className="glass-panel">
+              <div className="section-header">
+                <div className="eyebrow">Not detected · Code Editors</div>
+                <div className="title">Other LSP Editors</div>
+              </div>
+              <div className="stack stack-sm">
+                {undetected.filter(ide => LSP_EDITOR_IDS.has(ide.ideId)).map(ide => (
+                  <IdeCard key={ide.ideId} status={ide} onSetup={() => {}} onUnconfigure={() => {}} loading={false} />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {ideStatuses.length === 0 && (

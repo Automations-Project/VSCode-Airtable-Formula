@@ -5,7 +5,12 @@ export type IdeId =
   | 'claude-code'
   | 'claude-desktop'
   | 'cline'
-  | 'amp';
+  | 'amp'
+  | 'opencode'
+  | 'codex-cli'
+  | 'zed'
+  | 'helix'
+  | 'neovim';
 
 export type AiFileStatus = 'ok' | 'missing' | 'partial';
 
@@ -80,6 +85,8 @@ export interface IdeStatus {
   version?:          string;
   mcpConfigured:     boolean;
   mcpServerHealthy?: boolean;
+  lspConfigured?:    boolean;
+  lspManualStep?:    string;
   aiFiles:           AiFiles;
 }
 

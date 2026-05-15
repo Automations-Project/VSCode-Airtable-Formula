@@ -1,23 +1,33 @@
 import React from 'react';
 import type { IdeId } from '@shared/types.js';
 
-import cursorSvg from '../assets/icons/cursor.svg?raw';
-import windsurfSvg from '../assets/icons/windsurf.svg?raw';
+import cursorSvg     from '../assets/icons/cursor.svg?raw';
+import windsurfSvg   from '../assets/icons/windsurf.svg?raw';
 import claudeCodeSvg from '../assets/icons/claude-code.svg?raw';
-import claudeSvg from '../assets/icons/claude.svg?raw';
-import clineSvg from '../assets/icons/cline.svg?raw';
-import ampSvg from '../assets/icons/amp.svg?raw';
-import mcpSvg from '../assets/icons/mcp.svg?raw';
+import claudeSvg     from '../assets/icons/claude.svg?raw';
+import clineSvg      from '../assets/icons/cline.svg?raw';
+import ampSvg        from '../assets/icons/amp.svg?raw';
+import mcpSvg        from '../assets/icons/mcp.svg?raw';
+import opencodeSvg   from '../assets/icons/opencode.svg?raw';
+import codexCliSvg   from '../assets/icons/codex-cli.svg?raw';
+import zedSvg        from '../assets/icons/zed.svg?raw';
+import helixSvg      from '../assets/icons/helix.svg?raw';
+import neovimSvg     from '../assets/icons/neovim.svg?raw';
 
 const IDE_ICONS: Record<IdeId | 'mcp', string> = {
-  'cursor': cursorSvg,
-  'windsurf': windsurfSvg,
-  'windsurf-next': windsurfSvg,
-  'claude-code': claudeCodeSvg,
+  'cursor':         cursorSvg,
+  'windsurf':       windsurfSvg,
+  'windsurf-next':  windsurfSvg,
+  'claude-code':    claudeCodeSvg,
   'claude-desktop': claudeSvg,
-  'cline': clineSvg,
-  'amp': ampSvg,
-  'mcp': mcpSvg,
+  'cline':          clineSvg,
+  'amp':            ampSvg,
+  'opencode':       opencodeSvg,
+  'codex-cli':      codexCliSvg,
+  'zed':            zedSvg,
+  'helix':          helixSvg,
+  'neovim':         neovimSvg,
+  'mcp':            mcpSvg,
 };
 
 interface IdeIconProps {
