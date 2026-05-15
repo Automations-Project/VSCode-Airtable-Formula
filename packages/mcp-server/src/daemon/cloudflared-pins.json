@@ -1,0 +1,25 @@
+{
+  "version": "2026.3.0",
+  "assets": {
+    "darwin-arm64": {
+      "filename": "cloudflared-darwin-arm64.tgz",
+      "sha256": "2aae4f69b0fc1c671b8353b4f594cbd902cd1e360c8eed2b8cad4602cb1546fb"
+    },
+    "darwin-x64": {
+      "filename": "cloudflared-darwin-amd64.tgz",
+      "sha256": "0f30140c4a5e213d22f951ef4c964cac5fb6a5f061ba6eba5ea932999f7c0394"
+    },
+    "linux-arm64": {
+      "filename": "cloudflared-linux-arm64",
+      "sha256": "0755ba4cbab59980e6148367fcf53a8f3ec85a97deefd63c2420cf7850769bee"
+    },
+    "linux-x64": {
+      "filename": "cloudflared-linux-amd64",
+      "sha256": "4a9e50e6d6d798e90fcd01933151a90bf7edd99a0a55c28ad18f2e16263a5c30"
+    },
+    "windows-x64": {
+      "filename": "cloudflared-windows-amd64.exe",
+      "sha256": "59b12880b24af581cf5b1013db601c7d843b9b097e9c78aa5957c7f39f741885"
+    }
+  }
+}
