@@ -23,7 +23,6 @@ after(async () => {
 
 describe('enable-tunnel', () => {
   it('POST /daemon/enable-tunnel with unknown provider returns 500', async () => {
-    // Stub: after Plan 05 adds endpoint, unknown provider should error
     const res = await fetch(`http://127.0.0.1:${server.port}/daemon/enable-tunnel`, {
       method: 'POST',
       headers: {
@@ -32,17 +31,14 @@ describe('enable-tunnel', () => {
       },
       body: JSON.stringify({ provider: 'unknown-provider' }),
     });
-    // Stub: endpoint does not exist yet → will be 404 until Plan 05
-    assert.ok(res.status === 404 || res.status === 500, 'Expected 404 (no endpoint yet) or 500 (bad provider)');
+    assert.strictEqual(res.status, 500, 'Unknown provider should return 500');
   });
 
   it('POST /daemon/disable-tunnel requires bearer auth', async () => {
     const res = await fetch(`http://127.0.0.1:${server.port}/daemon/disable-tunnel`, {
       method: 'POST',
-      // No auth header
     });
-    // Before Plan 05: 404 (endpoint missing). After Plan 05: 401 (no bearer).
-    assert.ok(res.status === 401 || res.status === 404, 'Expected 401 or 404 without auth');
+    assert.strictEqual(res.status, 401, 'No bearer should return 401');
   });
 });
 
@@ -56,10 +52,65 @@ describe('tunnelUrl', () => {
 });
 
 describe('401-burst', () => {
-  it('10 auth failures in 60s triggers daemon:tunnel-auto-disabled SSE event', async () => {
-    // Stub — requires allowlist middleware (Plan 05) to be present for isTunnelRequest() to fire
-    // Real assertions filled in after Plan 05 + 06 complete
-    // The test must use tunnel headers to trigger the burst (isTunnelRequest = true)
-    assert.ok(true, 'Stub — filled in after Plan 05 401-burst tripwire lands');
+  it('10 auth failures in 60s from tunnel request triggers daemon:tunnel-auto-disabled SSE event', async () => {
+    // Set up SSE listener for the event
+    const tunnelHeaders = {
+      'X-Forwarded-For': '203.0.113.5',
+      'X-Forwarded-Proto': 'https',
+    };
+
+    let autoDisabledEvent = null;
+    const sseAbort = new AbortController();
+
+    // Start SSE listener (needs bearer — loopback can still connect to events)
+    const sseReq = fetch(`http://127.0.0.1:${server.port}/daemon/events`, {
+      headers: { Authorization: `Bearer ${server.bearerToken}` },
+      signal: sseAbort.signal,
+    });
+    const sseRes = await sseReq;
+    // Read SSE events in background
+    const eventPromise = new Promise((resolve) => {
+      const reader = sseRes.body.getReader();
+      const decoder = new TextDecoder();
+      const read = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value);
+          if (text.includes('daemon:tunnel-auto-disabled')) {
+            const dataLine = text.split('\n').find(l => l.startsWith('data:'));
+            if (dataLine) resolve(JSON.parse(dataLine.slice(5)));
+          }
+        }
+      };
+      read().catch(() => undefined);
+    });
+
+    // Send 10 requests with bad bearer token AND tunnel headers to trigger burst.
+    // Must use /mcp (not /daemon/*) because the tunnel allowlist blocks tunnel-originated
+    // requests from reaching /daemon/* endpoints before requireBearer is called.
+    for (let i = 0; i < 10; i++) {
+      await fetch(`http://127.0.0.1:${server.port}/mcp`, {
+        method: 'POST',
+        headers: {
+          ...tunnelHeaders,
+          Authorization: 'Bearer bad-token-intentional',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+    }
+
+    // Wait for SSE event (max 3 seconds)
+    const result = await Promise.race([
+      eventPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for SSE event')), 3000)),
+    ]);
+    sseAbort.abort();
+
+    assert.ok(result, 'SSE event payload should be non-null');
+    assert.strictEqual(result.failures, 10, 'Should report 10 failures');
+    assert.strictEqual(result.windowMs, 60_000, 'Should report 60s window');
+    // ip is optional (may be null in test environment)
   });
 });

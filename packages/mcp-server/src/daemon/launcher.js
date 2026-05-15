@@ -9,6 +9,7 @@ import { getHomeDir } from '../paths.js';
 import { startDaemonServer } from './server.js';
 import { acquire, getLockfilePath, isStale, read, release, replace } from './lockfile.js';
 import { ensureToken, getTokenPath, readToken } from './token.js';
+import { readTunnelSettings, writeTunnelSettings, getTunnelProvider } from './tunnel-providers/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -269,6 +270,7 @@ export async function startDaemon(options = {}) {
 
     let server;
     let lspChild = null;
+    let activeTunnel = null;
     let finalizePromise = null;
     let finalizeResolve;
     const closed = new Promise((resolve) => { finalizeResolve = resolve; });
@@ -287,7 +289,7 @@ export async function startDaemon(options = {}) {
         bearerToken,
         version,
         startedAt,
-        tunnelUrl: null,
+        tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
       };
     };
 
@@ -303,6 +305,7 @@ export async function startDaemon(options = {}) {
           }
           process.off('SIGINT', signalHandler);
           process.off('SIGTERM', signalHandler);
+          activeTunnel?.stop().catch(() => undefined);  // Stop tunnel before releasing lockfile (D-04)
           // Send SIGTERM to LSP subprocess before releasing lockfile (D-02)
           lspChild?.kill('SIGTERM');
           release({ lockPath, expectedUuid: uuid });
@@ -333,6 +336,21 @@ export async function startDaemon(options = {}) {
         onShutdown: finalize,
         onTokenRotated: async (nextToken) => {
           syncLockfile(nextToken.bearerToken);
+        },
+        onTunnelAutoDisable: async ({ failures, windowMs, ip }) => {
+          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl
+          if (activeTunnel) {
+            await activeTunnel.stop().catch(() => undefined);
+            activeTunnel = null;
+          }
+          // Write autoDisabled sentinel + reason so _computeTunnelState() can distinguish
+          // auto-disable (status: 'auto-disabled') from user-disable (status: 'disabled')
+          writeTunnelSettings(configDir, { enabled: false, autoDisabled: true, autoDisabledReason: { failures, ip: ip ?? null } });
+          replace({ ...buildRecord(), tunnelUrl: null }, { lockPath, expectedUuid: uuid });
+        },
+        onTunnelUrlChange: (url) => {
+          // Called by enable-tunnel and disable-tunnel endpoints + auto-start state changes
+          replace({ ...buildRecord(), tunnelUrl: url }, { lockPath, expectedUuid: uuid });
         },
       });
 
@@ -382,6 +400,37 @@ export async function startDaemon(options = {}) {
         console.error(`[airtable-mcp] Failed to spawn LSP subprocess: ${err instanceof Error ? err.message : String(err)}`);
       }
 
+      // Tunnel auto-start after daemon fully initialized (D-04)
+      const startTunnelIfConfigured = async () => {
+        const settings = readTunnelSettings(configDir);
+        if (!settings.enabled) return;
+        // ngrok cannot auto-start: authtoken lives in VS Code SecretStorage, inaccessible to daemon process (D-02, Pitfall 7)
+        if (settings.provider === 'ngrok') return;
+        try {
+          const provider = getTunnelProvider(settings.provider);
+          const check = await provider.isSetupComplete(configDir);
+          if (!check.ready) return; // binary not installed — skip silently
+          activeTunnel = await provider.start({
+            port: server.port,
+            configDir,
+            onStateChange: (state) => {
+              if (state.url) {
+                replace({ ...buildRecord(), tunnelUrl: state.url }, { lockPath, expectedUuid: uuid });
+              } else if (state.status === 'crashed' || state.status === 'disabled') {
+                replace({ ...buildRecord(), tunnelUrl: null }, { lockPath, expectedUuid: uuid });
+                writeTunnelSettings(configDir, { enabled: false });
+              }
+            },
+          });
+        } catch (err) {
+          // Non-fatal: daemon continues without tunnel (D-04: no auto-restart)
+          console.error(`[airtable-mcp] Tunnel auto-start failed: ${err instanceof Error ? err.message : String(err)}`);
+          writeTunnelSettings(configDir, { enabled: false });
+        }
+      };
+
+      await startTunnelIfConfigured();
+
       process.on('SIGINT', signalHandler);
       process.on('SIGTERM', signalHandler);
       options.signal?.addEventListener('abort', abortHandler);
@@ -395,7 +444,7 @@ export async function startDaemon(options = {}) {
         bearerToken: server.bearerToken,
         version,
         startedAt,
-        tunnelUrl: null,
+        tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
         close,
         closed,
       };
