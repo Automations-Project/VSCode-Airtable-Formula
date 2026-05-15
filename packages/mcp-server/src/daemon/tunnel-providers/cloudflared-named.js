@@ -32,6 +32,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { getTunnelBinaryPath } from '../install-tunnel.js';
+import { getHomeDir } from '../../paths.js';
 import {
   readNamedTunnelConfig,
   writeTunnelConfig,
@@ -115,7 +116,8 @@ export function createCloudflaredNamedProvider(options = {}) {
       // Re-validate — isSetupComplete is the single source of truth for "can
       // we start?". Callers hit start() after the UI/CLI confirmed setup, but
       // state can drift (user deleted the credentials file between clicks).
-      const binaryPath = getTunnelBinaryPath(startOptions.configDir);
+      const configDir = startOptions.configDir ?? getHomeDir();
+      const binaryPath = getTunnelBinaryPath(configDir);
       if (!existsSync(binaryPath)) {
         throw new Error(
           'cloudflared is not installed. Run `npx airtable-user-mcp daemon install-tunnel` first.',
@@ -127,7 +129,7 @@ export function createCloudflaredNamedProvider(options = {}) {
           'cloudflared named tunnel not set up — origin cert missing. Run `cloudflared tunnel login`.',
         );
       }
-      const existing = readNamedTunnelConfig(startOptions.configDir);
+      const existing = readNamedTunnelConfig(configDir);
       if (!existing) {
         throw new Error(
           'named tunnel not configured — run the cf-named setup flow from the dashboard or CLI.',
@@ -142,7 +144,7 @@ export function createCloudflaredNamedProvider(options = {}) {
       // Port-drift rewrite (see module-level comment). Always rewrite —
       // cheap, atomic, and the one bug we most want to avoid.
       const refreshed = writeTunnelConfig({
-        configDir: startOptions.configDir,
+        configDir,
         uuid: existing.uuid,
         hostname: existing.hostname,
         port: startOptions.port,

@@ -24,6 +24,7 @@ import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 import { getTunnelBinaryPath } from '../install-tunnel.js';
+import { getHomeDir } from '../../paths.js';
 
 const CONFIG_FILENAME = 'cloudflared-named.yml';
 const DEFAULT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -435,11 +436,11 @@ function runCapture(spawnImpl, command, args, signal) {
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * @param {string} configDir
+ * @param {string} [configDir] Defaults to getHomeDir() if omitted.
  * @returns {string}
  */
 export function getNamedTunnelConfigPath(configDir) {
-  return join(configDir, CONFIG_FILENAME);
+  return join(configDir ?? getHomeDir(), CONFIG_FILENAME);
 }
 
 /**
