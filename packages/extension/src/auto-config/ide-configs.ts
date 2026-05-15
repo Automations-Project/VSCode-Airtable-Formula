@@ -91,10 +91,12 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
   },
   'opencode': {
     label: 'OpenCode',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.config', 'opencode', 'opencode.json'),
-    mcpServersKey:  'mcp',
-    mcpEntryExtras: { type: 'local' },
+    capabilities: ['mcp', 'lsp'],
+    mcpConfigPath:   path.join(home, '.config', 'opencode', 'opencode.json'),
+    mcpServersKey:   'mcp',
+    mcpEntryExtras:  { type: 'local' },
+    lspConfigPath:   path.join(home, '.config', 'opencode', 'opencode.json'),
+    lspConfigFormat: 'json-merge',
     detectionPaths: [path.join(home, '.config', 'opencode')],
   },
   'codex-cli': {

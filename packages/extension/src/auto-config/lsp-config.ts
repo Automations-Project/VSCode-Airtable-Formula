@@ -117,6 +117,41 @@ async function isNeovimConfigured(configPath: string): Promise<boolean> {
   try { await fs.promises.access(configPath); return true; } catch { return false; }
 }
 
+// ── OpenCode: JSON merge into opencode.json (lsp key) ───────────────────────
+
+const OPENCODE_LSP_KEY = 'airtable-formula';
+const OPENCODE_LSP_ENTRY = {
+  command: ['npx', '-y', 'airtable-user-lsp', '--stdio'],
+  extensions: ['.formula', '.ats', '.ata'],
+};
+
+async function configureOpenCode(configPath: string): Promise<void> {
+  const existing = await readConfigFile(configPath);
+  const lsp = (existing['lsp'] ?? {}) as Record<string, unknown>;
+  lsp[OPENCODE_LSP_KEY] = OPENCODE_LSP_ENTRY;
+  existing['lsp'] = lsp;
+  await writeConfigAtomic(configPath, existing);
+}
+
+async function unconfigureOpenCode(configPath: string): Promise<void> {
+  const existing = await readConfigFile(configPath);
+  const lsp = existing['lsp'] as Record<string, unknown> | undefined;
+  if (lsp) {
+    delete lsp[OPENCODE_LSP_KEY];
+    if (Object.keys(lsp).length === 0) delete existing['lsp'];
+    else existing['lsp'] = lsp;
+  }
+  await writeConfigAtomic(configPath, existing);
+}
+
+async function isOpenCodeLspConfigured(configPath: string): Promise<boolean> {
+  try {
+    const existing = await readConfigFile(configPath);
+    const lsp = existing['lsp'] as Record<string, unknown> | undefined;
+    return typeof lsp === 'object' && lsp !== null && OPENCODE_LSP_KEY in lsp;
+  } catch { return false; }
+}
+
 // ── Codex CLI: TOML append to config.toml ────────────────────────────────────
 
 const CODEX_MARKER = '[mcp_servers.airtable-user-mcp]';
@@ -172,7 +207,8 @@ export async function configureLspForIde(ideId: IdeId): Promise<void> {
   const cfg = IDE_CONFIGS[ideId];
   if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
   switch (cfg.lspConfigFormat) {
-    case 'json-merge':   return configureZed(cfg.lspConfigPath);
+    case 'json-merge':
+      return ideId === 'opencode' ? configureOpenCode(cfg.lspConfigPath) : configureZed(cfg.lspConfigPath);
     case 'toml-append':  return configureHelix(cfg.lspConfigPath);
     case 'lua-write':    return configureNeovim(cfg.lspConfigPath);
   }
@@ -182,7 +218,8 @@ export async function unconfigureLspForIde(ideId: IdeId): Promise<void> {
   const cfg = IDE_CONFIGS[ideId];
   if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
   switch (cfg.lspConfigFormat) {
-    case 'json-merge':   return unconfigureZed(cfg.lspConfigPath);
+    case 'json-merge':
+      return ideId === 'opencode' ? unconfigureOpenCode(cfg.lspConfigPath) : unconfigureZed(cfg.lspConfigPath);
     case 'toml-append':  return unconfigureHelix(cfg.lspConfigPath);
     case 'lua-write':    return unconfigureNeovim(cfg.lspConfigPath);
   }
@@ -192,7 +229,8 @@ export async function isLspConfigured(ideId: IdeId): Promise<boolean> {
   const cfg = IDE_CONFIGS[ideId];
   if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return false;
   switch (cfg.lspConfigFormat) {
-    case 'json-merge':   return isZedConfigured(cfg.lspConfigPath);
+    case 'json-merge':
+      return ideId === 'opencode' ? isOpenCodeLspConfigured(cfg.lspConfigPath) : isZedConfigured(cfg.lspConfigPath);
     case 'toml-append':  return isHelixConfigured(cfg.lspConfigPath);
     case 'lua-write':    return isNeovimConfigured(cfg.lspConfigPath);
   }

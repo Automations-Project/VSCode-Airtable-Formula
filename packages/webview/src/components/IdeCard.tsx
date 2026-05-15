@@ -3,12 +3,14 @@ import type { IdeId, IdeStatus } from '@shared/types.js';
 import { Pill } from './Pill.js';
 import { IdeIcon } from './IdeIcon.js';
 
-// VS Code forks / extension-host environments: language features are provided
-// automatically when the Airtable Formula extension is installed in that IDE.
+// VS Code forks: LSP is always "on" via the host extension — no separate config row.
 const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
 
-// IDEs with dedicated LSP auto-config (Zed, Helix, Neovim).
+// Pure LSP editors: no MCP, no AI files — only LSP config matters.
 const LSP_EDITORS = new Set<IdeId>(['zed', 'helix', 'neovim']);
+
+// IDEs that actually install AI skill/rules/workflow files.
+const AI_FILES_IDES = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline', 'claude-code']);
 
 // Install / docs URL per supported IDE, shown on undetected cards so the user
 // knows where to go. Kept local because it's presentation-only state.
@@ -45,10 +47,14 @@ interface IdeCardProps { status: IdeStatus; onSetup: () => void; onUnconfigure: 
 export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProps) {
   const isLspEditor = LSP_EDITORS.has(status.ideId);
   const isVscodeFam = VSCODE_FAMILY.has(status.ideId);
+  // lspConfigured is only defined (non-undefined) for detected IDEs with LSP capability
+  const hasLspStatus = status.lspConfigured !== undefined;
+  const hasAiFiles = AI_FILES_IDES.has(status.ideId);
+
   const primaryConfigured = isLspEditor ? !!status.lspConfigured : status.mcpConfigured;
-  const allReady = primaryConfigured && (!isLspEditor
-    ? Object.values(status.aiFiles).every(s => s === 'ok')
-    : true);
+  const lspOk = !hasLspStatus || !!status.lspConfigured;
+  const aiOk = !hasAiFiles || Object.values(status.aiFiles).every(s => s === 'ok');
+  const allReady = primaryConfigured && lspOk && aiOk;
 
   const chipClass = !status.detected
     ? 'chip chip-muted'
@@ -111,6 +117,19 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
             </div>
           )}
 
+          {/* LSP row — dual-capability IDEs (MCP + LSP, e.g. OpenCode) */}
+          {hasLspStatus && !isLspEditor && (
+            <div className="list-row">
+              <LspBadge active={!!status.lspConfigured} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: status.lspConfigured ? 'var(--fg-ok)' : 'var(--fg-err)', flex: 1 }}>
+                LSP {status.lspConfigured ? 'configured' : 'not configured'}
+              </span>
+              <span className={status.lspConfigured ? 'chip chip-ok' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
+                {status.lspConfigured ? 'ready' : 'missing'}
+              </span>
+            </div>
+          )}
+
           {/* LSP row — dedicated LSP editors (Zed, Helix, Neovim) */}
           {isLspEditor && (
             <div className="list-row">
@@ -138,8 +157,8 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
             </div>
           )}
 
-          {/* AI files row — MCP clients only */}
-          {!isLspEditor && (
+          {/* AI files row — only IDEs that have skill/rules file paths */}
+          {hasAiFiles && (
             <div className="list-row" style={{ flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.72rem', color: 'var(--fg-ai)', fontWeight: 600 }}>AI files</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginLeft: 'auto' }}>
