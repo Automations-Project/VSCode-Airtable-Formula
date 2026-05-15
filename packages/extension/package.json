@@ -1,10 +1,10 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.50",
+  "version": "2.0.51",
   "publisher": "Nskha",
-  "displayName": "Airtable Formula",
-  "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
+  "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
+  "description": "Airtable formula, script & automation editor with MCP server (62 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -39,13 +39,18 @@
   },
   "categories": [
     "AI",
-    "Other",
-    "Formatters"
+    "Programming Languages",
+    "Formatters",
+    "Other"
   ],
   "keywords": [
     "airtable",
     "formula",
+    "scripts",
+    "automation",
     "mcp",
+    "lsp",
+    "language-server",
     "ai",
     "beautifier"
   ],

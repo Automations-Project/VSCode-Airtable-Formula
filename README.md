@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/airtable.svg" alt="Airtable" width="80" />
+<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/airtable.svg" alt="Airtable Formulas, Scripts, Automation, MCP & LSP" width="80" />
 
-# Airtable Formula
+# Airtable Formulas, Scripts, Automation, MCP & LSP
 
-**Formula editor, MCP server, and AI skills for VS Code**
+**Formula, script & automation editor · MCP server (62 tools) · Language server · AI skills**
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/version-short/Nskha.airtable-formula.svg?style=for-the-badge&label=VS%20Code&colorB=007ACC" alt="VS Code version" /></a>
@@ -35,6 +35,23 @@
 > **Experimental** — This project is under active development and not intended for production use. APIs, tools, and behavior may change without notice.
 
 </div>
+
+---
+
+## Great Features
+
+| Feature | What it does | File types |
+|:--------|:-------------|:----------:|
+| **Formula Editor** | Syntax highlighting, IntelliSense, beautify / minify | `.formula`, `.min.formula` |
+| **Script Editor** | Completions, hover docs, diagnostics | `.ats`, `.script` |
+| **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
+| **MCP Server (62 tools)** | Full Airtable internal API — schema, views, fields, extensions, templates | — |
+| **Language Server (LSP)** | Standalone multi-editor support — Neovim, Zed, Helix, OpenCode | All above |
+| **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
+| **AI Skills** | Pre-built Airtable-specific rules and workflows for AI coding assistants | — |
+| **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
+| **Tool Profiles** | `read-only` / `safe-write` / `full` / `custom` permission scopes | — |
+| **OS Keychain Auth** | Browser-based Airtable login with SSO/2FA — credentials in your OS keychain | — |
 
 ---
 
@@ -119,7 +136,7 @@ This monorepo ships **three products** from one source tree:
 
 | | Product | Install |
 |:-:|:--------|:--------|
-| <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png" width="24" /> | **Airtable Formula** — VS Code extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) |
+| <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png" width="24" /> | **Airtable Formulas, Scripts, Automation, MCP & LSP** — VS Code extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) |
 | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/icon.png" width="24" /> | **airtable-user-mcp** — Standalone MCP server | `npx airtable-user-mcp` |
 | | **airtable-user-lsp** — Airtable language server | `npx airtable-user-lsp` |
 
