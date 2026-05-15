@@ -162,6 +162,17 @@ export interface TunnelState {
   autoDisabledReason: TunnelAutoDisabledReason | null;
 }
 
+export interface DaemonStatusInfo {
+  running:   boolean;
+  healthy:   boolean;         // result of /daemon/health HTTP check
+  port:      number | null;   // MCP HTTP port
+  port_lsp:  number | null;   // LSP TCP port — null when LSP not started
+  tunnelUrl: string | null;   // active tunnel URL or null
+  uptime:    number | null;   // milliseconds since daemon startedAt, or null
+  // bearerToken intentionally excluded — must never reach webview (D-07, T-08-01)
+  // pid intentionally excluded — not needed in webview (T-08-02)
+}
+
 export interface DashboardState {
   ideStatuses:  IdeStatus[];
   versions:     VersionInfo;
@@ -172,4 +183,5 @@ export interface DashboardState {
   debug?:       DebugState;
   storage?:     StorageInfo;
   tunnel?:      TunnelState;  // undefined when daemon is not running
+  daemon?:      DaemonStatusInfo;  // undefined when daemon is not running
 }
