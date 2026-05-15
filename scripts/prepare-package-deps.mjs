@@ -26,7 +26,7 @@ const mcpRoot = dirname(mcpPkgPath);
 
 const extensionNodeModules = join(__dirname, '..', 'packages', 'extension', 'dist', 'node_modules');
 
-const packagesToCopy = ['patchright', 'patchright-core', 'otpauth'];
+const packagesToCopy = ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok'];
 
 rmSync(extensionNodeModules, { recursive: true, force: true });
 mkdirSync(extensionNodeModules, { recursive: true });

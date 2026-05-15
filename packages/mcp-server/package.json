@@ -73,6 +73,7 @@
     "tough-cookie": "^4.1.3"
   },
   "optionalDependencies": {
+    "@ngrok/ngrok": "^1.7.0",
     "otpauth": "^9.5.0",
     "patchright": "^1.58.2"
   }
