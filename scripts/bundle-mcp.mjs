@@ -22,6 +22,15 @@ const pkgJsonPath = require.resolve('airtable-user-mcp/package.json');
 const pkgRoot = path.dirname(pkgJsonPath);
 const outDir = path.resolve(__dirname, '../packages/extension/dist/mcp');
 
+// When the bundle runs as a standalone Node.js process (e.g. daemon start),
+// esbuild's CJS shim checks `typeof require !== "undefined"` before each
+// dynamic CJS require. In an ESM context, `require` is not in scope, so
+// CJS packages bundled inline (like Express) throw:
+//   "Dynamic require of 'node:events' is not supported"
+// Injecting a createRequire-based `require` via banner ensures the shim
+// finds a working require() before any CJS module code runs.
+const cjsRequireBanner = `import { createRequire as __cjsCreateRequire } from 'module';\nconst require = __cjsCreateRequire(import.meta.url);`;
+
 const sharedOptions = {
   bundle: true,
   format: 'esm',
@@ -29,6 +38,7 @@ const sharedOptions = {
   target: 'node20',
   // patchright and @ngrok/ngrok have native NAPI binaries — kept external
   external: ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok'],
+  banner: { js: cjsRequireBanner },
   logLevel: 'info',
 };
 

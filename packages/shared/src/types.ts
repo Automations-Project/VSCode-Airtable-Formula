@@ -176,6 +176,7 @@ export interface DaemonStatusInfo {
   port_lsp:  number | null;   // LSP TCP port — null when LSP not started
   tunnelUrl: string | null;   // active tunnel URL or null
   uptime:    number | null;   // milliseconds since daemon startedAt, or null
+  starting?: boolean;         // true while start/restart is in progress
   // bearerToken intentionally excluded — must never reach webview (D-07, T-08-01)
   // pid intentionally excluded — not needed in webview (T-08-02)
 }

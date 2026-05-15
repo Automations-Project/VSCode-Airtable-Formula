@@ -94,6 +94,87 @@ function isTunnelRequest(req) {
   return false;
 }
 
+function homepageHtml(version) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Airtable User MCP</title>
+<style>
+*,::before,::after{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;overflow:hidden;position:relative}
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden}
+.orb{position:absolute;border-radius:50%;filter:blur(80px);opacity:.35;animation:drift 12s ease-in-out infinite alternate}
+.orb1{width:500px;height:500px;background:#1868f7;top:-120px;left:-120px;animation-delay:0s}
+.orb2{width:400px;height:400px;background:#0052cc;bottom:-80px;right:-80px;animation-delay:-4s}
+.orb3{width:300px;height:300px;background:#00b4d8;top:40%;left:60%;animation-delay:-8s}
+@keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(30px,20px) scale(1.08)}}
+.card{position:relative;z-index:1;background:rgba(22,27,34,.85);border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:40px 48px;max-width:520px;width:90%;text-align:center;backdrop-filter:blur(20px);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.logo{font-size:2.4rem;font-weight:800;letter-spacing:-1px;background:linear-gradient(135deg,#4d8ef7 0%,#00b4d8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:4px}
+.version{font-size:.72rem;color:#8b949e;margin-bottom:24px;font-family:monospace}
+.desc{font-size:.95rem;color:#8b949e;line-height:1.6;margin-bottom:28px}
+.endpoint{background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 14px;font-family:monospace;font-size:.8rem;color:#58a6ff;margin-bottom:28px;word-break:break-all}
+.auth-note{background:rgba(255,186,5,.08);border:1px solid rgba(255,186,5,.2);border-radius:8px;padding:10px 14px;font-size:.78rem;color:#d29922;margin-bottom:28px;text-align:left;display:flex;gap:8px;align-items:flex-start}
+.auth-note::before{content:'🔒';flex-shrink:0;font-size:.9rem}
+.links{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.link{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:.8rem;font-weight:600;text-decoration:none;transition:all .15s ease;border:1px solid}
+.link-primary{background:#1868f7;border-color:#1868f7;color:#fff}.link-primary:hover{background:#1557d6}
+.link-ghost{background:transparent;border-color:rgba(255,255,255,.15);color:#e6edf3}.link-ghost:hover{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.04)}
+</style>
+</head>
+<body>
+<div class="bg">
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+</div>
+<div class="card">
+  <div class="logo">Airtable User MCP</div>
+  <div class="version">v${version}</div>
+  <p class="desc">A local MCP server that gives AI assistants full access to your Airtable workspaces — read, write, views, fields, forms, and more.</p>
+  <div class="endpoint">${'POST /mcp'}</div>
+  <div class="auth-note">This server requires a Bearer token. Get yours from the VS Code extension → Setup tab.</div>
+  <div class="links">
+    <a class="link link-primary" href="https://github.com/Automations-Project/airtable-user-mcp" target="_blank" rel="noopener">GitHub</a>
+    <a class="link link-ghost" href="https://www.npmjs.com/package/airtable-user-mcp" target="_blank" rel="noopener">npm</a>
+    <a class="link link-ghost" href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula" target="_blank" rel="noopener">VS Code Extension</a>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+function blockHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>401 — Unauthorized</title>
+<style>
+*,::before,::after{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+.card{background:rgba(22,27,34,.95);border:1px solid rgba(248,81,73,.25);border-radius:16px;padding:40px 48px;max-width:440px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.icon{font-size:2.8rem;margin-bottom:16px}
+.code{font-size:3rem;font-weight:800;letter-spacing:-2px;color:#f85149;margin-bottom:4px}
+.label{font-size:.85rem;color:#8b949e;margin-bottom:20px;letter-spacing:.05em;text-transform:uppercase}
+.desc{font-size:.88rem;color:#8b949e;line-height:1.6;margin-bottom:24px}
+.hint{background:rgba(22,27,34,.6);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 14px;font-size:.78rem;color:#58a6ff;font-family:monospace}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">🔒</div>
+  <div class="code">401</div>
+  <div class="label">Unauthorized</div>
+  <p class="desc">This MCP server requires a valid Bearer token in the <code>Authorization</code> header. Open the VS Code extension → Setup tab to copy your token and configure your AI client.</p>
+  <div class="hint">Authorization: Bearer &lt;your-token&gt;</div>
+</div>
+</body>
+</html>`;
+}
+
 export async function startDaemonServer(options = {}) {
   const host = options.host ?? '127.0.0.1';
   const requestedPort = options.port ?? 0;
@@ -155,6 +236,12 @@ export async function startDaemonServer(options = {}) {
 
   app.use(expressFactory.json({ limit: '1mb' }));
 
+  // Public homepage — accessible to anyone (loopback or tunnel)
+  app.get('/', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(homepageHtml(version));
+  });
+
   const publishEvent = (event, payload) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
     for (const response of sseClients) {
@@ -190,7 +277,12 @@ export async function startDaemonServer(options = {}) {
     const provided = match ? match[1] : null;
     if (provided !== currentToken.bearerToken) {
       track401Burst(req);  // 401-burst tripwire (D-06)
-      res.status(401).json({ error: 'Unauthorized' });
+      const wantHtml = (req.headers?.accept ?? '').includes('text/html');
+      if (wantHtml) {
+        res.status(401).setHeader('Content-Type', 'text/html; charset=utf-8').end(blockHtml());
+      } else {
+        res.status(401).json({ error: 'Unauthorized' });
+      }
       return;
     }
     next();
@@ -262,10 +354,16 @@ export async function startDaemonServer(options = {}) {
         await activeTunnel.stop().catch(() => undefined);
         activeTunnel = null;
       }
+      // Check binary is available BEFORE writing settings, so a missing binary
+      // doesn't leave settings stuck at enabled:true (which causes permanent "Starting..." in the UI).
+      const p = getTunnelProvider(provider);
+      const check = await p.isSetupComplete(options.configDir);
+      if (!check.ready) {
+        res.status(428).json({ ok: false, error: check.reason, needsInstall: true, action: check.action });
+        return;
+      }
       // Persist settings before starting (D-03)
       writeTunnelSettings(options.configDir, { enabled: true, provider, ngrokDomain: domain ?? null });
-      // Start tunnel via provider registry
-      const p = getTunnelProvider(provider);
       activeTunnel = await p.start({
         port: getBoundPort(httpServer),
         configDir: options.configDir,
@@ -283,7 +381,12 @@ export async function startDaemonServer(options = {}) {
       publishEvent('daemon:tunnel-started', { url });
       tunnelAutoDisabled = false; // reset burst counter on successful enable
       res.json({ ok: true, url });
-    } catch (err) { next(err); }
+    } catch (err) {
+      // If tunnel failed after settings were written, reset to disabled to prevent stuck "Starting..." state
+      writeTunnelSettings(options.configDir, { enabled: false });
+      options.onTunnelUrlChange?.(null);
+      next(err);
+    }
   });
 
   // POST /daemon/disable-tunnel (D-05)

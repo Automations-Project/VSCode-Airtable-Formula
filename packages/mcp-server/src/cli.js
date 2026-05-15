@@ -143,7 +143,19 @@ export async function runCli(args) {
     const subcmd = args[1];
     if (subcmd === 'start') {
       const { startDaemon } = await import('./daemon/launcher.js');
-      await startDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
+      const result = await startDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
+      // If we started the daemon (not just attached to an existing one), block
+      // until it shuts down so the process stays alive as the daemon.
+      if (!result.attached) await result.closed;
+      return true;
+    }
+    if (subcmd === 'install-tunnel') {
+      const { installCloudflared } = await import('./daemon/install-tunnel.js');
+      const { getHomeDir } = await import('./paths.js');
+      const configDir = process.env.AIRTABLE_USER_MCP_HOME ?? getHomeDir();
+      process.stderr.write('Downloading cloudflared binary...\n');
+      const result = await installCloudflared({ configDir });
+      process.stdout.write(`cloudflared ${result.version} installed to ${result.binaryPath}\n`);
       return true;
     }
     if (subcmd === 'stop') {

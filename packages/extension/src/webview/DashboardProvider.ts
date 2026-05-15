@@ -41,9 +41,24 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   }
 
   private _daemonManager?: DaemonManager;
+  private _daemonStarting = false;
+  private _lockfileWatcher?: import('fs').FSWatcher;
 
   setDaemonManager(mgr: DaemonManager): void {
     this._daemonManager = mgr;
+    void this._initLockfileWatch();
+  }
+
+  private async _initLockfileWatch(): Promise<void> {
+    const fsMod = await import('fs');
+    const configDir = path.join(os.homedir(), '.airtable-user-mcp');
+    try {
+      this._lockfileWatcher?.close();
+      this._lockfileWatcher = fsMod.watch(configDir, { persistent: false }, (_, filename) => {
+        if (filename === 'daemon.lock') void this.pushState();
+      });
+      this._lockfileWatcher.on('error', () => { /* transient FS errors — ignore */ });
+    } catch { /* configDir doesn't exist yet — re-initialized after first daemon start */ }
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -433,7 +448,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             authtoken = await this.context.secrets.get('airtable-formula.ngrok.authtoken') ?? undefined;
           }
         }
-        await fetch(`http://127.0.0.1:${status.port}/daemon/enable-tunnel`, {
+        const enableResp = await fetch(`http://127.0.0.1:${status.port}/daemon/enable-tunnel`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${status.bearerToken}`,
@@ -441,6 +456,32 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           },
           body: JSON.stringify({ provider: msg.provider, authtoken, domain: msg.domain }),
         });
+
+        if (!enableResp.ok) {
+          const body = await enableResp.json().catch(() => ({})) as Record<string, unknown>;
+          const errMsg = typeof body.error === 'string' ? body.error : `HTTP ${enableResp.status}`;
+          const needsInstall = body.needsInstall === true;
+
+          if (needsInstall) {
+            // cloudflared binary missing — offer to auto-download
+            const choice = await vscode.window.showErrorMessage(
+              `Tunnel binary not found: ${errMsg}`,
+              'Download cloudflared',
+              'Cancel',
+            );
+            if (choice === 'Download cloudflared') {
+              await this._installCloudflared(status, msg);
+            } else {
+              this.postResult(msg.id, false, errMsg);
+            }
+          } else {
+            void vscode.window.showErrorMessage(`Tunnel enable failed: ${errMsg}`);
+            this.postResult(msg.id, false, errMsg);
+          }
+          await this.pushState();
+          return;
+        }
+
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
@@ -466,13 +507,23 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
 
     if (msg.type === 'daemon:start' || msg.type === 'daemon:restart') {
-      try {
-        await this._daemonManager?.restartDaemon();
-        await this.pushState();
-        this.postResult(msg.id, true);
-      } catch (err) {
-        vscode.window.showErrorMessage(`Daemon start failed: ${err instanceof Error ? err.message : String(err)}`);
-        this.postResult(msg.id, false, String(err));
+      // Fire-and-forget: push a "starting" state immediately so the UI shows
+      // feedback, then run ensureDaemon in the background (can take ~15s).
+      this._daemonStarting = true;
+      void this.pushState();
+      this.postResult(msg.id, true);
+      const dm = this._daemonManager;
+      if (dm) {
+        dm.restartDaemon()
+          .then(() => { this._daemonStarting = false; void this._initLockfileWatch(); return this.pushState(); })
+          .catch(err => {
+            this._daemonStarting = false;
+            vscode.window.showErrorMessage(`Daemon start failed: ${err instanceof Error ? err.message : String(err)}`);
+            void this.pushState();
+          });
+      } else {
+        this._daemonStarting = false;
+        void this.pushState();
       }
       return;
     }
@@ -484,6 +535,30 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         this.postResult(msg.id, true);
       } catch (err) {
         vscode.window.showErrorMessage(`Daemon stop failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'daemon:copy-bearer-token') {
+      // Token is read directly from the lockfile on the extension host — it
+      // never enters the webview DOM (D-07, T-08-01).
+      try {
+        const fsMod = await import('fs');
+        const lockPath = path.join(os.homedir(), '.airtable-user-mcp', 'daemon.lock');
+        const raw = fsMod.readFileSync(lockPath, 'utf8');
+        const lock = JSON.parse(raw) as Record<string, unknown>;
+        const token = typeof lock.bearerToken === 'string' ? lock.bearerToken : null;
+        if (!token) {
+          void vscode.window.showErrorMessage('Bearer token not found — is the daemon running?');
+          this.postResult(msg.id, false, 'Token not found');
+          return;
+        }
+        await vscode.env.clipboard.writeText(token);
+        void vscode.window.showInformationMessage('Bearer token copied to clipboard.');
+        this.postResult(msg.id, true);
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Could not copy bearer token: ${err instanceof Error ? err.message : String(err)}`);
         this.postResult(msg.id, false, String(err));
       }
       return;
@@ -721,7 +796,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private async _computeDaemonStatusInfo(): Promise<DaemonStatusInfo | undefined> {
     try {
       const status = await this._daemonManager?.getDaemonStatus();
-      if (!status?.running) return undefined;
+      if (!status?.running) {
+        // Surface "starting" indicator so the webview can show progress feedback
+        // while ensureDaemon polls in the background.
+        if (this._daemonStarting) {
+          return { running: false, healthy: false, port: null, port_lsp: null, tunnelUrl: null, uptime: null, starting: true };
+        }
+        return undefined;
+      }
       return {
         running:   status.running,
         healthy:   status.healthy,
@@ -729,12 +811,55 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         port_lsp:  status.port_lsp,
         tunnelUrl: status.tunnelUrl,
         uptime:    status.uptime,
+        starting:  this._daemonStarting,
         // bearerToken intentionally excluded (D-07, T-08-01)
         // pid intentionally excluded (T-08-02)
       };
     } catch {
       return undefined;
     }
+  }
+
+  private async _installCloudflared(
+    daemonStatus: import('../mcp/daemon-manager.js').DaemonStatus,
+    originalMsg: Extract<import('@airtable-formula/shared').WebviewMessage, { type: 'tunnel:enable' }>,
+  ): Promise<void> {
+    const serverPath = path.join(this.context.extensionPath, 'dist', 'mcp', 'index.mjs');
+    const configDir = path.join(os.homedir(), '.airtable-user-mcp');
+
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Downloading cloudflared binary…', cancellable: false },
+      async () => {
+        const { spawn } = await import('child_process');
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(process.execPath, [serverPath, 'daemon', 'install-tunnel'], {
+            stdio: 'ignore',
+            env: { ...process.env, AIRTABLE_USER_MCP_HOME: configDir },
+          });
+          child.on('exit', code => code === 0 ? resolve() : reject(new Error(`install-tunnel exited ${code}`)));
+          child.on('error', reject);
+        });
+      },
+    );
+
+    // Retry enabling the tunnel now that the binary is present
+    const retryResp = await fetch(`http://127.0.0.1:${daemonStatus.port}/daemon/enable-tunnel`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${daemonStatus.bearerToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ provider: originalMsg.provider, domain: originalMsg.domain }),
+    }).catch(() => null);
+
+    if (!retryResp?.ok) {
+      const body = await retryResp?.json().catch(() => ({})) as Record<string, unknown>;
+      void vscode.window.showErrorMessage(`Tunnel enable failed after install: ${body.error ?? retryResp?.status}`);
+      this.postResult(originalMsg.id, false, String(body.error ?? retryResp?.status));
+    } else {
+      this.postResult(originalMsg.id, true);
+    }
+    await this.pushState();
   }
 
   async disableTunnel(): Promise<void> {

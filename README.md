@@ -38,7 +38,7 @@
 
 ---
 
-## Great Features
+## Top Features
 
 | Feature | What it does | File types |
 |:--------|:-------------|:----------:|
@@ -138,7 +138,7 @@ This monorepo ships **three products** from one source tree:
 |:-:|:--------|:--------|
 | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png" width="24" /> | **Airtable Formulas, Scripts, Automation, MCP & LSP** — VS Code extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) |
 | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/icon.png" width="24" /> | **airtable-user-mcp** — Standalone MCP server | `npx airtable-user-mcp` |
-| | **airtable-user-lsp** — Airtable language server | `npx airtable-user-lsp` |
+| <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/icon.png" width="24" /> | **airtable-user-lsp** — Airtable language server | `npx airtable-user-lsp` |
 
 </div>
 

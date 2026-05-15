@@ -34,6 +34,7 @@ export type WebviewMessage =
   | { type: 'tunnel:enable';              id: string; provider: TunnelProviderId; authtoken?: string; domain?: string }
   | { type: 'tunnel:disable';             id: string }
   | { type: 'tunnel:set-ngrok-authtoken'; id: string; authtoken: string }
-  | { type: 'daemon:start';   id: string }
-  | { type: 'daemon:stop';    id: string }
-  | { type: 'daemon:restart'; id: string };
+  | { type: 'daemon:start';               id: string }
+  | { type: 'daemon:stop';                id: string }
+  | { type: 'daemon:restart';             id: string }
+  | { type: 'daemon:copy-bearer-token';   id: string };

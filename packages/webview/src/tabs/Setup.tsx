@@ -27,11 +27,17 @@ export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: numb
 }`;
   }
 
-  // HTTP variant — each IDE has a slightly different key name (Pitfall 2 in RESEARCH.md)
+  // HTTP variant — port may be a number/placeholder, or a full https:// tunnel URL.
+  // When a tunnel URL is passed, use it directly (no 127.0.0.1 prefix).
+  const mcpUrl = (typeof port === 'string' && port.startsWith('http'))
+    ? `${port}/mcp`
+    : `http://127.0.0.1:${port}/mcp`;
+
+  // Each IDE has a slightly different key name (Pitfall 2 in RESEARCH.md)
   // Windsurf: serverUrl (not url)
   if (ide === 'windsurf') {
     return `"airtable": {
-  "serverUrl": "http://127.0.0.1:${port}/mcp",
+  "serverUrl": "${mcpUrl}",
   "headers": {
     "Authorization": "Bearer {{BEARER_TOKEN}}"
   }
@@ -41,7 +47,7 @@ export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: numb
   // Cursor + Cline: url only (no type: http)
   if (ide === 'cursor' || ide === 'cline') {
     return `"airtable": {
-  "url": "http://127.0.0.1:${port}/mcp",
+  "url": "${mcpUrl}",
   "headers": {
     "Authorization": "Bearer {{BEARER_TOKEN}}"
   }
@@ -51,7 +57,7 @@ export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: numb
   // claude-code, claude-desktop (and any future IDE) — type: "http" + url
   return `"airtable": {
   "type": "http",
-  "url": "http://127.0.0.1:${port}/mcp",
+  "url": "${mcpUrl}",
   "headers": {
     "Authorization": "Bearer {{BEARER_TOKEN}}"
   }
@@ -192,7 +198,7 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken } = useStore();
 
   const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
@@ -210,6 +216,7 @@ export function Setup() {
   const [ngrokAuthtokenInput, setNgrokAuthtokenInput] = React.useState('');
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
   const [copiedUrl, setCopiedUrl] = React.useState(false);
+  const [copiedToken, setCopiedToken] = React.useState(false);
 
   // MCP snippet state
   const [mcpActiveIde, setMcpActiveIde] = React.useState('claude-code');
@@ -245,6 +252,12 @@ export function Setup() {
     }
   };
 
+  const handleCopyToken = () => {
+    copyBearerToken();
+    setCopiedToken(true);
+    setTimeout(() => setCopiedToken(false), 1500);
+  };
+
   const handleCopySnippet = (text: string, key: string) => {
     navigator.clipboard.writeText(text).catch(() => undefined);
     setCopiedKeys(k => ({ ...k, [key]: true }));
@@ -253,6 +266,10 @@ export function Setup() {
 
   const mcpPort = daemon?.port ?? '{MCP_PORT}';
   const lspPort = daemon?.port_lsp ?? '{LSP_PORT}';
+  // When tunnel is active, HTTP snippets should point at the public tunnel URL
+  const mcpHttpEndpoint = (mcpActiveVariant === 'http' && tunnel?.status === 'active' && tunnel?.url)
+    ? tunnel.url
+    : mcpPort;
 
   const tunnelDetail = tunnel?.status === 'active'
     ? 'Your MCP server is publicly accessible'
@@ -279,7 +296,9 @@ export function Setup() {
             ? daemon.healthy
               ? <span className="chip chip-ok">Running · Healthy</span>
               : <span className="chip chip-warn">Running · Degraded</span>
-            : <span className="chip chip-muted">Stopped</span>}
+            : daemon?.starting
+              ? <span className="chip chip-info">Starting...</span>
+              : <span className="chip chip-muted">Stopped</span>}
         </div>
 
         {/* Key-value rows — only when running */}
@@ -319,15 +338,15 @@ export function Setup() {
         {/* Daemon controls */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
           {!daemon?.running ? (
-            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
-              {isLoading ? 'Starting...' : 'Start Daemon'}
+            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+              {daemon?.starting ? 'Starting...' : 'Start Daemon'}
             </button>
           ) : (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
-                {isLoading ? 'Restarting...' : 'Restart'}
+              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+                {daemon?.starting ? 'Restarting...' : 'Restart'}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1, color: 'var(--fg-err)' }}>
+              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1, color: 'var(--fg-err)' }}>
                 {isLoading ? 'Stopping...' : 'Stop'}
               </button>
             </>
@@ -599,7 +618,12 @@ export function Setup() {
       <div className="glass-panel">
         <div className="section-header">
           <div className="eyebrow">Config Snippets</div>
-          <div className="title">MCP Server</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="title">MCP Server</div>
+            {tunnel?.status === 'active' && mcpActiveVariant === 'http' && (
+              <span className="chip chip-ok" style={{ fontSize: '0.6rem' }}>via tunnel</span>
+            )}
+          </div>
           <div className="detail">Paste the server entry block into your IDE&apos;s MCP config file</div>
         </div>
 
@@ -648,27 +672,45 @@ export function Setup() {
         {/* Snippet code block — changes with active outer+inner tab */}
         <div role="tabpanel">
           {(() => {
-            const snippetText = getMcpSnippet(mcpActiveIde, mcpActiveVariant, mcpPort);
+            const snippetText = getMcpSnippet(mcpActiveIde, mcpActiveVariant, mcpHttpEndpoint);
             const copyKey = `mcp-${mcpActiveIde}-${mcpActiveVariant}`;
             return (
-              <div style={{ position: 'relative' }}>
-                <pre style={{
-                  background: 'var(--bg-input)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)', padding: '8px 12px',
-                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem', lineHeight: 1.5,
-                  color: 'var(--fg)', overflowX: 'auto', whiteSpace: 'pre', margin: 0,
-                }}>
-                  <code>{snippetText}</code>
-                </pre>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => handleCopySnippet(snippetText, copyKey)}
-                  aria-label={`Copy ${mcpActiveIde} ${mcpActiveVariant} snippet`}
-                  style={{ position: 'absolute', top: 8, right: 8 }}
-                >
-                  {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
-                </button>
-              </div>
+              <>
+                <div style={{ position: 'relative' }}>
+                  <pre style={{
+                    background: 'var(--bg-input)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                    fontFamily: 'var(--font-mono)', fontSize: '0.7rem', lineHeight: 1.5,
+                    color: 'var(--fg)', overflowX: 'auto', whiteSpace: 'pre', margin: 0,
+                  }}>
+                    <code>{snippetText}</code>
+                  </pre>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleCopySnippet(snippetText, copyKey)}
+                    aria-label={`Copy ${mcpActiveIde} ${mcpActiveVariant} snippet`}
+                    style={{ position: 'absolute', top: 8, right: 8 }}
+                  >
+                    {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
+                  </button>
+                </div>
+                {mcpActiveVariant === 'http' && (
+                  <div className="list-row" style={{ marginTop: 8, alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--fg-muted)', flex: 1 }}>
+                      Replace <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>{'{'}{'{'}'BEARER_TOKEN{'}'}{'}'}</code> with your daemon token
+                    </span>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleCopyToken}
+                      disabled={!daemon?.running}
+                      title={daemon?.running ? 'Copy bearer token to clipboard (token never leaves the extension host)' : 'Start the daemon first'}
+                      style={{ opacity: daemon?.running ? 1 : 0.4, whiteSpace: 'nowrap' }}
+                    >
+                      {copiedToken ? 'Copied!' : 'Copy Token'}
+                    </button>
+                  </div>
+                )}
+              </>
             );
           })()}
         </div>

@@ -36,6 +36,7 @@ interface Store extends DashboardState {
   startDaemon: () => void;
   stopDaemon: () => void;
   restartDaemon: () => void;
+  copyBearerToken: () => void;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -254,6 +255,11 @@ export const useStore = create<Store>((set, get) => ({
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
     sendToExtension({ type: 'daemon:restart', id });
+  },
+
+  copyBearerToken: () => {
+    const id = randomId();
+    sendToExtension({ type: 'daemon:copy-bearer-token', id });
   },
 
   markActionDone: (id, _ok) => {

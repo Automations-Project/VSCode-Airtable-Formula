@@ -409,7 +409,12 @@ export async function startDaemon(options = {}) {
         try {
           const provider = getTunnelProvider(settings.provider);
           const check = await provider.isSetupComplete(configDir);
-          if (!check.ready) return; // binary not installed — skip silently
+          if (!check.ready) {
+            // Binary missing — clear the stale enabled:true setting so the UI
+            // doesn't show "Starting…" forever on the next daemon start.
+            writeTunnelSettings(configDir, { enabled: false });
+            return;
+          }
           activeTunnel = await provider.start({
             port: server.port,
             configDir,
