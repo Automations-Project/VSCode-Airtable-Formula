@@ -192,17 +192,18 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon } = useStore();
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
   const pending = detected.filter(ide => !ide.mcpConfigured);
   const isLoading = pendingActions.size > 0;
+  // Derive tunnel pending state from store pendingActions (consistent with IDE actions)
+  const isTunnelPending = pendingActions.size > 0;
 
   const [selectedProvider, setSelectedProvider] = React.useState<'cf-quick' | 'ngrok' | 'cf-named'>('cf-quick');
   const [ngrokAuthtokenInput, setNgrokAuthtokenInput] = React.useState('');
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
-  const [isTunnelPending, setIsTunnelPending] = React.useState(false);
   const [copiedUrl, setCopiedUrl] = React.useState(false);
 
   // MCP snippet state
@@ -218,25 +219,17 @@ export function Setup() {
     if (tunnel?.provider) setSelectedProvider(tunnel.provider);
   }, [tunnel?.provider]);
 
-  const handleEnableTunnel = async () => {
-    setIsTunnelPending(true);
-    try {
-      if (selectedProvider === 'ngrok' && ngrokAuthtokenInput) {
-        setNgrokAuthtoken(ngrokAuthtokenInput);
-      }
-      enableTunnel(selectedProvider, undefined, ngrokDomainInput || undefined);
-    } finally {
-      setIsTunnelPending(false);
-    }
+  const handleEnableTunnel = () => {
+    // Pass authtoken inline so the extension stores and uses it atomically,
+    // eliminating the race between tunnel:set-ngrok-authtoken and tunnel:enable.
+    const authtoken = (selectedProvider === 'ngrok' && ngrokAuthtokenInput)
+      ? ngrokAuthtokenInput
+      : undefined;
+    enableTunnel(selectedProvider, authtoken, ngrokDomainInput || undefined);
   };
 
-  const handleDisableTunnel = async () => {
-    setIsTunnelPending(true);
-    try {
-      disableTunnel();
-    } finally {
-      setIsTunnelPending(false);
-    }
+  const handleDisableTunnel = () => {
+    disableTunnel();
   };
 
   const handleCopyUrl = () => {
