@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: — Daemon & LSP
-status: executing
-stopped_at: Phase 8 UI-SPEC approved
-last_updated: "2026-05-15T17:26:33.013Z"
-last_activity: 2026-05-15 -- Phase 9 planning complete
+status: complete
+stopped_at: Phase 9 complete — all documentation verified
+last_updated: "2026-05-15T20:50:00.000Z"
+last_activity: 2026-05-15 -- Phase 09 complete — milestone v2.0 Daemon & LSP DONE
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 30
-  completed_plans: 26
-  percent: 87
+  completed_plans: 30
+  percent: 100
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 07 — tunnel-support
+**Current focus:** Milestone v2.0 Daemon & LSP — COMPLETE
 
 ## Current Position
 
-Phase: 08 — COMPLETE
-Plan: 5 of 5 — COMPLETE
-Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 9 planning complete
+Phase: 09 (documentation) — COMPLETE
+Plan: 4 of 4
+Status: Milestone v2.0 Daemon & LSP COMPLETE — all 5 phases, 30 plans done
+Last activity: 2026-05-15 -- Phase 09 verified and complete
 
 ```
 Progress: [██████████] 100%
@@ -94,7 +94,8 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
-- Run /gsd-discuss-phase 9 or /gsd-plan-phase 9 — plan Phase 9 (Documentation)
+- Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
+- Run GitHub Actions Release workflow with `target=both` for v2.0.0 milestone release
 
 ### Blockers/Concerns
 
@@ -117,7 +118,6 @@ From Phase 6 REVIEW.md — all criticals fixed (verified 2026-05-15):
 
 ## Session Continuity
 
-Last session: 2026-05-15T14:37:21.785Z
-Stopped at: Phase 8 UI-SPEC approved
-Next: Phase 09 — Documentation
-Resume file: .planning/phases/09-documentation/ (plan first)
+Last session: 2026-05-15T20:50:00.000Z
+Stopped at: Phase 9 complete — milestone v2.0 Daemon & LSP DONE
+Next: Release — run GitHub Actions Release workflow (target=both, bump=minor for v2.0.0)

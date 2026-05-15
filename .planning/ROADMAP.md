@@ -286,10 +286,10 @@ Plans:
 **Plans**: 4 plans
 Plans:
 **Wave 1** *(all parallel — no file overlap)*
-- [ ] 09-01-PLAN.md — Add ## [2.0.0] — Daemon & LSP section to CHANGELOG.md (DOCS-01) [Wave 1, autonomous]
-- [ ] 09-02-PLAN.md — Update packages/mcp-server/README.md: Transport Modes section, daemon CLI subcommands, AIRTABLE_NO_DAEMON env var, Tools (62) fix (DOCS-02) [Wave 1, autonomous]
-- [ ] 09-03-PLAN.md — Update root README.md: airtable-user-lsp badge, LSP Server section, lsp-server monorepo row, three products (DOCS-03) [Wave 1, autonomous]
-- [ ] 09-04-PLAN.md — Update CLAUDE.md: five packages, daemon subsystem section, packages/lsp-server section, daemon start/stop/status CLI, DaemonManager Build Pipeline note (DOCS-04) [Wave 1, autonomous]
+- [x] 09-01-PLAN.md — Add ## [2.0.0] — Daemon & LSP section to CHANGELOG.md (DOCS-01) [Wave 1, autonomous]
+- [x] 09-02-PLAN.md — Update packages/mcp-server/README.md: Transport Modes section, daemon CLI subcommands, AIRTABLE_NO_DAEMON env var, Tools (62) fix (DOCS-02) [Wave 1, autonomous]
+- [x] 09-03-PLAN.md — Update root README.md: airtable-user-lsp badge, LSP Server section, lsp-server monorepo row, three products (DOCS-03) [Wave 1, autonomous]
+- [x] 09-04-PLAN.md — Update CLAUDE.md: five packages, daemon subsystem section, packages/lsp-server section, daemon start/stop/status CLI, DaemonManager Build Pipeline note (DOCS-04) [Wave 1, autonomous]
 
 **UI hint**: no
 
