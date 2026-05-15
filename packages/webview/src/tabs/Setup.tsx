@@ -58,9 +58,108 @@ export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: numb
 }`;
 }
 
-/** Stub — Plan 05 implements full body */
-export function getLspSnippet(_ide: string, _variant: 'tcp' | 'stdio', _port: number | string): string {
-  return '';
+export function getLspSnippet(ide: string, variant: 'tcp' | 'stdio', port: number | string): string {
+  // Neovim uses Lua format (D-10: vim.lsp.config API — Neovim 0.11+ native LSP)
+  if (ide === 'neovim') {
+    if (variant === 'tcp') {
+      return `vim.lsp.config('airtable_formula', {
+  cmd = vim.lsp.rpc.connect('127.0.0.1', ${port}),
+  filetypes = { 'formula', 'airtable-script', 'airtable-automation' },
+  root_markers = { '.git' },
+})
+vim.lsp.enable('airtable_formula')`;
+    }
+    return `vim.lsp.config('airtable_formula', {
+  cmd = { 'npx', '-y', 'airtable-user-lsp', '--stdio' },
+  filetypes = { 'formula', 'airtable-script', 'airtable-automation' },
+  root_markers = { '.git' },
+})
+vim.lsp.enable('airtable_formula')`;
+  }
+
+  // Zed — JSON binary format
+  if (ide === 'zed') {
+    if (variant === 'tcp') {
+      return `{
+  "lsp": {
+    "airtable-formula": {
+      "binary": {
+        "path": "airtable-user-lsp",
+        "arguments": ["--tcp-client", "127.0.0.1:${port}"]
+      }
+    }
+  }
+}`;
+    }
+    return `{
+  "lsp": {
+    "airtable-formula": {
+      "binary": {
+        "path": "airtable-user-lsp",
+        "arguments": ["--stdio"]
+      }
+    }
+  }
+}`;
+  }
+
+  // OpenCode — opencode.json format
+  if (ide === 'opencode') {
+    if (variant === 'tcp') {
+      return `{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "airtable-formula": {
+      "command": ["npx", "-y", "airtable-user-lsp", "--stdio"],
+      "extensions": [".formula", ".ats", ".ata"],
+      "initialization": {
+        "host": "127.0.0.1",
+        "port": ${port}
+      }
+    }
+  }
+}`;
+    }
+    return `{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "airtable-formula": {
+      "command": ["npx", "-y", "airtable-user-lsp", "--stdio"],
+      "extensions": [".formula", ".ats", ".ata"]
+    }
+  }
+}`;
+  }
+
+  // Claude Code — .lsp.json plugin format (D-11: plugin-based, not settings.json key)
+  // TCP variant: uses transport: "socket" (partially verified — see RESEARCH.md Assumption A2)
+  if (variant === 'tcp') {
+    return `{
+  "airtable-formula": {
+    "command": "npx",
+    "args": ["-y", "airtable-user-lsp", "--stdio"],
+    "transport": "socket",
+    "extensionToLanguage": {
+      ".formula": "airtable-formula",
+      ".ats": "airtable-script",
+      ".ata": "airtable-automation"
+    }
+  }
+}`;
+  }
+
+  // Claude Code stdio (fully verified format)
+  return `{
+  "airtable-formula": {
+    "command": "npx",
+    "args": ["-y", "airtable-user-lsp", "--stdio"],
+    "extensionToLanguage": {
+      ".formula": "airtable-formula",
+      ".ats": "airtable-script",
+      ".ata": "airtable-automation"
+    }
+  }
+}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +177,18 @@ const MCP_IDE_TABS = [
 const MCP_VARIANT_TABS = [
   { id: 'http',  label: 'HTTP (daemon)' },
   { id: 'stdio', label: 'stdio (npx)' },
+] as const;
+
+const LSP_IDE_TABS = [
+  { id: 'claude-code', label: 'Claude Code' },
+  { id: 'opencode',    label: 'OpenCode' },
+  { id: 'zed',         label: 'Zed' },
+  { id: 'neovim',      label: 'Neovim' },
+] as const;
+
+const LSP_VARIANT_TABS = [
+  { id: 'tcp',   label: 'TCP (daemon)' },
+  { id: 'stdio', label: 'stdio' },
 ] as const;
 
 export function Setup() {
@@ -143,6 +254,7 @@ export function Setup() {
   };
 
   const mcpPort = daemon?.port ?? '{MCP_PORT}';
+  const lspPort = daemon?.port_lsp ?? '{LSP_PORT}';
 
   const tunnelDetail = tunnel?.status === 'active'
     ? 'Your MCP server is publicly accessible'
@@ -500,6 +612,85 @@ export function Setup() {
                   className="btn btn-ghost btn-sm"
                   onClick={() => handleCopySnippet(snippetText, copyKey)}
                   aria-label={`Copy ${mcpActiveIde} ${mcpActiveVariant} snippet`}
+                  style={{ position: 'absolute', top: 8, right: 8 }}
+                >
+                  {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+
+      {/* LSP Config Snippets — D-09, D-10, D-12, D-13 */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Config Snippets</div>
+          <div className="title">LSP Server</div>
+          <div className="detail">Paste into your editor&apos;s LSP config to enable Airtable formula intelligence</div>
+        </div>
+
+        {/* Outer IDE tab bar — primary visual anchor (D-12) */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 8, gap: 0 }}>
+          {LSP_IDE_TABS.map(tab => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={lspActiveIde === tab.id}
+              onClick={() => setLspActiveIde(tab.id)}
+              style={{
+                padding: '8px 12px', fontSize: '0.7rem',
+                fontWeight: lspActiveIde === tab.id ? 600 : 500,
+                color: lspActiveIde === tab.id ? 'var(--fg)' : 'var(--fg-muted)',
+                borderBottom: `2px solid ${lspActiveIde === tab.id ? 'var(--at-blue)' : 'transparent'}`,
+                background: 'none', border: 'none', borderBottomStyle: 'solid', borderBottomWidth: 2,
+                cursor: 'pointer', whiteSpace: 'nowrap', marginBottom: 0,
+                transition: 'color 120ms ease, border-color 120ms ease',
+              }}
+            >{tab.label}</button>
+          ))}
+        </div>
+
+        {/* Inner variant sub-tab bar (D-13) */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 8, gap: 0 }}>
+          {LSP_VARIANT_TABS.map(tab => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={lspActiveVariant === tab.id}
+              onClick={() => setLspActiveVariant(tab.id as 'tcp' | 'stdio')}
+              style={{
+                padding: '4px 8px', fontSize: '0.7rem',
+                fontWeight: lspActiveVariant === tab.id ? 600 : 500,
+                color: lspActiveVariant === tab.id ? 'var(--fg)' : 'var(--fg-muted)',
+                borderBottom: `2px solid ${lspActiveVariant === tab.id ? 'var(--at-blue)' : 'transparent'}`,
+                background: 'none', border: 'none', borderBottomStyle: 'solid', borderBottomWidth: 2,
+                cursor: 'pointer', whiteSpace: 'nowrap', marginBottom: 0,
+                transition: 'color 120ms ease, border-color 120ms ease',
+              }}
+            >{tab.label}</button>
+          ))}
+        </div>
+
+        {/* Snippet code block — changes with active outer+inner tab */}
+        <div role="tabpanel">
+          {(() => {
+            const snippetText = getLspSnippet(lspActiveIde, lspActiveVariant, lspPort);
+            const copyKey = `lsp-${lspActiveIde}-${lspActiveVariant}`;
+            return (
+              <div style={{ position: 'relative' }}>
+                <pre style={{
+                  background: 'var(--bg-input)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem', lineHeight: 1.5,
+                  color: 'var(--fg)', overflowX: 'auto', whiteSpace: 'pre', margin: 0,
+                }}>
+                  <code>{snippetText}</code>
+                </pre>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => handleCopySnippet(snippetText, copyKey)}
+                  aria-label={`Copy ${lspActiveIde} ${lspActiveVariant} snippet`}
                   style={{ position: 'absolute', top: 8, right: 8 }}
                 >
                   {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
