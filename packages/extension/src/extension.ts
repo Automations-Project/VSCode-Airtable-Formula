@@ -405,6 +405,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const dashboardProvider = new DashboardProvider(context);
     dashboardProvider.setAuthManager(authManager);
     dashboardProvider.setDebugCollector(debugCollector);
+    dashboardProvider.setDaemonManager(daemonManager);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(DashboardProvider.viewId, dashboardProvider)
     );
@@ -566,6 +567,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await daemonManager.restartDaemon();
             vscode.window.showInformationMessage('Airtable Formula: Daemon restarted.');
             dashboardProvider.refresh();
+        }),
+        vscode.commands.registerCommand('airtableFormula.tunnel.disable', async () => {
+            // D-05: tunnel.disable command calls POST /daemon/disable-tunnel via DashboardProvider
+            await dashboardProvider.disableTunnel();
         }),
         vscode.commands.registerCommand('airtable-formula.install-browser', async () => {
             vscode.window.withProgress(

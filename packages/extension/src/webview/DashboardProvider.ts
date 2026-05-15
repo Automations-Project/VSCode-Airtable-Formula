@@ -12,6 +12,7 @@ import { exportDebugLog } from '../debug/exporter.js';
 import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
+import type { DaemonManager } from '../mcp/daemon-manager.js';
 
 export class DashboardProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'airtable-formula.dashboard';
@@ -36,6 +37,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
   setToolProfileManager(mgr: ToolProfileManager): void {
     this.toolProfileManager = mgr;
+  }
+
+  private _daemonManager?: DaemonManager;
+
+  setDaemonManager(mgr: DaemonManager): void {
+    this._daemonManager = mgr;
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -390,6 +397,55 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       this.postResult('', true);
       return;
     }
+
+    if (msg.type === 'tunnel:set-ngrok-authtoken') {
+      try {
+        await this.context.secrets.store('airtable-formula.ngrok.authtoken', msg.authtoken);
+        this.postResult(msg.id, true);
+      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      return;
+    }
+
+    if (msg.type === 'tunnel:enable') {
+      try {
+        const status = await this._daemonManager?.getDaemonStatus();
+        if (!status?.running || !status.port || !status.bearerToken) {
+          this.postResult(msg.id, false, 'Daemon not running');
+          return;
+        }
+        // For ngrok: read authtoken from SecretStorage (T-07-21 — never rely on webview to pass it directly)
+        let authtoken: string | undefined = msg.authtoken;
+        if (msg.provider === 'ngrok' && !authtoken) {
+          authtoken = await this.context.secrets.get('airtable-formula.ngrok.authtoken') ?? undefined;
+        }
+        await fetch(`http://127.0.0.1:${status.port}/daemon/enable-tunnel`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${status.bearerToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ provider: msg.provider, authtoken, domain: msg.domain }),
+        });
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      return;
+    }
+
+    if (msg.type === 'tunnel:disable') {
+      try {
+        const status = await this._daemonManager?.getDaemonStatus();
+        if (status?.running && status.port && status.bearerToken) {
+          await fetch(`http://127.0.0.1:${status.port}/daemon/disable-tunnel`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${status.bearerToken}` },
+          });
+        }
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      return;
+    }
   }
 
   async pushState(): Promise<void> {
@@ -475,6 +531,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       auth: authState,
       debug: debugState,
       storage,
+      tunnel: await this._computeTunnelState(),
     };
 
     this.view.webview.postMessage({ type: 'state:update', payload: state });
@@ -548,6 +605,83 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // empty or inaccessible
     }
     return total;
+  }
+
+  private async _computeTunnelState(): Promise<import('@airtable-formula/shared').TunnelState | undefined> {
+    try {
+      const pathMod = await import('path');
+      const osMod = await import('os');
+      const fsMod = await import('fs');
+      const configDir = pathMod.join(osMod.homedir(), '.airtable-user-mcp');
+      const settingsPath = pathMod.join(configDir, 'tunnel-settings.json');
+      const lockPath = pathMod.join(configDir, 'daemon.lock');
+
+      // Read tunnel-settings.json for provider + enabled state
+      let provider: import('@airtable-formula/shared').TunnelProviderId = 'cf-quick';
+      let enabled = false;
+      let autoDisabled = false;
+      let autoDisabledReason: import('@airtable-formula/shared').TunnelAutoDisabledReason | null = null;
+      if (fsMod.existsSync(settingsPath)) {
+        try {
+          const settings = JSON.parse(fsMod.readFileSync(settingsPath, 'utf8'));
+          if (['cf-quick', 'ngrok', 'cf-named'].includes(settings.provider)) {
+            provider = settings.provider;
+          }
+          enabled = settings.enabled === true;
+          autoDisabled = settings.autoDisabled === true;
+          if (autoDisabled && settings.autoDisabledReason && typeof settings.autoDisabledReason.failures === 'number') {
+            autoDisabledReason = {
+              failures: settings.autoDisabledReason.failures,
+              windowMs: typeof settings.autoDisabledReason.windowMs === 'number' ? settings.autoDisabledReason.windowMs : 0,
+              ip: typeof settings.autoDisabledReason.ip === 'string' ? settings.autoDisabledReason.ip : null,
+            };
+          }
+        } catch { /* use defaults */ }
+      }
+
+      // Read lockfile for tunnelUrl
+      let tunnelUrl: string | null = null;
+      if (fsMod.existsSync(lockPath)) {
+        try {
+          const lock = JSON.parse(fsMod.readFileSync(lockPath, 'utf8'));
+          tunnelUrl = typeof lock.tunnelUrl === 'string' ? lock.tunnelUrl : null;
+        } catch { /* no tunnelUrl */ }
+      }
+
+      // Check SecretStorage for ngrok authtoken
+      const ngrokAuthtokenSet = !!(await this.context.secrets.get('airtable-formula.ngrok.authtoken'));
+
+      // Determine TunnelStatus
+      let status: import('@airtable-formula/shared').TunnelStatus = 'disabled';
+      if (tunnelUrl) {
+        status = 'active';
+      } else if (!enabled && autoDisabled) {
+        status = 'auto-disabled'; // 401-burst auto-disable: show warning banner
+      } else if (enabled) {
+        status = 'starting'; // enabled but no URL yet — may be starting
+      }
+
+      return {
+        status,
+        url: tunnelUrl,
+        provider,
+        ngrokAuthtokenSet,
+        autoDisabledReason,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  async disableTunnel(): Promise<void> {
+    const status = await this._daemonManager?.getDaemonStatus();
+    if (status?.running && status.port && status.bearerToken) {
+      await fetch(`http://127.0.0.1:${status.port}/daemon/disable-tunnel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${status.bearerToken}` },
+      }).catch(() => undefined);
+    }
+    await this.pushState();
   }
 
   // Re-writes the MCP entry in every IDE that already has one, so env changes
