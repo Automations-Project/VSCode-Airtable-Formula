@@ -144,6 +144,24 @@ export interface DebugState {
   verboseHttp: boolean;
 }
 
+export type TunnelProviderId = 'cf-quick' | 'ngrok' | 'cf-named';
+
+export type TunnelStatus = 'disabled' | 'starting' | 'active' | 'auto-disabled' | 'error';
+
+export interface TunnelAutoDisabledReason {
+  failures: number;
+  windowMs: number;
+  ip: string | null;
+}
+
+export interface TunnelState {
+  status:             TunnelStatus;
+  url:                string | null;
+  provider:           TunnelProviderId;
+  ngrokAuthtokenSet:  boolean;       // true when VS Code SecretStorage has a token for 'airtable-formula.ngrok.authtoken'
+  autoDisabledReason: TunnelAutoDisabledReason | null;
+}
+
 export interface DashboardState {
   ideStatuses:  IdeStatus[];
   versions:     VersionInfo;
@@ -153,4 +171,5 @@ export interface DashboardState {
   auth:         AuthState;
   debug?:       DebugState;
   storage?:     StorageInfo;
+  tunnel?:      TunnelState;  // undefined when daemon is not running
 }

@@ -1,4 +1,4 @@
-import type { IdeId, DashboardState, IdeStatus, SettingsSnapshot, AuthState } from './types.js';
+import type { IdeId, DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId } from './types.js';
 
 // Extension → Webview
 export type ExtensionMessage =
@@ -30,4 +30,7 @@ export type WebviewMessage =
   | { type: 'action:backupSession';      id: string }
   | { type: 'action:restoreSession';     id: string }
   | { type: 'action:selectCustomBrowser'; id: string }
-  | { type: 'action:setBrowserChoice';   id: string; choice: import('./types.js').BrowserChoice };
+  | { type: 'action:setBrowserChoice';   id: string; choice: import('./types.js').BrowserChoice }
+  | { type: 'tunnel:enable';              id: string; provider: TunnelProviderId; authtoken?: string; domain?: string }
+  | { type: 'tunnel:disable';             id: string }
+  | { type: 'tunnel:set-ngrok-authtoken'; id: string; authtoken: string };
