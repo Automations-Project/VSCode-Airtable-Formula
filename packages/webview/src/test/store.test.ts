@@ -20,6 +20,7 @@ beforeEach(() => {
       debug: { enabled: false, verboseHttp: false, bufferSize: 1000 },
     },
     auth: { status: 'unknown', hasCredentials: false },
+    daemon: undefined,
   });
   vi.clearAllMocks();
 });
@@ -71,5 +72,36 @@ describe('store', () => {
   it('openStoragePath sends action:openStoragePath with path', () => {
     useStore.getState().openStoragePath('/tmp/test');
     expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:openStoragePath', path: '/tmp/test' }));
+  });
+});
+
+describe('store daemon field', () => {
+  it('applyState with daemon field populates store.daemon', () => {
+    useStore.getState().applyState({
+      ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' },
+      aiFilesCount: 0, loading: false,
+      settings: {
+        mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
+        ai: { autoInstallFiles: true, includeAgents: false },
+        formula: { formatterVersion: 'v2' },
+      },
+      daemon: { running: true, healthy: true, port: 3100, port_lsp: 2087, tunnelUrl: null, uptime: 90_000 },
+    });
+    expect(useStore.getState().daemon?.port).toBe(3100);
+    expect(useStore.getState().daemon?.healthy).toBe(true);
+    expect(useStore.getState().daemon?.port_lsp).toBe(2087);
+  });
+
+  it('applyState without daemon leaves daemon undefined', () => {
+    useStore.getState().applyState({
+      ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' },
+      aiFilesCount: 0, loading: false,
+      settings: {
+        mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
+        ai: { autoInstallFiles: true, includeAgents: false },
+        formula: { formatterVersion: 'v2' },
+      },
+    });
+    expect(useStore.getState().daemon).toBeUndefined();
   });
 });
