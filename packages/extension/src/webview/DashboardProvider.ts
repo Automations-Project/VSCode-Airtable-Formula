@@ -412,6 +412,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       try {
         const status = await this._daemonManager?.getDaemonStatus();
         if (!status?.running || !status.port || !status.bearerToken) {
+          void vscode.window.showErrorMessage('Cannot enable tunnel: daemon is not running. Start the daemon first via the Setup tab.');
           this.postResult(msg.id, false, 'Daemon not running');
           return;
         }
@@ -435,7 +436,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         });
         await this.pushState();
         this.postResult(msg.id, true);
-      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Tunnel enable failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
       return;
     }
 
