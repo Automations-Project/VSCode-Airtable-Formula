@@ -16,6 +16,7 @@ beforeEach(() => {
       mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true, toolProfile: { profile: 'safe-write', enabledCount: 47, totalCount: 61, categories: { read: true, tableWrite: true, tableDestructive: true, fieldWrite: true, fieldDestructive: true, viewWrite: true, viewDestructive: true, viewSection: true, viewSectionDestructive: true, formWrite: true, extension: true } }, serverSource: 'bundled' },
       ai: { autoInstallFiles: true, includeAgents: false },
       formula: { formatterVersion: 'v2' },
+      script: { beautifyStyle: 'default', minifyLevel: 'standard' },
       auth: { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' },
       debug: { enabled: false, verboseHttp: false, bufferSize: 1000 },
     },
