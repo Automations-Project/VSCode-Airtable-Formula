@@ -19,9 +19,43 @@ export function formatUptime(ms: number | null | undefined): string {
   return `${h}h ${m}m`;
 }
 
-/** Stub — Plan 04 implements full body */
-export function getMcpSnippet(_ide: string, _variant: 'http' | 'stdio', _port: number | string): string {
-  return '';
+export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: number | string): string {
+  if (variant === 'stdio') {
+    return `"airtable": {
+  "command": "npx",
+  "args": ["-y", "airtable-user-mcp"]
+}`;
+  }
+
+  // HTTP variant — each IDE has a slightly different key name (Pitfall 2 in RESEARCH.md)
+  // Windsurf: serverUrl (not url)
+  if (ide === 'windsurf') {
+    return `"airtable": {
+  "serverUrl": "http://127.0.0.1:${port}/mcp",
+  "headers": {
+    "Authorization": "Bearer {{BEARER_TOKEN}}"
+  }
+}`;
+  }
+
+  // Cursor + Cline: url only (no type: http)
+  if (ide === 'cursor' || ide === 'cline') {
+    return `"airtable": {
+  "url": "http://127.0.0.1:${port}/mcp",
+  "headers": {
+    "Authorization": "Bearer {{BEARER_TOKEN}}"
+  }
+}`;
+  }
+
+  // claude-code, claude-desktop (and any future IDE) — type: "http" + url
+  return `"airtable": {
+  "type": "http",
+  "url": "http://127.0.0.1:${port}/mcp",
+  "headers": {
+    "Authorization": "Bearer {{BEARER_TOKEN}}"
+  }
+}`;
 }
 
 /** Stub — Plan 05 implements full body */
