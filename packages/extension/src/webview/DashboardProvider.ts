@@ -485,13 +485,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     // during very early activation.
     const toolProfile: ToolProfileSnapshot = this.toolProfileManager?.getSnapshot() ?? {
       profile:      'full',
-      enabledCount: 36,
-      totalCount:   36,
+      enabledCount: 62,
+      totalCount:   62,
       categories: {
         read: true,
-        tableWrite: true, tableDestructive: true,
-        fieldWrite: true, fieldDestructive: true,
-        viewWrite: true, viewDestructive: true,
+        tableWrite: true,           tableDestructive: true,
+        fieldWrite: true,           fieldDestructive: true,
+        viewWrite: true,            viewDestructive: true,
+        viewSection: true,          viewSectionDestructive: true,
+        formWrite: true,
         extension: true,
       },
     };
