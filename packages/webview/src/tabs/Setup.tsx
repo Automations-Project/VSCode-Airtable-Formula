@@ -30,7 +30,7 @@ export function getLspSnippet(_ide: string, _variant: 'tcp' | 'stdio', _port: nu
 }
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon } = useStore();
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
@@ -86,6 +86,56 @@ export function Setup() {
 
   return (
     <div className="stack stack-lg">
+
+      {/* Daemon Status Block — D-01: hidden when daemon not running */}
+      {daemon?.running && (
+        <div className="glass-panel">
+          <div className="section-header">
+            <div className="eyebrow">Daemon</div>
+            <div className="title">MCP Server Status</div>
+            <div className="detail">Local daemon running on this machine</div>
+          </div>
+
+          {/* Health chip — D-03: chip-ok for healthy, chip-warn for degraded */}
+          <div style={{ marginBottom: 8 }}>
+            {daemon.healthy
+              ? <span className="chip chip-ok">Healthy</span>
+              : <span className="chip chip-warn">Degraded</span>}
+          </div>
+
+          {/* Key-value rows — D-02: LSP port and Tunnel URL hidden when null */}
+          <div className="stack stack-sm">
+            <div className="list-row">
+              <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>MCP Port</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>{daemon.port}</span>
+            </div>
+
+            {daemon.port_lsp !== null && (
+              <div className="list-row">
+                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>LSP Port</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>{daemon.port_lsp}</span>
+              </div>
+            )}
+
+            {daemon.tunnelUrl && (
+              <div className="list-row">
+                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Tunnel URL</span>
+                <span style={{
+                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%',
+                }}>
+                  {daemon.tunnelUrl}
+                </span>
+              </div>
+            )}
+
+            <div className="list-row">
+              <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Uptime</span>
+              <span style={{ fontSize: '0.7rem' }}>{formatUptime(daemon.uptime)}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tunnel section */}
       <div className="glass-panel">
