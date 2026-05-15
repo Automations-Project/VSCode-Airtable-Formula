@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
 stopped_at: UI-SPEC complete; planning not yet started
-last_updated: "2026-05-14T23:52:11.142Z"
-last_activity: 2026-05-14 -- Phase 07 planning complete
+last_updated: "2026-05-15T00:20:46.331Z"
+last_activity: 2026-05-15 -- Phase 07 execution started
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 21
-  completed_plans: 12
-  percent: 57
+  completed_plans: 13
+  percent: 59
 ---
 
 # Project State
@@ -21,17 +21,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** Airtable-aware language intelligence directly in VS Code — accurate completions, diagnostics, and hover docs for formulas, scripts, and automation scripts
-**Current focus:** Phase 07 (Tunnel Support) — UI-SPEC approved, planning next
+**Current focus:** Phase 07 — tunnel-support
 
 ## Current Position
 
-Phase: 07 (tunnel-support) — UI-SPEC APPROVED ✓
-Plan: 0 of TBD (planning not yet started)
-Status: Ready to execute
-Last activity: 2026-05-14 -- Phase 07 planning complete
+Phase: 07 (tunnel-support) — EXECUTING
+Plan: 2 of 9
+Status: Executing Phase 07
+Last activity: 2026-05-15 -- Phase 07 Plan 01 complete (Wave 0 tunnel test stubs)
 
 ```
-Progress: [████      ] 40% (2/5 phases complete)
+Progress: [████      ] 59% (13/21 plans complete across 2/5 phases)
 ```
 
 ## Performance Metrics
@@ -78,6 +78,8 @@ Recent decisions affecting current work:
 - v2.0: No OAuth 2.1 in Airtable daemon — bearer token sufficient for local loopback; OAuth only for public multi-user scenario
 - v2.0: Port source is `C:\Users\admin\github-repos\VSCode-Perplexity-MCP` — lockfile.ts, launcher.ts, server.ts, attach.ts are direct port sources
 - v2.0: Phase 6 (LSP) and Phase 7 (Tunnel) can execute in parallel after Phase 5 (Daemon Core) completes
+- 07-01: /daemon/shutdown excluded from DAEMON_PATHS allowlist test loop — calling it mid-suite kills the server and breaks subsequent fetch calls
+- 07-01: Allowlist tests are intentionally RED at Wave 0 — assert 404 for tunnel requests to /daemon/* paths; GREEN when Plan 05 adds allowlist middleware
 
 ### Pending Todos
 
@@ -106,7 +108,7 @@ From Phase 6 REVIEW.md — criticals pending fix:
 
 ## Session Continuity
 
-Last session: 2026-05-15 — Phase 07 UI-SPEC approved
-Stopped at: UI-SPEC complete; planning not yet started
-Next: /gsd-plan-phase 7
-Resume file: .planning/phases/07-tunnel-support/07-UI-SPEC.md
+Last session: 2026-05-15 — Phase 07 Plan 01 complete
+Stopped at: 07-01 complete (Wave 0 tunnel test stubs committed c2c6d8a)
+Next: 07-02
+Resume file: .planning/phases/07-tunnel-support/07-02-PLAN.md
