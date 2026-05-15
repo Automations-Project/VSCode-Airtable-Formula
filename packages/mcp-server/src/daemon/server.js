@@ -217,6 +217,8 @@ export async function startDaemonServer(options = {}) {
   };
 
   const toolConfig = new ToolConfigManager();
+  await toolConfig.load();
+  toolConfig.startWatching();
   const startedAt = Date.now();
   const sseClients = new Set();
   const activeMcpClosers = new Set();
@@ -465,6 +467,8 @@ export async function startDaemonServer(options = {}) {
   const stop = async () => {
     if (closed) return;
     closed = true;
+
+    try { toolConfig.stopWatching(); } catch { /* best-effort */ }
 
     // Stop tunnel before closing SSE clients — tunnel stop may publish a final event
     await runShutdownStep('tunnel-stop', () => activeTunnel?.stop().catch(() => undefined));

@@ -333,6 +333,8 @@ export async function startDaemon(options = {}) {
         version,
         configDir,
         bearerToken: token.bearerToken,
+        getTools: options.getTools,
+        callTool: options.callTool,
         onShutdown: finalize,
         onTokenRotated: async (nextToken) => {
           syncLockfile(nextToken.bearerToken);

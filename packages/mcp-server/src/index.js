@@ -3,7 +3,8 @@ import { runCli } from './cli.js';
 
 // Handle CLI subcommands before starting the MCP server
 const cliArgs = process.argv.slice(2);
-if (cliArgs.length > 0) {
+const isDaemonStart = cliArgs[0] === 'daemon' && cliArgs[1] === 'start';
+if (cliArgs.length > 0 && !isDaemonStart) {
   const handled = await runCli(cliArgs);
   if (handled) process.exit(process.exitCode || 0);
 }
@@ -2068,6 +2069,63 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 let activeTransport = null;
 
 async function main() {
+  if (isDaemonStart) {
+    const { startDaemon } = await import('./daemon/launcher.js');
+    const result = await startDaemon({
+      configDir: process.env.AIRTABLE_USER_MCP_HOME,
+      getTools: (tc) => {
+        const enabledTools = tc.filterTools(TOOLS);
+        const enabledNames = new Set(enabledTools.map(t => t.name));
+        const hiddenByCategory = {};
+        for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
+          if (!enabledNames.has(tool)) {
+            (hiddenByCategory[cat] ??= []).push(tool);
+          }
+        }
+        const hiddenSummary = Object.entries(hiddenByCategory)
+          .map(([cat, tools]) => `${cat}: ${tools.join(', ')}`)
+          .join(' | ');
+        const manageDef = {
+          ...MANAGE_TOOLS_DEF,
+          description: hiddenSummary
+            ? `${MANAGE_TOOLS_DEF.description}\n\nActive profile: "${tc.activeProfile}". ` +
+              `Hidden by current profile (call get_tool_status to inspect, switch_profile or ` +
+              `toggle_category to enable): ${hiddenSummary}.`
+            : `${MANAGE_TOOLS_DEF.description}\n\nActive profile: "${tc.activeProfile}" — all tools enabled.`,
+        };
+        return [...enabledTools, manageDef];
+      },
+      callTool: async (request, _getClient, tc) => {
+        const { name, arguments: args } = request.params;
+        const handler = handlers[name];
+        if (!handler) return err(`Unknown tool: ${name}`);
+        if (!tc.isToolEnabled(name)) {
+          return err(
+            `Tool "${name}" is currently disabled. Active profile: "${tc.activeProfile}". ` +
+            `Use manage_tools to change profile or re-enable this tool.`
+          );
+        }
+        if (inflightToolCalls >= MAX_CONCURRENT_TOOL_CALLS) {
+          return err(
+            `Too many concurrent tool calls (${inflightToolCalls}/${MAX_CONCURRENT_TOOL_CALLS}). ` +
+            `Retry after in-flight requests drain, or set AIRTABLE_MAX_CONCURRENT_TOOLS to raise the cap.`
+          );
+        }
+        inflightToolCalls++;
+        const traced = traceToolHandler(name, handler);
+        try {
+          return await traced(args || {});
+        } catch (error) {
+          return err(`Error in ${name}: ${error.message}`);
+        } finally {
+          inflightToolCalls--;
+        }
+      },
+    });
+    if (!result.attached) await result.closed;
+    return;
+  }
+
   await toolConfig.load();
   await toolConfig.startWatching();
   const enabledCount = toolConfig.enabledToolNames().size;
