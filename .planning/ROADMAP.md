@@ -235,13 +235,13 @@ Plans:
 - [x] 07-04-PLAN.md — Create tunnel-providers/cloudflared-named.js, cloudflared-named-setup.js, index.js (TUNNEL-01, TUNNEL-03, TUNNEL-04) [Wave 3, depends_on: 07-02, autonomous]
 
 **Wave 4** *(depends on 07-03 and 07-04)*
-- [ ] 07-05-PLAN.md — Modify server.js: allowlist middleware + 401-burst tripwire + enable-tunnel/disable-tunnel endpoints + health tunnelUrl (TUNNEL-01, TUNNEL-03) [Wave 4, depends_on: 07-03, 07-04, autonomous]
+- [x] 07-05-PLAN.md — Modify server.js: allowlist middleware + 401-burst tripwire + enable-tunnel/disable-tunnel endpoints + health tunnelUrl (TUNNEL-01, TUNNEL-03) [Wave 4, depends_on: 07-03, 07-04, autonomous]
 
 **Wave 5** *(depends on 07-05)*
-- [ ] 07-06-PLAN.md — Modify launcher.js: tunnel auto-start + finalize stop + lockfile tunnelUrl; update daemon/index.js barrel (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 5, depends_on: 07-05, autonomous]
+- [x] 07-06-PLAN.md — Modify launcher.js: tunnel auto-start + finalize stop + lockfile tunnelUrl; update daemon/index.js barrel (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 5, depends_on: 07-05, autonomous]
 
 **Wave 6** *(depends on 07-06)*
-- [ ] 07-07-PLAN.md — Add TunnelState types to shared/types.ts; add tunnel messages to shared/messages.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 6, depends_on: 07-06, autonomous]
+- [x] 07-07-PLAN.md — Add TunnelState types to shared/types.ts; add tunnel messages to shared/messages.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 6, depends_on: 07-06, autonomous]
 
 **Wave 7** *(depends on 07-07)*
 - [ ] 07-08-PLAN.md — Add tunnel handlers + setDaemonManager + _computeTunnelState to DashboardProvider.ts; wire in extension.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03) [Wave 7, depends_on: 07-07, autonomous]
@@ -284,6 +284,6 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
 | 6. LSP Server | 5/5 | Complete | 2026-05-15 |
-| 7. Tunnel Support | 4/9 | In Progress|  |
+| 7. Tunnel Support | 7/9 | In Progress|  |
 | 8. Setup Tab UI | 0/? | Not started | - |
 | 9. Documentation | 0/? | Not started | - |

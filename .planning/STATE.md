@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
 stopped_at: 07-06 complete (tunnel lifecycle in launcher.js e69c039)
-last_updated: "2026-05-15T12:55:00.000Z"
+last_updated: "2026-05-15T09:54:59.797Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 21
-  completed_plans: 17
-  percent: 81
+  completed_plans: 19
+  percent: 90
 ---
 
 # Project State
@@ -26,12 +26,12 @@ See: .planning/PROJECT.md (updated 2026-05-14)
 ## Current Position
 
 Phase: 07 (tunnel-support) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-05-15
 
 ```
-Progress: [████████░░] 81%
+Progress: [█████████░] 90%
 ```
 
 ## Performance Metrics
@@ -71,6 +71,7 @@ Progress: [████████░░] 81%
 | Phase 07-tunnel-support P04 | 35 | 2 tasks | 5 files |
 | Phase 07-tunnel-support P05 | 12min | 2 tasks | 1 file |
 | Phase 07-tunnel-support P06 | 15min | 2 tasks | 3 files |
+| Phase 07-tunnel-support P07 | 5 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,7 @@ Recent decisions affecting current work:
 - v2.0: Phase 6 (LSP) and Phase 7 (Tunnel) can execute in parallel after Phase 5 (Daemon Core) completes
 - 07-01: /daemon/shutdown excluded from DAEMON_PATHS allowlist test loop — calling it mid-suite kills the server and breaks subsequent fetch calls
 - 07-01: Allowlist tests are intentionally RED at Wave 0 — assert 404 for tunnel requests to /daemon/* paths; GREEN when Plan 05 adds allowlist middleware
+- [Phase ?]: TunnelState types before DashboardState, following BrowserDownloadState pattern; tunnel? optional field
 
 ### Pending Todos
 
@@ -114,7 +116,7 @@ From Phase 6 REVIEW.md — criticals pending fix:
 
 ## Session Continuity
 
-Last session: 2026-05-15T12:55:00.000Z
+Last session: 2026-05-15T09:54:54.036Z
 Stopped at: 07-06 complete (tunnel lifecycle in launcher.js e69c039)
 Next: 07-07
 Resume file: None
