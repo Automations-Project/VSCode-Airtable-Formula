@@ -283,7 +283,14 @@ Plans:
   2. A user reading `packages/mcp-server/README.md` understands the three transport modes (stdio standalone, stdio-proxy to daemon, HTTP) and can use `--no-daemon` to opt out
   3. A user reading the root README can find the LSP setup section and follow it to configure their editor without any additional research
   4. A developer reading `CLAUDE.md` can find the daemon architecture section, understand the new file layout in `packages/mcp-server/src/daemon/`, and know which files were ported from the Perplexity project
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+**Wave 1** *(all parallel — no file overlap)*
+- [ ] 09-01-PLAN.md — Add ## [2.0.0] — Daemon & LSP section to CHANGELOG.md (DOCS-01) [Wave 1, autonomous]
+- [ ] 09-02-PLAN.md — Update packages/mcp-server/README.md: Transport Modes section, daemon CLI subcommands, AIRTABLE_NO_DAEMON env var, Tools (62) fix (DOCS-02) [Wave 1, autonomous]
+- [ ] 09-03-PLAN.md — Update root README.md: airtable-user-lsp badge, LSP Server section, lsp-server monorepo row, three products (DOCS-03) [Wave 1, autonomous]
+- [ ] 09-04-PLAN.md — Update CLAUDE.md: five packages, daemon subsystem section, packages/lsp-server section, daemon start/stop/status CLI, DaemonManager Build Pipeline note (DOCS-04) [Wave 1, autonomous]
+
 **UI hint**: no
 
 ### Progress
@@ -298,4 +305,4 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 | 6. LSP Server | 5/5 | Complete | 2026-05-15 |
 | 7. Tunnel Support | 9/9 | Complete | 2026-05-15 |
 | 8. Setup Tab UI | 5/5 | Complete | 2026-05-15 |
-| 9. Documentation | 0/? | Not started | - |
+| 9. Documentation | 0/4 | Not started | - |
