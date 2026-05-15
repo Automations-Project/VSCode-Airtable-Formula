@@ -247,7 +247,7 @@ Plans:
 - [x] 07-08-PLAN.md — Add tunnel handlers + setDaemonManager + _computeTunnelState to DashboardProvider.ts; wire in extension.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03) [Wave 7, depends_on: 07-07, autonomous]
 
 **Wave 8** *(depends on 07-08)*
-- [ ] 07-09-PLAN.md — Add tunnel glass-panel to Setup.tsx + store.ts tunnel actions + package.json tunnel.disable command (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 8, depends_on: 07-08, autonomous]
+- [x] 07-09-PLAN.md — Add tunnel glass-panel to Setup.tsx + store.ts tunnel actions + package.json tunnel.disable command (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 8, depends_on: 07-08, autonomous]
 
 **UI hint**: yes
 
@@ -259,7 +259,19 @@ Plans:
   1. Opening the Setup tab shows a live status block with MCP port, LSP port, tunnel URL (if active), and daemon uptime — all sourced from the running daemon lockfile
   2. A user setting up a new MCP client in Claude Code, Claude Desktop, Cursor, Windsurf, or Cline can copy a ready-to-paste config snippet directly from the Setup tab
   3. A user setting up LSP in Claude Code, OpenCode, Zed, or Neovim can copy a ready-to-paste config snippet directly from the Setup tab
-**Plans**: TBD
+**Plans**: 5 plans *(COMPLETE 2026-05-15)*
+Plans:
+**Wave 1** *(no dependencies)*
+- [x] 08-01-PLAN.md — Add DaemonStatusInfo interface + daemon? to DashboardState; Wave 0 test suite (formatUptime, getMcpSnippet, getLspSnippet stubs) (UI-01) [Wave 1, autonomous]
+
+**Wave 2** *(depends on 08-01 — 08-02 and 08-03 parallel)*
+- [x] 08-02-PLAN.md — Add _computeDaemonStatusInfo() to DashboardProvider.ts; populate daemon: in pushState() (UI-01) [Wave 2, depends_on: 08-01, autonomous]
+- [x] 08-03-PLAN.md — Export formatUptime + stubs; add DaemonStatusBlock as first panel in Setup.tsx (UI-01) [Wave 2, depends_on: 08-01, autonomous]
+
+**Wave 3** *(depends on 08-01, 08-03 — sequential: shared file)*
+- [x] 08-04-PLAN.md — Implement getMcpSnippet(); add MCP Config Snippets panel (5 IDEs × HTTP+stdio) (UI-02) [Wave 3, depends_on: 08-01, 08-03, autonomous]
+- [x] 08-05-PLAN.md — Implement getLspSnippet(); add LSP Config Snippets panel (4 IDEs × TCP+stdio) (UI-03) [Wave 3, depends_on: 08-01, 08-03, 08-04, autonomous]
+
 **UI hint**: yes
 
 #### Phase 9: Documentation
@@ -284,6 +296,6 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
 | 6. LSP Server | 5/5 | Complete | 2026-05-15 |
-| 7. Tunnel Support | 8/9 | In Progress|  |
-| 8. Setup Tab UI | 0/? | Not started | - |
+| 7. Tunnel Support | 9/9 | Complete | 2026-05-15 |
+| 8. Setup Tab UI | 5/5 | Complete | 2026-05-15 |
 | 9. Documentation | 0/? | Not started | - |

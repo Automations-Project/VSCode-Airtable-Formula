@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: — Daemon & LSP
 status: completed
-stopped_at: Phase 8 plans committed (5 plans, 3 waves)
-last_updated: "2026-05-15T15:30:00.000Z"
-last_activity: 2026-05-15 -- Phase 08 plans ready for execution
+stopped_at: Phase 8 execution complete — all 33 tests green
+last_updated: "2026-05-15T18:50:00.000Z"
+last_activity: 2026-05-15 -- Phase 08 executed (5/5 plans, 295 tests passing)
 progress:
   total_phases: 5
   completed_phases: 3
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-14)
 
 ## Current Position
 
-Phase: 08 — PLANNED
-Plan: 0 of 5 — pending execution
-Status: Phase 08 plans ready; execute with /gsd-execute-phase 8
-Last activity: 2026-05-15 -- Phase 08 plans committed (3 waves)
+Phase: 08 — COMPLETE
+Plan: 5 of 5 — COMPLETE
+Status: Phase 08 complete — proceed to Phase 09 (Documentation)
+Last activity: 2026-05-15 -- Phase 08 executed (295 tests passing)
 
 ```
 Progress: [██████████] 100%
@@ -94,7 +94,7 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
-- Run /gsd-execute-phase 8 — execute Phase 8 (5 plans, 3 waves)
+- Run /gsd-discuss-phase 9 or /gsd-plan-phase 9 — plan Phase 9 (Documentation)
 
 ### Blockers/Concerns
 
@@ -119,5 +119,5 @@ From Phase 6 REVIEW.md — all criticals fixed (verified 2026-05-15):
 
 Last session: 2026-05-15T14:37:21.785Z
 Stopped at: Phase 8 UI-SPEC approved
-Next: Execute Phase 08 — /gsd-execute-phase 8
-Resume file: .planning/phases/08-setup-tab-ui/08-01-PLAN.md
+Next: Phase 09 — Documentation
+Resume file: .planning/phases/09-documentation/ (plan first)
