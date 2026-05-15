@@ -14,6 +14,7 @@ import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { ensureToken, rotateToken, getTokenPath } from './token.js';
+import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -74,6 +75,25 @@ function getBoundPort(server) {
   return address.port;
 }
 
+/**
+ * Detect whether an incoming request originated from a tunnel (i.e., not loopback).
+ * Tunnel traffic carries X-Forwarded-For or cf-connecting-ip headers, or arrives
+ * from a non-loopback IP.
+ *
+ * NOTE: X-Forwarded-For spoofing makes us MORE restrictive, never less — safe by design.
+ * (D-07 threat model: T-07-14)
+ *
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
+function isTunnelRequest(req) {
+  if (req.headers?.['x-forwarded-for']) return true;
+  if (req.headers?.['cf-connecting-ip']) return true;
+  const ip = req.socket?.remoteAddress ?? '';
+  if (ip && ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') return true;
+  return false;
+}
+
 export async function startDaemonServer(options = {}) {
   const host = options.host ?? '127.0.0.1';
   const requestedPort = options.port ?? 0;
@@ -90,6 +110,15 @@ export async function startDaemonServer(options = {}) {
 
   let currentToken = initialToken;
   let closed = false;
+  let activeTunnel = null;
+
+  // 401-burst tripwire constants (D-06)
+  const BURST_FAILURE_COUNT = 10;
+  const BURST_WINDOW_MS = 60_000;
+  let authFailureCount = 0;
+  let burstWindowStart = Date.now();
+  let tunnelAutoDisabled = false;
+
   let auth;
   let client;
   let clientInitPromise = null;
@@ -113,13 +142,54 @@ export async function startDaemonServer(options = {}) {
 
   const expressFactory = express;
   const app = expressFactory();
+
+  // Tunnel allowlist — MUST run before express.json() and before requireBearer (D-07)
+  // Prevents tunnel callers from reaching /daemon/* endpoints (including their auth errors)
+  // Security: T-07-12 — tunnel caller never discovers /daemon/shutdown exists
+  app.use((req, res, next) => {
+    if (!isTunnelRequest(req)) return next();
+    const p = req.path;
+    if (p.startsWith('/mcp') || p === '/') return next();
+    res.status(404).json({ error: 'Not found' });
+  });
+
   app.use(expressFactory.json({ limit: '1mb' }));
+
+  const publishEvent = (event, payload) => {
+    const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const response of sseClients) {
+      response.write(frame);
+    }
+  };
+
+  // 401-burst tripwire tracker (D-06)
+  // Only counts failures from tunnel-originated requests (isTunnelRequest = true).
+  // Sliding window: resets when BURST_WINDOW_MS elapses between failures.
+  // On threshold: publishes daemon:tunnel-auto-disabled SSE + calls onTunnelAutoDisable callback.
+  const track401Burst = (req) => {
+    if (!isTunnelRequest(req)) return; // only track tunnel-originated failures
+    const now = Date.now();
+    if (now - burstWindowStart > BURST_WINDOW_MS) {
+      authFailureCount = 0;
+      burstWindowStart = now;
+    }
+    authFailureCount++;
+    if (authFailureCount >= BURST_FAILURE_COUNT && !tunnelAutoDisabled) {
+      tunnelAutoDisabled = true;
+      const ip = req.headers?.['cf-connecting-ip']
+        ?? req.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
+        ?? null;
+      publishEvent('daemon:tunnel-auto-disabled', { failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
+      options.onTunnelAutoDisable?.({ failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
+    }
+  };
 
   const requireBearer = (req, res, next) => {
     const header = req.headers?.authorization ?? '';
     const match = header.match(/^Bearer\s+(.+)$/i);
     const provided = match ? match[1] : null;
     if (provided !== currentToken.bearerToken) {
+      track401Burst(req);  // 401-burst tripwire (D-06)
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -134,14 +204,8 @@ export async function startDaemonServer(options = {}) {
     port: getBoundPort(httpServer),
     uptimeMs: Date.now() - startedAt,
     startedAt: new Date(startedAt).toISOString(),
+    tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
   });
-
-  const publishEvent = (event, payload) => {
-    const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const response of sseClients) {
-      response.write(frame);
-    }
-  };
 
   app.get('/daemon/health', requireBearer, (_req, res) => {
     res.json(getHealth());
@@ -185,6 +249,56 @@ export async function startDaemonServer(options = {}) {
     setImmediate(() => {
       stop().catch(next);
     });
+  });
+
+  // POST /daemon/enable-tunnel (D-01, D-04)
+  // body: { provider: 'cf-quick'|'ngrok'|'cf-named', authtoken?: string, domain?: string }
+  // Requires loopback bearer auth — tunnel callers see 404 (allowlist middleware above).
+  app.post('/daemon/enable-tunnel', requireBearer, async (req, res, next) => {
+    try {
+      const { provider, authtoken, domain } = req.body ?? {};
+      // Stop existing tunnel if running
+      if (activeTunnel) {
+        await activeTunnel.stop().catch(() => undefined);
+        activeTunnel = null;
+      }
+      // Persist settings before starting (D-03)
+      writeTunnelSettings(options.configDir, { enabled: true, provider, ngrokDomain: domain ?? null });
+      // Start tunnel via provider registry
+      const p = getTunnelProvider(provider);
+      activeTunnel = await p.start({
+        port: getBoundPort(httpServer),
+        configDir: options.configDir,
+        authtoken,
+        domain,
+        onStateChange: (state) => {
+          if (state.url) {
+            options.onTunnelUrlChange?.(state.url);
+          } else if (state.status === 'crashed' || state.status === 'disabled') {
+            options.onTunnelUrlChange?.(null);
+          }
+        },
+      });
+      const url = await activeTunnel.waitUntilReady;
+      publishEvent('daemon:tunnel-started', { url });
+      tunnelAutoDisabled = false; // reset burst counter on successful enable
+      res.json({ ok: true, url });
+    } catch (err) { next(err); }
+  });
+
+  // POST /daemon/disable-tunnel (D-05)
+  // Stops tunnel, writes enabled:false to tunnel-settings.json, publishes daemon:tunnel-stopped SSE.
+  app.post('/daemon/disable-tunnel', requireBearer, async (_req, res, next) => {
+    try {
+      if (activeTunnel) {
+        await activeTunnel.stop().catch(() => undefined);
+        activeTunnel = null;
+      }
+      writeTunnelSettings(options.configDir, { enabled: false });
+      options.onTunnelUrlChange?.(null);
+      publishEvent('daemon:tunnel-stopped', {});
+      res.json({ ok: true });
+    } catch (err) { next(err); }
   });
 
   app.all('/mcp', requireBearer, async (req, res, next) => {
@@ -247,6 +361,10 @@ export async function startDaemonServer(options = {}) {
   const stop = async () => {
     if (closed) return;
     closed = true;
+
+    // Stop tunnel before closing SSE clients — tunnel stop may publish a final event
+    await runShutdownStep('tunnel-stop', () => activeTunnel?.stop().catch(() => undefined));
+    activeTunnel = null;
 
     await runShutdownStep('sse-clients', () => {
       for (const response of sseClients) {
