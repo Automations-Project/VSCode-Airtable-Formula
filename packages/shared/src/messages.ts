@@ -37,4 +37,9 @@ export type WebviewMessage =
   | { type: 'daemon:start';               id: string }
   | { type: 'daemon:stop';                id: string }
   | { type: 'daemon:restart';             id: string }
-  | { type: 'daemon:copy-bearer-token';   id: string };
+  | { type: 'daemon:copy-bearer-token';   id: string }
+  | { type: 'daemon:rotate-token';        id: string }
+  | { type: 'action:save-airtable-pat';             id: string; pat: string }
+  | { type: 'action:copy-airtable-pat';             id: string }
+  | { type: 'action:configure-official-airtable';   id: string; ideId: IdeId }
+  | { type: 'action:unconfigure-official-airtable'; id: string; ideId: IdeId };

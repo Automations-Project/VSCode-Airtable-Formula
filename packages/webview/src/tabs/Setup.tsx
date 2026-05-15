@@ -168,6 +168,17 @@ vim.lsp.enable('airtable_formula')`;
 }`;
 }
 
+export function getOfficialAirtableSnippet(ide: string): string {
+  // Windsurf uses 'serverUrl'; everyone else uses 'url'.
+  const urlKey = (ide === 'windsurf' || ide === 'windsurf-next') ? 'serverUrl' : 'url';
+  return `"airtable": {
+  "${urlKey}": "https://mcp.airtable.com/mcp",
+  "headers": {
+    "Authorization": "Bearer {{AIRTABLE_PAT}}"
+  }
+}`;
+}
+
 // ---------------------------------------------------------------------------
 // Module-level constants — defined outside component to avoid re-creation per render
 // ---------------------------------------------------------------------------
@@ -178,6 +189,18 @@ const MCP_IDE_TABS = [
   { id: 'cursor',         label: 'Cursor' },
   { id: 'windsurf',       label: 'Windsurf' },
   { id: 'cline',          label: 'Cline' },
+] as const;
+
+// IDEs that support the official Airtable HTTP MCP (those with mcpServersKey, excluding codex-cli)
+const OFFICIAL_MCP_IDES = [
+  { id: 'claude-code',    label: 'Claude Code' },
+  { id: 'claude-desktop', label: 'Claude Desktop' },
+  { id: 'cursor',         label: 'Cursor' },
+  { id: 'windsurf',       label: 'Windsurf' },
+  { id: 'windsurf-next',  label: 'Windsurf Next' },
+  { id: 'cline',          label: 'Cline' },
+  { id: 'amp',            label: 'Amp' },
+  { id: 'opencode',       label: 'OpenCode' },
 ] as const;
 
 const MCP_VARIANT_TABS = [
@@ -198,7 +221,7 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
 
   const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
@@ -217,6 +240,9 @@ export function Setup() {
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
   const [copiedUrl, setCopiedUrl] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState(false);
+  const [rotatedToken, setRotatedToken] = React.useState(false);
+  const [patInput, setPatInput] = React.useState('');
+  const [copiedPat, setCopiedPat] = React.useState(false);
 
   // MCP snippet state
   const [mcpActiveIde, setMcpActiveIde] = React.useState('claude-code');
@@ -226,6 +252,8 @@ export function Setup() {
   const [lspActiveVariant, setLspActiveVariant] = React.useState<'tcp' | 'stdio'>('tcp');
   // Shared copy state for all snippet copy buttons
   const [copiedKeys, setCopiedKeys] = React.useState<Record<string, boolean>>({});
+  // Official Airtable MCP snippet IDE selector
+  const [officialSnippetIde, setOfficialSnippetIde] = React.useState('claude-code');
 
   React.useEffect(() => {
     if (tunnel?.provider) setSelectedProvider(tunnel.provider);
@@ -256,6 +284,18 @@ export function Setup() {
     copyBearerToken();
     setCopiedToken(true);
     setTimeout(() => setCopiedToken(false), 1500);
+  };
+
+  const handleRotateToken = () => {
+    rotateToken();
+    setRotatedToken(true);
+    setTimeout(() => setRotatedToken(false), 2000);
+  };
+
+  const handleCopyPat = () => {
+    copyAirtablePat();
+    setCopiedPat(true);
+    setTimeout(() => setCopiedPat(false), 1500);
   };
 
   const handleCopySnippet = (text: string, key: string) => {
@@ -331,6 +371,28 @@ export function Setup() {
             <div className="list-row">
               <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Uptime</span>
               <span style={{ fontSize: '0.7rem' }}>{formatUptime(daemon.uptime)}</span>
+            </div>
+
+            {/* Bearer token row — value stays in extension host (D-07) */}
+            <div className="list-row" style={{ alignItems: 'center' }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Bearer Token</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0.15em', color: 'var(--fg-muted)' }}>•••••••••••••••••</span>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={handleCopyToken}
+                title="Copy bearer token to clipboard"
+                style={{ marginLeft: 8 }}
+              >
+                {copiedToken ? 'Copied!' : 'Copy'}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={handleRotateToken}
+                title="Rotate bearer token — all connected clients will need the new token"
+                style={{ marginLeft: 4, color: rotatedToken ? 'var(--fg-ok)' : undefined }}
+              >
+                {rotatedToken ? 'Rotated!' : 'Rotate'}
+              </button>
             </div>
           </div>
         )}
@@ -790,6 +852,183 @@ export function Setup() {
                   {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
                 </button>
               </div>
+            );
+          })()}
+        </div>
+      </div>
+
+      {/* Official Airtable MCP — https://mcp.airtable.com/mcp */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Official Integration</div>
+          <div className="title">Airtable Cloud MCP</div>
+          <div className="detail">
+            The official Airtable MCP provides core data operations via airtable.com.
+            Our MCP adds user-session tools the official one lacks — install both for full coverage.
+          </div>
+        </div>
+
+        {/* PAT status chip */}
+        <div style={{ marginBottom: 8 }}>
+          {officialAirtable?.patSet
+            ? <span className="chip chip-ok">PAT saved</span>
+            : <span className="chip chip-muted">No PAT</span>}
+        </div>
+
+        {/* PAT input */}
+        <div style={{ marginBottom: 12 }}>
+          <label htmlFor="airtable-pat" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+            Personal Access Token
+          </label>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              id="airtable-pat"
+              type="password"
+              placeholder={officialAirtable?.patSet ? '••••••••••••••••••••••••••' : 'patXXXXXXXXXXXXXX.xxxxxxxxxxxxxxx'}
+              value={patInput}
+              onChange={e => setPatInput(e.target.value)}
+              style={{
+                flex: 1,
+                fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
+                background: 'var(--bg-input)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', padding: '4px 8px',
+                color: 'var(--fg)',
+              }}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => { if (patInput) { saveAirtablePat(patInput); setPatInput(''); } }}
+              disabled={!patInput || isLoading}
+            >
+              {officialAirtable?.patSet ? 'Update' : 'Save'}
+            </button>
+            {officialAirtable?.patSet && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={handleCopyPat}
+                title="Copy saved PAT to clipboard"
+              >
+                {copiedPat ? 'Copied!' : 'Copy PAT'}
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--fg-muted)', marginTop: 4 }}>
+            Create a PAT at <strong>airtable.com → Account → Developer hub</strong>. Stored securely in VS Code SecretStorage.
+          </div>
+        </div>
+
+        {/* Per-IDE configure rows — only detected MCP-capable IDEs */}
+        {(() => {
+          const detectedOfficial = OFFICIAL_MCP_IDES.filter(ide =>
+            ideStatuses.find(s => s.ideId === ide.id && s.detected)
+          );
+          if (detectedOfficial.length === 0) return null;
+          return (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--fg-muted)', marginBottom: 6 }}>
+                Detected IDEs
+              </div>
+              <div className="stack stack-sm">
+                {detectedOfficial.map(ide => {
+                  const configured = officialAirtable?.ideConfigured[ide.id as import('@shared/types.js').IdeId] ?? false;
+                  return (
+                    <div key={ide.id} className="list-row" style={{ alignItems: 'center' }}>
+                      <span style={{ flex: 1, fontSize: '0.78rem' }}>{ide.label}</span>
+                      {configured
+                        ? <span className="chip chip-ok" style={{ fontSize: '0.62rem' }}>Configured</span>
+                        : <span className="chip chip-muted" style={{ fontSize: '0.62rem' }}>Not configured</span>}
+                      {configured ? (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => unconfigureOfficialAirtable(ide.id as import('@shared/types.js').IdeId)}
+                          disabled={isLoading}
+                          style={{ marginLeft: 8, color: 'var(--fg-err)' }}
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => configureOfficialAirtable(ide.id as import('@shared/types.js').IdeId)}
+                          disabled={isLoading || !officialAirtable?.patSet}
+                          title={!officialAirtable?.patSet ? 'Save your PAT first' : undefined}
+                          style={{ marginLeft: 8, opacity: !officialAirtable?.patSet ? 0.5 : 1 }}
+                        >
+                          Configure
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Official Airtable MCP snippet */}
+        <div>
+          <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--fg-muted)', marginBottom: 6 }}>
+            Config Snippet
+          </div>
+
+          {/* IDE tab bar for official snippet */}
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 8, gap: 0 }}>
+            {OFFICIAL_MCP_IDES.map(tab => (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={officialSnippetIde === tab.id}
+                onClick={() => setOfficialSnippetIde(tab.id)}
+                style={{
+                  padding: '4px 8px', fontSize: '0.7rem',
+                  fontWeight: officialSnippetIde === tab.id ? 600 : 500,
+                  color: officialSnippetIde === tab.id ? 'var(--fg)' : 'var(--fg-muted)',
+                  borderBottom: `2px solid ${officialSnippetIde === tab.id ? 'var(--at-blue)' : 'transparent'}`,
+                  background: 'none', border: 'none', borderBottomStyle: 'solid', borderBottomWidth: 2,
+                  cursor: 'pointer', whiteSpace: 'nowrap', marginBottom: 0,
+                  transition: 'color 120ms ease, border-color 120ms ease',
+                }}
+              >{tab.label}</button>
+            ))}
+          </div>
+
+          {(() => {
+            const snippetText = getOfficialAirtableSnippet(officialSnippetIde);
+            const copyKey = `official-${officialSnippetIde}`;
+            return (
+              <>
+                <div style={{ position: 'relative' }}>
+                  <pre style={{
+                    background: 'var(--bg-input)', border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)', padding: '8px 12px',
+                    fontFamily: 'var(--font-mono)', fontSize: '0.7rem', lineHeight: 1.5,
+                    color: 'var(--fg)', overflowX: 'auto', whiteSpace: 'pre', margin: 0,
+                  }}>
+                    <code>{snippetText}</code>
+                  </pre>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleCopySnippet(snippetText, copyKey)}
+                    style={{ position: 'absolute', top: 8, right: 8 }}
+                  >
+                    {copiedKeys[copyKey] ? 'Copied!' : 'Copy snippet'}
+                  </button>
+                </div>
+                <div className="list-row" style={{ marginTop: 6, alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--fg-muted)', flex: 1 }}>
+                    Replace <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>{'{'}{'{'}'AIRTABLE_PAT{'}'}{'}'}</code> with your token
+                  </span>
+                  {officialAirtable?.patSet && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleCopyPat}
+                      title="Copy saved PAT to clipboard"
+                    >
+                      {copiedPat ? 'Copied!' : 'Copy PAT'}
+                    </button>
+                  )}
+                </div>
+              </>
             );
           })()}
         </div>

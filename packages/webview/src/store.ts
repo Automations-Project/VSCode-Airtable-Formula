@@ -37,6 +37,11 @@ interface Store extends DashboardState {
   stopDaemon: () => void;
   restartDaemon: () => void;
   copyBearerToken: () => void;
+  rotateToken: () => void;
+  saveAirtablePat: (pat: string) => void;
+  copyAirtablePat: () => void;
+  configureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
+  unconfigureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -260,6 +265,35 @@ export const useStore = create<Store>((set, get) => ({
   copyBearerToken: () => {
     const id = randomId();
     sendToExtension({ type: 'daemon:copy-bearer-token', id });
+  },
+
+  rotateToken: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'daemon:rotate-token', id });
+  },
+
+  saveAirtablePat: (pat) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:save-airtable-pat', id, pat });
+  },
+
+  copyAirtablePat: () => {
+    const id = randomId();
+    sendToExtension({ type: 'action:copy-airtable-pat', id });
+  },
+
+  configureOfficialAirtable: (ideId) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:configure-official-airtable', id, ideId });
+  },
+
+  unconfigureOfficialAirtable: (ideId) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
   },
 
   markActionDone: (id, _ok) => {

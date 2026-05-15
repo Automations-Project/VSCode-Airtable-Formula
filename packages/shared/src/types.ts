@@ -181,15 +181,23 @@ export interface DaemonStatusInfo {
   // pid intentionally excluded — not needed in webview (T-08-02)
 }
 
+export interface OfficialAirtableMcpState {
+  /** True when a Personal Access Token is stored in VS Code SecretStorage. */
+  patSet: boolean;
+  /** Per-IDE: whether the 'airtable' key already exists in that IDE's MCP config. */
+  ideConfigured: Partial<Record<IdeId, boolean>>;
+}
+
 export interface DashboardState {
-  ideStatuses:  IdeStatus[];
-  versions:     VersionInfo;
-  aiFilesCount: number;
-  loading:      boolean;
-  settings:     SettingsSnapshot;
-  auth:         AuthState;
-  debug?:       DebugState;
-  storage?:     StorageInfo;
-  tunnel?:      TunnelState;  // undefined when daemon is not running
-  daemon?:      DaemonStatusInfo;  // undefined when daemon is not running
+  ideStatuses:      IdeStatus[];
+  versions:         VersionInfo;
+  aiFilesCount:     number;
+  loading:          boolean;
+  settings:         SettingsSnapshot;
+  auth:             AuthState;
+  debug?:           DebugState;
+  storage?:         StorageInfo;
+  tunnel?:          TunnelState;           // undefined when daemon is not running
+  daemon?:          DaemonStatusInfo;      // undefined when daemon is not running
+  officialAirtable?: OfficialAirtableMcpState;
 }

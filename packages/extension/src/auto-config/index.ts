@@ -8,6 +8,8 @@ import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic,
 import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, isMcpTomlConfigured } from './lsp-config.js';
 
 const MCP_SERVER_NAME = 'airtable-user-mcp';
+const OFFICIAL_AIRTABLE_NAME = 'airtable';
+const OFFICIAL_AIRTABLE_URL = 'https://mcp.airtable.com/mcp';
 
 /** Stable directory for the launcher — never includes a version number. */
 const LAUNCHER_DIR = path.join(os.homedir(), '.airtable-user-mcp');
@@ -209,6 +211,52 @@ export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
 export async function getAllIdeStatuses(): Promise<IdeStatus[]> {
   const ids = Object.keys(IDE_CONFIGS) as IdeId[];
   return Promise.all(ids.map(getIdeStatus));
+}
+
+// ── Official Airtable MCP (https://mcp.airtable.com/mcp) ───────────────────
+
+function buildOfficialAirtableEntry(ideId: IdeId, pat: string): Record<string, unknown> {
+  // Windsurf uses 'serverUrl'; all other MCP clients use 'url'.
+  const urlKey = (ideId === 'windsurf' || ideId === 'windsurf-next') ? 'serverUrl' : 'url';
+  return {
+    [urlKey]: OFFICIAL_AIRTABLE_URL,
+    headers: { Authorization: `Bearer ${pat}` },
+  };
+}
+
+export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string): Promise<void> {
+  const cfg = IDE_CONFIGS[ideId];
+  if (!cfg.mcpConfigPath || !cfg.mcpServersKey || !cfg.capabilities.includes('mcp')) return;
+  if (ideId === 'codex-cli') return; // TOML format not supported for official MCP
+  const entry = buildOfficialAirtableEntry(ideId, pat);
+  const existing = await readConfigFile(cfg.mcpConfigPath);
+  const merged = mergeServerEntry(existing, cfg.mcpServersKey, OFFICIAL_AIRTABLE_NAME, entry);
+  await writeConfigAtomic(cfg.mcpConfigPath, merged);
+}
+
+export async function unconfigureOfficialAirtableMcp(ideId: IdeId): Promise<void> {
+  const cfg = IDE_CONFIGS[ideId];
+  if (!cfg.mcpConfigPath || !cfg.mcpServersKey || !cfg.capabilities.includes('mcp')) return;
+  if (ideId === 'codex-cli') return;
+  const existing = await readConfigFile(cfg.mcpConfigPath);
+  const cleaned = removeServerEntry(existing, cfg.mcpServersKey, OFFICIAL_AIRTABLE_NAME);
+  await writeConfigAtomic(cfg.mcpConfigPath, cleaned);
+}
+
+export async function isOfficialAirtableConfigured(ideId: IdeId): Promise<boolean> {
+  try {
+    const cfg = IDE_CONFIGS[ideId];
+    if (!cfg.mcpConfigPath || !cfg.mcpServersKey || !cfg.capabilities.includes('mcp')) return false;
+    if (ideId === 'codex-cli') return false;
+    const existing = await readConfigFile(cfg.mcpConfigPath);
+    const parts = cfg.mcpServersKey.split('.');
+    let cur: unknown = existing;
+    for (const p of parts) {
+      if (typeof cur !== 'object' || cur === null) return false;
+      cur = (cur as Record<string, unknown>)[p];
+    }
+    return typeof cur === 'object' && cur !== null && OFFICIAL_AIRTABLE_NAME in (cur as object);
+  } catch { return false; }
 }
 
 export { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';

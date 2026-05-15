@@ -4,8 +4,9 @@ import * as path from 'path';
 import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot, DaemonStatusInfo } from '@airtable-formula/shared';
 import type { WebviewMessage } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
-import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde } from '../auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
+import type { IdeId } from '@airtable-formula/shared';
 import { installAiFiles, checkAiFiles } from '../skills/installer.js';
 import { getSettings, updateSetting } from '../settings.js';
 import { getBundledServerPath, getServerEntry } from '../mcp/server-path.js';
@@ -563,6 +564,96 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+
+    if (msg.type === 'daemon:rotate-token') {
+      try {
+        const status = await this._daemonManager?.getDaemonStatus();
+        if (!status?.running || !status.port || !status.bearerToken) {
+          void vscode.window.showErrorMessage('Cannot rotate token: daemon is not running.');
+          this.postResult(msg.id, false, 'Daemon not running');
+          return;
+        }
+        const resp = await fetch(`http://127.0.0.1:${status.port}/daemon/rotate-token`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${status.bearerToken}` },
+        });
+        if (!resp.ok) {
+          void vscode.window.showErrorMessage(`Token rotation failed: HTTP ${resp.status}`);
+          this.postResult(msg.id, false, `HTTP ${resp.status}`);
+          return;
+        }
+        void vscode.window.showInformationMessage('Bearer token rotated. Use "Copy Token" to get the new value.');
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Token rotation failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'action:save-airtable-pat') {
+      try {
+        if (msg.pat) {
+          await this.context.secrets.store('airtable-formula.airtable.pat', msg.pat);
+          void vscode.window.showInformationMessage('Airtable PAT saved securely.');
+        } else {
+          await this.context.secrets.delete('airtable-formula.airtable.pat');
+        }
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'action:copy-airtable-pat') {
+      try {
+        const pat = await this.context.secrets.get('airtable-formula.airtable.pat');
+        if (!pat) {
+          void vscode.window.showErrorMessage('No Airtable PAT saved. Enter your token first.');
+          this.postResult(msg.id, false, 'No PAT');
+          return;
+        }
+        await vscode.env.clipboard.writeText(pat);
+        void vscode.window.showInformationMessage('Airtable PAT copied to clipboard.');
+        this.postResult(msg.id, true);
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Could not copy PAT: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'action:configure-official-airtable') {
+      try {
+        const pat = await this.context.secrets.get('airtable-formula.airtable.pat');
+        if (!pat) {
+          void vscode.window.showErrorMessage('No Airtable PAT saved. Enter your Personal Access Token first.');
+          this.postResult(msg.id, false, 'No PAT');
+          return;
+        }
+        await configureOfficialAirtableMcp(msg.ideId, pat);
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        void vscode.window.showErrorMessage(`Configure failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'action:unconfigure-official-airtable') {
+      try {
+        await unconfigureOfficialAirtableMcp(msg.ideId);
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
   }
 
   async pushState(): Promise<void> {
@@ -650,8 +741,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       auth: authState,
       debug: debugState,
       storage,
-      tunnel: await this._computeTunnelState(),
-      daemon: await this._computeDaemonStatusInfo(),
+      tunnel:          await this._computeTunnelState(),
+      daemon:          await this._computeDaemonStatusInfo(),
+      officialAirtable: await this._computeOfficialAirtableState(),
     };
 
     this.view.webview.postMessage({ type: 'state:update', payload: state });
@@ -818,6 +910,20 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     } catch {
       return undefined;
     }
+  }
+
+  private async _computeOfficialAirtableState(): Promise<import('@airtable-formula/shared').OfficialAirtableMcpState> {
+    const patSet = !!(await this.context.secrets.get('airtable-formula.airtable.pat'));
+    const ideIds = Object.keys(IDE_CONFIGS) as IdeId[];
+    const results = await Promise.all(ideIds.map(async ideId => ({
+      ideId,
+      configured: await isOfficialAirtableConfigured(ideId),
+    })));
+    const ideConfigured: Partial<Record<IdeId, boolean>> = {};
+    for (const { ideId, configured } of results) {
+      ideConfigured[ideId] = configured;
+    }
+    return { patSet, ideConfigured };
   }
 
   private async _installCloudflared(
