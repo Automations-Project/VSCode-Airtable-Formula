@@ -2,6 +2,33 @@ import React from 'react';
 import { useStore } from '../store.js';
 import { IdeCard } from '../components/IdeCard.js';
 
+// ---------------------------------------------------------------------------
+// Pure helpers — exported for unit testing in setup.test.tsx
+// ---------------------------------------------------------------------------
+
+export function formatUptime(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return '—';
+  if (ms < 60_000) return '< 1m';
+  if (ms < 3_600_000) {
+    const m = Math.floor(ms / 60_000);
+    const s = Math.floor((ms % 60_000) / 1000);
+    return `${m}m ${s}s`;
+  }
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return `${h}h ${m}m`;
+}
+
+/** Stub — Plan 04 implements full body */
+export function getMcpSnippet(_ide: string, _variant: 'http' | 'stdio', _port: number | string): string {
+  return '';
+}
+
+/** Stub — Plan 05 implements full body */
+export function getLspSnippet(_ide: string, _variant: 'tcp' | 'stdio', _port: number | string): string {
+  return '';
+}
+
 export function Setup() {
   const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken } = useStore();
 
