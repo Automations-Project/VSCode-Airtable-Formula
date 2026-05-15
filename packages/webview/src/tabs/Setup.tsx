@@ -58,9 +58,108 @@ export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: numb
 }`;
 }
 
-/** Stub — Plan 05 implements full body */
-export function getLspSnippet(_ide: string, _variant: 'tcp' | 'stdio', _port: number | string): string {
-  return '';
+export function getLspSnippet(ide: string, variant: 'tcp' | 'stdio', port: number | string): string {
+  // Neovim uses Lua format (D-10: vim.lsp.config API — Neovim 0.11+ native LSP)
+  if (ide === 'neovim') {
+    if (variant === 'tcp') {
+      return `vim.lsp.config('airtable_formula', {
+  cmd = vim.lsp.rpc.connect('127.0.0.1', ${port}),
+  filetypes = { 'formula', 'airtable-script', 'airtable-automation' },
+  root_markers = { '.git' },
+})
+vim.lsp.enable('airtable_formula')`;
+    }
+    return `vim.lsp.config('airtable_formula', {
+  cmd = { 'npx', '-y', 'airtable-user-lsp', '--stdio' },
+  filetypes = { 'formula', 'airtable-script', 'airtable-automation' },
+  root_markers = { '.git' },
+})
+vim.lsp.enable('airtable_formula')`;
+  }
+
+  // Zed — JSON binary format
+  if (ide === 'zed') {
+    if (variant === 'tcp') {
+      return `{
+  "lsp": {
+    "airtable-formula": {
+      "binary": {
+        "path": "airtable-user-lsp",
+        "arguments": ["--tcp-client", "127.0.0.1:${port}"]
+      }
+    }
+  }
+}`;
+    }
+    return `{
+  "lsp": {
+    "airtable-formula": {
+      "binary": {
+        "path": "airtable-user-lsp",
+        "arguments": ["--stdio"]
+      }
+    }
+  }
+}`;
+  }
+
+  // OpenCode — opencode.json format
+  if (ide === 'opencode') {
+    if (variant === 'tcp') {
+      return `{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "airtable-formula": {
+      "command": ["npx", "-y", "airtable-user-lsp", "--stdio"],
+      "extensions": [".formula", ".ats", ".ata"],
+      "initialization": {
+        "host": "127.0.0.1",
+        "port": ${port}
+      }
+    }
+  }
+}`;
+    }
+    return `{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "airtable-formula": {
+      "command": ["npx", "-y", "airtable-user-lsp", "--stdio"],
+      "extensions": [".formula", ".ats", ".ata"]
+    }
+  }
+}`;
+  }
+
+  // Claude Code — .lsp.json plugin format (D-11: plugin-based, not settings.json key)
+  // TCP variant: uses transport: "socket" (partially verified — see RESEARCH.md Assumption A2)
+  if (variant === 'tcp') {
+    return `{
+  "airtable-formula": {
+    "command": "npx",
+    "args": ["-y", "airtable-user-lsp", "--stdio"],
+    "transport": "socket",
+    "extensionToLanguage": {
+      ".formula": "airtable-formula",
+      ".ats": "airtable-script",
+      ".ata": "airtable-automation"
+    }
+  }
+}`;
+  }
+
+  // Claude Code stdio (fully verified format)
+  return `{
+  "airtable-formula": {
+    "command": "npx",
+    "args": ["-y", "airtable-user-lsp", "--stdio"],
+    "extensionToLanguage": {
+      ".formula": "airtable-formula",
+      ".ats": "airtable-script",
+      ".ata": "airtable-automation"
+    }
+  }
+}`;
 }
 
 // ---------------------------------------------------------------------------
