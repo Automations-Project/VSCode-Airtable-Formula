@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
-import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot } from '@airtable-formula/shared';
+import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot, DaemonStatusInfo } from '@airtable-formula/shared';
 import type { WebviewMessage } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
 import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde } from '../auto-config/index.js';
@@ -532,6 +532,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       debug: debugState,
       storage,
       tunnel: await this._computeTunnelState(),
+      daemon: await this._computeDaemonStatusInfo(),
     };
 
     this.view.webview.postMessage({ type: 'state:update', payload: state });
@@ -667,6 +668,25 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         provider,
         ngrokAuthtokenSet,
         autoDisabledReason,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async _computeDaemonStatusInfo(): Promise<DaemonStatusInfo | undefined> {
+    try {
+      const status = await this._daemonManager?.getDaemonStatus();
+      if (!status?.running) return undefined;
+      return {
+        running:   status.running,
+        healthy:   status.healthy,
+        port:      status.port,
+        port_lsp:  status.port_lsp,
+        tunnelUrl: status.tunnelUrl,
+        uptime:    status.uptime,
+        // bearerToken intentionally excluded (D-07, T-08-01)
+        // pid intentionally excluded (T-08-02)
       };
     } catch {
       return undefined;
