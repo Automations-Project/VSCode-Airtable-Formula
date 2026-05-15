@@ -53,7 +53,7 @@ Airtable-aware language intelligence directly in VS Code — so users get accura
 - [ ] `airtable-user-lsp` public npm package — LSP server wrapping `language-services` (stdio + TCP modes)
 - [ ] LSP port written to daemon lockfile (`port_lsp`)
 - [ ] VS Code extension: daemon lifecycle in `auth-manager.ts`, HTTP `McpServerDefinitionProvider` when daemon running
-- [ ] Setup tab updated with MCP + LSP status and per-IDE config snippets
+- [x] Setup tab updated with MCP + LSP status and per-IDE config snippets — Validated in Phase 8: Setup Tab UI
 - [ ] Documentation updates (CHANGELOG, README, CLAUDE.md, LSP setup guide)
 
 ### Out of Scope
@@ -92,7 +92,7 @@ Airtable-aware language intelligence directly in VS Code — so users get accura
 
 ## Evolution
 
-Last updated: 2026-05-12 (Phase 1 complete)
+Last updated: 2026-05-15 (Phase 8 complete)
 
 This document evolves at phase transitions and milestone boundaries.
 
