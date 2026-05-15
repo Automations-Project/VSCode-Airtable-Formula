@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.48",
+  "version": "2.0.50",
   "publisher": "Nskha",
   "displayName": "Airtable Formula",
   "description": "Airtable formula editor, MCP server installer, and AI skills for VS Code.",
@@ -617,7 +617,7 @@
     ]
   },
   "scripts": {
-    "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\"",
+    "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\" && node scripts/patch-esm-meta.mjs",
     "build:mcp": "node ../../scripts/bundle-mcp.mjs",
     "prepare:deps": "node ../../scripts/prepare-package-deps.mjs",
     "package": "vsce package --no-dependencies",
