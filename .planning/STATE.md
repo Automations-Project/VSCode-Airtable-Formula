@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: — Daemon & LSP
 status: completed
-stopped_at: Phase 8 context gathered
-last_updated: "2026-05-15T14:18:26.658Z"
+stopped_at: Phase 8 UI-SPEC approved
+last_updated: "2026-05-15T14:37:21.794Z"
 last_activity: 2026-05-15 -- Phase 07 marked complete
 progress:
   total_phases: 5
@@ -117,7 +117,7 @@ From Phase 6 REVIEW.md — all criticals fixed (verified 2026-05-15):
 
 ## Session Continuity
 
-Last session: 2026-05-15T14:18:26.649Z
-Stopped at: Phase 8 context gathered
+Last session: 2026-05-15T14:37:21.785Z
+Stopped at: Phase 8 UI-SPEC approved
 Next: Phase 08 (or release of Phase 07 work)
-Resume file: .planning/phases/08-setup-tab-ui/08-CONTEXT.md
+Resume file: .planning/phases/08-setup-tab-ui/08-UI-SPEC.md
