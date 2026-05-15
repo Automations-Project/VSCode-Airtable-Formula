@@ -110,7 +110,7 @@ vim.lsp.enable('airtable_formula')`;
   "$schema": "https://opencode.ai/config.json",
   "lsp": {
     "airtable-formula": {
-      "command": ["npx", "-y", "airtable-user-lsp", "--stdio"],
+      "command": ["npx", "-y", "airtable-user-lsp"],
       "extensions": [".formula", ".ats", ".ata"],
       "initialization": {
         "host": "127.0.0.1",
