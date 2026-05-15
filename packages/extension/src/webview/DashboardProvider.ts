@@ -413,10 +413,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           this.postResult(msg.id, false, 'Daemon not running');
           return;
         }
-        // For ngrok: read authtoken from SecretStorage (T-07-21 — never rely on webview to pass it directly)
+        // For ngrok: store the authtoken when provided inline, then read it back from SecretStorage.
+        // This ensures store-then-use is atomic within the same handler (fixes T-07-21 race condition).
         let authtoken: string | undefined = msg.authtoken;
-        if (msg.provider === 'ngrok' && !authtoken) {
-          authtoken = await this.context.secrets.get('airtable-formula.ngrok.authtoken') ?? undefined;
+        if (msg.provider === 'ngrok') {
+          if (authtoken) {
+            await this.context.secrets.store('airtable-formula.ngrok.authtoken', authtoken);
+          } else {
+            authtoken = await this.context.secrets.get('airtable-formula.ngrok.authtoken') ?? undefined;
+          }
         }
         await fetch(`http://127.0.0.1:${status.port}/daemon/enable-tunnel`, {
           method: 'POST',
