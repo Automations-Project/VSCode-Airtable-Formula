@@ -244,7 +244,7 @@ Plans:
 - [x] 07-07-PLAN.md — Add TunnelState types to shared/types.ts; add tunnel messages to shared/messages.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 6, depends_on: 07-06, autonomous]
 
 **Wave 7** *(depends on 07-07)*
-- [ ] 07-08-PLAN.md — Add tunnel handlers + setDaemonManager + _computeTunnelState to DashboardProvider.ts; wire in extension.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03) [Wave 7, depends_on: 07-07, autonomous]
+- [x] 07-08-PLAN.md — Add tunnel handlers + setDaemonManager + _computeTunnelState to DashboardProvider.ts; wire in extension.ts (TUNNEL-01, TUNNEL-02, TUNNEL-03) [Wave 7, depends_on: 07-07, autonomous]
 
 **Wave 8** *(depends on 07-08)*
 - [ ] 07-09-PLAN.md — Add tunnel glass-panel to Setup.tsx + store.ts tunnel actions + package.json tunnel.disable command (TUNNEL-01, TUNNEL-02, TUNNEL-03, TUNNEL-04) [Wave 8, depends_on: 07-08, autonomous]
@@ -284,6 +284,6 @@ Note: Phase 6 and Phase 7 can execute in parallel after Phase 5 completes.
 |-------|----------------|--------|-----------|
 | 5. Daemon Core | 0/7 | Not started | - |
 | 6. LSP Server | 5/5 | Complete | 2026-05-15 |
-| 7. Tunnel Support | 7/9 | In Progress|  |
+| 7. Tunnel Support | 8/9 | In Progress|  |
 | 8. Setup Tab UI | 0/? | Not started | - |
 | 9. Documentation | 0/? | Not started | - |
