@@ -33,4 +33,7 @@ export type WebviewMessage =
   | { type: 'action:setBrowserChoice';   id: string; choice: import('./types.js').BrowserChoice }
   | { type: 'tunnel:enable';              id: string; provider: TunnelProviderId; authtoken?: string; domain?: string }
   | { type: 'tunnel:disable';             id: string }
-  | { type: 'tunnel:set-ngrok-authtoken'; id: string; authtoken: string };
+  | { type: 'tunnel:set-ngrok-authtoken'; id: string; authtoken: string }
+  | { type: 'daemon:start';   id: string }
+  | { type: 'daemon:stop';    id: string }
+  | { type: 'daemon:restart'; id: string };

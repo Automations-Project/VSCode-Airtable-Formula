@@ -192,7 +192,7 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon } = useStore();
 
   const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
@@ -265,24 +265,26 @@ export function Setup() {
   return (
     <div className="stack stack-lg">
 
-      {/* Daemon Status Block — D-01: hidden when daemon not running */}
-      {daemon?.running && (
-        <div className="glass-panel">
-          <div className="section-header">
-            <div className="eyebrow">Daemon</div>
-            <div className="title">MCP Server Status</div>
-            <div className="detail">Local daemon running on this machine</div>
-          </div>
+      {/* Daemon Status Block — always visible */}
+      <div className="glass-panel">
+        <div className="section-header">
+          <div className="eyebrow">Daemon</div>
+          <div className="title">MCP Server Status</div>
+          <div className="detail">{daemon?.running ? 'Local daemon running on this machine' : 'Start the daemon to enable MCP and LSP features'}</div>
+        </div>
 
-          {/* Health chip — D-03: chip-ok for healthy, chip-warn for degraded */}
-          <div style={{ marginBottom: 8 }}>
-            {daemon.healthy
-              ? <span className="chip chip-ok">Healthy</span>
-              : <span className="chip chip-warn">Degraded</span>}
-          </div>
+        {/* Status chip */}
+        <div style={{ marginBottom: 8 }}>
+          {daemon?.running
+            ? daemon.healthy
+              ? <span className="chip chip-ok">Running · Healthy</span>
+              : <span className="chip chip-warn">Running · Degraded</span>
+            : <span className="chip chip-muted">Stopped</span>}
+        </div>
 
-          {/* Key-value rows — D-02: LSP port and Tunnel URL hidden when null */}
-          <div className="stack stack-sm">
+        {/* Key-value rows — only when running */}
+        {daemon?.running && (
+          <div className="stack stack-sm" style={{ marginBottom: 8 }}>
             <div className="list-row">
               <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>MCP Port</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>{daemon.port}</span>
@@ -312,8 +314,26 @@ export function Setup() {
               <span style={{ fontSize: '0.7rem' }}>{formatUptime(daemon.uptime)}</span>
             </div>
           </div>
+        )}
+
+        {/* Daemon controls */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          {!daemon?.running ? (
+            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
+              {isLoading ? 'Starting...' : 'Start Daemon'}
+            </button>
+          ) : (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
+                {isLoading ? 'Restarting...' : 'Restart'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1, color: 'var(--fg-err)' }}>
+                {isLoading ? 'Stopping...' : 'Stop'}
+              </button>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Tunnel section */}
       <div className="glass-panel">

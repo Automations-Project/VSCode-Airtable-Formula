@@ -464,6 +464,30 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       } catch (err) { this.postResult(msg.id, false, String(err)); }
       return;
     }
+
+    if (msg.type === 'daemon:start' || msg.type === 'daemon:restart') {
+      try {
+        await this._daemonManager?.restartDaemon();
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Daemon start failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'daemon:stop') {
+      try {
+        await this._daemonManager?.stopDaemon();
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Daemon stop failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
   }
 
   async pushState(): Promise<void> {

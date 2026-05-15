@@ -65,6 +65,12 @@ const AI_CONFIGS: Record<IdeId, AiInstallConfig> = {
     agentsPath:   null,
     wrapCursor: false,
   },
+  // CLI tools and LSP-only editors — no AI files concept
+  'opencode':  { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
+  'codex-cli': { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
+  'zed':       { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
+  'helix':     { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
+  'neovim':    { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
 };
 
 export function cursorWrap(content: string, description: string): string {

@@ -33,6 +33,9 @@ interface Store extends DashboardState {
   enableTunnel: (provider: TunnelProviderId, authtoken?: string, domain?: string) => void;
   disableTunnel: () => void;
   setNgrokAuthtoken: (authtoken: string) => void;
+  startDaemon: () => void;
+  stopDaemon: () => void;
+  restartDaemon: () => void;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -233,6 +236,24 @@ export const useStore = create<Store>((set, get) => ({
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
     sendToExtension({ type: 'tunnel:set-ngrok-authtoken', id, authtoken });
+  },
+
+  startDaemon: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'daemon:start', id });
+  },
+
+  stopDaemon: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'daemon:stop', id });
+  },
+
+  restartDaemon: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'daemon:restart', id });
   },
 
   markActionDone: (id, _ok) => {
