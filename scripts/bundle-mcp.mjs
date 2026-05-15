@@ -27,8 +27,8 @@ const sharedOptions = {
   format: 'esm',
   platform: 'node',
   target: 'node20',
-  // patchright has native binaries — vendored separately
-  external: ['patchright', 'patchright-core', 'otpauth'],
+  // patchright and @ngrok/ngrok have native NAPI binaries — kept external
+  external: ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok'],
   logLevel: 'info',
 };
 

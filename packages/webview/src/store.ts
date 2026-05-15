@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DashboardState, IdeStatus, SettingsSnapshot, AuthState } from '@shared/types.js';
+import type { DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId } from '@shared/types.js';
 import { sendToExtension } from './lib/vscode.js';
 import { randomId } from './lib/utils.js';
 
@@ -30,6 +30,9 @@ interface Store extends DashboardState {
   selectCustomBrowser: () => void;
   setBrowserChoice: (choice: import('@shared/types.js').BrowserChoice) => void;
   openStoragePath: (path: string) => void;
+  enableTunnel: (provider: TunnelProviderId, authtoken?: string, domain?: string) => void;
+  disableTunnel: () => void;
+  setNgrokAuthtoken: (authtoken: string) => void;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -212,6 +215,24 @@ export const useStore = create<Store>((set, get) => ({
   openStoragePath: (p) => {
     const id = randomId();
     sendToExtension({ type: 'action:openStoragePath', id, path: p });
+  },
+
+  enableTunnel: (provider, authtoken, domain) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'tunnel:enable', id, provider, authtoken, domain });
+  },
+
+  disableTunnel: () => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'tunnel:disable', id });
+  },
+
+  setNgrokAuthtoken: (authtoken) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'tunnel:set-ngrok-authtoken', id, authtoken });
   },
 
   markActionDone: (id, _ok) => {
