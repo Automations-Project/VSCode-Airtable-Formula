@@ -11,6 +11,7 @@
   <a href="https://open-vsx.org/extension/Nskha/airtable-formula"><img src="https://img.shields.io/open-vsx/v/Nskha/airtable-formula?style=for-the-badge&logo=eclipseide&logoColor=white&label=Open%20VSX&color=C160EF" alt="Open VSX version" /></a>
   <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
   <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP%20Registry-Listed-1D4ED8?style=for-the-badge" alt="MCP Registry listing" /></a>
+  <a href="https://www.npmjs.com/package/airtable-user-lsp"><img src="https://img.shields.io/npm/v/airtable-user-lsp?style=for-the-badge&logo=npm&logoColor=white&label=LSP&color=CB3837" alt="npm airtable-user-lsp version" /></a>
 </p>
 
 <p align="center">
@@ -112,7 +113,7 @@ Your MCP client will expose every tool from both servers. The two entries are in
 
 ## What's In This Repo
 
-This monorepo ships **two products** from one source tree:
+This monorepo ships **three products** from one source tree:
 
 <div align="center">
 
@@ -120,6 +121,7 @@ This monorepo ships **two products** from one source tree:
 |:-:|:--------|:--------|
 | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png" width="24" /> | **Airtable Formula** — VS Code extension | [Marketplace](https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula) |
 | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/icon.png" width="24" /> | **airtable-user-mcp** — Standalone MCP server | `npx airtable-user-mcp` |
+| | **airtable-user-lsp** — Airtable language server | `npx airtable-user-lsp` |
 
 </div>
 
@@ -163,6 +165,21 @@ Manage Airtable bases with capabilities **not available through the official RES
 | **Tool Management** | 1 | List profiles, switch profile, toggle tools/categories (meta-tool, always enabled) |
 
 See the full tool reference in [`packages/mcp-server/README.md`](packages/mcp-server/README.md).
+
+### LSP Server
+
+**`airtable-user-lsp`** is a standalone language server for Airtable formula, script, and automation files — works in any LSP-capable editor, not just VS Code.
+
+```bash
+# stdio mode — works standalone, no daemon needed
+npx airtable-user-lsp --stdio
+```
+
+Features: diagnostics, completions, hover documentation, and signature help for `.formula`, `.ats`, and `.ata` files.
+
+When the daemon is running, it auto-spawns `airtable-user-lsp --tcp` so multiple editors share one language server instance. The TCP port is written to `~/.airtable-user-mcp/daemon.lock` as `port_lsp`.
+
+See [`packages/lsp-server/README.md`](packages/lsp-server/README.md) for per-editor configuration (Neovim, Zed, OpenCode, Helix).
 
 ---
 
@@ -223,6 +240,7 @@ This is a **pnpm monorepo**.
 | `packages/webview` | React dashboard webview (Vite + Tailwind v4) |
 | `packages/shared` | Shared types and message protocol |
 | `packages/mcp-server` | [`airtable-user-mcp`](https://www.npmjs.com/package/airtable-user-mcp) — ESM Node MCP server |
+| `packages/lsp-server` | [`airtable-user-lsp`](https://www.npmjs.com/package/airtable-user-lsp) — LSP server for formula / script / automation files |
 | `scripts/` | Build tooling (esbuild bundler, dep vendoring) |
 
 ```bash
