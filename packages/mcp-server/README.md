@@ -108,6 +108,10 @@ npx airtable-user-mcp
 
 That's it. Your MCP client connects via **stdio** and gets access to all 62 tools.
 
+When the daemon is running (started automatically by the VS Code extension, or via `npx airtable-user-mcp daemon start`),
+subsequent `npx airtable-user-mcp` invocations transparently proxy their stdio to the shared daemon —
+so all clients share one Chromium session. To skip the daemon and run in-process: `AIRTABLE_NO_DAEMON=1 npx airtable-user-mcp`.
+
 ---
 
 ## Run alongside the official Airtable MCP
@@ -291,6 +295,7 @@ $env:AIRTABLE_BROWSER_PATH = "C:\Program Files\Google\Chrome\Application\chrome.
 | `AIRTABLE_NO_BROWSER` | Skip Patchright entirely — uses cached cookies only (CI/headless) |
 | `AIRTABLE_HEADLESS_ONLY` | Run the browser without a visible window |
 | `AIRTABLE_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
+| `AIRTABLE_NO_DAEMON` | Skip daemon; run in-process stdio directly (backwards-compatible mode) |
 
 ---
 
@@ -343,11 +348,14 @@ npx airtable-user-mcp doctor           Run diagnostics
 npx airtable-user-mcp install-browser  Download Chromium (~170 MB)
 npx airtable-user-mcp --version        Print version
 npx airtable-user-mcp --help           Show this help
+npx airtable-user-mcp daemon start     Start the shared background daemon
+npx airtable-user-mcp daemon stop      Stop the running daemon
+npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 ```
 
 ---
 
-## Tools (61)
+## Tools (62)
 
 ### Schema Read (9)
 
@@ -515,11 +523,24 @@ Args: {
 
 ---
 
+## Transport Modes
+
+`airtable-user-mcp` supports three transport modes. The default behaviour is automatic — MCP clients
+do not need to change their configuration when the daemon is present.
+
+| Mode | How to use | When to use |
+|:-----|:-----------|:------------|
+| **stdio standalone** | `AIRTABLE_NO_DAEMON=1 npx airtable-user-mcp` | Backwards-compatible; one process per client; no daemon |
+| **stdio-proxy** | `npx airtable-user-mcp` (default when daemon lock exists) | Transparent; stdin/stdout bridged to the running daemon |
+| **HTTP (daemon direct)** | `http://127.0.0.1:{port}/mcp` with `Authorization: Bearer {token}` | VS Code extension and other HTTP-capable clients |
+
+The daemon stores its port and bearer token in `~/.airtable-user-mcp/daemon.lock`.
+
 ## Protocol
 
 | | |
 |:--|:--|
-| **Transport** | stdio (JSON-RPC 2.0) |
+| **Transport** | stdio + HTTP (StreamableHTTPServerTransport) |
 | **MCP Version** | 2025-11-25 |
 | **SDK** | `@modelcontextprotocol/sdk` v1.27.1 |
 
