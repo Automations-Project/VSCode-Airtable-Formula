@@ -359,7 +359,8 @@ export async function startDaemonServer(options = {}) {
       const p = getTunnelProvider(provider);
       const check = await p.isSetupComplete(options.configDir);
       if (!check.ready) {
-        res.status(428).json({ ok: false, error: check.reason, needsInstall: true, action: check.action });
+        const needsInstall = check.action?.kind === 'install-binary';
+        res.status(428).json({ ok: false, error: check.reason, needsInstall, action: check.action });
         return;
       }
       // Persist settings before starting (D-03)

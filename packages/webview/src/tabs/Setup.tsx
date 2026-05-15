@@ -255,8 +255,12 @@ export function Setup() {
   // Official Airtable MCP snippet IDE selector
   const [officialSnippetIde, setOfficialSnippetIde] = React.useState('claude-code');
 
+  const tunnelProviderInitialized = React.useRef(false);
   React.useEffect(() => {
-    if (tunnel?.provider) setSelectedProvider(tunnel.provider);
+    if (!tunnelProviderInitialized.current && tunnel?.provider) {
+      tunnelProviderInitialized.current = true;
+      setSelectedProvider(tunnel.provider as 'cf-quick' | 'ngrok' | 'cf-named');
+    }
   }, [tunnel?.provider]);
 
   const handleEnableTunnel = () => {
