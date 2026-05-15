@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Daemon & LSP
 status: executing
-stopped_at: 07-01 complete (Wave 0 tunnel test stubs committed c2c6d8a)
-last_updated: "2026-05-15T00:50:25.206Z"
+stopped_at: 07-06 complete (tunnel lifecycle in launcher.js e69c039)
+last_updated: "2026-05-15T12:55:00.000Z"
 last_activity: 2026-05-15
 progress:
   total_phases: 5
@@ -26,12 +26,12 @@ See: .planning/PROJECT.md (updated 2026-05-14)
 ## Current Position
 
 Phase: 07 (tunnel-support) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
 Last activity: 2026-05-15
 
 ```
-Progress: [████████░░] 76%
+Progress: [████████░░] 81%
 ```
 
 ## Performance Metrics
@@ -69,6 +69,8 @@ Progress: [████████░░] 76%
 | Phase 07-tunnel-support P02 | 15min | 2 tasks | 4 files |
 | Phase 07-tunnel-support P03 | 20min | 2 tasks | 5 files |
 | Phase 07-tunnel-support P04 | 35 | 2 tasks | 5 files |
+| Phase 07-tunnel-support P05 | 12min | 2 tasks | 1 file |
+| Phase 07-tunnel-support P06 | 15min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -112,7 +114,7 @@ From Phase 6 REVIEW.md — criticals pending fix:
 
 ## Session Continuity
 
-Last session: 2026-05-15T00:45:51.295Z
-Stopped at: 07-01 complete (Wave 0 tunnel test stubs committed c2c6d8a)
-Next: 07-02
+Last session: 2026-05-15T12:55:00.000Z
+Stopped at: 07-06 complete (tunnel lifecycle in launcher.js e69c039)
+Next: 07-07
 Resume file: None
