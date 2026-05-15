@@ -93,13 +93,12 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Fix 3 code review criticals from 06-REVIEW.md (CR-01 socket error handler, CR-02 release.yml `both` target, CR-03 double SIGTERM)
 - Run GitHub Actions Release workflow with `target=lsp-server` to publish airtable-user-lsp to npm (human UAT item)
-- Run /gsd-plan-phase 7 — plan Phase 7 execution
+- Run /gsd-plan-phase 8 — plan Phase 8 execution
 
 ### Blockers/Concerns
 
-None blocking. Phase 06 criticals are safety/correctness fixes for pre-release.
+None.
 
 ### Known Advisory Issues (non-blocking)
 
@@ -110,11 +109,11 @@ From Phase 3 REVIEW.md (v1.0) — not fixed but documented:
 - I-2: Destructured bindings not collected in buildLocalSymbols (best-effort per D-04)
 - I-3: Method hover missing `range` field
 
-From Phase 6 REVIEW.md — criticals pending fix:
+From Phase 6 REVIEW.md — all criticals fixed (verified 2026-05-15):
 
-- CR-01: tcp-server.ts missing socket.on('error') handler — ECONNRESET kills whole server
-- CR-02: release.yml `both` target doesn't include lsp-server
-- CR-03: launcher.js double SIGTERM / dual lspChild reference
+- CR-01 ✓ tcp-server.ts: socket.on('error') handler added, ECONNRESET isolated
+- CR-02 ✓ release.yml: `both` target now includes lsp-server in all bump/publish/tag steps
+- CR-03 ✓ launcher.js: setLspChild/lsp-child shutdown step removed from server.js; single SIGTERM path in finalize()
 
 ## Session Continuity
 
