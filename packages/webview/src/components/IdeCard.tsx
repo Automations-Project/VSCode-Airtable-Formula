@@ -3,6 +3,10 @@ import type { IdeId, IdeStatus } from '@shared/types.js';
 import { Pill } from './Pill.js';
 import { IdeIcon } from './IdeIcon.js';
 
+// VS Code forks / extension-host environments: language features (LSP) are
+// provided automatically when the extension is installed in that IDE.
+const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
+
 // Install / docs URL per supported IDE, shown on undetected cards so the user
 // knows where to go. Kept local because it's presentation-only state.
 const IDE_DOCS_URL: Record<IdeId, string> = {
@@ -67,6 +71,23 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
               {status.mcpConfigured ? 'ready' : 'missing'}
             </span>
           </div>
+
+          {/* LSP row — VS Code family only */}
+          {VSCODE_FAMILY.has(status.ideId) && (
+            <div className="list-row">
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.58rem', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                color: 'var(--fg-ok)', background: 'rgba(34,197,94,0.12)',
+                border: '1px solid rgba(34,197,94,0.3)', borderRadius: 3,
+                padding: '0 4px', lineHeight: '16px', flexShrink: 0,
+              }}>LSP</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--fg-ok)', flex: 1 }}>
+                Formula · Script · Automation
+              </span>
+              <span className="chip chip-ok" style={{ fontSize: '0.6rem' }}>via extension</span>
+            </div>
+          )}
 
           {/* Stale-path warning */}
           {status.mcpConfigured && status.mcpServerHealthy === false && (
