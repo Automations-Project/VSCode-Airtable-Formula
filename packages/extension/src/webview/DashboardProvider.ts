@@ -727,6 +727,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           try {
             await configureMcpForIde(s.ideId, serverPath, serverEntry);
           } catch (err) {
+            this._debugCollector?.trace('ext', 'error', 'mcp_config:rewrite_failed', { ideId: s.ideId }, String(err));
             console.error(`[airtable-formula] Failed to re-apply MCP config for ${s.ideId}:`, err);
           }
         }),
@@ -744,6 +745,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       const manifest = JSON.parse(new TextDecoder().decode(bytes));
       return typeof manifest.mcpServer === 'string' ? manifest.mcpServer : 'unknown';
     } catch (err) {
+      this._debugCollector?.trace('ext', 'error', 'mcp_version:read_failed', {}, String(err));
       console.error('[airtable-formula] Failed to read MCP version manifest', err);
       return 'unknown';
     }
