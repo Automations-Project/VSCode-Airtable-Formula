@@ -20,7 +20,7 @@
 
 - [x] **TUNNEL-01**: User can enable a Cloudflare or ngrok tunnel from the VS Code extension Setup tab
 - [x] **TUNNEL-02**: Tunnel URL is written to lockfile and surfaced in the Setup tab dashboard
-- [ ] **TUNNEL-03**: Tunnel auto-disables on repeated auth failures (401 burst) and surfaces warning in UI
+- [x] **TUNNEL-03**: Tunnel auto-disables on repeated auth failures (401 burst) and surfaces warning in UI
 - [x] **TUNNEL-04**: User can switch tunnel provider (Cloudflare / ngrok) from settings
 
 ### LSP Server
@@ -99,7 +99,7 @@
 | LSP-05 | Phase 6 | Pending |
 | TUNNEL-01 | Phase 7 | Complete |
 | TUNNEL-02 | Phase 7 | Complete |
-| TUNNEL-03 | Phase 7 | Pending |
+| TUNNEL-03 | Phase 7 | Complete |
 | TUNNEL-04 | Phase 7 | Complete |
 | UI-01 | Phase 8 | Pending |
 | UI-02 | Phase 8 | Pending |
