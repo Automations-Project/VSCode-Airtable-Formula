@@ -2,8 +2,8 @@
 phase: 8
 slug: setup-tab-ui
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-05-15
 ---
 
@@ -40,13 +40,13 @@ created: 2026-05-15
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 08-01-01 | 01 | 1 | UI-01 | — | N/A | unit | `pnpm -F webview vitest run -t "daemon"` | ❌ Wave 0 | ⬜ pending |
 | 08-01-02 | 01 | 1 | UI-01 | — | formatUptime null/min/hours | unit | `pnpm -F webview vitest run -t "formatUptime"` | ❌ Wave 0 | ⬜ pending |
-| 08-01-03 | 01 | 1 | UI-01 | — | daemon block hidden when not running | unit | `pnpm -F webview vitest run -t "DaemonStatusBlock"` | ❌ Wave 0 | ⬜ pending |
-| 08-01-04 | 01 | 1 | UI-01 | — | LSP port row hidden when null | unit | `pnpm -F webview vitest run -t "lsp port row"` | ❌ Wave 0 | ⬜ pending |
-| 08-02-01 | 02 | 2 | UI-02 | T-08-01 | HTTP snippet contains {{BEARER_TOKEN}} | unit | `pnpm -F webview vitest run -t "bearer token"` | ❌ Wave 0 | ⬜ pending |
-| 08-02-02 | 02 | 2 | UI-02 | — | MCP HTTP snippet uses live port | unit | `pnpm -F webview vitest run -t "mcp port"` | ❌ Wave 0 | ⬜ pending |
-| 08-03-01 | 03 | 2 | UI-03 | — | LSP TCP uses live port_lsp | unit | `pnpm -F webview vitest run -t "lsp port snippet"` | ❌ Wave 0 | ⬜ pending |
-| 08-03-02 | 03 | 2 | UI-02+UI-03 | — | N/A | unit | `pnpm -F webview vitest run -t "copy"` | ❌ Wave 0 | ⬜ pending |
-| 08-04-01 | 04 | 3 | UI-01 | T-08-02 | bearerToken/pid stripped from DaemonStatusInfo | manual | inspect DashboardState.daemon in devtools | manual | ⬜ pending |
+| 08-01-03 | 03 | 2 | UI-01 | — | daemon block hidden when not running | unit | `pnpm -F webview vitest run -t "DaemonStatusBlock"` | ❌ Wave 0 | ⬜ pending |
+| 08-01-04 | 03 | 2 | UI-01 | — | LSP port row hidden when null | unit | `pnpm -F webview vitest run -t "lsp port row"` | ❌ Wave 0 | ⬜ pending |
+| 08-02-01 | 04 | 3 | UI-02 | T-08-01 | HTTP snippet contains {{BEARER_TOKEN}} | unit | `pnpm -F webview vitest run -t "bearer token"` | ❌ Wave 0 | ⬜ pending |
+| 08-02-02 | 04 | 3 | UI-02 | — | MCP HTTP snippet uses live port | unit | `pnpm -F webview vitest run -t "mcp port"` | ❌ Wave 0 | ⬜ pending |
+| 08-03-01 | 05 | 3 | UI-03 | — | LSP TCP uses live port_lsp | unit | `pnpm -F webview vitest run -t "lsp port snippet"` | ❌ Wave 0 | ⬜ pending |
+| 08-03-02 | 05 | 3 | UI-02+UI-03 | — | N/A | unit | `pnpm -F webview vitest run -t "copy"` | ❌ Wave 0 | ⬜ pending |
+| 08-04-01 | 02 | 2 | UI-01 | T-08-02 | bearerToken/pid stripped from DaemonStatusInfo | manual | inspect DashboardState.daemon in devtools | manual | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -71,11 +71,11 @@ created: 2026-05-15
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 30s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved

@@ -702,22 +702,22 @@ private async _computeDaemonStatusInfo(): Promise<DaemonStatusInfo | undefined> 
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **OpenCode LSP TCP transport**
+1. **OpenCode LSP TCP transport** — RESOLVED
    - What we know: OpenCode `opencode.json` supports `lsp.{name}.command`, `extensions`, `initialization`
    - What is unclear: Whether OpenCode's LSP client can connect to an existing TCP port vs always spawning a subprocess via `command`
-   - Recommendation: Executor should check the OpenCode LSP docs before finalizing TCP snippet. If TCP attach is not supported, show only the stdio variant for OpenCode or annotate the TCP tab.
+   - Resolution: D-11 is at implementer's discretion. The TCP snippet for OpenCode uses `initialization.host/port` per Plan 05. If TCP attach is not supported, the stdio variant is the primary recommendation — annotate the TCP tab with a note directing users to verify OpenCode TCP support.
 
-2. **Zed custom LSP without extension**
+2. **Zed custom LSP without extension** — RESOLVED
    - What we know: Zed `lsp.{name}.binary` overrides the binary for a known language server
    - What is unclear: Whether Zed will activate a completely new language server for `.formula` files without a Zed extension that registers the language ID and file associations
-   - Recommendation: Snippet should include a comment that Zed requires a Zed extension for full `.formula` file support.
+   - Resolution: Snippet includes a comment per Plan 05: Zed requires a Zed extension for full `.formula` file support. The TCP and stdio snippets are provided as-is; the comment warns users.
 
-3. **Claude Code LSP TCP socket parameters**
+3. **Claude Code LSP TCP socket parameters** — RESOLVED
    - What we know: Claude Code plugin `.lsp.json` supports `transport: "socket"` (documented field)
    - What is unclear: Whether the socket transport connects to an existing TCP port, and what parameters it accepts
-   - Recommendation: Executor fetches the Claude Code plugin creation docs before writing the TCP snippet. The stdio variant is fully verified and should be the primary recommendation if socket TCP is not clearly documented.
+   - Resolution: Plan 05 uses `transport: "socket"` with `host`/`port` params (Assumption A2). The stdio variant remains the verified primary. The TCP tab is provided with a note that socket transport connectivity is not fully verified.
 
 ---
 
