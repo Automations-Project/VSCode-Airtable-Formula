@@ -394,7 +394,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         this.authManager?.restartAutoRefresh();
       }
       await this.pushState();
-      this.postResult('', true);
+      // No postResult here — setting:change has no id field and the webview
+      // does not register a pending action for it; posting action:result with
+      // id:'' would break acknowledgement routing.
       return;
     }
 
