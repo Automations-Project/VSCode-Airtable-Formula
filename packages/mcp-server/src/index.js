@@ -81,12 +81,15 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { AirtableAuth } from './auth.js';
 import { ToolConfigManager, TOOL_CATEGORIES, CATEGORY_LABELS, BUILTIN_PROFILES } from './tool-config.js';
 import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
+import { PROMPTS, renderPrompt } from './prompts.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
@@ -136,7 +139,7 @@ const server = new Server(
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },
-  { capabilities: { tools: { listChanged: true } } }
+  { capabilities: { tools: { listChanged: true }, prompts: {} } }
 );
 
 toolConfig.bindServer(server);
@@ -2062,6 +2065,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } finally {
     inflightToolCalls--;
   }
+});
+
+// ─── Prompt Handlers ─────────────────────────────────────────
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  return renderPrompt(name, args ?? {});
 });
 
 // ─── Start & Shutdown ─────────────────────────────────────────

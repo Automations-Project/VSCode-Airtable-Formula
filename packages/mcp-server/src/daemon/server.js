@@ -8,7 +8,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { PROMPTS, renderPrompt } from '../prompts.js';
 import express from 'express';
 import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
@@ -411,7 +414,7 @@ export async function startDaemonServer(options = {}) {
     try {
       const mcpServer = new Server(
         { name: 'airtable-user-mcp', version },
-        { capabilities: { tools: { listChanged: true } } },
+        { capabilities: { tools: { listChanged: true }, prompts: {} } },
       );
       toolConfig.bindServer(mcpServer);
       mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -422,6 +425,11 @@ export async function startDaemonServer(options = {}) {
           return { content: [{ type: 'text', text: 'Daemon not fully initialized' }], isError: true };
         }
         return options.callTool(request, getClient, toolConfig);
+      });
+      mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
+      mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        return renderPrompt(name, args ?? {});
       });
 
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
