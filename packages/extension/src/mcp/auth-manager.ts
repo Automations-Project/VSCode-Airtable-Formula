@@ -34,6 +34,7 @@ export class AuthManager implements vscode.Disposable {
 
   private _state: AuthState = { status: 'unknown', hasCredentials: false };
   private _timer: ReturnType<typeof setInterval> | undefined;
+  private _initCheckTimer: ReturnType<typeof setTimeout> | undefined;
   private _disposed = false;
   private _browser: BrowserProbe = { found: false };
   private _downloadManager?: BrowserDownloadManager;
@@ -399,8 +400,10 @@ export class AuthManager implements vscode.Disposable {
       void this._autoRefreshCycle();
     }, intervalMs);
 
-    // Also run a check shortly after startup (10s delay)
-    setTimeout(() => {
+    // Run an initial check shortly after startup. Tracked so restartAutoRefresh()
+    // can cancel it — prevents stacked Chromium launches when auth settings change.
+    this._initCheckTimer = setTimeout(() => {
+      this._initCheckTimer = undefined;
       void this._autoRefreshCycle();
     }, 10_000);
   }
@@ -409,6 +412,10 @@ export class AuthManager implements vscode.Disposable {
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = undefined;
+    }
+    if (this._initCheckTimer) {
+      clearTimeout(this._initCheckTimer);
+      this._initCheckTimer = undefined;
     }
   }
 

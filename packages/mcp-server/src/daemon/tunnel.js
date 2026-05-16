@@ -96,8 +96,11 @@ export function startTunnel(options) {
     resolveReady(url);
   };
 
-  createInterface({ input: child.stderr }).on("line", handleLine);
-  createInterface({ input: child.stdout }).on("line", handleLine);
+  const rlStderr = createInterface({ input: child.stderr });
+  const rlStdout = createInterface({ input: child.stdout });
+  rlStderr.on("line", handleLine);
+  rlStdout.on("line", handleLine);
+  child.on("close", () => { rlStderr.close(); rlStdout.close(); });
 
   child.on("error", (error) => {
     if (!settled) {

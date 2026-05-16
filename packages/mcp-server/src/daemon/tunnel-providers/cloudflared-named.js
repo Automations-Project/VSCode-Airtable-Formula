@@ -242,8 +242,11 @@ function spawnNamedTunnel(options) {
     resolveReady(hostnameUrl);
   };
 
-  if (child.stderr) createInterface({ input: child.stderr }).on('line', handleLine);
-  if (child.stdout) createInterface({ input: child.stdout }).on('line', handleLine);
+  const rlStderr = child.stderr ? createInterface({ input: child.stderr }) : null;
+  const rlStdout = child.stdout ? createInterface({ input: child.stdout }) : null;
+  rlStderr?.on('line', handleLine);
+  rlStdout?.on('line', handleLine);
+  child.on('close', () => { rlStderr?.close(); rlStdout?.close(); });
 
   child.on('error', (error) => {
     if (!settled) {
