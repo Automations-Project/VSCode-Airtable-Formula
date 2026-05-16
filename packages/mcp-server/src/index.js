@@ -585,17 +585,34 @@ TYPE OPTIONS by fieldType:
   },
   {
     name: 'update_field_config',
-    description: 'Update the configuration of any computed field (formula, rollup, lookup, count, etc). Use this to change formula text, rollup settings, etc.',
+    description: `Update the configuration of any field — computed OR non-computed.
+Works for formula, rollup, lookup, count, singleSelect, multipleSelects, number, date, text, and all other field types.
+
+COMMON typeOptions by fieldType:
+
+  formula:         { formulaText: "IF({Field}, 1, 0)" }
+  rollup:          { relationColumnId: "fldXXX", formulaText: "SUM(values)" }
+  lookup:          { relationColumnId: "fldXXX", foreignTableRollupColumnId: "fldYYY" }
+  count:           { recordLinkFieldId: "fldXXX" }
+  singleSelect:    { choices: [{ name: "Option A", color: "blueLight2" }] }
+  multipleSelects: { choices: [{ name: "Option A", color: "blueLight2" }, { name: "Option B", color: "greenLight2" }] }
+  number:          { format: "integer"|"decimal"|"currency"|"percentV2", precision: 2, symbol: "$", negative: false }
+
+ADDING CHOICES TO AN EXISTING SELECT FIELD:
+  Choices not in the list are deleted. To preserve existing choices, first call
+  get_table_schema to retrieve them (each has an { id, name, color }), then
+  pass the full merged list — existing entries with their IDs, new entries without:
+  { choices: [{ id: "selXXX", name: "Existing" }, { name: "New Choice", color: "pinkLight2" }] }`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
         appId: { type: 'string', description: 'The Airtable base/application ID' },
         fieldId: { type: 'string', description: 'The field/column ID (e.g. "fldXXX")' },
-        fieldType: { type: 'string', description: 'The field type: "formula", "rollup", "lookup", "count"' },
+        fieldType: { type: 'string', description: 'The field type: "formula", "rollup", "lookup", "count", "singleSelect", "multipleSelects", "number", "date", "text", etc.' },
         typeOptions: {
           type: 'object',
-          description: 'Type-specific options. For formula: { formulaText: "..." }',
+          description: 'Type-specific options — see tool description for shapes per fieldType.',
         },
         debug: debugProp,
       },
