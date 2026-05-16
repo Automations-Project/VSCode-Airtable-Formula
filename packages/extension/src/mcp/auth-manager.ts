@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import { fork } from 'child_process';
+import { unlink } from 'node:fs/promises';
 import type { AuthState, BrowserDownloadState } from '@airtable-formula/shared';
 import { getSettings } from '../settings.js';
 import { detectBrowser, detectAllBrowsers, type BrowserProbe } from './browser-detect.js';
@@ -274,7 +275,16 @@ export class AuthManager implements vscode.Disposable {
     this._updateState({ status: 'checking' });
 
     try {
-      const result = await this._spawnScript('health-check.mjs', { ...this._browserEnv(), ...this._profileEnv() });
+      let result = await this._spawnScript('health-check.mjs', { ...this._browserEnv(), ...this._profileEnv() });
+
+      // Chrome exits immediately (exit code 21) when a stale LOCK file blocks
+      // profile acquisition — common after a crash. Clear it and retry once.
+      if (!result.valid && typeof result.error === 'string' && this._isChromeLockError(result.error)) {
+        await this._clearChromeProfileLock();
+        await new Promise<void>(r => setTimeout(r, 800));
+        result = await this._spawnScript('health-check.mjs', { ...this._browserEnv(), ...this._profileEnv() });
+      }
+
       const now = new Date().toISOString();
 
       if (result.valid) {
@@ -468,6 +478,23 @@ export class AuthManager implements vscode.Disposable {
           void this.manualLogin();
         }
       }
+    }
+  }
+
+  private _isChromeLockError(error: string): boolean {
+    return (
+      error.includes('browserType.launchPersistentContext') ||
+      error.includes('Target page, context or browser has been closed') ||
+      error.includes('exit code 21')
+    );
+  }
+
+  private async _clearChromeProfileLock(): Promise<void> {
+    try {
+      await unlink(path.join(PROFILE_DIR, 'Default', 'LOCK'));
+      console.log('[AuthManager] Cleared stale Chrome profile lock');
+    } catch {
+      // File absent or already cleared — no action needed
     }
   }
 
