@@ -570,6 +570,20 @@ TYPE OPTIONS by fieldType:
     },
   },
   {
+    name: 'download_base_formulas',
+    description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        outputDir: { type: 'string', description: 'Local directory to write files into. Defaults to process.cwd() when omitted. Structure: outputDir/<Table Name>/<Field Name>.formula' },
+        debug: debugProp,
+      },
+      required: ['appId'],
+    },
+  },
+  {
     name: 'update_field_config',
     description: 'Update the configuration of any computed field (formula, rollup, lookup, count, etc). Use this to change formula text, rollup settings, etc.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1662,6 +1676,44 @@ const handlers = {
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, content, 'utf8');
     return ok({ written: true, path: outputPath, fieldName, tableId: foundTableId, bytes: Buffer.byteLength(content) }, raw, debug);
+  },
+
+  async download_base_formulas({ appId, outputDir, debug }) {
+    const baseDir = outputDir || process.cwd();
+    const raw = await client.getApplicationData(appId);
+    const tables = raw?.data?.tableSchemas || raw?.data?.tables || [];
+    const written = [];
+
+    for (const table of tables) {
+      const fields = table.columns || table.fields || [];
+      const formulaFields = fields.filter(f => f.type === 'formula');
+      if (formulaFields.length === 0) continue;
+
+      const safeTableName = (table.name ?? table.id).replace(/[/\\:*?"<>|]/g, '_');
+      const tableDir = `${baseDir}/${safeTableName}`;
+      await mkdir(tableDir, { recursive: true });
+
+      for (const field of formulaFields) {
+        const formulaText = field.typeOptions?.formulaText ?? '';
+        const fieldName = field.name ?? field.id;
+        const description = field.description ?? '';
+        const resultType = field.typeOptions?.resultType ?? '';
+
+        const headerLines = [
+          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${fieldName}"`,
+          description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
+          resultType ? `# AT: resultType=${resultType}` : null,
+        ].filter(Boolean).join('\n');
+
+        const safeFieldName = fieldName.replace(/[/\\:*?"<>|]/g, '_');
+        const filePath = `${tableDir}/${safeFieldName}.formula`;
+        const content = headerLines + '\n' + formulaText;
+        await writeFile(filePath, content, 'utf8');
+        written.push({ path: filePath, tableName: table.name, tableId: table.id, fieldName, fieldId: field.id });
+      }
+    }
+
+    return ok({ tablesProcessed: tables.length, filesWritten: written.length, files: written }, raw, debug);
   },
 
   async update_field_config({ appId, fieldId, fieldType, typeOptions, debug }) {

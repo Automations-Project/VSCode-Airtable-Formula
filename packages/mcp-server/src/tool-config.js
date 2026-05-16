@@ -25,6 +25,7 @@ export const TOOL_CATEGORIES = {
   validate_formula:       'read',
   list_view_sections:     'read',
   download_formula_field: 'read',
+  download_base_formulas:   'read',
 
   // Table mutations (non-destructive)
   create_table:           'table-write',

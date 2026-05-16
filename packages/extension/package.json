@@ -4,7 +4,7 @@
   "version": "2.0.71",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
-  "description": "Airtable formula, script & automation editor with MCP server (62 tools), language server, and AI skills for VS Code.",
+  "description": "Airtable formula, script & automation editor with MCP server (63 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -478,9 +478,9 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection and formula validation only (10 tools)",
-            "Read + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (48 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (62 tools)",
+            "Schema inspection and formula validation only (11 tools)",
+            "Read + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (49 tools)",
+            "All tools enabled including destructive ops, form metadata, and extensions (63 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -632,7 +632,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 62 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 63 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
