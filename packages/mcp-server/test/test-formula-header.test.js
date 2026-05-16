@@ -42,6 +42,13 @@ describe('stripHeader', () => {
     assert.equal(text, '');
     assert.equal(offset, 0);
   });
+
+  it('strips // AT: lines for automation language', () => {
+    const raw = '// AT: appId=appXXX automationId=autXXX\nlet x = 1;';
+    const { text, offset } = stripHeader(raw, 'automation');
+    assert.equal(text, 'let x = 1;');
+    assert.equal(offset, 1);
+  });
 });
 
 describe('parseHeader', () => {
@@ -66,5 +73,11 @@ describe('parseHeader', () => {
     const raw = '// AT: appId=appXXX extensionId=extXXX\noutput.text("hi");';
     const result = parseHeader(raw, 'script');
     assert.deepEqual(result, { appId: 'appXXX', extensionId: 'extXXX' });
+  });
+
+  it('parses // AT: for automation language', () => {
+    const raw = '// AT: appId=appXXX automationId=autXXX\nlet x = 1;';
+    const result = parseHeader(raw, 'automation');
+    assert.deepEqual(result, { appId: 'appXXX', automationId: 'autXXX' });
   });
 });

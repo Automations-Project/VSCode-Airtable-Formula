@@ -1,6 +1,8 @@
 /** @param {'formula'|'script'|'automation'} language */
 function prefix(language) {
-  return language === 'formula' ? '# AT:' : '// AT:';
+  if (language === 'formula') return '# AT:';
+  if (language === 'script' || language === 'automation') return '// AT:';
+  throw new Error(`Unknown language: ${language}`);
 }
 
 /**
@@ -9,7 +11,7 @@ function prefix(language) {
  */
 export function stripHeader(raw, language = 'formula') {
   const p = prefix(language);
-  const lines = raw.split('\n');
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
   let i = 0;
   while (i < lines.length && lines[i].startsWith(p)) i++;
   return { text: lines.slice(i).join('\n'), offset: i };
