@@ -1,7 +1,30 @@
 import React, { useState } from 'react';
 import { useStore } from '../store.js';
 import type { PromptDef, PromptArg } from '@shared/types.js';
-import { Plus, ArrowLeft, Trash2, RotateCcw, Save, X } from 'lucide-react';
+import { Plus, ArrowLeft, Trash2, RotateCcw, Save, X, Info } from 'lucide-react';
+
+// ─── Reconnect notice ─────────────────────────────────────────────────────────
+
+function ReconnectNotice() {
+  return (
+    <div style={{
+      display: 'flex', gap: 8, padding: '9px 12px',
+      borderRadius: 8, border: '1px solid rgba(22,110,225,0.3)',
+      background: 'rgba(22,110,225,0.08)', fontSize: '0.68rem', lineHeight: 1.5,
+    }}>
+      <Info size={13} style={{ color: 'var(--fg-info)', flexShrink: 0, marginTop: 1 }} />
+      <div style={{ color: 'var(--fg-subtle)' }}>
+        <span style={{ color: 'var(--fg-info)', fontWeight: 600 }}>Reconnect required after changes. </span>
+        Clients cache MCP capabilities at connect-time. After saving or adding prompts:
+        <ul style={{ marginTop: 4, paddingLeft: 14 }}>
+          <li><b>Cursor / Windsurf</b> — Reload Window (Ctrl+Shift+P)</li>
+          <li><b>Claude Code</b> — Restart session or run <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.64rem' }}>/mcp</code></li>
+          <li><b>Claude Desktop</b> — Restart the app</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 // ─── Arg row editor ───────────────────────────────────────────────────────────
 
@@ -110,6 +133,9 @@ function PromptEditor({
       <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--fg-muted)', fontSize: '0.7rem', padding: 0 }}>
         <ArrowLeft size={12} /> Back to prompts
       </button>
+
+      {/* Reconnect notice */}
+      <ReconnectNotice />
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -310,6 +336,9 @@ export function Prompts() {
           <Plus size={12} /> New
         </button>
       </div>
+
+      {/* Reconnect notice */}
+      <ReconnectNotice />
 
       {/* List */}
       {prompts.length === 0 ? (
