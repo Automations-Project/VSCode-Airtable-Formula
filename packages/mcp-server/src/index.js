@@ -1668,7 +1668,7 @@ const handlers = {
       return ok({ written: false, formulaText, fieldName, tableId: foundTableId, description, resultType }, raw, debug);
     }
     const headerLines = [
-      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName}"`,
+      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName.replace(/"/g, "'")}"`,
       description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
       resultType ? `# AT: resultType=${resultType}` : null,
     ].filter(Boolean).join('\n');
@@ -1700,7 +1700,7 @@ const handlers = {
         const resultType = field.typeOptions?.resultType ?? '';
 
         const headerLines = [
-          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${fieldName}"`,
+          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${fieldName.replace(/"/g, "'")}"`,
           description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
           resultType ? `# AT: resultType=${resultType}` : null,
         ].filter(Boolean).join('\n');

@@ -179,7 +179,7 @@ export async function downloadFormulaField(
 
   const safeName = result.fieldName.replace(/[/\\:*?"<>|]/g, '_');
   const filePath = path.join(folders[0].fsPath, `${safeName}.formula`);
-  const header = `# AT: appId=${appId} tableId=${result.tableId} fieldId=${fieldId} fieldName="${result.fieldName}"\n`;
+  const header = `# AT: appId=${appId} tableId=${result.tableId} fieldId=${fieldId} fieldName="${result.fieldName.replace(/"/g, "'")}"\n`;
   await fs.writeFile(filePath, header + result.formulaText, 'utf8');
 
   const doc = await vscode.workspace.openTextDocument(filePath);
