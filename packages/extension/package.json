@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.71",
+  "version": "2.0.77",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
   "description": "Airtable formula, script & automation editor with MCP server (63 tools), language server, and AI skills for VS Code.",
@@ -337,12 +337,12 @@
       "explorer/context": [
         {
           "command": "airtable-formula.beautifyFile",
-          "when": "resourceExtname == .formula",
+          "when": "resourceExtname == .formula || resourceExtname == .fx",
           "group": "7_modification@1"
         },
         {
           "command": "airtable-formula.minifyFile",
-          "when": "resourceExtname == .formula",
+          "when": "resourceExtname == .formula || resourceExtname == .fx",
           "group": "7_modification@2"
         },
         {

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { stripFormulaHeader } from '../language/formula/formula-header.js';
 
 interface MinifyOptions {
     level?: 'micro' | 'safe' | 'standard' | 'aggressive' | 'extreme';
@@ -157,9 +158,11 @@ export async function minifyWithLevel(levelOverride?: string) {
     }
 
     const selection = editor.selection;
-    const targetRange = selection && !selection.isEmpty
+    const hasSelection = selection && !selection.isEmpty;
+    const fullText = document.getText();
+    const targetRange = hasSelection
         ? new vscode.Range(selection.start, selection.end)
-        : new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        : new vscode.Range(document.positionAt(0), document.positionAt(fullText.length));
     const source = document.getText(targetRange);
 
     const minify = getMinifyFunctionWithLevel(document, selected.value);
@@ -169,7 +172,16 @@ export async function minifyWithLevel(levelOverride?: string) {
     }
 
     try {
-        const result = minify(source);
+        let result: string;
+        if (hasSelection) {
+            result = minify(source);
+        } else {
+            // Full-document: strip # AT: header so the minifier never sees it.
+            const { formula, offset } = stripFormulaHeader(source, 'formula');
+            const headerLines = source.replace(/\r\n/g, '\n').split('\n').slice(0, offset);
+            const header = offset > 0 ? headerLines.join('\n') + '\n' : '';
+            result = header + minify(formula);
+        }
         if (result !== source) {
             await editor.edit(edit => edit.replace(targetRange, result));
             void vscode.window.showInformationMessage(`Minified with ${selected.label} level`);
@@ -187,11 +199,12 @@ export async function minifyFilesWithLevel(levelOverride: string, uri?: vscode.U
         return;
     }
 
+    const FORMULA_EXTS = new Set(['.formula', '.fx']);
     const targets = (uris && uris.length ? uris : (uri ? [uri] : []))
-        .filter(u => path.extname(u.fsPath).toLowerCase() === '.formula');
+        .filter(u => FORMULA_EXTS.has(path.extname(u.fsPath).toLowerCase()));
 
     if (!targets.length) {
-        void vscode.window.showWarningMessage('No .formula files selected');
+        void vscode.window.showWarningMessage('No .formula or .fx files selected');
         return;
     }
 
@@ -213,20 +226,27 @@ export async function minifyFilesWithLevel(levelOverride: string, uri?: vscode.U
             if (!minify) {
                 throw new Error('Minifier not found');
             }
-            const source = openDoc
+            const raw = openDoc
                 ? openDoc.getText()
                 : Buffer.from(await vscode.workspace.fs.readFile(target)).toString('utf8');
-            const result = minify(source);
-            if (result !== source) {
+
+            // Strip # AT: header before minifying; restore it in the output.
+            const { formula, offset } = stripFormulaHeader(raw, 'formula');
+            const headerLines = raw.replace(/\r\n/g, '\n').split('\n').slice(0, offset);
+            const header = offset > 0 ? headerLines.join('\n') + '\n' : '';
+            const minified = minify(formula);
+            const result = header + minified;
+
+            if (result !== raw) {
                 const outputExt = selected.value === 'extreme' ? '.ultra-min.formula' : '.min.formula';
                 const isMinifiedTarget = /\.(ultra-)?min\.formula$/i.test(target.fsPath);
                 const outPath = isMinifiedTarget
                     ? target.fsPath
-                    : target.fsPath.replace(/\.formula$/i, outputExt);
+                    : target.fsPath.replace(/\.(formula|fx)$/i, outputExt);
                 const outUri = isMinifiedTarget ? target : vscode.Uri.file(outPath);
 
                 if (isMinifiedTarget && openDoc) {
-                    const fullRange = new vscode.Range(openDoc.positionAt(0), openDoc.positionAt(source.length));
+                    const fullRange = new vscode.Range(openDoc.positionAt(0), openDoc.positionAt(raw.length));
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(openDoc.uri, fullRange, result);
                     await vscode.workspace.applyEdit(edit);

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { stripFormulaHeader } from '../language/formula/formula-header.js';
 
 interface BeautifyOptions {
     max_line_length?: number;
@@ -162,9 +163,11 @@ export async function beautifyWithStyle(styleOverride?: string) {
     }
 
     const selection = editor.selection;
-    const targetRange = selection && !selection.isEmpty
+    const hasSelection = selection && !selection.isEmpty;
+    const fullText = document.getText();
+    const targetRange = hasSelection
         ? new vscode.Range(selection.start, selection.end)
-        : new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        : new vscode.Range(document.positionAt(0), document.positionAt(fullText.length));
     const source = document.getText(targetRange);
 
     const beautify = getBeautifyFunctionWithStyle(document, selected.value);
@@ -174,7 +177,15 @@ export async function beautifyWithStyle(styleOverride?: string) {
     }
 
     try {
-        const result = beautify(source);
+        let result: string;
+        if (hasSelection) {
+            result = beautify(source);
+        } else {
+            const { formula, offset } = stripFormulaHeader(source, 'formula');
+            const headerLines = source.replace(/\r\n/g, '\n').split('\n').slice(0, offset);
+            const header = offset > 0 ? headerLines.join('\n') + '\n' : '';
+            result = header + beautify(formula);
+        }
         if (result !== source) {
             await editor.edit(edit => edit.replace(targetRange, result));
             void vscode.window.showInformationMessage(`Beautified with ${selected.label} style`);
@@ -192,11 +203,12 @@ export async function beautifyFilesWithStyle(styleOverride: string, uri?: vscode
         return;
     }
 
+    const FORMULA_EXTS = new Set(['.formula', '.fx']);
     const targets = (uris && uris.length ? uris : (uri ? [uri] : []))
-        .filter(u => path.extname(u.fsPath).toLowerCase() === '.formula');
+        .filter(u => FORMULA_EXTS.has(path.extname(u.fsPath).toLowerCase()));
 
     if (!targets.length) {
-        void vscode.window.showWarningMessage('No .formula files selected');
+        void vscode.window.showWarningMessage('No .formula or .fx files selected');
         return;
     }
 
@@ -218,13 +230,19 @@ export async function beautifyFilesWithStyle(styleOverride: string, uri?: vscode
             if (!beautify) {
                 throw new Error('Beautifier not found');
             }
-            const source = openDoc
+            const raw = openDoc
                 ? openDoc.getText()
                 : Buffer.from(await vscode.workspace.fs.readFile(target)).toString('utf8');
-            const result = beautify(source);
-            if (result !== source) {
+
+            // Strip # AT: header before beautifying; restore it in the output.
+            const { formula, offset } = stripFormulaHeader(raw, 'formula');
+            const headerLines = raw.replace(/\r\n/g, '\n').split('\n').slice(0, offset);
+            const header = offset > 0 ? headerLines.join('\n') + '\n' : '';
+            const result = header + beautify(formula);
+
+            if (result !== raw) {
                 if (openDoc) {
-                    const fullRange = new vscode.Range(openDoc.positionAt(0), openDoc.positionAt(source.length));
+                    const fullRange = new vscode.Range(openDoc.positionAt(0), openDoc.positionAt(raw.length));
                     const edit = new vscode.WorkspaceEdit();
                     edit.replace(openDoc.uri, fullRange, result);
                     await vscode.workspace.applyEdit(edit);
