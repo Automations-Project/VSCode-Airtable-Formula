@@ -22,6 +22,7 @@
  */
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { unlink } from 'node:fs/promises';
 import { getProfileDir } from './paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,7 +59,17 @@ async function main() {
     };
     if (browserPath) launchOpts.executablePath = browserPath;
     const chromium = await getChromium();
-    context = await chromium.launchPersistentContext(profileDir, launchOpts);
+    try {
+      context = await chromium.launchPersistentContext(profileDir, launchOpts);
+    } catch (launchErr) {
+      // Chrome exits immediately (exit code 21) when it can't acquire the profile
+      // lock — typically a stale LOCK file left by a previous crash. Clear it and
+      // retry once before giving up.
+      const staleLock = path.join(profileDir, 'Default', 'LOCK');
+      await unlink(staleLock).catch(() => {});
+      await new Promise(r => setTimeout(r, 800));
+      context = await chromium.launchPersistentContext(profileDir, launchOpts);
+    }
 
     const page = context.pages()[0] || await context.newPage();
 
