@@ -519,6 +519,70 @@ function checkDivisionByZero(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
+/**
+ * Returns true when the IF chain is a dispatch table — every IF tests the same
+ * field/expression against a different literal value, e.g.:
+ *   IF({Game}='Fortnite', …, IF({Game}='Apex', …, IF({Game}='Valorant', …)))
+ *
+ * This is the idiomatic way to branch on a single field in Airtable when
+ * SWITCH() would exceed its case limit (~15–25 cases). The nesting is
+ * intentional and not a readability problem, so nested-if is suppressed.
+ *
+ * Detection: collect the first argument (condition) of every IF call, extract
+ * the left-hand side of the comparison, and check whether a single LHS
+ * dominates (≥ 60%). The 60% threshold tolerates a handful of sub-IFs inside
+ * then-branches that test unrelated conditions.
+ */
+function isDispatchTablePattern(text: string): boolean {
+  const conditions: string[] = [];
+
+  for (let i = 0; i < text.length - 2; i++) {
+    const upper = text.slice(i, i + 4).toUpperCase();
+    let condStart = -1;
+    if (upper.startsWith('IF(')) condStart = i + 3;
+    else if (upper === 'IF (') condStart = i + 4;
+    if (condStart < 0) continue;
+
+    let depth = 0;
+    let inStr = false;
+    let strChar = '';
+    for (let j = condStart; j < text.length; j++) {
+      const ch = text[j];
+      if (inStr) {
+        if (ch === strChar) inStr = false;
+      } else if (ch === '"' || ch === "'") {
+        inStr = true;
+        strChar = ch;
+      } else if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        if (depth === 0) break;
+        depth--;
+      } else if (ch === ',' && depth === 0) {
+        conditions.push(text.slice(condStart, j).trim());
+        break;
+      }
+    }
+  }
+
+  if (conditions.length < 4) return false;
+
+  const lhsList = conditions
+    .map(c => {
+      const m = c.match(/^(.*?)(?:\s*(?:!=|<=|>=|=|<|>))/);
+      return m ? m[1].trim() : '';
+    })
+    .filter(Boolean);
+
+  if (lhsList.length < 3) return false;
+
+  const counts = new Map<string, number>();
+  for (const lhs of lhsList) counts.set(lhs, (counts.get(lhs) ?? 0) + 1);
+
+  const maxCount = Math.max(0, ...counts.values());
+  return maxCount / lhsList.length >= 0.6;
+}
+
 function checkNestedIfs(text: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
 
@@ -539,7 +603,7 @@ function checkNestedIfs(text: string): LsDiagnostic[] {
     }
   }
 
-  if (maxDepth >= 4) {
+  if (maxDepth >= 4 && !isDispatchTablePattern(text)) {
     diagnostics.push({
       range: makeRange(text, deepestStart, Math.min(deepestStart + 20, text.length)),
       message: `Deeply nested IF (${maxDepth} levels). Consider using SWITCH() for better readability.`,
