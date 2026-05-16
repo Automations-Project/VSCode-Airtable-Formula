@@ -95,11 +95,47 @@ export async function uploadFormulaFile(
   const raw = await fs.readFile(uri.fsPath, 'utf8');
   const meta = parseFormulaHeader(raw, 'formula');
 
-  if (!meta['appId'] || !meta['fieldId']) {
-    vscode.window.showErrorMessage(
-      'No Airtable target found. Add a `# AT: appId=... fieldId=...` header at the top of the file, or use "Airtable: Download Formula Field" to create a properly-linked file.',
+  let appId: string = meta['appId'] ?? '';
+  let fieldId: string = meta['fieldId'] ?? '';
+
+  // Missing header — collect the required IDs interactively instead of erroring.
+  if (!appId || !fieldId) {
+    if (!appId) {
+      const input = await vscode.window.showInputBox({
+        title: 'Upload Formula to Airtable',
+        prompt: 'Base ID',
+        placeHolder: 'appXXXXXXXXXXXXXX',
+        validateInput: v => (v?.startsWith('app') ? null : 'Must start with "app"'),
+      });
+      if (!input) return;
+      appId = input;
+    }
+
+    if (!fieldId) {
+      const input = await vscode.window.showInputBox({
+        title: 'Upload Formula to Airtable',
+        prompt: 'Formula Field ID',
+        placeHolder: 'fldXXXXXXXXXXXXXX',
+        validateInput: v => (v?.startsWith('fld') ? null : 'Must start with "fld"'),
+      });
+      if (!input) return;
+      fieldId = input;
+    }
+
+    // Offer to persist the header so future uploads skip this prompt.
+    const action = await vscode.window.showInformationMessage(
+      'Save Airtable link to this file for future uploads?',
+      { modal: true },
+      'Save & Upload',
+      'Upload Once',
     );
-    return;
+    if (!action) return;
+
+    if (action === 'Save & Upload') {
+      const formula = stripFormulaHeader(raw, 'formula').formula;
+      const header = `# AT: appId=${appId} fieldId=${fieldId}\n`;
+      await fs.writeFile(uri.fsPath, header + formula, 'utf8');
+    }
   }
 
   const formulaText = stripFormulaHeader(raw, 'formula').formula;
@@ -113,13 +149,13 @@ export async function uploadFormulaFile(
       },
       async () => {
         await callDaemonTool(daemonManager, 'update_formula_field', {
-          appId: meta['appId'],
-          fieldId: meta['fieldId'],
+          appId,
+          fieldId,
           formulaText,
         });
       },
     );
-    vscode.window.showInformationMessage(`Formula uploaded (fieldId: ${meta['fieldId']})`);
+    vscode.window.showInformationMessage(`Formula uploaded (fieldId: ${fieldId})`);
   } catch (err) {
     vscode.window.showErrorMessage(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
   }
