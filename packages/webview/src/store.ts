@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import type { DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId } from '@shared/types.js';
+import type { DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId, PromptDef } from '@shared/types.js';
 import { sendToExtension } from './lib/vscode.js';
 import { randomId } from './lib/utils.js';
 
 interface Store extends DashboardState {
-  activeTab: 'overview' | 'setup' | 'settings';
+  activeTab: 'overview' | 'setup' | 'prompts' | 'settings';
   pendingActions: Set<string>;
   pendingIdeActions: Map<string, string>; // ideId → actionId
   setTab: (tab: Store['activeTab']) => void;
@@ -42,6 +42,9 @@ interface Store extends DashboardState {
   copyAirtablePat: () => void;
   configureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
   unconfigureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
+  savePrompt: (prompt: PromptDef) => void;
+  deletePrompt: (name: string) => void;
+  resetPrompt: (name: string) => void;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -294,6 +297,24 @@ export const useStore = create<Store>((set, get) => ({
     const id = randomId();
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
     sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
+  },
+
+  savePrompt: (prompt) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:save-prompt', id, prompt });
+  },
+
+  deletePrompt: (name) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:delete-prompt', id, name });
+  },
+
+  resetPrompt: (name) => {
+    const id = randomId();
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    sendToExtension({ type: 'action:reset-prompt', id, name });
   },
 
   markActionDone: (id, _ok) => {

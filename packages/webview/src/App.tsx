@@ -4,12 +4,14 @@ import { onExtensionMessage, sendToExtension } from './lib/vscode.js';
 import type { ExtensionMessage } from '@shared/messages.js';
 import { Overview } from './tabs/Overview.js';
 import { Setup } from './tabs/Setup.js';
+import { Prompts } from './tabs/Prompts.js';
 import { Settings } from './tabs/Settings.js';
 import { AirtableLogo } from './components/AirtableLogo.js';
 
 const TABS = [
   { id: 'overview' as const, label: 'Overview' },
   { id: 'setup'    as const, label: 'Setup' },
+  { id: 'prompts'  as const, label: 'Prompts' },
   { id: 'settings' as const, label: 'Settings' },
 ];
 
@@ -87,6 +89,7 @@ export function App() {
       >
         {activeTab === 'overview' && <Overview />}
         {activeTab === 'setup'    && <Setup />}
+        {activeTab === 'prompts'  && <Prompts />}
         {activeTab === 'settings' && <Settings />}
       </div>
 

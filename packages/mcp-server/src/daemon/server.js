@@ -11,7 +11,7 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { PROMPTS, renderPrompt } from '../prompts.js';
+import { getPrompts, renderPrompt } from '../prompts.js';
 import express from 'express';
 import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
@@ -426,7 +426,7 @@ export async function startDaemonServer(options = {}) {
         }
         return options.callTool(request, getClient, toolConfig);
       });
-      mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
+      mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: getPrompts() }));
       mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
         return renderPrompt(name, args ?? {});

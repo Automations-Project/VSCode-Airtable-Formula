@@ -89,7 +89,7 @@ import { ToolConfigManager, TOOL_CATEGORIES, CATEGORY_LABELS, BUILTIN_PROFILES }
 import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
-import { PROMPTS, renderPrompt } from './prompts.js';
+import { getPrompts, renderPrompt } from './prompts.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
@@ -2069,7 +2069,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // ─── Prompt Handlers ─────────────────────────────────────────
 
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: getPrompts() }));
 
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;

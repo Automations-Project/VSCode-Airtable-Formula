@@ -181,6 +181,25 @@ export interface DaemonStatusInfo {
   // pid intentionally excluded — not needed in webview (T-08-02)
 }
 
+export interface PromptArg {
+  name:        string;
+  description: string;
+  required:    boolean;
+}
+
+export interface PromptDef {
+  name:        string;
+  description: string;
+  arguments:   PromptArg[];
+  template:    string;
+  isBuiltin:   boolean;
+  isModified:  boolean; // true when a built-in has a user override
+}
+
+export interface PromptsState {
+  prompts: PromptDef[];
+}
+
 export interface OfficialAirtableMcpState {
   /** True when a Personal Access Token is stored in VS Code SecretStorage. */
   patSet: boolean;
@@ -200,4 +219,5 @@ export interface DashboardState {
   tunnel?:          TunnelState;           // undefined when daemon is not running
   daemon?:          DaemonStatusInfo;      // undefined when daemon is not running
   officialAirtable?: OfficialAirtableMcpState;
+  prompts?:          PromptsState;
 }

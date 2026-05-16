@@ -15,6 +15,7 @@ import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
 import type { DaemonManager } from '../mcp/daemon-manager.js';
+import { BUILTIN_PROMPT_DEFS, BUILTIN_NAMES } from '../mcp/prompt-defs.js';
 
 export class DashboardProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'airtable-formula.dashboard';
@@ -654,6 +655,47 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+
+    if (msg.type === 'action:save-prompt') {
+      try {
+        await this._writePromptConfig(cfg => {
+          const { isBuiltin, isModified, ...def } = msg.prompt;
+          if (isBuiltin || BUILTIN_NAMES.has(def.name)) {
+            cfg.overrides = cfg.overrides ?? {};
+            cfg.overrides[def.name] = def;
+          } else {
+            cfg.custom = cfg.custom ?? [];
+            const idx = (cfg.custom as { name: string }[]).findIndex(p => p.name === def.name);
+            if (idx >= 0) cfg.custom[idx] = def; else cfg.custom.push(def);
+          }
+        });
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      return;
+    }
+
+    if (msg.type === 'action:delete-prompt') {
+      try {
+        await this._writePromptConfig(cfg => {
+          cfg.custom = (cfg.custom ?? []).filter((p: { name: string }) => p.name !== msg.name);
+        });
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      return;
+    }
+
+    if (msg.type === 'action:reset-prompt') {
+      try {
+        await this._writePromptConfig(cfg => {
+          if (cfg.overrides) delete cfg.overrides[msg.name];
+        });
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) { this.postResult(msg.id, false, String(err)); }
+      return;
+    }
   }
 
   async pushState(): Promise<void> {
@@ -744,6 +786,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       tunnel:          await this._computeTunnelState(),
       daemon:          await this._computeDaemonStatusInfo(),
       officialAirtable: await this._computeOfficialAirtableState(),
+      prompts:          await this._computePromptsState(),
     };
 
     this.view.webview.postMessage({ type: 'state:update', payload: state });
@@ -924,6 +967,43 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       ideConfigured[ideId] = configured;
     }
     return { patSet, ideConfigured };
+  }
+
+  private async _computePromptsState(): Promise<import('@airtable-formula/shared').PromptsState> {
+    const configPath = path.join(os.homedir(), '.airtable-user-mcp', 'prompts.json');
+    let userConfig: { overrides?: Record<string, { name: string; description: string; arguments: import('@airtable-formula/shared').PromptArg[]; template: string }>; custom?: import('@airtable-formula/shared').PromptDef[] } = {};
+    try {
+      const raw = await (await import('fs/promises')).readFile(configPath, 'utf8');
+      userConfig = JSON.parse(raw);
+    } catch { /* no config yet */ }
+
+    const prompts: import('@airtable-formula/shared').PromptDef[] = BUILTIN_PROMPT_DEFS.map(p => {
+      const override = userConfig.overrides?.[p.name];
+      return override
+        ? { ...override, isBuiltin: true, isModified: true }
+        : { ...p, isBuiltin: true, isModified: false };
+    });
+
+    for (const c of (userConfig.custom ?? [])) {
+      prompts.push({ ...c, isBuiltin: false, isModified: false });
+    }
+
+    return { prompts };
+  }
+
+  private async _writePromptConfig(mutate: (cfg: { overrides: Record<string, unknown>; custom: unknown[] }) => void): Promise<void> {
+    const configPath = path.join(os.homedir(), '.airtable-user-mcp', 'prompts.json');
+    const fsP = await import('fs/promises');
+    let cfg: { overrides: Record<string, unknown>; custom: unknown[] } = { overrides: {}, custom: [] };
+    try {
+      const raw = await fsP.readFile(configPath, 'utf8');
+      cfg = JSON.parse(raw);
+      if (!cfg.overrides) { cfg.overrides = {}; }
+      if (!cfg.custom) { cfg.custom = []; }
+    } catch { /* no config yet */ }
+    mutate(cfg);
+    await fsP.mkdir(path.dirname(configPath), { recursive: true });
+    await fsP.writeFile(configPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
   }
 
   private async _installCloudflared(

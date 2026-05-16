@@ -1,4 +1,4 @@
-import type { IdeId, DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId } from './types.js';
+import type { IdeId, DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId, PromptDef } from './types.js';
 
 // Extension → Webview
 export type ExtensionMessage =
@@ -42,4 +42,7 @@ export type WebviewMessage =
   | { type: 'action:save-airtable-pat';             id: string; pat: string }
   | { type: 'action:copy-airtable-pat';             id: string }
   | { type: 'action:configure-official-airtable';   id: string; ideId: IdeId }
-  | { type: 'action:unconfigure-official-airtable'; id: string; ideId: IdeId };
+  | { type: 'action:unconfigure-official-airtable'; id: string; ideId: IdeId }
+  | { type: 'action:save-prompt';   id: string; prompt: PromptDef }
+  | { type: 'action:delete-prompt'; id: string; name: string }
+  | { type: 'action:reset-prompt';  id: string; name: string };
