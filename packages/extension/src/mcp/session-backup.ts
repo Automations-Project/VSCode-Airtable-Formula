@@ -166,8 +166,7 @@ function encrypt(data: Buffer, password: string): Buffer {
   return Buffer.concat([MAGIC, Buffer.from([FORMAT_V2]), salt, iv, encrypted, authTag]);
 }
 
-function decrypt(data: Buffer, password: string): Buffer {
-  const header = parseEncryptedHeader(data);
+function decryptWithHeader(data: Buffer, password: string, header: BackupHeader): Buffer {
   const saltStart = header.saltOffset;
   const saltEnd   = saltStart + 32;
   const ivStart   = saltEnd;
@@ -187,9 +186,23 @@ function decrypt(data: Buffer, password: string): Buffer {
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(authTag);
 
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+}
+
+function decrypt(data: Buffer, password: string): Buffer {
+  const header = parseEncryptedHeader(data);
   try {
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decryptWithHeader(data, password, header);
   } catch {
+    // If we parsed as v2 because data[4] === 0x02, that byte might just be the
+    // first byte of a v1 salt. Try v1 params before giving up.
+    if (header.version === 2) {
+      try {
+        return decryptWithHeader(data, password, { version: 1, iterations: PBKDF2_ITERS_V1, saltOffset: 4 });
+      } catch {
+        // v1 also failed — genuinely wrong password or corrupted
+      }
+    }
     throw new Error('Incorrect password or corrupted backup');
   }
 }
