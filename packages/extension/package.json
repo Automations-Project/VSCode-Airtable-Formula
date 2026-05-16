@@ -278,6 +278,16 @@
         "command": "airtableFormula.tunnel.disable",
         "title": "Disable Tunnel",
         "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.uploadFormulaFile",
+        "title": "Upload to Airtable",
+        "category": "Airtable Formula"
+      },
+      {
+        "command": "airtable-formula.downloadFormulaField",
+        "title": "Download Formula Field",
+        "category": "Airtable Formula"
       }
     ],
     "viewsContainers": {
@@ -344,6 +354,11 @@
           "command": "airtable-formula.script.minifyFile",
           "when": "resourceExtname == .ats || resourceExtname == .script || resourceExtname == .ata || resourceExtname == .automation",
           "group": "7_modification@2"
+        },
+        {
+          "command": "airtable-formula.uploadFormulaFile",
+          "when": "resourceExtname == .formula || resourceExtname == .fx",
+          "group": "airtable@1"
         }
       ]
     },

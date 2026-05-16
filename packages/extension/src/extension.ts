@@ -15,6 +15,8 @@ import { DaemonManager } from './mcp/daemon-manager.js';
 import { BrowserDownloadManager } from './mcp/browser-download.js';
 import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES } from './mcp/tool-profile.js';
 import { scriptBeautify, scriptMinify, scriptBeautifyFile, scriptMinifyFile, formatScriptDocument } from './commands/scriptFormatter.js';
+import { uploadFormulaFile, downloadFormulaField } from './commands/formulaFile.js';
+import { registerFileTemplates } from './commands/formulaFileTemplate.js';
 
 // Inlined to avoid pulling shared/ESM types into the CJS extension DTS build.
 // These must mirror the ToolProfileName / ToolCategories definitions in
@@ -639,6 +641,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
     );
+
+    // ── Formula File commands (upload / download) ────────────────────────
+    context.subscriptions.push(
+      vscode.commands.registerCommand('airtable-formula.uploadFormulaFile', (uri: vscode.Uri) => {
+        uploadFormulaFile(uri, daemonManager).catch((err: unknown) =>
+          vscode.window.showErrorMessage(`Upload failed: ${String(err)}`),
+        );
+      }),
+      vscode.commands.registerCommand('airtable-formula.downloadFormulaField', () => {
+        downloadFormulaField(daemonManager).catch((err: unknown) =>
+          vscode.window.showErrorMessage(`Download failed: ${String(err)}`),
+        );
+      }),
+    );
+    registerFileTemplates(context);
 
     // React to setting changes at runtime
     context.subscriptions.push(
