@@ -477,12 +477,12 @@ To clear a field, omit the cellObject or pass null value.`,
     description: `Create a new field in an Airtable table. Supports all field types including computed fields (formula, rollup, lookup, count) that are not available via the official API.
 
 FIELD TYPES (fieldType parameter):
-  Canonical (internal-API names):  "text", "multilineText", "number", "checkbox", "date", "singleSelect", "multipleSelects", "rating", "formula", "rollup", "lookup", "count"
-  Friendly aliases (auto-normalized to internal shape):
-    "url"       → type: "text" with typeOptions.validatorName = "url"
-    "email"     → type: "text" with typeOptions.validatorName = "email"
-    "phone" / "phoneNumber" → type: "text" with typeOptions.validatorName = "phoneNumber"
-    "dateTime"  → type: "date" with typeOptions: { isDateTime: true, dateFormat, timeFormat, timeZone, shouldDisplayTimeZone }
+  Supported names: "text", "multilineText", "number", "checkbox", "date", "singleSelect", "multipleSelects", "rating", "formula", "rollup", "lookup", "count"
+  Friendly aliases (auto-normalized):
+    "url"       → type: "text" with validatorName = "url"
+    "email"     → type: "text" with validatorName = "email"
+    "phone" / "phoneNumber" → type: "text" with validatorName = "phoneNumber"
+    "dateTime"  → type: "date" with isDateTime: true
 
 TYPE OPTIONS by fieldType:
   formula:                { formulaText: "..." }
@@ -493,7 +493,10 @@ TYPE OPTIONS by fieldType:
   number (currency):      { format: "currency", symbol: "$", precision: 2, negative: false }
   number (percent):       { format: "percentV2", precision: 2, negative: false }
   date / dateTime:        { dateFormat: "Local"|"us"|"european"|"iso"|"friendly", timeFormat: "12hour"|"24hour", timeZone: "UTC"|"client"|<IANA-tz>, shouldDisplayTimeZone: true|false, isDateTime: true (auto for dateTime) }
-  singleSelect:           { choices: [{ name: "Option A", color: "blueLight2" }] }`,
+  singleSelect:           { choices: [{ name: "Option A", color: "blueLight2" }] }
+  multipleSelects:        { choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }
+
+SELECT CHOICES: pass an array of { name, color? } objects — the client auto-converts to the object format the internal API requires and generates valid choice IDs.`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -595,14 +598,18 @@ COMMON typeOptions by fieldType:
   lookup:          { relationColumnId: "fldXXX", foreignTableRollupColumnId: "fldYYY" }
   count:           { recordLinkFieldId: "fldXXX" }
   singleSelect:    { choices: [{ name: "Option A", color: "blueLight2" }] }
-  multipleSelects: { choices: [{ name: "Option A", color: "blueLight2" }, { name: "Option B", color: "greenLight2" }] }
+  multipleSelects: { choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }
   number:          { format: "integer"|"decimal"|"currency"|"percentV2", precision: 2, symbol: "$", negative: false }
 
-ADDING CHOICES TO AN EXISTING SELECT FIELD:
-  Choices not in the list are deleted. To preserve existing choices, first call
-  get_table_schema to retrieve them (each has an { id, name, color }), then
-  pass the full merged list — existing entries with their IDs, new entries without:
-  { choices: [{ id: "selXXX", name: "Existing" }, { name: "New Choice", color: "pinkLight2" }] }`,
+SELECT CHOICES — pass an array of { name, color? } objects; the client handles the internal format.
+
+ADDING TO AN EXISTING SELECT FIELD (merge, not replace):
+  Choices not in the list are DELETED. To add without losing existing choices:
+  1. Call get_table_schema — each existing choice has { id, name, color }
+  2. Pass the full list: existing entries WITH their id, new entries WITHOUT:
+     { choices: [{ id: "selXXXXXXXXXXXXXX", name: "Existing" }, { name: "New Choice", color: "pinkLight2" }] }
+
+REPLACING ALL CHOICES: just pass the new choices without any IDs.`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',

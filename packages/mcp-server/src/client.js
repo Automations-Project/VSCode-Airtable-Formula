@@ -238,6 +238,44 @@ function normalizeFilterSet(filterSet) {
  *
  * Users who pass the canonical internal type ("text" / "date") get their typeOptions passed through.
  */
+
+/**
+ * Generate an Airtable-style choice ID: "sel" + 14 base62 characters.
+ * Verified format: the internal API rejects IDs shorter than this (VALIDATION_FAILED).
+ */
+function generateChoiceId() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = randomBytes(14);
+  let id = 'sel';
+  for (let i = 0; i < 14; i++) {
+    id += chars[bytes[i] % chars.length];
+  }
+  return id;
+}
+
+/**
+ * Normalize a choices value from caller-friendly array form to the object form
+ * the internal API requires.
+ *
+ * Caller may pass:
+ *   Array:  [{ name, color }]              → new choice, ID generated
+ *           [{ id: "selXXX", name, color }] → existing choice, ID preserved
+ * Internal: { selXXX: { name, color } }    → already correct, returned as-is
+ *
+ * Verified: the internal API rejects array format with VALIDATION_FAILED.
+ * Verified: choice IDs must be "sel" + 14 alphanumeric characters.
+ */
+function normalizeChoices(choices) {
+  if (!choices) return choices;
+  if (!Array.isArray(choices)) return choices; // already object-keyed, pass through
+  const result = {};
+  for (const { id, name, color, ...rest } of choices) {
+    const key = id || generateChoiceId();
+    result[key] = { name, ...(color ? { color } : {}), ...rest };
+  }
+  return result;
+}
+
 function normalizeFieldType(type, typeOptions = {}) {
   const opts = typeOptions || {};
 
@@ -271,6 +309,21 @@ function normalizeFieldType(type, typeOptions = {}) {
         dateFormat: flattenFormatOption(opts.dateFormat, 'Local'),
         timeFormat: flattenFormatOption(opts.timeFormat, '24hour'),
       },
+    };
+  }
+  // "multipleSelects" is the public/REST API name; internal API uses "multiSelect" (no "s").
+  // Also normalize choices from array form to the object form the internal API requires.
+  if (type === 'multipleSelects' || type === 'multiSelect') {
+    return {
+      type: 'multiSelect',
+      typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
+    };
+  }
+  // Normalize singleSelect choices to object form (type name kept as-is until confirmed).
+  if (type === 'singleSelect' || type === 'select') {
+    return {
+      type,
+      typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
     };
   }
   return { type, typeOptions: opts };

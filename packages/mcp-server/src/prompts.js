@@ -122,6 +122,54 @@ Configure an Airtable view in base **{appId}**, table **{tableId}**.
   },
 
   {
+    name: 'airtable-manage-select-choices',
+    description: 'Add, remove, or replace choices on a singleSelect or multipleSelects field',
+    arguments: [
+      { name: 'appId',   description: 'Base ID (appXXX)',                              required: true  },
+      { name: 'fieldId', description: 'Field ID (fldXXX)',                             required: true  },
+      { name: 'action',  description: '"add", "remove", "replace", or "list"',         required: true  },
+      { name: 'choices', description: 'Comma-separated choice names (e.g. "PC, Xbox")', required: false },
+    ],
+    template: `\
+Manage choices for an Airtable select field.
+
+**Base:** {appId}
+**Field:** {fieldId}
+**Action:** {action}
+**Choices to add/remove/replace:** {choices}
+
+**Steps:**
+
+1. Call \`get_base_schema\` with appId="{appId}" to find the field's current type ("singleSelect" or "multipleSelects") and its existing choices. Each existing choice has an \`id\`, \`name\`, and \`color\`.
+
+2. Based on the action:
+
+   **list** — just report the current choices, no update needed.
+
+   **add** — build the full choice list: all existing choices (include their \`id\`) + the new choices (no \`id\`):
+   \`\`\`json
+   [
+     { "id": "selXXXXXXXXXXXXXX", "name": "Existing Choice" },
+     { "name": "New Choice", "color": "blueLight2" }
+   ]
+   \`\`\`
+
+   **remove** — build the list of choices you want to KEEP (omit the ones to remove, each with their \`id\`).
+
+   **replace** — pass only the new choices without any \`id\` fields (all existing choices will be deleted).
+
+3. Call \`update_field_config\` with:
+   - appId: "{appId}"
+   - fieldId: "{fieldId}"
+   - fieldType: the field's current type ("singleSelect" or "multipleSelects")
+   - typeOptions: { choices: <the list from step 2> }
+
+4. Confirm the result to the user.
+
+**Important:** Choices omitted from the list are permanently deleted. Always fetch the current schema first when adding or removing specific choices.`,
+  },
+
+  {
     name: 'airtable-validate-formula',
     description: 'Validate an Airtable formula and show its result type',
     arguments: [
