@@ -1578,12 +1578,20 @@ const handlers = {
   },
 
   async create_formula_field({ appId, tableId, name, formulaText, formulaFilePath, debug }) {
-    if (!formulaText && !formulaFilePath) {
+    if (formulaText == null && !formulaFilePath) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: 'Provide formulaText or formulaFilePath' }) }], isError: true };
     }
     let formula;
     if (formulaFilePath) {
-      const raw = await readFile(formulaFilePath, 'utf8');
+      let raw;
+      try {
+        raw = await readFile(formulaFilePath, 'utf8');
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: `Cannot read formulaFilePath: ${err.message}` }) }],
+          isError: true,
+        };
+      }
       formula = stripHeader(raw, 'formula').text;
     } else {
       formula = stripHeader(formulaText, 'formula').text;
@@ -1619,12 +1627,20 @@ const handlers = {
   },
 
   async update_formula_field({ appId, fieldId, formulaText, formulaFilePath, debug }) {
-    if (!formulaText && !formulaFilePath) {
+    if (formulaText == null && !formulaFilePath) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: 'Provide formulaText or formulaFilePath' }) }], isError: true };
     }
     let formula;
     if (formulaFilePath) {
-      const raw = await readFile(formulaFilePath, 'utf8');
+      let raw;
+      try {
+        raw = await readFile(formulaFilePath, 'utf8');
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: `Cannot read formulaFilePath: ${err.message}` }) }],
+          isError: true,
+        };
+      }
       formula = stripHeader(raw, 'formula').text;
     } else {
       formula = stripHeader(formulaText, 'formula').text;
