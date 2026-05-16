@@ -18,7 +18,11 @@
 !LICENSE
 !glama.json
 
-# 3. Allow GitHub config
+# 3. Allow docs (specs, plans)
+!docs/
+!docs/**
+
+# 4. Allow GitHub config
 !.github/
 !.github/**
 
