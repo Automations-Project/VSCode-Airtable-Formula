@@ -26,30 +26,37 @@ async function callDaemonTool(
     params: { name: toolName, arguments: args },
   });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-
-  let response: Response;
+  let raw: string;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/mcp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${bearerToken}`,
-      },
-      body,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let response: Response;
+    try {
+      response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearerToken}`,
+        },
+        body,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) {
+      throw new Error(`Daemon returned HTTP ${response.status}: ${await response.text()}`);
+    }
+    raw = await response.text();
+  } catch (err) {
+    if ((err as { name?: string }).name === 'AbortError') {
+      throw new Error(`Daemon call to ${toolName} timed out after 30s`);
+    }
+    throw err;
   }
 
-  if (!response.ok) {
-    throw new Error(`Daemon returned HTTP ${response.status}: ${await response.text()}`);
-  }
-
-  const envelope = (await response.json()) as {
-    result?: { content?: Array<{ type: string; text?: string }> };
+  const envelope = JSON.parse(raw) as {
+    result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
     error?: { message: string };
   };
 
@@ -63,11 +70,18 @@ async function callDaemonTool(
   }
 
   const textBlock = content.find(c => c.type === 'text' && typeof c.text === 'string');
+  const textContent = textBlock?.text ?? '{}';
+
+  if ((envelope.result as { isError?: boolean })?.isError) {
+    const errObj = JSON.parse(textContent) as { error?: string };
+    throw new Error(errObj.error ?? textContent);
+  }
+
   if (!textBlock?.text) {
     throw new Error(`No text block in response from ${toolName}`);
   }
 
-  return JSON.parse(textBlock.text) as Record<string, unknown>;
+  return JSON.parse(textContent) as Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,22 +104,25 @@ export async function uploadFormulaFile(
 
   const formulaText = stripFormulaHeader(raw, 'formula').formula;
 
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Uploading formula to Airtable…',
-      cancellable: false,
-    },
-    async () => {
-      await callDaemonTool(daemonManager, 'update_formula_field', {
-        appId: meta['appId'],
-        fieldId: meta['fieldId'],
-        formulaText,
-      });
-    },
-  );
-
-  vscode.window.showInformationMessage(`Formula uploaded (fieldId: ${meta['fieldId']})`);
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Uploading formula to Airtable…',
+        cancellable: false,
+      },
+      async () => {
+        await callDaemonTool(daemonManager, 'update_formula_field', {
+          appId: meta['appId'],
+          fieldId: meta['fieldId'],
+          formulaText,
+        });
+      },
+    );
+    vscode.window.showInformationMessage(`Formula uploaded (fieldId: ${meta['fieldId']})`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -129,21 +146,28 @@ export async function downloadFormulaField(
   });
   if (!fieldId) return;
 
-  let result!: { formulaText: string; fieldName: string; tableId: string };
+  let result: { formulaText: string; fieldName: string; tableId: string } | undefined;
 
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Downloading formula from Airtable…',
-      cancellable: false,
-    },
-    async () => {
-      result = (await callDaemonTool(daemonManager, 'download_formula_field', {
-        appId,
-        fieldId,
-      })) as typeof result;
-    },
-  );
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Downloading formula from Airtable…',
+        cancellable: false,
+      },
+      async () => {
+        result = (await callDaemonTool(daemonManager, 'download_formula_field', {
+          appId,
+          fieldId,
+        })) as { formulaText: string; fieldName: string; tableId: string };
+      },
+    );
+  } catch (err) {
+    vscode.window.showErrorMessage(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+
+  if (!result) return;
 
   const folders = await vscode.window.showOpenDialog({
     canSelectFiles: false,
