@@ -39,6 +39,7 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   validate_formula:          'read',
   list_view_sections:        'read',
   list_record_templates:     'read',
+  download_formula_field:    'read',
   // Table mutations (non-destructive)
   create_table:              'table-write',
   rename_table:              'table-write',

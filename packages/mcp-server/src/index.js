@@ -93,7 +93,8 @@ import { getPrompts, renderPrompt } from './prompts.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import path from 'path';
 import { stripHeader } from './formula-header.js';
 
@@ -551,6 +552,21 @@ TYPE OPTIONS by fieldType:
         debug: debugProp,
       },
       required: ['appId', 'tableId', 'formulaText'],
+    },
+  },
+  {
+    name: 'download_formula_field',
+    description: 'Download the formula text of a formula field to a local file. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        fieldId: { type: 'string', description: 'The formula field ID (e.g. "fldXXX")' },
+        outputPath: { type: 'string', description: 'Local file path to write the .formula file. When omitted, returns formula text in the response without writing a file.' },
+        debug: debugProp,
+      },
+      required: ['appId', 'fieldId'],
     },
   },
   {
@@ -1608,6 +1624,44 @@ const handlers = {
     const clean = stripHeader(formulaText, 'formula').text;
     const result = await client.validateFormula(appId, tableId, clean);
     return ok(result, result, debug);
+  },
+
+  async download_formula_field({ appId, fieldId, outputPath, debug }) {
+    const raw = await client.getApplicationData(appId);
+    const tables = raw?.data?.tableSchemas || raw?.data?.tables || [];
+    let foundField = null;
+    let foundTableId = null;
+    for (const table of tables) {
+      const fields = table.columns || table.fields || [];
+      const field = fields.find(f => f.id === fieldId);
+      if (field) {
+        foundField = field;
+        foundTableId = table.id;
+        break;
+      }
+    }
+    if (!foundField) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: `Field ${fieldId} not found in base ${appId}` }) }], isError: true };
+    }
+    if (foundField.type !== 'formula') {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: `Field ${fieldId} is type "${foundField.type}", not formula` }) }], isError: true };
+    }
+    const formulaText = foundField.typeOptions?.formulaText ?? '';
+    const fieldName = foundField.name ?? fieldId;
+    const description = foundField.description ?? '';
+    const resultType = foundField.typeOptions?.resultType ?? '';
+    if (!outputPath) {
+      return ok({ written: false, formulaText, fieldName, tableId: foundTableId, description, resultType }, raw, debug);
+    }
+    const headerLines = [
+      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName}"`,
+      description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
+      resultType ? `# AT: resultType=${resultType}` : null,
+    ].filter(Boolean).join('\n');
+    const content = headerLines + '\n' + formulaText;
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, content, 'utf8');
+    return ok({ written: true, path: outputPath, fieldName, tableId: foundTableId, bytes: Buffer.byteLength(content) }, raw, debug);
   },
 
   async update_field_config({ appId, fieldId, fieldType, typeOptions, debug }) {
