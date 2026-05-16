@@ -1,19 +1,33 @@
 {
   "name": "airtable-user-lsp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Airtable language server for formula, script, and automation files. Works with any LSP-capable editor.",
   "type": "module",
   "main": "dist/index.mjs",
-  "bin": { "airtable-user-lsp": "dist/index.mjs" },
-  "engines": { "node": ">=20" },
-  "files": ["dist/**", "README.md", "LICENSE"],
-  "publishConfig": { "access": "public", "provenance": true },
+  "bin": {
+    "airtable-user-lsp": "dist/index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Automations-Project/VSCode-Airtable-Formula.git",
     "directory": "packages/lsp-server"
   },
-  "author": { "name": "Nskha", "url": "https://github.com/automations-Project" },
+  "author": {
+    "name": "Nskha",
+    "url": "https://github.com/automations-Project"
+  },
   "license": "MIT",
   "scripts": {
     "build": "tsup",

@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.77",
+  "version": "2.0.78",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
   "description": "Airtable formula, script & automation editor with MCP server (63 tools), language server, and AI skills for VS Code.",
@@ -80,8 +80,14 @@
       },
       {
         "id": "airtable-script",
-        "aliases": ["Airtable Script", "script"],
-        "extensions": [".script", ".ats"],
+        "aliases": [
+          "Airtable Script",
+          "script"
+        ],
+        "extensions": [
+          ".script",
+          ".ats"
+        ],
         "configuration": "./language-configuration/airtable-script-language-configuration.json",
         "icon": {
           "light": "./icons/script-light.svg",
@@ -90,8 +96,14 @@
       },
       {
         "id": "airtable-automation",
-        "aliases": ["Airtable Automation", "automation"],
-        "extensions": [".automation", ".ata"],
+        "aliases": [
+          "Airtable Automation",
+          "automation"
+        ],
+        "extensions": [
+          ".automation",
+          ".ata"
+        ],
         "configuration": "./language-configuration/airtable-automation-language-configuration.json",
         "icon": {
           "light": "./icons/automation-light.svg",
@@ -568,7 +580,13 @@
         "airtableFormula.script.beautifyStyle": {
           "type": "string",
           "default": "default",
-          "enum": ["default", "compact", "singleQuote", "tabIndent", "semicolonFree"],
+          "enum": [
+            "default",
+            "compact",
+            "singleQuote",
+            "tabIndent",
+            "semicolonFree"
+          ],
           "enumDescriptions": [
             "Prettier defaults: 2-space indent, double quotes, trailing commas",
             "printWidth: 120, no trailing commas",
@@ -581,7 +599,12 @@
         "airtableFormula.script.minifyLevel": {
           "type": "string",
           "default": "standard",
-          "enum": ["safe", "standard", "aggressive", "extreme"],
+          "enum": [
+            "safe",
+            "standard",
+            "aggressive",
+            "extreme"
+          ],
           "enumDescriptions": [
             "Whitespace removal only — no mangle, no compress",
             "compress: true, mangle: false (good balance)",
@@ -618,7 +641,11 @@
         "airtableFormula.script.prettier.trailingComma": {
           "type": "string",
           "default": "all",
-          "enum": ["all", "es5", "none"],
+          "enum": [
+            "all",
+            "es5",
+            "none"
+          ],
           "description": "Prettier trailingComma for Script/Automation beautifier."
         },
         "airtableFormula.script.terser.mangle": {
