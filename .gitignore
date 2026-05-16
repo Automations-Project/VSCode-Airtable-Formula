@@ -26,11 +26,7 @@
 !scripts/
 !scripts/**
 
-# 5. Allow planning directory
-!.planning/
-!.planning/**
-
-# 6. Allow packages directory structure
+# 5. Allow packages directory structure
 !packages/
 !packages/extension/
 !packages/extension/**
@@ -45,7 +41,8 @@
 !packages/webview/
 !packages/webview/**
 
-# 6. Re-ignore build artifacts, deps & private files inside allowed dirs
+# 6. Re-ignore planning directory, build artifacts, deps & private files inside allowed dirs
+.planning/
 **/node_modules/
 **/dist/
 *.vsix

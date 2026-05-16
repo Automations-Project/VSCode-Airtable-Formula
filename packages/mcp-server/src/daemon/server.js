@@ -463,13 +463,21 @@ export async function startDaemonServer(options = {}) {
         : hostname.split('.')[0].slice(0, 32) || 'airtable-mcp';
 
       const tunnel = await createNamedTunnel({ configDir: options.configDir, name: tunnelName, hostname, binaryPath });
-      const result = writeTunnelConfig({
-        configDir: options.configDir,
-        uuid: tunnel.uuid,
-        hostname,
-        port: getBoundPort(httpServer),
-        credentialsPath: tunnel.credentialsPath,
-      });
+      let result;
+      try {
+        result = writeTunnelConfig({
+          configDir: options.configDir,
+          uuid: tunnel.uuid,
+          hostname,
+          port: getBoundPort(httpServer),
+          credentialsPath: tunnel.credentialsPath,
+        });
+      } catch (writeErr) {
+        throw new Error(
+          `Tunnel created (uuid=${tunnel.uuid}) but config file write failed: ${writeErr.message}. ` +
+          `Re-run the setup flow to complete configuration.`,
+        );
+      }
       res.json({ ok: true, uuid: tunnel.uuid, hostname, configPath: result.configPath });
     } catch (err) { next(err); }
   });

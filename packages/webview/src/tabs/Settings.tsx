@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store.js';
 import { sendToExtension } from '../lib/vscode.js';
 import { StatusDot } from '../components/StatusDot.js';
@@ -58,6 +58,16 @@ export function Settings() {
   const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
   const { saveCredentials, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession, selectCustomBrowser, setBrowserChoice } = useStore();
+
+  const [settingsPending, setSettingsPending] = useState(false);
+
+  // Clear pending indicator when a fresh state arrives from the extension
+  useEffect(() => { setSettingsPending(false); }, [settings]);
+
+  const changeHeavySetting = useCallback((key: string, value: unknown) => {
+    setSettingsPending(true);
+    sendToExtension({ type: 'setting:change', key, value });
+  }, []);
   const availableBrowsers = auth.availableBrowsers ?? [];
   const browserChoice = settings.auth.browserChoice;
   const debugStartSession = useStore(s => s.debugStartSession);
@@ -101,7 +111,8 @@ export function Settings() {
   const downloadError = dl?.status === 'error';
 
   return (
-    <div className="stack stack-lg">
+    <div className="stack stack-lg" style={{ position: 'relative' }}>
+      {settingsPending && <div className="settings-pending-bar" />}
 
       {/* Airtable Account */}
       <div className="glass-panel">
@@ -505,7 +516,7 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.serverSource ?? 'bundled'}
-              onChange={e => sendToExtension({ type: 'setting:change', key: 'mcp.serverSource', value: e.target.value })}
+              onChange={e => changeHeavySetting('mcp.serverSource', e.target.value)}
             >
               <option value="bundled">bundled</option>
               <option value="npx">npx</option>
@@ -532,7 +543,7 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.toolProfile.profile}
-              onChange={e => sendToExtension({ type: 'setting:change', key: 'mcp.toolProfile', value: e.target.value })}
+              onChange={e => changeHeavySetting('mcp.toolProfile', e.target.value)}
             >
               <option value="read-only">read-only</option>
               <option value="safe-write">safe-write</option>

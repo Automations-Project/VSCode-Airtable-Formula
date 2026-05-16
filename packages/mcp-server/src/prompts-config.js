@@ -2,9 +2,10 @@
  * Reads and writes ~/.airtable-user-mcp/prompts.json.
  * The MCP server reads this synchronously (fresh per request) — the file is tiny.
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getHomeDir } from './paths.js';
+import { safeAtomicWriteFileSync } from './safe-write.js';
 
 function configPath() {
   return getHomeDir() + '/prompts.json';
@@ -25,5 +26,5 @@ export function readPromptsConfig() {
 export function writePromptsConfig(config) {
   const p = configPath();
   mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  safeAtomicWriteFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf8');
 }

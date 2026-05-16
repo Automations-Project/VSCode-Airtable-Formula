@@ -681,7 +681,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'action:delete-prompt') {
       try {
         await this._writePromptConfig(cfg => {
-          cfg.custom = (cfg.custom ?? []).filter((p: { name: string }) => p.name !== msg.name);
+          cfg.custom = ((cfg.custom ?? []) as { name: string }[]).filter(p => p.name !== msg.name);
         });
         await this.pushState();
         this.postResult(msg.id, true);
@@ -1006,7 +1006,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     } catch { /* no config yet */ }
     mutate(cfg);
     await fsP.mkdir(path.dirname(configPath), { recursive: true });
-    await fsP.writeFile(configPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+    const data = JSON.stringify(cfg, null, 2) + '\n';
+    const tmp = configPath + '.tmp';
+    try {
+      await fsP.writeFile(tmp, data, 'utf8');
+      await fsP.rename(tmp, configPath);
+    } catch (err) {
+      await fsP.unlink(tmp).catch(() => undefined);
+      throw err;
+    }
   }
 
   private async _installCloudflared(
@@ -1094,6 +1102,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           const enableResp = await fetch(`${base}/daemon/enable-tunnel`, {
             method: 'POST', headers,
             body: JSON.stringify({ provider: originalMsg.provider, domain: originalMsg.domain }),
+            signal: AbortSignal.timeout(90_000),
           });
           if (!enableResp.ok) {
             const b = await enableResp.json().catch(() => ({})) as Record<string, unknown>;

@@ -160,8 +160,8 @@ export function getPromptsWithTemplates() {
   const result = BUILTIN_PROMPT_DEFS.map(p => {
     const override = config.overrides?.[p.name];
     return override
-      ? { ...override, isBuiltin: true, isModified: true }
-      : { ...p,        isBuiltin: true, isModified: false };
+      ? { ...p, ...override, isBuiltin: true, isModified: true }
+      : { ...p,              isBuiltin: true, isModified: false };
   });
   for (const c of config.custom ?? []) {
     result.push({ ...c, isBuiltin: false, isModified: false });

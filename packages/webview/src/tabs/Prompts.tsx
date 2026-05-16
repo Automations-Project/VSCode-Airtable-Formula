@@ -97,7 +97,7 @@ function PromptEditor({
   function markDirty() { setDirty(true); }
 
   function handleSave() {
-    if (!nameIsValid) return;
+    if (!dirty || !nameIsValid) return;
     savePrompt({ name, description: desc, arguments: args, template, isBuiltin: initial.isBuiltin, isModified: initial.isBuiltin });
     onBack();
   }

@@ -15,8 +15,50 @@ const TABS = [
   { id: 'settings' as const, label: 'Settings' },
 ];
 
+const BRAND_DOTS = [
+  { bg: '#FCB400', delay: '0s' },
+  { bg: '#18BFFF', delay: '0.18s' },
+  { bg: '#F82B60', delay: '0.36s' },
+] as const;
+
+function LoadingScreen() {
+  return (
+    <div
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', height: '100%', gap: 16,
+        animation: 'at-loader-fadein 0.4s ease both',
+      }}
+    >
+      {/* Breathing logo */}
+      <div style={{ animation: 'at-logo-breathe 2.6s ease-in-out infinite' }}>
+        <AirtableLogo size={54} />
+      </div>
+
+      {/* App name + status */}
+      <div style={{ textAlign: 'center', lineHeight: 1.5 }}>
+        <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Airtable Dashboard</div>
+        <div style={{ fontSize: '0.68rem', color: 'var(--fg-muted)', marginTop: 3 }}>Loading dashboard…</div>
+      </div>
+
+      {/* Brand-color bouncing dots */}
+      <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+        {BRAND_DOTS.map(({ bg, delay }) => (
+          <div
+            key={bg}
+            style={{
+              width: 7, height: 7, borderRadius: '50%', background: bg,
+              animation: `at-dot-bounce 1.3s ease-in-out infinite ${delay}`,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function App() {
-  const { activeTab, setTab, applyState, applyAuthState, markActionDone, versions } = useStore();
+  const { activeTab, setTab, applyState, applyAuthState, markActionDone, versions, loading } = useStore();
 
   useEffect(() => {
     // Runtime guards — the extension is the sole message source but a bug or
@@ -54,13 +96,13 @@ export function App() {
       <div style={{ background: 'var(--bg-nav)', padding: '0 16px', borderBottom: '1px solid var(--border)', flexShrink: 0, position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 44 }}>
           <AirtableLogo size={22} />
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Airtable Formula</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Airtable Dashboard</span>
           <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--at-gray600)' }} />
           <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>VSCode</span>
           <div style={{ flex: 1 }} />
           <span className="chip chip-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem' }}>v{versions.extension}</span>
         </div>
-        <div style={{ display: 'flex' }} role="tablist" aria-label="Dashboard sections">
+        <div style={{ display: loading ? 'none' : 'flex' }} role="tablist" aria-label="Dashboard sections">
           {TABS.map(t => (
             <button
               key={t.id}
@@ -82,15 +124,19 @@ export function App() {
 
       {/* Content */}
       <div
-        style={{ flex: 1, overflowY: 'auto', padding: '14px 16px 20px', position: 'relative', zIndex: 1 }}
-        role="tabpanel"
-        id={`tabpanel-${activeTab}`}
-        aria-label={TABS.find(t => t.id === activeTab)?.label}
+        style={{ flex: 1, overflowY: 'auto', padding: loading ? 0 : '14px 16px 20px', position: 'relative', zIndex: 1 }}
+        role={loading ? undefined : 'tabpanel'}
+        id={loading ? undefined : `tabpanel-${activeTab}`}
+        aria-label={loading ? undefined : TABS.find(t => t.id === activeTab)?.label}
       >
-        {activeTab === 'overview' && <Overview />}
-        {activeTab === 'setup'    && <Setup />}
-        {activeTab === 'prompts'  && <Prompts />}
-        {activeTab === 'settings' && <Settings />}
+        {loading ? <LoadingScreen /> : (
+          <>
+            {activeTab === 'overview' && <Overview />}
+            {activeTab === 'setup'    && <Setup />}
+            {activeTab === 'prompts'  && <Prompts />}
+            {activeTab === 'settings' && <Settings />}
+          </>
+        )}
       </div>
 
       {/* Footer */}
