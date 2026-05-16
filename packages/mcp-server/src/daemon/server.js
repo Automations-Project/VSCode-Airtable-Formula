@@ -18,6 +18,16 @@ import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { ensureToken, rotateToken, getTokenPath } from './token.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
+import {
+  runCloudflaredLogin,
+  createNamedTunnel,
+  writeTunnelConfig,
+  readNamedTunnelConfig,
+} from './tunnel-providers/cloudflared-named-setup.js';
+import { getTunnelBinaryPath } from './install-tunnel.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -407,6 +417,60 @@ export async function startDaemonServer(options = {}) {
       options.onTunnelUrlChange?.(null);
       publishEvent('daemon:tunnel-stopped', {});
       res.json({ ok: true });
+    } catch (err) { next(err); }
+  });
+
+  // POST /daemon/tunnel/named-login
+  // Runs `cloudflared tunnel login` (opens a browser). Blocks until
+  // ~/.cloudflared/cert.pem appears (up to 10 minutes) or returns early if
+  // the cert already exists. Returns { ok: true, alreadyLoggedIn? }.
+  app.post('/daemon/tunnel/named-login', requireBearer, async (_req, res, next) => {
+    try {
+      const certPath = join(homedir(), '.cloudflared', 'cert.pem');
+      if (existsSync(certPath)) {
+        res.json({ ok: true, alreadyLoggedIn: true });
+        return;
+      }
+      const binaryPath = getTunnelBinaryPath(options.configDir);
+      await runCloudflaredLogin({ configDir: options.configDir, binaryPath, forwardOutput: false, timeoutMs: 10 * 60 * 1000 });
+      res.json({ ok: true });
+    } catch (err) { next(err); }
+  });
+
+  // POST /daemon/tunnel/named-create
+  // body: { hostname: string, name?: string }
+  // Creates a Cloudflare named tunnel (cloudflared tunnel create + route dns)
+  // then writes cloudflared-named.yml. Returns early if config already exists.
+  // Returns { ok: true, uuid, hostname, configPath }.
+  app.post('/daemon/tunnel/named-create', requireBearer, async (req, res, next) => {
+    try {
+      const { hostname, name } = req.body ?? {};
+      if (!hostname || typeof hostname !== 'string') {
+        res.status(400).json({ ok: false, error: 'hostname is required' });
+        return;
+      }
+
+      // Idempotent: if already configured, just return existing config
+      const existing = readNamedTunnelConfig(options.configDir);
+      if (existing) {
+        res.json({ ok: true, uuid: existing.uuid, hostname: existing.hostname, configPath: existing.configPath, alreadyConfigured: true });
+        return;
+      }
+
+      const binaryPath = getTunnelBinaryPath(options.configDir);
+      const tunnelName = (typeof name === 'string' && name.trim())
+        ? name.trim()
+        : hostname.split('.')[0].slice(0, 32) || 'airtable-mcp';
+
+      const tunnel = await createNamedTunnel({ configDir: options.configDir, name: tunnelName, hostname, binaryPath });
+      const result = writeTunnelConfig({
+        configDir: options.configDir,
+        uuid: tunnel.uuid,
+        hostname,
+        port: getBoundPort(httpServer),
+        credentialsPath: tunnel.credentialsPath,
+      });
+      res.json({ ok: true, uuid: tunnel.uuid, hostname, configPath: result.configPath });
     } catch (err) { next(err); }
   });
 

@@ -23,9 +23,12 @@ Usage:
   npx airtable-user-mcp status           Show session & browser info
   npx airtable-user-mcp doctor           Run diagnostics
   npx airtable-user-mcp install-browser  Download Chromium (~170MB)
-  npx airtable-user-mcp daemon start     Start the shared daemon process
-  npx airtable-user-mcp daemon stop      Stop the running daemon
-  npx airtable-user-mcp daemon status    Show daemon status (JSON)
+  npx airtable-user-mcp daemon start                          Start the shared daemon process
+  npx airtable-user-mcp daemon stop                           Stop the running daemon
+  npx airtable-user-mcp daemon status                         Show daemon status (JSON)
+  npx airtable-user-mcp daemon install-tunnel                 Download the cloudflared binary
+  npx airtable-user-mcp daemon setup-tunnel named [--name N] --hostname H
+                                                              Set up a Cloudflare named tunnel
   npx airtable-user-mcp --version        Print version
   npx airtable-user-mcp --help           Show this help
 
@@ -158,6 +161,97 @@ export async function runCli(args) {
       process.stdout.write(`cloudflared ${result.version} installed to ${result.binaryPath}\n`);
       return true;
     }
+    if (subcmd === 'setup-tunnel') {
+      const provider = args[2];
+      if (provider !== 'named') {
+        process.stderr.write('Usage: airtable-user-mcp daemon setup-tunnel named [--name <tunnel-name>] --hostname <hostname>\n');
+        process.stderr.write('Currently only "named" (Cloudflare named tunnel) requires setup.\n');
+        process.exitCode = 1;
+        return true;
+      }
+
+      // Parse --hostname and --name flags
+      let hostname = '';
+      let tunnelName = '';
+      for (let i = 3; i < args.length; i++) {
+        if (args[i] === '--hostname' && args[i + 1]) { hostname = args[++i]; }
+        else if (args[i] === '--name' && args[i + 1]) { tunnelName = args[++i]; }
+      }
+
+      const {
+        runCloudflaredLogin,
+        createNamedTunnel,
+        writeTunnelConfig,
+        readNamedTunnelConfig,
+      } = await import('./daemon/tunnel-providers/cloudflared-named-setup.js');
+      const { getTunnelBinaryPath } = await import('./daemon/install-tunnel.js');
+      const { existsSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { homedir } = await import('node:os');
+
+      const configDir = getConfigDir();
+      const binaryPath = getTunnelBinaryPath(configDir);
+
+      if (!existsSync(binaryPath)) {
+        process.stderr.write('cloudflared binary not found. Install it first:\n');
+        process.stderr.write('  npx airtable-user-mcp daemon install-tunnel\n');
+        process.exitCode = 1;
+        return true;
+      }
+
+      // Step 1: Login (if cert missing)
+      const certPath = join(homedir(), '.cloudflared', 'cert.pem');
+      if (!existsSync(certPath)) {
+        process.stderr.write('Running cloudflared tunnel login — a browser window will open.\n');
+        process.stderr.write('Log in to your Cloudflare account and select the zone for your tunnel hostname.\n');
+        await runCloudflaredLogin({ configDir, binaryPath, forwardOutput: true });
+        process.stderr.write('Cloudflare login complete.\n');
+      } else {
+        process.stderr.write('Cloudflare cert already present — skipping login.\n');
+      }
+
+      // Step 2: Collect hostname interactively if not provided
+      if (!hostname) {
+        const { createInterface } = await import('node:readline');
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        hostname = await new Promise(resolve =>
+          rl.question('Enter the hostname for this tunnel (e.g. mcp.example.com): ', ans => {
+            rl.close();
+            resolve(ans.trim());
+          }),
+        );
+      }
+      if (!hostname) {
+        process.stderr.write('Hostname is required.\n');
+        process.exitCode = 1;
+        return true;
+      }
+
+      // Idempotent: skip create if already configured for this hostname
+      const existing = readNamedTunnelConfig(configDir);
+      if (existing) {
+        process.stderr.write(`Named tunnel already configured: ${existing.hostname} (uuid=${existing.uuid})\n`);
+        process.stdout.write('Setup complete — enable the tunnel from the dashboard or restart the daemon.\n');
+        return true;
+      }
+
+      // Step 3: Create named tunnel (run + route dns)
+      if (!tunnelName) tunnelName = hostname.split('.')[0].slice(0, 32) || 'airtable-mcp';
+      process.stderr.write(`Creating Cloudflare named tunnel "${tunnelName}" → ${hostname}…\n`);
+      const tunnel = await createNamedTunnel({ configDir, name: tunnelName, hostname, binaryPath });
+      process.stderr.write(`Tunnel created: uuid=${tunnel.uuid}  credentials: ${tunnel.credentialsPath}\n`);
+      process.stderr.write('DNS route installed.\n');
+
+      // Step 4: Write YAML config
+      writeTunnelConfig({ configDir, uuid: tunnel.uuid, hostname, port: 7400, credentialsPath: tunnel.credentialsPath });
+      process.stdout.write(`\nSetup complete!\n`);
+      process.stdout.write(`  Tunnel: ${tunnelName} (${tunnel.uuid})\n`);
+      process.stdout.write(`  URL:    https://${hostname}\n`);
+      process.stdout.write(`\nEnable the tunnel from the VS Code dashboard, or run:\n`);
+      process.stdout.write(`  npx airtable-user-mcp daemon start\n`);
+      return true;
+    }
+
     if (subcmd === 'stop') {
       const { stopDaemon } = await import('./daemon/launcher.js');
       await stopDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME });

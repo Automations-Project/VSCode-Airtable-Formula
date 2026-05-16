@@ -462,10 +462,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         if (!enableResp.ok) {
           const body = await enableResp.json().catch(() => ({})) as Record<string, unknown>;
           const errMsg = typeof body.error === 'string' ? body.error : `HTTP ${enableResp.status}`;
-          const needsInstall = body.needsInstall === true;
+          const action = body.action as { kind?: string } | undefined;
 
-          if (needsInstall) {
-            // cloudflared binary missing — offer to auto-download
+          if (body.needsInstall === true) {
+            // cloudflared binary missing — offer to auto-download, then retry
             const choice = await vscode.window.showErrorMessage(
               `Tunnel binary not found: ${errMsg}`,
               'Download cloudflared',
@@ -476,6 +476,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             } else {
               this.postResult(msg.id, false, errMsg);
             }
+          } else if (msg.provider === 'cf-named' && (action?.kind === 'run-command' || action?.kind === 'cf-named-setup')) {
+            // Named tunnel needs login and/or create — run the full setup flow then retry
+            await this._ensureCfNamedSetup(status, msg);
           } else {
             void vscode.window.showErrorMessage(`Tunnel enable failed: ${errMsg}`);
             this.postResult(msg.id, false, errMsg);
@@ -1046,6 +1049,65 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       this.postResult(originalMsg.id, true);
     }
     await this.pushState();
+  }
+
+  private async _ensureCfNamedSetup(
+    daemonStatus: import('../mcp/daemon-manager.js').DaemonStatus,
+    originalMsg: Extract<import('@airtable-formula/shared').WebviewMessage, { type: 'tunnel:enable' }>,
+  ): Promise<void> {
+    const port = daemonStatus.port!;
+    const token = daemonStatus.bearerToken!;
+    const base = `http://127.0.0.1:${port}`;
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+    try {
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Cloudflare Named Tunnel Setup', cancellable: false },
+        async (progress) => {
+          // Step 1: Login (no-op if cert already present)
+          progress.report({ message: 'Authenticating with Cloudflare… (complete login in browser if prompted)' });
+          const loginResp = await fetch(`${base}/daemon/tunnel/named-login`, {
+            method: 'POST', headers,
+            signal: AbortSignal.timeout(11 * 60 * 1000),
+          });
+          if (!loginResp.ok) {
+            const b = await loginResp.json().catch(() => ({})) as Record<string, unknown>;
+            throw new Error(`Cloudflare login failed: ${b.error ?? loginResp.status}`);
+          }
+
+          // Step 2: Create tunnel (no-op if already configured)
+          const hostname = originalMsg.domain;
+          if (!hostname) throw new Error('Named tunnel requires a hostname (domain). Enter it in the tunnel settings.');
+          progress.report({ message: `Creating tunnel for ${hostname}…` });
+          const createResp = await fetch(`${base}/daemon/tunnel/named-create`, {
+            method: 'POST', headers,
+            body: JSON.stringify({ hostname }),
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (!createResp.ok) {
+            const b = await createResp.json().catch(() => ({})) as Record<string, unknown>;
+            throw new Error(`Tunnel creation failed: ${b.error ?? createResp.status}`);
+          }
+
+          // Step 3: Retry enable-tunnel now that setup is complete
+          progress.report({ message: 'Starting tunnel…' });
+          const enableResp = await fetch(`${base}/daemon/enable-tunnel`, {
+            method: 'POST', headers,
+            body: JSON.stringify({ provider: originalMsg.provider, domain: originalMsg.domain }),
+          });
+          if (!enableResp.ok) {
+            const b = await enableResp.json().catch(() => ({})) as Record<string, unknown>;
+            throw new Error(typeof b.error === 'string' ? b.error : `HTTP ${enableResp.status}`);
+          }
+        },
+      );
+      this.postResult(originalMsg.id, true);
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Named tunnel setup failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      this.postResult(originalMsg.id, false, String(err));
+    }
   }
 
   async disableTunnel(): Promise<void> {

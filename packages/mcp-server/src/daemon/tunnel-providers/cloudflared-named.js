@@ -99,6 +99,7 @@ export function createCloudflaredNamedProvider(options = {}) {
         return {
           ready: false,
           reason: 'named tunnel not configured — run the setup flow.',
+          action: { kind: 'cf-named-setup' },
         };
       }
 
