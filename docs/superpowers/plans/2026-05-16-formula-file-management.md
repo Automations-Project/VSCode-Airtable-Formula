@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `# AT:` / `// AT:` metadata headers to all Airtable file types, `formulaFilePath` on MCP formula tools, a `download_formula_field` MCP tool, right-click upload and command-palette download commands, auto-placeholder header on file creation, and language provider offset fixes so headers are invisible to the parser.
+**Goal:** Add `# AT:` / `// AT:` metadata headers to all Airtable file types, `formulaFilePath` on MCP formula tools, a `download_formula_field` MCP tool, a `download_base_formulas` bulk-download tool, right-click upload and command-palette download commands, auto-placeholder header on file creation, and language provider offset fixes so headers are invisible to the parser.
 
 **Architecture:** A shared `stripHeader` / `parseHeader` utility in each package strips AT: comment lines before any formula text reaches the Airtable API or language parser. The extension calls the daemon's MCP HTTP endpoint (`POST http://127.0.0.1:{port}/mcp` with bearer token) for upload and download operations. The `onDidCreateFiles` VS Code event inserts snippet-based placeholder headers whenever an empty Airtable file is created.
 
@@ -36,6 +36,15 @@
 | Modify | `packages/webview/src/store.ts` | Bump `totalCount` default |
 | Modify | `packages/webview/src/test/store.test.ts` | Update count assertions |
 | Modify | `packages/extension/src/skills/content.ts` | Document `# AT:` format for AI |
+
+**Header format (enhanced — applies to all download tools):**
+```
+# AT: appId=appXXX tableId=tblXXX fieldId=fldXXX fieldName="Text Formula"
+# AT: description="Optional field description text"
+# AT: resultType=text
+IF({Status} = "Active", "Yes", "No")
+```
+`description` and `resultType` lines are omitted when empty. All `# AT:` lines are stripped on upload — settings are informational only.
 
 ---
 
@@ -435,11 +444,17 @@ async download_formula_field({ appId, fieldId, outputPath, debug }) {
   }
   const formulaText = foundField.typeOptions?.formulaText ?? '';
   const fieldName = foundField.name ?? fieldId;
+  const description = foundField.description ?? '';
+  const resultType = foundField.typeOptions?.resultType ?? '';
   if (!outputPath) {
-    return ok({ written: false, formulaText, fieldName, tableId: foundTableId }, raw, debug);
+    return ok({ written: false, formulaText, fieldName, tableId: foundTableId, description, resultType }, raw, debug);
   }
-  const header = `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName}"\n`;
-  const content = header + formulaText;
+  const headerLines = [
+    `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName}"`,
+    description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
+    resultType ? `# AT: resultType=${resultType}` : null,
+  ].filter(Boolean).join('\n');
+  const content = headerLines + '\n' + formulaText;
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, content, 'utf8');
   return ok({ written: true, path: outputPath, fieldName, tableId: foundTableId, bytes: Buffer.byteLength(content) }, raw, debug);
@@ -1232,6 +1247,139 @@ git commit -m "docs(skills): document AT: header format for all Airtable file ty
 
 ---
 
+## Task 11: MCP `download_base_formulas` tool
+
+**Files:**
+- Modify: `packages/mcp-server/src/index.js`
+- Modify: `packages/mcp-server/src/tool-config.js`
+- Modify: `packages/mcp-server/test/test-tool-config.test.js`
+- Modify: `packages/extension/src/mcp/tool-profile.ts`
+- Modify: `packages/extension/package.json` (counts)
+- Modify: `packages/webview/src/store.ts` + `store.test.ts`
+
+- [ ] **Step 11.1: Add the tool definition in `index.js`**
+
+After the `download_formula_field` definition, add:
+
+```js
+{
+  name: 'download_base_formulas',
+  description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      appId: { type: 'string', description: 'The Airtable base/application ID' },
+      outputDir: { type: 'string', description: 'Local directory to write files into. Defaults to process.cwd() when omitted. Structure: outputDir/<Table Name>/<Field Name>.formula' },
+      debug: debugProp,
+    },
+    required: ['appId'],
+  },
+},
+```
+
+- [ ] **Step 11.2: Add the handler in `index.js`**
+
+After the `download_formula_field` handler, add:
+
+```js
+async download_base_formulas({ appId, outputDir, debug }) {
+  const baseDir = outputDir || process.cwd();
+  const raw = await client.getApplicationData(appId);
+  const tables = raw?.data?.tableSchemas || raw?.data?.tables || [];
+  const written = [];
+
+  for (const table of tables) {
+    const fields = table.columns || table.fields || [];
+    const formulaFields = fields.filter(f => f.type === 'formula');
+    if (formulaFields.length === 0) continue;
+
+    const safeTableName = (table.name ?? table.id).replace(/[/\\:*?"<>|]/g, '_');
+    const tableDir = `${baseDir}/${safeTableName}`;
+    await mkdir(tableDir, { recursive: true });
+
+    for (const field of formulaFields) {
+      const formulaText = field.typeOptions?.formulaText ?? '';
+      const fieldName = field.name ?? field.id;
+      const description = field.description ?? '';
+      const resultType = field.typeOptions?.resultType ?? '';
+
+      const headerLines = [
+        `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${fieldName}"`,
+        description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
+        resultType ? `# AT: resultType=${resultType}` : null,
+      ].filter(Boolean).join('\n');
+
+      const safeFieldName = fieldName.replace(/[/\\:*?"<>|]/g, '_');
+      const filePath = `${tableDir}/${safeFieldName}.formula`;
+      const content = headerLines + '\n' + formulaText;
+      await writeFile(filePath, content, 'utf8');
+      written.push({ path: filePath, tableName: table.name, tableId: table.id, fieldName, fieldId: field.id });
+    }
+  }
+
+  return ok({ tablesProcessed: tables.length, filesWritten: written.length, files: written }, raw, debug);
+},
+```
+
+- [ ] **Step 11.3: Add to `tool-config.js` read category**
+
+In `packages/mcp-server/src/tool-config.js`, in the `// Read-only / inspection` block, add after `download_formula_field: 'read',`:
+
+```js
+download_base_formulas:   'read',
+```
+
+- [ ] **Step 11.4: Update the tool-config test**
+
+In `packages/mcp-server/test/test-tool-config.test.js`:
+
+Change the count from `62` to:
+```js
+assert.equal(tools.length, 63, `Expected 63 tools, got ${tools.length}`);
+```
+
+Add `'download_base_formulas'` to the sorted `readTools` array:
+```js
+assert.deepEqual(readTools.sort(), [
+  'download_base_formulas', 'download_formula_field', 'get_base_schema', 'get_table_schema',
+  'get_view', 'list_fields', 'list_record_templates', 'list_tables', 'list_view_sections',
+  'list_views', 'validate_formula',
+]);
+```
+
+- [ ] **Step 11.5: Mirror in `tool-profile.ts`**
+
+In `packages/extension/src/mcp/tool-profile.ts`, in the `TOOL_CATEGORIES` read block, add after `download_formula_field: 'read',`:
+
+```ts
+download_base_formulas:    'read',
+```
+
+- [ ] **Step 11.6: Run tool-sync check and fix counts**
+
+```bash
+pnpm check:tool-sync
+```
+
+Apply the reported count diffs to `packages/extension/package.json`, `packages/webview/src/store.ts`, and `packages/webview/src/test/store.test.ts`.
+
+- [ ] **Step 11.7: Run full test suite**
+
+```bash
+pnpm test
+```
+Expected: all tests pass, `check:tool-sync` prints green ✓.
+
+- [ ] **Step 11.8: Commit**
+
+```bash
+git add packages/mcp-server/src/index.js packages/mcp-server/src/tool-config.js packages/mcp-server/test/test-tool-config.test.js packages/extension/src/mcp/tool-profile.ts packages/extension/package.json packages/webview/src/store.ts packages/webview/src/test/store.test.ts
+git commit -m "feat(mcp): download_base_formulas — bulk download all formula fields per base into per-table folders"
+```
+
+---
+
 ## Final Verification
 
 - [ ] **Full build + sync check**
@@ -1246,11 +1394,16 @@ Expected: green ✓ on tool-sync, all packages build clean.
   2. Right-click in VS Code explorer → "Upload to Airtable"
   3. Confirm success notification and formula updated in Airtable
 
-- [ ] **Manual smoke test — download**
+- [ ] **Manual smoke test — download single field**
   1. Command palette: "Airtable Formula: Download Formula Field"
   2. Enter a real `appId` and `fieldId`
   3. Pick a folder
-  4. Confirm file opens with `# AT:` header and formula text
+  4. Confirm file opens with enriched `# AT:` header (appId, tableId, fieldId, fieldName, description if set, resultType if set) followed by formula text
+
+- [ ] **Manual smoke test — bulk download via MCP**
+  1. Ask AI to call `download_base_formulas` with a real `appId` and an `outputDir`
+  2. Confirm per-table subfolders are created with one `.formula` file per formula field
+  3. Confirm each file has the enriched `# AT:` header
 
 - [ ] **Manual smoke test — auto-placeholder**
   1. Create a new empty `.formula` file
