@@ -93,7 +93,9 @@ import { getPrompts, renderPrompt } from './prompts.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
+import { readFile } from 'node:fs/promises';
 import path from 'path';
+import { stripHeader } from './formula-header.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -527,9 +529,13 @@ TYPE OPTIONS by fieldType:
         tableId: { type: 'string', description: 'The table ID (e.g. "tblXXX")' },
         name: { type: 'string', description: 'Name for the new formula field' },
         formulaText: { type: 'string', description: 'The formula expression' },
+        formulaFilePath: {
+          type: 'string',
+          description: 'Path to a local .formula or .fx file. When provided, reads formula from file instead of formulaText (unblocks large formulas that exceed LLM output limits). The # AT: metadata header is stripped automatically.',
+        },
         debug: debugProp,
       },
-      required: ['appId', 'tableId', 'name', 'formulaText'],
+      required: ['appId', 'tableId', 'name'],
     },
   },
   {
@@ -576,9 +582,13 @@ TYPE OPTIONS by fieldType:
         appId: { type: 'string', description: 'The Airtable base/application ID' },
         fieldId: { type: 'string', description: 'The field/column ID (e.g. "fldXXX")' },
         formulaText: { type: 'string', description: 'The new formula text' },
+        formulaFilePath: {
+          type: 'string',
+          description: 'Path to a local .formula or .fx file. When provided, reads formula from file instead of formulaText (unblocks large formulas that exceed LLM output limits). The # AT: metadata header is stripped automatically.',
+        },
         debug: debugProp,
       },
-      required: ['appId', 'fieldId', 'formulaText'],
+      required: ['appId', 'fieldId'],
     },
   },
   {
@@ -1567,24 +1577,39 @@ const handlers = {
     );
   },
 
-  async create_formula_field({ appId, tableId, name, formulaText, debug }) {
+  async create_formula_field({ appId, tableId, name, formulaText, formulaFilePath, debug }) {
+    if (!formulaText && !formulaFilePath) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Provide formulaText or formulaFilePath' }) }], isError: true };
+    }
+    let formula;
+    if (formulaFilePath) {
+      const raw = await readFile(formulaFilePath, 'utf8');
+      formula = stripHeader(raw, 'formula').text;
+    } else {
+      formula = stripHeader(formulaText, 'formula').text;
+    }
     return handlers.create_field({
       appId, tableId, name,
       fieldType: 'formula',
-      typeOptions: { formulaText },
+      typeOptions: { formulaText: formula },
       debug,
     });
   },
 
   async validate_formula({ appId, tableId, formulaText, debug }) {
-    const result = await client.validateFormula(appId, tableId, formulaText);
+    const clean = stripHeader(formulaText, 'formula').text;
+    const result = await client.validateFormula(appId, tableId, clean);
     return ok(result, result, debug);
   },
 
   async update_field_config({ appId, fieldId, fieldType, typeOptions, debug }) {
+    const opts = { ...typeOptions };
+    if (fieldType === 'formula' && typeof opts.formulaText === 'string') {
+      opts.formulaText = stripHeader(opts.formulaText, 'formula').text;
+    }
     const result = await client.updateFieldConfig(appId, fieldId, {
       type: fieldType,
-      typeOptions,
+      typeOptions: opts,
     });
     return ok(
       { updated: true, fieldId, type: fieldType },
@@ -1593,11 +1618,21 @@ const handlers = {
     );
   },
 
-  async update_formula_field({ appId, fieldId, formulaText, debug }) {
+  async update_formula_field({ appId, fieldId, formulaText, formulaFilePath, debug }) {
+    if (!formulaText && !formulaFilePath) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Provide formulaText or formulaFilePath' }) }], isError: true };
+    }
+    let formula;
+    if (formulaFilePath) {
+      const raw = await readFile(formulaFilePath, 'utf8');
+      formula = stripHeader(raw, 'formula').text;
+    } else {
+      formula = stripHeader(formulaText, 'formula').text;
+    }
     return handlers.update_field_config({
       appId, fieldId,
       fieldType: 'formula',
-      typeOptions: { formulaText },
+      typeOptions: { formulaText: formula },
       debug,
     });
   },
