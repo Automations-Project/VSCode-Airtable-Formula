@@ -1,0 +1,317 @@
+{
+  "IF Statement": {
+    "prefix": "if",
+    "body": [
+      "IF(${1:condition}, ${2:value_if_true}, ${3:value_if_false})"
+    ],
+    "description": "IF conditional statement"
+  },
+  "Nested IF": {
+    "prefix": "ifnested",
+    "body": [
+      "IF(",
+      "  ${1:condition1}, ${2:value1},",
+      "  IF(",
+      "    ${3:condition2}, ${4:value2},",
+      "    ${5:default_value}",
+      "  )",
+      ")"
+    ],
+    "description": "Nested IF statement"
+  },
+  "SWITCH Statement": {
+    "prefix": "switch",
+    "body": [
+      "SWITCH(",
+      "  ${1:expression},",
+      "  '${2:pattern1}', '${3:result1}',",
+      "  '${4:pattern2}', '${5:result2}',",
+      "  '${6:default}'",
+      ")"
+    ],
+    "description": "SWITCH statement for multiple conditions"
+  },
+  "CONCATENATE": {
+    "prefix": "concat",
+    "body": [
+      "CONCATENATE(${1:text1}, ${2:text2})"
+    ],
+    "description": "Concatenate text strings"
+  },
+  "AND Condition": {
+    "prefix": "and",
+    "body": [
+      "AND(${1:condition1}, ${2:condition2})"
+    ],
+    "description": "AND logical operator"
+  },
+  "OR Condition": {
+    "prefix": "or",
+    "body": [
+      "OR(${1:condition1}, ${2:condition2})"
+    ],
+    "description": "OR logical operator"
+  },
+  "Date Add": {
+    "prefix": "dateadd",
+    "body": [
+      "DATEADD(${1:date}, ${2:count}, '${3|days,weeks,months,years|}')"
+    ],
+    "description": "Add time to a date"
+  },
+  "Date Difference": {
+    "prefix": "datediff",
+    "body": [
+      "DATETIME_DIFF(${1:end_date}, ${2:start_date}, '${3|days,weeks,months,years,hours,minutes,seconds|}')"
+    ],
+    "description": "Calculate difference between dates"
+  },
+  "Date Format": {
+    "prefix": "dateformat",
+    "body": [
+      "DATETIME_FORMAT(${1:date}, '${2|MM/DD/YYYY,DD/MM/YYYY,YYYY-MM-DD,MM-DD-YYYY,HH:mm:ss,LLLL|}')"
+    ],
+    "description": "Format a date"
+  },
+  "Left Text": {
+    "prefix": "left",
+    "body": [
+      "LEFT(${1:text}, ${2:count})"
+    ],
+    "description": "Extract characters from left"
+  },
+  "Right Text": {
+    "prefix": "right",
+    "body": [
+      "RIGHT(${1:text}, ${2:count})"
+    ],
+    "description": "Extract characters from right"
+  },
+  "Mid Text": {
+    "prefix": "mid",
+    "body": [
+      "MID(${1:text}, ${2:start}, ${3:count})"
+    ],
+    "description": "Extract characters from middle"
+  },
+  "Find Text": {
+    "prefix": "find",
+    "body": [
+      "FIND('${1:search_text}', ${2:text})"
+    ],
+    "description": "Find position of text"
+  },
+  "Replace Text": {
+    "prefix": "substitute",
+    "body": [
+      "SUBSTITUTE(${1:text}, '${2:old_text}', '${3:new_text}')"
+    ],
+    "description": "Replace text occurrences"
+  },
+  "Array Join": {
+    "prefix": "arrayjoin",
+    "body": [
+      "ARRAYJOIN(${1:array}, '${2:separator}')"
+    ],
+    "description": "Join array elements with separator"
+  },
+  "Array Unique": {
+    "prefix": "arrayunique",
+    "body": [
+      "ARRAYUNIQUE(${1:array})"
+    ],
+    "description": "Get unique values from array"
+  },
+  "Round Number": {
+    "prefix": "round",
+    "body": [
+      "ROUND(${1:number}, ${2:precision})"
+    ],
+    "description": "Round number to precision"
+  },
+  "Sum Values": {
+    "prefix": "sum",
+    "body": [
+      "SUM(${1:value1}, ${2:value2})"
+    ],
+    "description": "Sum numeric values"
+  },
+  "Average Values": {
+    "prefix": "avg",
+    "body": [
+      "AVERAGE(${1:value1}, ${2:value2})"
+    ],
+    "description": "Calculate average"
+  },
+  "Max Value": {
+    "prefix": "max",
+    "body": [
+      "MAX(${1:value1}, ${2:value2})"
+    ],
+    "description": "Get maximum value"
+  },
+  "Min Value": {
+    "prefix": "min",
+    "body": [
+      "MIN(${1:value1}, ${2:value2})"
+    ],
+    "description": "Get minimum value"
+  },
+  "Field Reference": {
+    "prefix": "field",
+    "body": [
+      "{${1:Field Name}}"
+    ],
+    "description": "Reference a field"
+  },
+  "Regex Match": {
+    "prefix": "regex",
+    "body": [
+      "REGEX_MATCH(${1:text}, '${2:pattern}')"
+    ],
+    "description": "Match text against regex pattern"
+  },
+  "Regex Extract": {
+    "prefix": "regexextract",
+    "body": [
+      "REGEX_EXTRACT(${1:text}, '${2:pattern}')"
+    ],
+    "description": "Extract text matching regex pattern"
+  },
+  "Regex Replace": {
+    "prefix": "regexreplace",
+    "body": [
+      "REGEX_REPLACE(${1:text}, '${2:pattern}', '${3:replacement}')"
+    ],
+    "description": "Replace text matching regex pattern"
+  },
+  "Error Check": {
+    "prefix": "iserror",
+    "body": [
+      "ISERROR(${1:expression})"
+    ],
+    "description": "Check if expression returns error"
+  },
+  "Blank Check": {
+    "prefix": "isblank",
+    "body": [
+      "IF(${1:field} = BLANK(), ${2:if_blank}, ${3:if_not_blank})"
+    ],
+    "description": "Check if field is blank"
+  },
+  "Today": {
+    "prefix": "today",
+    "body": [
+      "TODAY()"
+    ],
+    "description": "Get today's date"
+  },
+  "Now": {
+    "prefix": "now",
+    "body": [
+      "NOW()"
+    ],
+    "description": "Get current date and time"
+  },
+  "Record ID": {
+    "prefix": "recordid",
+    "body": [
+      "RECORD_ID()"
+    ],
+    "description": "Get current record ID"
+  },
+  "XOR Condition": {
+    "prefix": "xor",
+    "body": [
+      "XOR(${1:condition1}, ${2:condition2})"
+    ],
+    "description": "XOR logical operator - true if odd number of args are true"
+  },
+  "Error Fallback": {
+    "prefix": "iferror",
+    "body": [
+      "IF(ISERROR(${1:expression}), ${2:fallback_value}, ${1:expression})"
+    ],
+    "description": "Return fallback value if expression errors"
+  },
+  "Time From Now": {
+    "prefix": "fromnow",
+    "body": [
+      "FROMNOW(${1:date})"
+    ],
+    "description": "Duration from now until a date"
+  },
+  "Time To Now": {
+    "prefix": "tonow",
+    "body": [
+      "TONOW(${1:date})"
+    ],
+    "description": "Duration from a date until now"
+  },
+  "Workday": {
+    "prefix": "workday",
+    "body": [
+      "WORKDAY(${1:start_date}, ${2:num_days})"
+    ],
+    "description": "Date that is N workdays from start"
+  },
+  "Workday Difference": {
+    "prefix": "workdaydiff",
+    "body": [
+      "WORKDAY_DIFF(${1:start_date}, ${2:end_date})"
+    ],
+    "description": "Number of workdays between dates"
+  },
+  "JSON Object Builder": {
+    "prefix": "jsonobj",
+    "body": [
+      "\"{\" &",
+      "  \"\\\"${1:key1}\\\":\\\"\" & ${2:value1} & \"\\\",\" &",
+      "  \"\\\"${3:key2}\\\":\\\"\" & ${4:value2} & \"\\\"\" &",
+      "\"}\""
+    ],
+    "description": "Build a JSON object string"
+  },
+  "JSON Array Builder": {
+    "prefix": "jsonarr",
+    "body": [
+      "\"[\" & ARRAYJOIN(${1:array}, \",\") & \"]\""
+    ],
+    "description": "Build a JSON array string from array field"
+  },
+  "Date Comparison": {
+    "prefix": "isbefore",
+    "body": [
+      "IS_BEFORE(${1:date1}, ${2:date2})"
+    ],
+    "description": "Check if date1 is before date2"
+  },
+  "Date Same": {
+    "prefix": "issame",
+    "body": [
+      "IS_SAME(${1:date1}, ${2:date2}, '${3|day,week,month,year|}')"
+    ],
+    "description": "Check if dates are the same"
+  },
+  "Encode URL": {
+    "prefix": "encodeurl",
+    "body": [
+      "ENCODE_URL_COMPONENT(${1:text})"
+    ],
+    "description": "Encode text for use in URL"
+  },
+  "Created Time": {
+    "prefix": "createdtime",
+    "body": [
+      "CREATED_TIME()"
+    ],
+    "description": "When record was created"
+  },
+  "Last Modified Time": {
+    "prefix": "modifiedtime",
+    "body": [
+      "LAST_MODIFIED_TIME()"
+    ],
+    "description": "When record was last modified"
+  }
+}

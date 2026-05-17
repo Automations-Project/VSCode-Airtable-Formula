@@ -1,13 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M2 9 A7 7 0 0 1 9 2 H23 A7 7 0 0 1 30 9" stroke="#FCB400"/>
-    <path d="M30 9 V23 A7 7 0 0 1 23 30 H16" stroke="#18BFFF"/>
-    <path d="M16 30 H9 A7 7 0 0 1 2 23 V9" stroke="#F82B60"/>
-  </g>
-  <g transform="translate(6 6) scale(0.833)" stroke="#F82B60" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M8 21s-4-3-4-9 4-9 4-9" />
-    <path d="M16 3s4 3 4 9-4 9-4 9" />
-    <line x1="15" x2="9" y1="9" y2="15" />
-    <line x1="9" x2="15" y1="9" y2="15" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"><path stroke="#FCB400" d="M2 9 A7 7 0 0 1 9 2 H23 A7 7 0 0 1 30 9"/><path stroke="#18BFFF" d="M30 9 V23 A7 7 0 0 1 23 30 H16"/><path stroke="#F82B60" d="M16 30 H9 A7 7 0 0 1 2 23 V9"/></g><g fill="none" stroke="#F82B60" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" transform="translate(6 6) scale(0.833)"><path d="M8 21s-4-3-4-9 4-9 4-9"/><path d="M16 3s4 3 4 9-4 9-4 9"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></g></svg>

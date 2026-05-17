@@ -1,0 +1,142 @@
+name: Issue Report
+description: Report a bug, regression, or request an enhancement
+title: "[Issue]: "
+labels:
+  - triage
+body:
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: Issue Type
+      description: What kind of issue are you reporting?
+      options:
+        - Bug
+        - Regression
+        - Performance/Freeze
+        - Feature Request
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the extension is affected?
+      options:
+        - Beautifier v2
+        - Minifier v2
+        - Beautifier v1
+        - Minifier v1
+        - Diagnostics
+        - Syntax Highlighting
+        - IntelliSense / Completions
+        - Commands / Context Menus
+        - Skills Installer
+        - Build / Release
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity / Impact
+      options:
+        - Low (minor issue)
+        - Medium (workflow impacted)
+        - High (blocking)
+    validations:
+      required: true
+
+  - type: input
+    id: extension_version
+    attributes:
+      label: Extension Version
+      placeholder: e.g. 0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: vscode_version
+    attributes:
+      label: VS Code Version
+      placeholder: e.g. 1.86.1
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: e.g. Windows 11 / macOS 14 / Ubuntu 22.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Short summary of the issue or request.
+      placeholder: Provide a concise summary.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Required for bugs, regressions, or freezes.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      placeholder: What should happen?
+    validations:
+      required: false
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      placeholder: What actually happened?
+    validations:
+      required: false
+
+  - type: textarea
+    id: formula
+    attributes:
+      label: Sample Formula / Minimal Repro
+      description: Provide a minimal formula sample (redact sensitive data).
+      placeholder: |
+        Example:
+        IF({Status}="Open", "Yes", "No")
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Paste extension host logs, error output, or screenshots.
+      placeholder: Attach logs or screenshots if available.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues to avoid duplicates.
+          required: true
+        - label: I can share a minimal repro formula if needed.
+          required: false

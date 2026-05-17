@@ -1,0 +1,44 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "bun: watch",
+			"type": "shell",
+			"command": "bun",
+			"args": ["run", "watch"],
+			"isBackground": true,
+			"problemMatcher": "$esbuild-watch",
+			"presentation": {
+				"reveal": "never"
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "bun: build",
+			"type": "shell",
+			"command": "bun",
+			"args": ["run", "build"],
+			"problemMatcher": "$esbuild-watch",
+			"group": "build"
+		},
+		{
+			"label": "bun: compile",
+			"type": "shell",
+			"command": "bun",
+			"args": ["run", "compile"],
+			"problemMatcher": "$tsc",
+			"group": "build"
+		},
+		{
+			"label": "bun: check-types",
+			"type": "shell",
+			"command": "bun",
+			"args": ["run", "check-types"],
+			"problemMatcher": "$tsc",
+			"group": "build"
+		}
+	]
+}
