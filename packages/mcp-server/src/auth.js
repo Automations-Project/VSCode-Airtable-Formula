@@ -59,6 +59,7 @@ export class AirtableAuth {
     this._queue = [];
     this._processing = false;
     this._maxQueueSize = Number(process.env.AIRTABLE_MAX_AUTH_QUEUE) || 64;
+    this._rateDelayMs = Number(process.env.AIRTABLE_RATE_DELAY_MS) || 0;
 
     // Per-app secretSocketId cache (captured from network traffic).
     // LRU-bounded so long-running servers with many bases don't grow this
@@ -354,6 +355,11 @@ export class AirtableAuth {
         resolve(await fn());
       } catch (err) {
         reject(err);
+      }
+      // Optional inter-call delay to stay under Airtable's 5 req/s limit.
+      // Set AIRTABLE_RATE_DELAY_MS=200 to enable; default 0 (no delay).
+      if (this._rateDelayMs > 0 && this._queue.length > 0) {
+        await new Promise(r => setTimeout(r, this._rateDelayMs));
       }
     }
 
