@@ -150,4 +150,38 @@ describe('AirtableClient.deleteFields', () => {
     assert.equal(result.succeeded.length, 1);
     assert.equal(result.failed.length, 1);
   });
+
+  it('routes deleted:false (dependency-blocked) to failed[] when force=false', async () => {
+    const DEPENDENCY_RESPONSE = {
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: {
+          type: 'SCHEMA_DEPENDENCIES_VALIDATION_FAILED',
+          details: { dependentColumns: [{ id: 'fldDEP', type: 'formula' }] },
+        },
+      }),
+      text: async () => JSON.stringify({ error: { type: 'SCHEMA_DEPENDENCIES_VALIDATION_FAILED' } }),
+    };
+    const auth = createMockAuth({
+      get() {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            data: { tableSchemas: [{ id: 'tbl1', columns: [{ id: 'fld001', name: 'HasDeps', type: 'formula', typeOptions: {} }], views: [] }] },
+          }),
+          text: async () => '{}',
+        };
+      },
+      postForm() {
+        return DEPENDENCY_RESPONSE;
+      },
+    });
+    const client = new AirtableClient(auth);
+    const result = await client.deleteFields('appTEST', [{ fieldId: 'fld001', expectedName: 'HasDeps' }], { force: false });
+    assert.equal(result.succeeded.length, 0, 'no fields should be in succeeded');
+    assert.equal(result.failed.length, 1, 'dependency-blocked field should be in failed');
+    assert.ok(result.failed[0].error.includes('dependencies') || result.failed[0].error.includes('not deleted'),
+      `error message should mention dependencies or not deleted, got: "${result.failed[0].error}"`);
+  });
 });

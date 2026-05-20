@@ -708,7 +708,11 @@ export class AirtableClient {
       const { fieldId, expectedName } = fields[i];
       try {
         const result = await this.deleteField(appId, fieldId, expectedName, { force });
-        succeeded.push({ fieldId, name: expectedName, deleted: result.deleted, forced: result.forced ?? false });
+        if (!result.deleted) {
+          failed.push({ fieldId, name: expectedName, error: result.message ?? 'Field was not deleted' });
+        } else {
+          succeeded.push({ fieldId, name: expectedName, deleted: true, forced: result.forced ?? false });
+        }
       } catch (error) {
         failed.push({ fieldId, name: expectedName, error: error.message });
       }
