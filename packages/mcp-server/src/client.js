@@ -692,9 +692,9 @@ export class AirtableClient {
   }
 
   /**
-   * Delete multiple fields sequentially. Returns { succeeded, failed }.
-   * Each failed entry includes the fieldId and error message but does NOT
-   * abort the rest of the batch — all fields are attempted.
+   * Delete multiple fields using the native batch endpoint (destroyMultipleColumns).
+   * Fields are grouped by tableId and each table's fields are deleted in 1-2 API
+   * calls instead of N×3. Returns { succeeded, failed }.
    *
    * @param {string} appId
    * @param {{fieldId: string, expectedName: string}[]} fields
@@ -704,21 +704,82 @@ export class AirtableClient {
     const succeeded = [];
     const failed = [];
 
-    for (let i = 0; i < fields.length; i++) {
-      const { fieldId, expectedName } = fields[i];
+    // Step 1: Validate expectedName safety checks and group by tableId.
+    // getApplicationData is cached, so N resolveField calls cost one network round-trip.
+    const byTable = new Map(); // tableId → [{ fieldId, expectedName }]
+
+    for (const { fieldId, expectedName } of fields) {
       try {
-        const result = await this.deleteField(appId, fieldId, expectedName, { force });
-        if (!result.deleted) {
-          failed.push({ fieldId, name: expectedName, error: result.message ?? 'Field was not deleted' });
+        const { field, table } = await this.resolveField(appId, fieldId);
+        if (field.name !== expectedName) {
+          failed.push({
+            fieldId,
+            name: expectedName,
+            error: `Safety check failed: field is named "${field.name}" but expectedName was "${expectedName}"`,
+          });
         } else {
-          succeeded.push({ fieldId, name: expectedName, deleted: true, forced: result.forced ?? false });
+          if (!byTable.has(table.id)) byTable.set(table.id, []);
+          byTable.get(table.id).push({ fieldId, expectedName });
         }
-      } catch (error) {
-        failed.push({ fieldId, name: expectedName, error: error.message });
+      } catch (err) {
+        failed.push({ fieldId, name: expectedName, error: err.message });
       }
-      onProgress?.({ index: i, total: fields.length, succeeded: succeeded.length, failed: failed.length });
     }
 
+    // Step 2: Batch-delete each table's fields via destroyMultipleColumns (1-2 calls per table).
+    for (const [tableId, tableFields] of byTable) {
+      const columnIds = tableFields.map(f => f.fieldId);
+
+      const checkRes = await this.auth.postForm(
+        `https://airtable.com/v0.3/table/${tableId}/destroyMultipleColumns`,
+        this._mutationParams({ columnIds, checkSchemaDependencies: true }, appId),
+        appId,
+      );
+
+      if (checkRes.ok) {
+        this.cache.invalidate(appId);
+        for (const f of tableFields) {
+          succeeded.push({ fieldId: f.fieldId, name: f.expectedName, deleted: true, forced: false });
+        }
+        continue;
+      }
+
+      const checkBody = await checkRes.json().catch(() => null);
+      const isDependencyError = checkBody?.error?.type === 'SCHEMA_DEPENDENCIES_VALIDATION_FAILED';
+
+      if (!isDependencyError || !force) {
+        const errMsg = isDependencyError
+          ? 'Fields have schema dependencies and force=false'
+          : `destroyMultipleColumns failed (${checkRes.status})`;
+        for (const f of tableFields) {
+          failed.push({ fieldId: f.fieldId, name: f.expectedName, error: errMsg });
+        }
+        continue;
+      }
+
+      // Deps exist and force=true: second call without checkSchemaDependencies
+      const forceRes = await this.auth.postForm(
+        `https://airtable.com/v0.3/table/${tableId}/destroyMultipleColumns`,
+        this._mutationParams({ columnIds }, appId),
+        appId,
+      );
+
+      if (!forceRes.ok) {
+        const errText = await forceRes.text().catch(() => '');
+        for (const f of tableFields) {
+          failed.push({ fieldId: f.fieldId, name: f.expectedName, error: `destroyMultipleColumns force-delete failed (${forceRes.status}): ${errText}` });
+        }
+      } else {
+        this.cache.invalidate(appId);
+        for (const f of tableFields) {
+          succeeded.push({ fieldId: f.fieldId, name: f.expectedName, deleted: true, forced: true });
+        }
+      }
+    }
+
+    if (fields.length > 0) {
+      onProgress?.({ index: fields.length - 1, total: fields.length, succeeded: succeeded.length, failed: failed.length });
+    }
     return { succeeded, failed };
   }
 
