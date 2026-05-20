@@ -169,9 +169,13 @@ vim.lsp.enable('airtable_formula')`;
 }
 
 export function getOfficialAirtableSnippet(ide: string): string {
+  const isWindsurf = ide === 'windsurf' || ide === 'windsurf-next';
   // Windsurf uses 'serverUrl'; everyone else uses 'url'.
-  const urlKey = (ide === 'windsurf' || ide === 'windsurf-next') ? 'serverUrl' : 'url';
-  return `"airtable": {
+  // Claude Code and most MCP clients require "type": "http" to recognise
+  // remote HTTP servers — without it the entry is silently ignored.
+  const urlKey = isWindsurf ? 'serverUrl' : 'url';
+  const typeField = isWindsurf ? '' : '\n  "type": "http",';
+  return `"airtable": {${typeField}
   "${urlKey}": "https://mcp.airtable.com/mcp",
   "headers": {
     "Authorization": "Bearer {{AIRTABLE_PAT}}"

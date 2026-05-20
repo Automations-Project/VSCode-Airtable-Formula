@@ -216,9 +216,13 @@ export async function getAllIdeStatuses(): Promise<IdeStatus[]> {
 // ── Official Airtable MCP (https://mcp.airtable.com/mcp) ───────────────────
 
 function buildOfficialAirtableEntry(ideId: IdeId, pat: string): Record<string, unknown> {
+  const isWindsurf = ideId === 'windsurf' || ideId === 'windsurf-next';
   // Windsurf uses 'serverUrl'; all other MCP clients use 'url'.
-  const urlKey = (ideId === 'windsurf' || ideId === 'windsurf-next') ? 'serverUrl' : 'url';
+  // Claude Code (and most MCP clients) also require "type": "http" to recognise
+  // remote HTTP servers — without it the entry is silently ignored.
+  const urlKey = isWindsurf ? 'serverUrl' : 'url';
   return {
+    ...(isWindsurf ? {} : { type: 'http' }),
     [urlKey]: OFFICIAL_AIRTABLE_URL,
     headers: { Authorization: `Bearer ${pat}` },
   };
