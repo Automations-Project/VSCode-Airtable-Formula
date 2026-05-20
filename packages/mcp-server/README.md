@@ -379,7 +379,7 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `rename_table` | Rename a table |
 | `delete_table` | Delete a table (requires `expectedName` safety guard) |
 
-### Field Management (8)
+### Field Management (9)
 
 | Tool | Description |
 |:-----|:------------|
@@ -389,6 +389,7 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `update_field_config` | Update configuration of any computed field |
 | `rename_field` | Rename a field with pre-validation |
 | `delete_field` | Delete with safety guards and a compact dependency summary |
+| `delete_fields` | Bulk-delete multiple fields in 1–2 API calls. Takes a `fields` array of `{fieldId, expectedName}` pairs; validates names before deleting. Use `force: true` to override dependency blocks. Optional `checkpointFile` writes progress after each batch so interrupted runs can resume. |
 | `duplicate_field` | Clone a field, optionally copying cell values |
 | `update_field_description` | Set or update a field's description text |
 
@@ -501,9 +502,10 @@ Args: {
 
 ## Safety
 
-- **Destructive operations** (`delete_table`, `delete_field`, `delete_view`, `remove_extension`) include built-in safety guards
-- `delete_table` and `delete_field` both require an `expectedName` parameter that must match the current name exactly — prevents accidentally deleting the wrong object after a rename
+- **Destructive operations** (`delete_table`, `delete_field`, `delete_fields`, `delete_view`, `remove_extension`) include built-in safety guards
+- `delete_table`, `delete_field`, and each entry in `delete_fields` all require an `expectedName` that must match the current field name exactly — prevents accidentally deleting the wrong object after a rename
 - `delete_field` checks for downstream dependencies and returns a compact summary (`viewGroupings`, `viewSorts`, `viewFilters`, `fields`) before committing; set `force: true` to delete anyway
+- `delete_fields` is the preferred tool for bulk deletion (dozens to hundreds of fields). It uses Airtable's native batch endpoint, so N fields from the same table cost 1–2 API calls instead of N×3. Set `force: true` to delete even fields with downstream dependencies.
 - Formula validation is available and recommended before creating/updating formulas
 - All tools accept `debug: true` for raw response inspection
 
