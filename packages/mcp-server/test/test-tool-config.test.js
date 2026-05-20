@@ -17,7 +17,7 @@ import {
 describe('TOOL_CATEGORIES', () => {
   it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
-    assert.equal(tools.length, 63, `Expected 63 tools, got ${tools.length}`);
+    assert.equal(tools.length, 64, `Expected 64 tools, got ${tools.length}`);
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       assert.ok(CATEGORY_LABELS[cat], `Tool "${tool}" has unknown category "${cat}"`);
     }
@@ -83,9 +83,9 @@ describe('ToolConfigManager', () => {
       assert.equal(mgr.activeProfile, 'full');
     });
 
-    it('enables all 63 tools on full profile', () => {
+    it('enables all 64 tools on full profile', () => {
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 63);
+      assert.equal(enabled.size, 64);
     });
 
     it('manage_tools is always enabled', () => {
@@ -121,10 +121,10 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('create_extension'));
     });
 
-    it('full enables all 63 tools', async () => {
+    it('full enables all 64 tools', async () => {
       await mgr.switchProfile('full');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 63);
+      assert.equal(enabled.size, 64);
     });
   });
 
@@ -194,10 +194,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('getToolStatus()', () => {
-    it('returns status for all 63 tools', async () => {
+    it('returns status for all 64 tools', async () => {
       await mgr.switchProfile('full');
       const status = mgr.getToolStatus();
-      assert.equal(status.length, 63);
+      assert.equal(status.length, 64);
       assert.ok(status.every(s => s.enabled === true));
     });
 

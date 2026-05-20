@@ -682,6 +682,39 @@ REPLACING ALL CHOICES: just pass the new choices without any IDs.`,
       required: ['appId', 'fieldId', 'expectedName'],
     },
   },
+  {
+    name: 'delete_fields',
+    description: 'Delete multiple fields from an Airtable table in a single call. Each entry requires fieldId and expectedName as a safety guard (deletion is refused if names do not match). Fields are processed sequentially and all are attempted even if some fail — partial results are always returned. Optionally writes a JSON checkpoint file after each deletion so the batch can be resumed if interrupted.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        fields: {
+          type: 'array',
+          description: 'Fields to delete. Each entry must have fieldId and expectedName.',
+          items: {
+            type: 'object',
+            properties: {
+              fieldId:      { type: 'string', description: 'Field/column ID (e.g. "fldXXX")' },
+              expectedName: { type: 'string', description: 'Expected name — deletion is refused if it does not match' },
+            },
+            required: ['fieldId', 'expectedName'],
+          },
+        },
+        force: {
+          type: 'boolean',
+          description: 'When true, delete each field even if it has downstream formula/rollup dependencies. Default: false.',
+        },
+        checkpointFile: {
+          type: 'string',
+          description: 'Absolute path to a JSON file updated after each deletion. Stores remaining fields so the batch can be resumed after a crash.',
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'fields'],
+    },
+  },
 
   // ── View Tools ──
   {
@@ -1803,6 +1836,43 @@ const handlers = {
     }
     // Has dependencies — return info for caller to decide
     return ok(result, result, debug);
+  },
+
+  async delete_fields({ appId, fields, force, checkpointFile, debug }) {
+    if (!Array.isArray(fields) || fields.length === 0) {
+      return err('fields must be a non-empty array of { fieldId, expectedName } objects');
+    }
+
+    const checkpointPath = typeof checkpointFile === 'string' && checkpointFile ? checkpointFile : null;
+
+    const result = await client.deleteFields(appId, fields, {
+      force: !!force,
+      onProgress: checkpointPath
+        ? async ({ index, total, succeeded, failed }) => {
+            const checkpoint = {
+              appId,
+              processedUpTo: index,
+              total,
+              remaining: fields.slice(index + 1),
+              succeededCount: succeeded,
+              failedCount: failed,
+              savedAt: new Date().toISOString(),
+            };
+            await writeFile(checkpointPath, JSON.stringify(checkpoint, null, 2)).catch(() => {});
+          }
+        : undefined,
+    });
+
+    return ok(
+      {
+        succeeded: result.succeeded.length,
+        failed:    result.failed.length,
+        total:     fields.length,
+        ...(result.failed.length > 0 ? { failures: result.failed } : {}),
+      },
+      result,
+      debug,
+    );
   },
 
   // ── View Mutations ──

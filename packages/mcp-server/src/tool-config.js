@@ -56,6 +56,7 @@ export const TOOL_CATEGORIES = {
 
   // Field destructive
   delete_field:           'field-destructive',
+  delete_fields:          'field-destructive',
 
   // View mutations (non-destructive)
   create_view:            'view-write',
