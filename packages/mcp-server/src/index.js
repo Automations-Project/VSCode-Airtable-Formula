@@ -2209,9 +2209,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // fires more concurrent tool calls than MAX_CONCURRENT_TOOL_CALLS (default 16).
 const _rawCap = Number(process.env.AIRTABLE_MAX_CONCURRENT_TOOLS);
 const MAX_CONCURRENT_TOOL_CALLS = Number.isFinite(_rawCap) && _rawCap >= 1 ? Math.floor(_rawCap) : 16;
-const TOOL_QUEUE_WAIT_MS = Number.isFinite(Number(process.env.AIRTABLE_TOOL_QUEUE_WAIT_MS))
-  ? Number(process.env.AIRTABLE_TOOL_QUEUE_WAIT_MS)
-  : 60_000;
+const _rawWait = Number(process.env.AIRTABLE_TOOL_QUEUE_WAIT_MS);
+const TOOL_QUEUE_WAIT_MS = Number.isFinite(_rawWait) && _rawWait >= 1000 ? Math.floor(_rawWait) : 60_000;
 
 let _inflightToolCalls = 0;
 const _pendingToolQueue = [];
@@ -2242,7 +2241,7 @@ function _releaseToolSlot() {
     entry.resolve(); // slot transferred — inflight count stays the same
     return;
   }
-  _inflightToolCalls--;
+  if (_inflightToolCalls > 0) _inflightToolCalls--;
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
