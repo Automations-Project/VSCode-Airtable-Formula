@@ -64,6 +64,7 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   duplicate_field:           'field-write',
   // Field destructive
   delete_field:              'field-destructive',
+  delete_fields:             'field-destructive',
   // View mutations
   create_view:               'view-write',
   duplicate_view:            'view-write',
