@@ -55,3 +55,99 @@ describe('tool-call semaphore helpers', () => {
     assert.ok(src.includes('_pendingToolQueue'), '_pendingToolQueue must be defined');
   });
 });
+
+import { AirtableClient } from '../src/client.js';
+
+describe('AirtableClient.deleteFields', () => {
+  it('processes all fields and reports succeeded/failed counts', async () => {
+    // Schema contains all three fields so resolveField succeeds for each.
+    // The cache is invalidated after each successful delete, causing a re-fetch
+    // that always returns the full schema. postForm fails only for fldBAD.
+    const SCHEMA = {
+      data: {
+        tableSchemas: [{
+          id: 'tblAAA',
+          columns: [
+            { id: 'fld001', name: 'Field A', type: 'text', typeOptions: {} },
+            { id: 'fldBAD', name: 'Bad Field', type: 'text', typeOptions: {} },
+            { id: 'fld003', name: 'Field C', type: 'text', typeOptions: {} },
+          ],
+          views: [],
+        }],
+      },
+    };
+    const auth = createMockAuth({
+      get() {
+        return { ok: true, status: 200, json: async () => SCHEMA, text: async () => '{}' };
+      },
+      postForm(url) {
+        // fldBAD destroy call fails with a non-dependency error → throws in deleteField
+        if (url.includes('fldBAD')) {
+          return { ok: false, status: 422, json: async () => ({ error: { type: 'NOT_FOUND' } }), text: async () => 'not found' };
+        }
+        return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
+      },
+    });
+    const client = new AirtableClient(auth);
+    const fields = [
+      { fieldId: 'fld001', expectedName: 'Field A' },
+      { fieldId: 'fldBAD', expectedName: 'Bad Field' },
+      { fieldId: 'fld003', expectedName: 'Field C' },
+    ];
+    const result = await client.deleteFields('appTEST', fields, { force: true });
+    assert.equal(result.succeeded.length, 2, 'two fields should succeed');
+    assert.equal(result.failed.length, 1, 'one field should fail');
+    assert.equal(result.failed[0].fieldId, 'fldBAD');
+    assert.ok(typeof result.failed[0].error === 'string', 'error must be a string');
+  });
+
+  it('calls onProgress once per field', async () => {
+    const auth = createMockAuth({
+      get() {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            data: { tableSchemas: [{ id: 'tbl1', columns: [{ id: 'fld001', name: 'A', type: 'text', typeOptions: {} }], views: [] }] },
+          }),
+          text: async () => '{}',
+        };
+      },
+    });
+    const client = new AirtableClient(auth);
+    const progressLog = [];
+    await client.deleteFields('appTEST', [{ fieldId: 'fld001', expectedName: 'A' }], {
+      onProgress: (info) => progressLog.push(info),
+    });
+    assert.equal(progressLog.length, 1);
+    assert.equal(progressLog[0].index, 0);
+    assert.equal(progressLog[0].total, 1);
+  });
+
+  it('continues processing after a per-field failure', async () => {
+    // Schema contains both fields. fld001 postForm fails (non-dep error → throws),
+    // fld002 succeeds. Cache is invalidated only on success, but the schema mock
+    // always returns both fields so both resolveField calls succeed regardless.
+    const SCHEMA2 = {
+      data: { tableSchemas: [{ id: 'tbl1', columns: [
+        { id: 'fld001', name: 'A', type: 'text', typeOptions: {} },
+        { id: 'fld002', name: 'B', type: 'text', typeOptions: {} },
+      ], views: [] }] },
+    };
+    const auth = createMockAuth({
+      get() {
+        return { ok: true, status: 200, json: async () => SCHEMA2, text: async () => '{}' };
+      },
+      postForm(url) {
+        if (url.includes('fld001')) return { ok: false, status: 422, json: async () => ({ error: { type: 'ERR' } }), text: async () => 'err' };
+        return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
+      },
+    });
+    const client = new AirtableClient(auth);
+    const result = await client.deleteFields('appTEST', [
+      { fieldId: 'fld001', expectedName: 'A' },
+      { fieldId: 'fld002', expectedName: 'B' },
+    ], { force: true });
+    assert.equal(result.succeeded.length, 1);
+    assert.equal(result.failed.length, 1);
+  });
+});

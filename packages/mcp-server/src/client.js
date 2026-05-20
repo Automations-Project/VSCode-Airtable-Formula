@@ -691,6 +691,33 @@ export class AirtableClient {
     return { deleted: true, fieldId, name: expectedName, forced: true, ...data };
   }
 
+  /**
+   * Delete multiple fields sequentially. Returns { succeeded, failed }.
+   * Each failed entry includes the fieldId and error message but does NOT
+   * abort the rest of the batch — all fields are attempted.
+   *
+   * @param {string} appId
+   * @param {{fieldId: string, expectedName: string}[]} fields
+   * @param {{ force?: boolean, onProgress?: Function }} options
+   */
+  async deleteFields(appId, fields, { force = false, onProgress } = {}) {
+    const succeeded = [];
+    const failed = [];
+
+    for (let i = 0; i < fields.length; i++) {
+      const { fieldId, expectedName } = fields[i];
+      try {
+        const result = await this.deleteField(appId, fieldId, expectedName, { force });
+        succeeded.push({ fieldId, name: expectedName, deleted: result.deleted, forced: result.forced ?? false });
+      } catch (error) {
+        failed.push({ fieldId, name: expectedName, error: error.message });
+      }
+      onProgress?.({ index: i, total: fields.length, succeeded: succeeded.length, failed: failed.length });
+    }
+
+    return { succeeded, failed };
+  }
+
   // ─── Formula Validation ───────────────────────────────────────
 
   /**
