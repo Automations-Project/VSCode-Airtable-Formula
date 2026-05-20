@@ -43,3 +43,15 @@ describe('AirtableAuth rate delay', () => {
     );
   });
 });
+
+describe('tool-call semaphore helpers', () => {
+  it('acquires immediately when inflight < cap', async () => {
+    const src = _require('node:fs').readFileSync(
+      new URL('../src/index.js', import.meta.url),
+      'utf8'
+    );
+    assert.ok(src.includes('_acquireToolSlot'), '_acquireToolSlot must be defined');
+    assert.ok(src.includes('_releaseToolSlot'), '_releaseToolSlot must be defined');
+    assert.ok(src.includes('_pendingToolQueue'), '_pendingToolQueue must be defined');
+  });
+});

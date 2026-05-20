@@ -2203,26 +2203,56 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: [...enabledTools, manageDef] };
 });
 
-// Cap on concurrent tool calls. All Airtable-bound calls funnel through the
-// auth queue (single browser context), but an aggressive LLM loop can still
-// queue thousands of requests and blow up memory. This limit rejects new calls
-// cleanly when the backlog is saturated.
+// ─── Tool-Call Concurrency Semaphore ──────────────────────────────────────
+// Queues excess calls (up to AIRTABLE_TOOL_QUEUE_WAIT_MS) rather than
+// immediately rejecting them. Prevents thundering-herd retries when the AI
+// fires more concurrent tool calls than MAX_CONCURRENT_TOOL_CALLS (default 16).
 const _rawCap = Number(process.env.AIRTABLE_MAX_CONCURRENT_TOOLS);
-// Clamp: a broken env var ("abc" → NaN, "0" → rejects all calls) must not
-// break the server. Minimum of 1, sensible default of 16.
 const MAX_CONCURRENT_TOOL_CALLS = Number.isFinite(_rawCap) && _rawCap >= 1 ? Math.floor(_rawCap) : 16;
-let inflightToolCalls = 0;
+const TOOL_QUEUE_WAIT_MS = Number.isFinite(Number(process.env.AIRTABLE_TOOL_QUEUE_WAIT_MS))
+  ? Number(process.env.AIRTABLE_TOOL_QUEUE_WAIT_MS)
+  : 60_000;
+
+let _inflightToolCalls = 0;
+const _pendingToolQueue = [];
+
+function _acquireToolSlot() {
+  if (_inflightToolCalls < MAX_CONCURRENT_TOOL_CALLS) {
+    _inflightToolCalls++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const idx = _pendingToolQueue.findIndex(e => e.resolve === resolve);
+      if (idx !== -1) _pendingToolQueue.splice(idx, 1);
+      reject(new Error(
+        `Tool call queued for ${TOOL_QUEUE_WAIT_MS}ms with no slot available ` +
+        `(${_inflightToolCalls}/${MAX_CONCURRENT_TOOL_CALLS} inflight). Retry later.`
+      ));
+    }, TOOL_QUEUE_WAIT_MS);
+    timeoutId.unref?.();
+    _pendingToolQueue.push({ resolve, reject, timeoutId });
+  });
+}
+
+function _releaseToolSlot() {
+  if (_pendingToolQueue.length > 0) {
+    const entry = _pendingToolQueue.shift();
+    clearTimeout(entry.timeoutId);
+    entry.resolve(); // slot transferred — inflight count stays the same
+    return;
+  }
+  _inflightToolCalls--;
+}
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  // manage_tools is always accessible
   const handler = handlers[name];
   if (!handler) {
     return err(`Unknown tool: ${name}`);
   }
 
-  // Block disabled tools at runtime (defense in depth)
   if (!toolConfig.isToolEnabled(name)) {
     return err(
       `Tool "${name}" is currently disabled. Active profile: "${toolConfig.activeProfile}". ` +
@@ -2230,21 +2260,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     );
   }
 
-  if (inflightToolCalls >= MAX_CONCURRENT_TOOL_CALLS) {
-    return err(
-      `Too many concurrent tool calls (${inflightToolCalls}/${MAX_CONCURRENT_TOOL_CALLS}). ` +
-      `Retry after in-flight requests drain, or set AIRTABLE_MAX_CONCURRENT_TOOLS to raise the cap.`
-    );
+  try {
+    await _acquireToolSlot();
+  } catch (slotErr) {
+    return err(slotErr.message);
   }
-
-  inflightToolCalls++;
   const traced = traceToolHandler(name, handler);
   try {
     return await traced(args || {});
   } catch (error) {
     return err(`Error in ${name}: ${error.message}`);
   } finally {
-    inflightToolCalls--;
+    _releaseToolSlot();
   }
 });
 
@@ -2298,20 +2325,18 @@ async function main() {
             `Use manage_tools to change profile or re-enable this tool.`
           );
         }
-        if (inflightToolCalls >= MAX_CONCURRENT_TOOL_CALLS) {
-          return err(
-            `Too many concurrent tool calls (${inflightToolCalls}/${MAX_CONCURRENT_TOOL_CALLS}). ` +
-            `Retry after in-flight requests drain, or set AIRTABLE_MAX_CONCURRENT_TOOLS to raise the cap.`
-          );
+        try {
+          await _acquireToolSlot();
+        } catch (slotErr) {
+          return err(slotErr.message);
         }
-        inflightToolCalls++;
         const traced = traceToolHandler(name, handler);
         try {
           return await traced(args || {});
         } catch (error) {
           return err(`Error in ${name}: ${error.message}`);
         } finally {
-          inflightToolCalls--;
+          _releaseToolSlot();
         }
       },
     });
