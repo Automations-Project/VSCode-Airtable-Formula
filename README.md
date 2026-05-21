@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/airtable.svg" alt="Airtable Formulas, Scripts, Automation, MCP & LSP" width="80" />
+<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner.svg" alt="airtable-user-mcp — 66 tools your AI assistant can't get from the official Airtable REST API" width="900" />
 
 # Airtable Formulas, Scripts, Automation, MCP & LSP
 
@@ -32,7 +32,7 @@
 
 > **Not affiliated with Airtable Inc.** This is a community-maintained project.
 >
-> **Experimental** — This project is under active development and not intended for production use. APIs, tools, and behavior may change without notice.
+> **Active development** — Breaking changes may land between minor versions. Pin to a version if you need stability.
 
 </div>
 
@@ -60,6 +60,10 @@
 Airtable's public Web API has never exposed some of the most common tasks builders actually need: creating a formula field, tweaking a view's filter set, installing an extension, or validating a formula before it breaks production. The official Airtable MCP server is a thin wrapper over that same REST API, so it inherits every one of those gaps.
 
 **`airtable-user-mcp` is an add-on to the official Airtable MCP, not a replacement.** It uses Airtable's own internal API (the one the web UI uses) to cover exactly the surface area the REST API can't reach. Register both servers in your AI client and your assistant gets the full Airtable automation experience — records over HTTP via the official MCP, plus schema, formulas, views, and extensions via this one.
+
+<div align="center">
+<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/architecture.svg" alt="Architecture: AI Client → Official MCP + airtable-user-mcp → Airtable" width="900" />
+</div>
 
 ---
 
@@ -113,6 +117,11 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 
 ## Use both MCPs together
 
+```bash
+npx -y airtable-user-mcp login          # one-time browser login
+claude mcp add airtable --scope user -- npx -y airtable-user-mcp   # Claude Code
+```
+
 `airtable-user-mcp` is additive. Register the official Airtable MCP following [Airtable's setup guide](https://support.airtable.com/docs/using-the-airtable-mcp-server), then add this one alongside it in the same `mcpServers` block:
 
 ```json
@@ -157,15 +166,6 @@ This monorepo ships **three products** from one source tree:
 ---
 
 ## Features
-
-### VS Code Extension
-
-- **Formula Editor** — Syntax highlighting, IntelliSense, beautify / minify for `.formula` files
-- **MCP Server** — One-click MCP registration for multiple IDEs
-- **AI Skills** — Auto-install Airtable-specific skills, rules, and workflows for AI coding assistants
-- **Airtable Login** — Credentials in OS keychain, browser-based auth with auto-refresh
-- **Dashboard** — React webview with Overview, Setup, and Settings tabs
-
 
 ### MCP Server (66 Tools)
 
