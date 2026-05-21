@@ -214,6 +214,8 @@ jobs:
             readme = readme.replace(/\| <img src=\"[^\"]*claude\\.svg\"[^|]*\|[^\n]*\n/,
               '| Claude Desktop | Claude Code | Cursor | Windsurf | Cline | Amp |\n');
             readme = readme.replace(/<img src=\"[^\"]*mcp\\.svg\"[^/]*\\/>/g, '');
+            readme = readme.replace(/assets\/banner\.svg/g, 'assets/banner.png');
+            readme = readme.replace(/assets\/architecture\.svg/g, 'assets/architecture.png');
             fs.writeFileSync('packages/extension/README.md', readme);
           "
 
