@@ -4,7 +4,7 @@
 
 # airtable-user-mcp
 
-**Community add-on to the official Airtable MCP — 62 tools your AI assistant can't get from the public REST API**
+**Community add-on to the official Airtable MCP — 66 tools your AI assistant can't get from the public REST API**
 
 <p align="center">
   <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
@@ -57,11 +57,14 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| Total tools | ~17 | **62** |
+| Total tools | ~17 | **66** |
 | Auth | PAT or OAuth, per-scope | **Log in once with your normal account** (SSO/2FA supported) |
 | Transport | HTTP (remote) | stdio (local, private) |
 | Data routing | Through `mcp.airtable.com` | **Direct from your machine** |
 | Schema read | Partial | **Full** incl. view state |
+| **Read records** (up to 1 000/call, resolved values) | ❌ | ✅ `query_records` |
+| **Search records by text** (incl. lookup & rollup fields) | ❌ `filterByFormula` silently fails on lookup fields | ✅ `query_records.search` — works on all field types |
+| **Duplicate records** | ❌ | ✅ `duplicate_records` |
 | Create formula fields | ❌ | ✅ |
 | Create rollup / lookup / count fields | ❌ `UNSUPPORTED_FIELD_TYPE_FOR_CREATE` | ✅ |
 | Update a formula's text | ❌ | ✅ |
@@ -80,7 +83,6 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
 | Tool profiles & per-tool toggles | ❌ | ✅ read-only / safe-write / full / custom |
-| `filterByFormula` on record queries | ❌ Explicitly disallowed | ✅ |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
 
@@ -106,7 +108,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 62 tools.
+That's it. Your MCP client connects via **stdio** and gets access to all 66 tools.
 
 When the daemon is running (started automatically by the VS Code extension, or via `npx airtable-user-mcp daemon start`),
 subsequent `npx airtable-user-mcp` invocations transparently proxy their stdio to the shared daemon —
@@ -227,7 +229,7 @@ Add the `airtable` entry to `mcpServers`:
 }
 ```
 
-Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 62 tools.
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 66 tools.
 
 </details>
 
@@ -250,7 +252,7 @@ Verify:
 claude mcp list
 ```
 
-You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 62 tools are available.
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 66 tools are available.
 
 </details>
 
@@ -355,9 +357,9 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 ---
 
-## Tools (62)
+## Tools (66)
 
-### Schema Read (9)
+### Schema Read (11)
 
 | Tool | Description |
 |:-----|:------------|
@@ -370,6 +372,34 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `validate_formula` | Validate a formula expression before applying |
 | `list_view_sections` | List sidebar sections for a table with their view membership |
 | `list_record_templates` | List record templates (saved row scaffolds) for a table |
+| `download_formula_field` | Download a formula field to a local `.formula` file with an `AT:` metadata header. Pass `outputPath` to save; omit to read inline. |
+| `download_base_formulas` | Download **all** formula fields in a base to `.formula` files, organised into per-table subfolders. Each file includes the `AT:` header for one-click upload. |
+
+### Record Read (1)
+
+Reads resolved record data via Airtable's internal readQueries endpoint — bypasses the REST API
+`filterByFormula` limitation that silently fails on lookup and rollup fields.
+
+| Tool | Description |
+|:-----|:------------|
+| `query_records` | Fetch up to 1 000 records from a view with all field values **already resolved** (lookup fields return the linked record's display string, not a raw ID). Pass `search` for case-insensitive substring matching across every field value including lookups, rollups, formula fields, and multi-select arrays. Increase `limit` (max 1 000) to widen the search window. |
+
+#### Why `query_records` instead of the Official MCP's record search
+
+```
+// ❌ REST API filterByFormula — silently fails for lookup fields
+//    FIND() operates on the raw cell value, not the resolved display string
+filterByFormula: "FIND('John Smith', {Name Lookup})"   // returns 0 results
+
+// ✅ query_records.search — works on all field types
+{ "search": "john smith", "limit": 500 }   // matches any field containing "john smith"
+```
+
+### Record Write (1)
+
+| Tool | Description |
+|:-----|:------------|
+| `duplicate_records` | Duplicate one or more existing records within the same table. Pass `sourceRowIds` array; returns the new record IDs. |
 
 ### Table Management (3)
 
@@ -481,6 +511,23 @@ Args: { "appId": "appXXX", "tableId": "tblXXX", "formulaText": "IF({Price}>0,{Pr
 Tool: create_formula_field
 Args: { "appId": "appXXX", "tableId": "tblXXX", "name": "Total", "formulaText": "IF({Price}>0,{Price}*{Qty},0)" }
 ```
+
+### Search records (including lookup fields)
+
+```
+Tool: query_records
+Args: {
+  "appId": "appXXXXXXXXXXXXXX",
+  "tableId": "tblXXX",
+  "viewId": "viwXXX",
+  "search": "john smith",
+  "limit": 500
+}
+```
+
+Returns every record in the view where any field value contains "john smith" — including fields
+whose value comes from a lookup, rollup, or formula. The Official Airtable MCP's `filterByFormula`
+with `FIND()` or `SEARCH()` silently fails on lookup fields; `query_records` does not.
 
 ### Configure view filters
 

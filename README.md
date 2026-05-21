@@ -4,7 +4,7 @@
 
 # Airtable Formulas, Scripts, Automation, MCP & LSP
 
-**Formula, script & automation editor · MCP server (62 tools) · Language server · AI skills**
+**Formula, script & automation editor · MCP server (66 tools) · Language server · AI skills**
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/version-short/Nskha.airtable-formula.svg?style=for-the-badge&label=VS%20Code&colorB=007ACC" alt="VS Code version" /></a>
@@ -45,7 +45,7 @@
 | **Formula Editor** | Syntax highlighting, IntelliSense, beautify / minify | `.formula`, `.min.formula` |
 | **Script Editor** | Completions, hover docs, diagnostics | `.ats`, `.script` |
 | **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
-| **MCP Server (62 tools)** | Full Airtable internal API — schema, views, fields, extensions, templates | — |
+| **MCP Server (66 tools)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
 | **Language Server (LSP)** | Standalone multi-editor support — Neovim, Zed, Helix, OpenCode | All above |
 | **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
 | **AI Skills** | Pre-built Airtable-specific rules and workflows for AI coding assistants | — |
@@ -69,11 +69,14 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| **Total tools** | ~17 | **62** |
+| **Total tools** | ~17 | **66** |
 | **Auth model** | Personal Access Token or OAuth, per-scope setup | **Log in once with your normal Airtable account** (SSO/2FA supported) |
 | **Transport** | HTTP (remote) | stdio (local, private) |
 | **Data never leaves your machine** | ❌ Requests go through `mcp.airtable.com` | ✅ Runs locally against Airtable's API |
 | **Schema read (bases, tables, fields, views)** | Partial (no view config) | **Full** — filters, sorts, groups, visibility, row height, descriptions |
+| **Read records with resolved field values** | Partial | ✅ `query_records` — returns lookup/rollup/formula fields fully resolved |
+| **Search records by text** (incl. lookup fields) | ❌ `filterByFormula` with `FIND()`/`SEARCH()` silently fails on lookup fields | ✅ `query_records.search` — substring match on all resolved values |
+| **Duplicate records** | ❌ | ✅ `duplicate_records` |
 | **Create formula fields** | ❌ `UNSUPPORTED_FIELD_TYPE_FOR_CREATE` | ✅ |
 | **Create rollup fields** | ❌ | ✅ |
 | **Create lookup / multipleLookupValues fields** | ❌ | ✅ |
@@ -96,7 +99,6 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
 | **Create dashboard pages** | ❌ | ✅ |
 | **Tool profiles & per-tool toggles** | ❌ | ✅ read-only / safe-write / full / custom |
-| **`filterByFormula` on record queries** | ❌ Explicitly disallowed | ✅ |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
 | **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
@@ -165,15 +167,17 @@ This monorepo ships **three products** from one source tree:
 - **Dashboard** — React webview with Overview, Setup, and Settings tabs
 
 
-### MCP Server (62 Tools)
+### MCP Server (66 Tools)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
 | Category | Tools | Highlights |
 |:---------|:-----:|:-----------|
-| **Schema Read** | 9 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates |
+| **Schema Read** | 11 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates; download all formula fields to local files |
+| **Record Read** | 1 | `query_records` — up to 1 000 records/call with resolved field values; `search` param works on lookup/rollup fields (REST API `filterByFormula` doesn't) |
+| **Record Write** | 1 | `duplicate_records` — bulk copy records within a table |
 | **Table Management** | 3 | create / rename / delete tables |
-| **Field Management** | 8 | Create formula / rollup / lookup / count fields, validate formulas, update descriptions, delete |
+| **Field Management** | 9 | Create formula / rollup / lookup / count fields, validate formulas, update descriptions, delete single or bulk |
 | **View Configuration** | 20 | Filters, sorts, grouping, columns, freezing, row height, covers, color rules, calendar dates, create / duplicate / rename / delete |
 | **Sidebar Sections** | 4 | Create, rename, move-into-section, delete (auto-promotes contained views to ungrouped) |
 | **Record Templates** | 8 | Create / rename / describe / set cells / set columns / duplicate / apply / delete saved row scaffolds |
