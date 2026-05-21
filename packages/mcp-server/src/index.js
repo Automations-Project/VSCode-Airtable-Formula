@@ -212,13 +212,15 @@ const TOOLS = [
   },
   {
     name: 'list_fields',
-    description: 'List all fields (columns) in a specific table of an Airtable base.',
+    description: 'List fields (columns) in a table. Returns id, name, type, and typeOptions for each field. On large tables (100+ fields) use fieldType or nameContains to filter the response and reduce context size.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
         appId: { type: 'string', description: 'The Airtable base/application ID' },
-        tableIdOrName: { type: 'string', description: 'The table ID or name to list fields for' },
+        tableIdOrName: { type: 'string', description: 'The table ID (tblXXX) or exact name' },
+        fieldType: { type: 'string', description: 'Return only fields of this type, e.g. "formula", "text", "number", "checkbox"' },
+        nameContains: { type: 'string', description: 'Return only fields whose name contains this substring (case-insensitive)' },
         debug: debugProp,
       },
       required: ['appId', 'tableIdOrName'],
@@ -1545,14 +1547,19 @@ const handlers = {
     return ok(summary, table, debug);
   },
 
-  async list_fields({ appId, tableIdOrName, debug }) {
+  async list_fields({ appId, tableIdOrName, fieldType, nameContains, debug }) {
     const table = await client.resolveTable(appId, tableIdOrName);
-    const fields = (table.columns || table.fields || []).map(f => ({
+    let fields = (table.columns || table.fields || []).map(f => ({
       id: f.id,
       name: f.name,
       type: f.type,
       typeOptions: f.typeOptions,
     }));
+    if (fieldType) fields = fields.filter(f => f.type === fieldType);
+    if (nameContains) {
+      const needle = nameContains.toLowerCase();
+      fields = fields.filter(f => f.name.toLowerCase().includes(needle));
+    }
     return ok(fields, table, debug);
   },
 

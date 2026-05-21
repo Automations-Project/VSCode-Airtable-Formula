@@ -368,7 +368,7 @@ export class AirtableAuth {
 
   // ─── Raw API Call (no queue, no recovery) ─────────────────────
 
-  async _rawApiCall(method, urlPath, body = null, appId = null, contentType = 'form') {
+  async _rawApiCall(method, urlPath, body = null, appId = null, contentType = 'form', evalTimeoutMs = 15_000) {
     const url = urlPath.startsWith('http') ? urlPath : `https://airtable.com${urlPath}`;
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const csrfToken = this.csrfToken;
@@ -379,13 +379,14 @@ export class AirtableAuth {
 
     // H3 — per-evaluate timeout. Playwright has no built-in timeout on
     // page.evaluate; a CDP-dead Chromium can hang forever. We race against
-    // a 15s timer and let _apiCall's catch trigger _recoverSession.
-    const EVAL_TIMEOUT_MS = 15_000;
+    // a configurable timer (default 15s) and let _apiCall's catch trigger
+    // _recoverSession. Callers handling large responses (e.g. getApplicationData)
+    // should pass a higher evalTimeoutMs to avoid spurious recovery cycles.
     const withTimeout = (promise) => Promise.race([
       promise,
       new Promise((_, reject) => setTimeout(
-        () => reject(new Error(`page.evaluate exceeded ${EVAL_TIMEOUT_MS / 1000}s; browser may be unresponsive`)),
-        EVAL_TIMEOUT_MS,
+        () => reject(new Error(`page.evaluate exceeded ${evalTimeoutMs / 1000}s; browser may be unresponsive`)),
+        evalTimeoutMs,
       )),
     ]);
 
@@ -448,7 +449,7 @@ export class AirtableAuth {
 
   // ─── Queued API Call (with session recovery & rate-limit backoff) ──────────────────
 
-  async _apiCall(method, urlPath, body = null, appId = null, contentType = 'form') {
+  async _apiCall(method, urlPath, body = null, appId = null, contentType = 'form', evalTimeoutMs = 15_000) {
     return this._enqueue(async () => {
       await this.ensureLoggedIn();
 
@@ -464,7 +465,7 @@ export class AirtableAuth {
         }
         let result;
         try {
-          result = await this._rawApiCall(method, urlPath, body, appId, contentType);
+          result = await this._rawApiCall(method, urlPath, body, appId, contentType, evalTimeoutMs);
         } catch (evalError) {
           // page.evaluate itself failed (browser crashed, context destroyed)
           if (!this._recovering && attempt < MAX_RETRIES) {
@@ -527,11 +528,11 @@ export class AirtableAuth {
     }
   }
 
-  async get(url, appId) {
+  async get(url, appId, { evalTimeoutMs = 15_000 } = {}) {
     const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
     trace('http', 'http:request', { method: 'GET', endpoint_pattern: pattern, has_payload: false });
     const start = Date.now();
-    const result = await this._apiCall('GET', url, null, appId);
+    const result = await this._apiCall('GET', url, null, appId, 'form', evalTimeoutMs);
     trace('http', 'http:response', { endpoint_pattern: pattern, status: result.status, duration_ms: Date.now() - start });
     return this._wrapResponse(result);
   }

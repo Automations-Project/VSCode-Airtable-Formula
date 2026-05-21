@@ -424,13 +424,57 @@ export class AirtableClient {
       requestId: this._genRequestId(),
     });
     const url = `https://airtable.com/v0.3/application/${appId}/read?${params}`;
-    const res = await this.auth.get(url, appId);
+    // Use a generous timeout — full-base responses can exceed 1MB on large bases.
+    const res = await this.auth.get(url, appId, { evalTimeoutMs: 60_000 });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`getApplicationData failed (${res.status}): ${text}`);
     }
     const data = await res.json();
     this.cache.setFull(appId, data);
+    return data;
+  }
+
+  /**
+   * Fetch schema data for a single table using includeDataForTableIds.
+   * Dramatically reduces response size on large bases (avoids downloading all tables).
+   * Falls back to caching full data if the endpoint returns all tables anyway.
+   */
+  async getApplicationDataForTable(appId, tableId) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+
+    const cachedTable = this.cache.getTable(appId, tableId);
+    if (cachedTable) return cachedTable;
+
+    // Also accept a warm full-cache hit — no extra fetch needed.
+    const cachedFull = this.cache.getFull(appId);
+    if (cachedFull) return cachedFull;
+
+    const params = new URLSearchParams({
+      stringifiedObjectParams: JSON.stringify({
+        includeDataForTableIds: [tableId],
+        includeDataForViewIds: null,
+        shouldIncludeSchemaChecksum: false,
+      }),
+      requestId: this._genRequestId(),
+    });
+    const url = `https://airtable.com/v0.3/application/${appId}/read?${params}`;
+    const res = await this.auth.get(url, appId, { evalTimeoutMs: 60_000 });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`getApplicationDataForTable failed (${res.status}): ${text}`);
+    }
+    const data = await res.json();
+    const tables = data?.data?.tableSchemas || data?.data?.tables || [];
+
+    if (tables.length === 1 && tables[0].id === tableId) {
+      // Targeted response — cache per-table only (don't pollute the full cache).
+      this.cache.setTable(appId, tableId, data);
+    } else {
+      // Endpoint returned the full base (no server-side filtering) — cache as full.
+      this.cache.setFull(appId, data);
+    }
     return data;
   }
 
@@ -462,7 +506,11 @@ export class AirtableClient {
   // ─── Schema Resolution Helpers ────────────────────────────────
 
   async resolveTable(appId, tableIdOrName) {
-    const data = await this.getApplicationData(appId);
+    // When caller passes a table ID we can do a targeted single-table fetch,
+    // avoiding a full-base download on large bases.
+    const data = tableIdOrName.startsWith('tbl')
+      ? await this.getApplicationDataForTable(appId, tableIdOrName)
+      : await this.getApplicationData(appId);
     const tables = data?.data?.tableSchemas || data?.data?.tables || [];
 
     // Exact ID match is always unambiguous.
@@ -692,6 +740,31 @@ export class AirtableClient {
   }
 
   /**
+   * After a destroyMultipleColumns network error, verify which fields are actually
+   * gone from a fresh schema fetch. This handles the case where the request timed
+   * out at the MCP layer but Airtable had already deleted the fields (Bug 6).
+   */
+  async _verifyFieldsDeletion(appId, tableFields) {
+    this.cache.invalidate(appId);
+    const freshData = await this.getApplicationData(appId);
+    const tables = freshData?.data?.tableSchemas || freshData?.data?.tables || [];
+    const stillExist = new Set();
+    for (const t of tables) {
+      for (const f of (t.columns || t.fields || [])) stillExist.add(f.id);
+    }
+    const succeeded = [];
+    const failed = [];
+    for (const { fieldId, expectedName } of tableFields) {
+      if (!stillExist.has(fieldId)) {
+        succeeded.push({ fieldId, name: expectedName, deleted: true, forced: false, timedOut: true });
+      } else {
+        failed.push({ fieldId, name: expectedName, error: 'destroyMultipleColumns timed out; field still exists' });
+      }
+    }
+    return { succeeded, failed };
+  }
+
+  /**
    * Delete multiple fields using the native batch endpoint (destroyMultipleColumns).
    * Fields are grouped by tableId and each table's fields are deleted in 1-2 API
    * calls instead of N×3. Returns { succeeded, failed }.
@@ -730,11 +803,24 @@ export class AirtableClient {
     for (const [tableId, tableFields] of byTable) {
       const columnIds = tableFields.map(f => f.fieldId);
 
-      const checkRes = await this.auth.postForm(
-        `https://airtable.com/v0.3/table/${tableId}/destroyMultipleColumns`,
-        this._mutationParams({ columnIds, checkSchemaDependencies: true }, appId),
-        appId,
-      );
+      let checkRes;
+      try {
+        checkRes = await this.auth.postForm(
+          `https://airtable.com/v0.3/table/${tableId}/destroyMultipleColumns`,
+          this._mutationParams({ columnIds, checkSchemaDependencies: true }, appId),
+          appId,
+        );
+      } catch (err) {
+        // Network/timeout — Airtable may have already deleted the fields.
+        // Verify by re-fetching the schema (Bug 6: silent success masking).
+        const verified = await this._verifyFieldsDeletion(appId, tableFields).catch(ve => ({
+          succeeded: [],
+          failed: tableFields.map(f => ({ fieldId: f.fieldId, name: f.expectedName, error: `destroyMultipleColumns network error: ${err.message}; verification also failed: ${ve.message}` })),
+        }));
+        succeeded.push(...verified.succeeded);
+        failed.push(...verified.failed);
+        continue;
+      }
 
       if (checkRes.ok) {
         this.cache.invalidate(appId);
@@ -758,11 +844,22 @@ export class AirtableClient {
       }
 
       // Deps exist and force=true: second call without checkSchemaDependencies
-      const forceRes = await this.auth.postForm(
-        `https://airtable.com/v0.3/table/${tableId}/destroyMultipleColumns`,
-        this._mutationParams({ columnIds }, appId),
-        appId,
-      );
+      let forceRes;
+      try {
+        forceRes = await this.auth.postForm(
+          `https://airtable.com/v0.3/table/${tableId}/destroyMultipleColumns`,
+          this._mutationParams({ columnIds }, appId),
+          appId,
+        );
+      } catch (err) {
+        const verified = await this._verifyFieldsDeletion(appId, tableFields).catch(ve => ({
+          succeeded: [],
+          failed: tableFields.map(f => ({ fieldId: f.fieldId, name: f.expectedName, error: `destroyMultipleColumns force network error: ${err.message}; verification also failed: ${ve.message}` })),
+        }));
+        succeeded.push(...verified.succeeded);
+        failed.push(...verified.failed);
+        continue;
+      }
 
       if (!forceRes.ok) {
         const errText = await forceRes.text().catch(() => '');

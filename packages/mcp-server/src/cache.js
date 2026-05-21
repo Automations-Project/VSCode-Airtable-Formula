@@ -19,6 +19,8 @@ export class SchemaCache {
     // we use for simple LRU-ish eviction (evict oldest when size exceeds cap).
     this._scaffolding = new Map();
     this._full = new Map();
+    // Map<`${appId}:${tableId}`, { data, timestamp }> — single-table targeted fetches
+    this._table = new Map();
   }
 
   // ─── Scaffolding Cache ────────────────────────────────────────
@@ -41,20 +43,34 @@ export class SchemaCache {
     this._setEntry(this._full, appId, data);
   }
 
+  // ─── Per-Table Cache ──────────────────────────────────────────
+
+  getTable(appId, tableId) {
+    return this._getEntry(this._table, `${appId}:${tableId}`);
+  }
+
+  setTable(appId, tableId, data) {
+    this._setEntry(this._table, `${appId}:${tableId}`, data);
+  }
+
   // ─── Invalidation ─────────────────────────────────────────────
 
   /**
    * Invalidate caches for an app after a mutation.
-   * Clears both full and scaffolding since field changes affect both.
+   * Clears full, scaffolding, and all per-table entries for this app.
    */
   invalidate(appId) {
     this._full.delete(appId);
     this._scaffolding.delete(appId);
+    for (const key of this._table.keys()) {
+      if (key.startsWith(`${appId}:`)) this._table.delete(key);
+    }
   }
 
   invalidateAll() {
     this._full.clear();
     this._scaffolding.clear();
+    this._table.clear();
   }
 
   // ─── Internals ────────────────────────────────────────────────
