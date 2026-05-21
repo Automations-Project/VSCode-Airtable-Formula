@@ -2232,6 +2232,126 @@ export class AirtableClient {
 
   // ─── Helpers ──────────────────────────────────────────────────
 
+  // ─── Record Read ──────────────────────────────────────────────
+
+  /**
+   * Query records from a view via the readQueries snapshot endpoint.
+   * Uses allowMsgpackOfResult:false to get a JSON response.
+   *
+   * @param {string} appId
+   * @param {string} tableId
+   * @param {string} viewId
+   * @param {{ columnIds?: string[], limit?: number }} options
+   */
+  async queryRecords(appId, tableId, viewId, { columnIds, limit = 100 } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    assertAirtableId(viewId, 'viewId');
+
+    let resolvedColumnIds = columnIds;
+    if (!resolvedColumnIds || resolvedColumnIds.length === 0) {
+      const table = await this.resolveTable(appId, tableId);
+      resolvedColumnIds = (table.columns || table.fields || []).map(f => f.id);
+    }
+
+    const queryId = 'qry' + this._genRandomId();
+    const clampedLimit = Math.max(1, Math.min(limit ?? 100, 1000));
+
+    const payload = {
+      queries: [{
+        id: queryId,
+        spec: {
+          source: { type: 'view', tableId, viewId },
+          columnIds: resolvedColumnIds,
+          filters: null,
+          sorts: [],
+          limit: clampedLimit,
+        },
+        realm: { type: 'application' },
+        mayHaveAcceptableAuthorizationError: false,
+      }],
+      subscribeToRealtimeUpdates: false,
+      allowMsgpackOfResult: false,
+    };
+
+    const url = `https://airtable.com/v0.3/application/${appId}/readQueries`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`readQueries failed (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const queryResult = data?.data?.queryResults?.[queryId] || {};
+    const rows = queryResult.rows || [];
+
+    return {
+      tableId,
+      viewId,
+      limit: clampedLimit,
+      count: rows.length,
+      rows: rows.map(r => ({
+        id: r.id,
+        fields: r.cellValuesByColumnId || r.cellValues || {},
+      })),
+    };
+  }
+
+  // ─── Record Write ─────────────────────────────────────────────
+
+  /**
+   * Duplicate records via the pasteCells endpoint.
+   * Creates exact copies of the specified sourceRowIds within the same table.
+   *
+   * @param {string} appId
+   * @param {string} tableId
+   * @param {string} viewId
+   * @param {string[]} sourceRowIds
+   */
+  async duplicateRecords(appId, tableId, viewId, sourceRowIds) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    assertAirtableId(viewId, 'viewId');
+
+    if (!Array.isArray(sourceRowIds) || sourceRowIds.length === 0) {
+      throw new Error('sourceRowIds must be a non-empty array of record IDs');
+    }
+
+    const table = await this.resolveTable(appId, tableId);
+    const sourceColumnConfigs = (table.columns || table.fields || []).map(f => ({
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      typeOptions: f.typeOptions || null,
+    }));
+
+    const payload = {
+      viewId,
+      sourceApplicationId: appId,
+      sourceTableId: tableId,
+      sourceColumnConfigs,
+      isCut: false,
+      sourceRowIds,
+    };
+
+    const url = `https://airtable.com/v0.3/table/${tableId}/pasteCells`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`pasteCells failed (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const result = data?.data || {};
+    return {
+      duplicated: true,
+      count: result.pastedRowIds?.length ?? 0,
+      rowIds: result.pastedRowIds || [],
+    };
+  }
+
   _genRequestId() {
     return 'req' + this._genRandomId();
   }

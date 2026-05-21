@@ -568,7 +568,8 @@ export function Settings() {
 
           {settings.mcp.toolProfile.profile === 'custom' && (
             <div className="stack stack-sm" style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (9 tools)" value={settings.mcp.toolProfile.categories.read}                   settingKey="mcp.categories.read" />
+              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (11 tools)" value={settings.mcp.toolProfile.categories.read}                   settingKey="mcp.categories.read" />
+              <SettingToggle label="Record Read"          desc="query_records — snapshot read of up to 1000 rows per call (1 tool)"                            value={settings.mcp.toolProfile.categories.recordRead}             settingKey="mcp.categories.recordRead" />
               <SettingToggle label="Table Write"          desc="Tables + record templates: create / rename / update / set cells / duplicate / apply (9 tools)" value={settings.mcp.toolProfile.categories.tableWrite}             settingKey="mcp.categories.tableWrite" />
               <SettingToggle label="Table Destructive"    desc="delete_table, delete_record_template (2 tools)"                              value={settings.mcp.toolProfile.categories.tableDestructive}       settingKey="mcp.categories.tableDestructive" />
               <SettingToggle label="Field Write"          desc="Create / update / rename / duplicate fields (7 tools)"                        value={settings.mcp.toolProfile.categories.fieldWrite}             settingKey="mcp.categories.fieldWrite" />
@@ -579,6 +580,7 @@ export function Settings() {
               <SettingToggle label="View Sections (destructive)" desc="delete_view_section (1 tool)"                                          value={settings.mcp.toolProfile.categories.viewSectionDestructive} settingKey="mcp.categories.viewSectionDestructive" />
               <SettingToggle label="Form Metadata"        desc="Edit legacy form views — public-facing (2 tools)"                             value={settings.mcp.toolProfile.categories.formWrite}              settingKey="mcp.categories.formWrite" />
               <SettingToggle label="Extension Management" desc="Create / install / duplicate / remove extensions (7 tools)"                   value={settings.mcp.toolProfile.categories.extension}              settingKey="mcp.categories.extension" />
+              <SettingToggle label="Record Write"         desc="duplicate_records — bulk record duplication via pasteCells (1 tool)"                            value={settings.mcp.toolProfile.categories.recordWrite}            settingKey="mcp.categories.recordWrite" />
             </div>
           )}
 

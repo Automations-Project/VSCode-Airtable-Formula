@@ -1452,6 +1452,54 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
       required: ['appId', 'installationId'],
     },
   },
+
+  // ── Record Read Tools ──
+  {
+    name: 'query_records',
+    description: 'Read records from an Airtable table view via the internal readQueries snapshot endpoint. Returns up to 1000 records per call with their field values. Useful for bulk data access, audits, and AI-assisted analysis.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID (e.g. "tblXXX")' },
+        viewId: { type: 'string', description: 'The view ID (e.g. "viwXXX") — determines row order and visible fields' },
+        columnIds: {
+          type: 'array',
+          description: 'Optional: specific field IDs to fetch. Omit to fetch all fields in the table schema.',
+          items: { type: 'string' },
+        },
+        limit: {
+          type: 'integer',
+          description: 'Maximum number of records to return (1–1000). Default: 100.',
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'viewId'],
+    },
+  },
+
+  // ── Record Write Tools ──
+  {
+    name: 'duplicate_records',
+    description: 'Duplicate one or more existing records within a table. Creates exact copies of the specified source records in the same table and view. Returns the new record IDs.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID containing the records to duplicate' },
+        viewId: { type: 'string', description: 'The view ID to paste the duplicated records into' },
+        sourceRowIds: {
+          type: 'array',
+          description: 'Array of record IDs to duplicate (e.g. ["recXXX", "recYYY"])',
+          items: { type: 'string' },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'viewId', 'sourceRowIds'],
+    },
+  },
 ];
 
 // ─── Meta-Tool: manage_tools ─────────────────────────────────
@@ -2188,6 +2236,20 @@ const handlers = {
       result,
       debug,
     );
+  },
+
+  // ── Record Read ──
+
+  async query_records({ appId, tableId, viewId, columnIds, limit, debug }) {
+    const result = await client.queryRecords(appId, tableId, viewId, { columnIds, limit });
+    return ok(result, result, debug);
+  },
+
+  // ── Record Write ──
+
+  async duplicate_records({ appId, tableId, viewId, sourceRowIds, debug }) {
+    const result = await client.duplicateRecords(appId, tableId, viewId, sourceRowIds);
+    return ok(result, result, debug);
   },
 
   // ── Meta: Tool Management ──

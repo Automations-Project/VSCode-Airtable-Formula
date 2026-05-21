@@ -102,11 +102,18 @@ export const TOOL_CATEGORIES = {
   rename_extension:       'extension',
   duplicate_extension:    'extension',
   remove_extension:       'extension',
+
+  // Record Read (snapshot read via readQueries)
+  query_records:          'record-read',
+
+  // Record Write (duplicate via pasteCells)
+  duplicate_records:      'record-write',
 };
 
 /** Human-readable labels for categories */
 export const CATEGORY_LABELS = {
   'read':                     'Read / Inspect',
+  'record-read':              'Record Read',
   'table-write':              'Table Write',
   'table-destructive':        'Table Destructive',
   'field-write':              'Field Write',
@@ -117,23 +124,25 @@ export const CATEGORY_LABELS = {
   'view-section-destructive': 'View Sections (destructive)',
   'form-write':               'Form Metadata',
   'extension':                'Extension Management',
+  'record-write':             'Record Write',
 };
 
 // ─── Built-in Profiles ───────────────────────────────────────
 
 export const BUILTIN_PROFILES = {
   'read-only': {
-    description: 'Schema inspection and formula validation only',
-    categories: ['read'],
+    description: 'Schema inspection, formula validation, and record reading only',
+    categories: ['read', 'record-read'],
   },
   'safe-write': {
-    description: 'Read + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
-    categories: ['read', 'table-write', 'field-write', 'view-write', 'view-section'],
+    description: 'Read + record read/write + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
+    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'],
   },
   full: {
     description: 'All tools enabled including destructive ops, form metadata, and extensions',
     categories: [
-      'read', 'table-write', 'table-destructive',
+      'read', 'record-read', 'record-write',
+      'table-write', 'table-destructive',
       'field-write', 'field-destructive',
       'view-write', 'view-destructive',
       'view-section', 'view-section-destructive',

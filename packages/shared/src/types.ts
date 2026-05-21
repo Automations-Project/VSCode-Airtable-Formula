@@ -94,6 +94,7 @@ export type ToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
 
 export interface ToolCategories {
   read:                    boolean;
+  recordRead:              boolean;
   tableWrite:              boolean;
   tableDestructive:        boolean;
   fieldWrite:              boolean;
@@ -104,6 +105,7 @@ export interface ToolCategories {
   viewSectionDestructive:  boolean;
   formWrite:               boolean;
   extension:               boolean;
+  recordWrite:             boolean;
 }
 
 export interface ToolProfileSnapshot {

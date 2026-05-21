@@ -27,7 +27,8 @@ type ExtraCategoryKey =
   | 'field-write' | 'field-destructive'
   | 'view-write' | 'view-destructive'
   | 'view-section' | 'view-section-destructive'
-  | 'form-write';
+  | 'form-write'
+  | 'record-read' | 'record-write';
 export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategoryKey> = {
   // Read-only / inspection
   get_base_schema:           'read',
@@ -41,6 +42,8 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   list_record_templates:     'read',
   download_formula_field:    'read',
   download_base_formulas:    'read',
+  // Record read (snapshot read via readQueries)
+  query_records:             'record-read',
   // Table mutations (non-destructive)
   create_table:              'table-write',
   rename_table:              'table-write',
@@ -104,10 +107,13 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   rename_extension:          'extension',
   duplicate_extension:       'extension',
   remove_extension:          'extension',
+  // Record write (duplicate via pasteCells)
+  duplicate_records:         'record-write',
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
   'read':                     'Read / Inspect',
+  'record-read':              'Record Read',
   'table-write':              'Table Write',
   'table-destructive':        'Table Destructive',
   'field-write':              'Field Write',
@@ -118,6 +124,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'view-section-destructive': 'View Sections (destructive)',
   'form-write':               'Form Metadata',
   'extension':                'Extension Management',
+  'record-write':             'Record Write',
 };
 
 interface ProfileDef {
@@ -127,12 +134,13 @@ interface ProfileDef {
 }
 
 export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', ProfileDef> = {
-  'read-only': { description: 'Schema inspection and formula validation only', categories: ['read'] },
-  'safe-write':{ description: 'Read + create/update tables, fields, views, sidebar sections, and record templates (no deletes, no form metadata)',
-                 categories: ['read', 'table-write', 'field-write', 'view-write', 'view-section'] },
+  'read-only': { description: 'Schema inspection, formula validation, and record reading only', categories: ['read', 'record-read'] },
+  'safe-write':{ description: 'Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates (no deletes, no form metadata)',
+                 categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'] },
   full:        { description: 'All tools enabled including destructive ops, form metadata, and extensions',
                  categories: [
-                   'read', 'table-write', 'table-destructive',
+                   'read', 'record-read', 'record-write',
+                   'table-write', 'table-destructive',
                    'field-write', 'field-destructive',
                    'view-write', 'view-destructive',
                    'view-section', 'view-section-destructive',
@@ -143,6 +151,7 @@ export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', Profi
 // Settings key suffix → file-format category key
 const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
   read:                    'read',
+  recordRead:              'record-read',
   tableWrite:              'table-write',
   tableDestructive:        'table-destructive',
   fieldWrite:              'field-write',
@@ -153,6 +162,7 @@ const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
   viewSectionDestructive:  'view-section-destructive',
   formWrite:               'form-write',
   extension:               'extension',
+  recordWrite:             'record-write',
 };
 
 // Inverse: file-format category key → settings key suffix
@@ -243,6 +253,7 @@ export class ToolProfileManager implements vscode.Disposable {
     const profile = (cfg.get<string>('mcp.toolProfile', 'full') as ToolProfileName) ?? 'full';
     const categories: ToolCategories = {
       read:                   cfg.get('mcp.categories.read',                   true),
+      recordRead:             cfg.get('mcp.categories.recordRead',             true),
       tableWrite:             cfg.get('mcp.categories.tableWrite',             true),
       tableDestructive:       cfg.get('mcp.categories.tableDestructive',       true),
       fieldWrite:             cfg.get('mcp.categories.fieldWrite',             true),
@@ -253,6 +264,7 @@ export class ToolProfileManager implements vscode.Disposable {
       viewSectionDestructive: cfg.get('mcp.categories.viewSectionDestructive', true),
       formWrite:              cfg.get('mcp.categories.formWrite',              true),
       extension:              cfg.get('mcp.categories.extension',              true),
+      recordWrite:            cfg.get('mcp.categories.recordWrite',            true),
     };
     return {
       profile,
@@ -300,13 +312,14 @@ export class ToolProfileManager implements vscode.Disposable {
     ];
     // Group by category file-key, preserving order
     const categoryOrder = [
-      'read',
+      'read', 'record-read',
       'table-write', 'table-destructive',
       'field-write', 'field-destructive',
       'view-write', 'view-destructive',
       'view-section', 'view-section-destructive',
       'form-write',
       'extension',
+      'record-write',
     ];
     for (const cat of categoryOrder) {
       const label = CATEGORY_LABELS[cat] ?? cat;

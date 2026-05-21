@@ -4,7 +4,7 @@
   "version": "2.0.80",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
-  "description": "Airtable formula, script & automation editor with MCP server (64 tools), language server, and AI skills for VS Code.",
+  "description": "Airtable formula, script & automation editor with MCP server (66 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -490,9 +490,9 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection and formula validation only (11 tools)",
-            "Read + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (49 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (64 tools)",
+            "Schema inspection, formula validation, and record reading only (12 tools)",
+            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (51 tools)",
+            "All tools enabled including destructive ops, form metadata, and extensions (66 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -551,6 +551,16 @@
           "type": "boolean",
           "default": true,
           "description": "Extension Management tools: create_extension, create_extension_dashboard, install_extension, update_extension_state, rename_extension, duplicate_extension, remove_extension."
+        },
+        "airtableFormula.mcp.categories.recordRead": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record Read tool: query_records (snapshot read via readQueries, up to 1000 rows per call)."
+        },
+        "airtableFormula.mcp.categories.recordWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record Write tool: duplicate_records (bulk record duplication via pasteCells)."
         },
         "airtableFormula.mcp.tools": {
           "type": "object",
@@ -659,7 +669,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 64 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 66 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
