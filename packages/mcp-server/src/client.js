@@ -2243,7 +2243,7 @@ export class AirtableClient {
    * @param {string} viewId
    * @param {{ columnIds?: string[], limit?: number }} options
    */
-  async queryRecords(appId, tableId, viewId, { columnIds, limit = 100 } = {}) {
+  async queryRecords(appId, tableId, viewId, { columnIds, limit = 100, search } = {}) {
     assertAirtableId(appId, 'appId');
     assertAirtableId(tableId, 'tableId');
     assertAirtableId(viewId, 'viewId');
@@ -2286,15 +2286,31 @@ export class AirtableClient {
     const queryResult = data?.data?.queryResults?.[queryId] || {};
     const rows = queryResult.rows || [];
 
+    const mapped = rows.map(r => ({ id: r.id, fields: r.cellValuesByColumnId || r.cellValues || {} }));
+
+    // Client-side substring search across all resolved field values (including lookup fields).
+    // This avoids the FIND()/SEARCH() formula limitation of the REST API that doesn't reach
+    // into lookup-resolved strings.
+    const filtered = search
+      ? (() => {
+          const needle = search.toLowerCase();
+          return mapped.filter(r =>
+            Object.values(r.fields).some(v => {
+              if (v === null || v === undefined) return false;
+              if (Array.isArray(v)) return v.some(item => String(item).toLowerCase().includes(needle));
+              return String(v).toLowerCase().includes(needle);
+            })
+          );
+        })()
+      : mapped;
+
     return {
       tableId,
       viewId,
       limit: clampedLimit,
-      count: rows.length,
-      rows: rows.map(r => ({
-        id: r.id,
-        fields: r.cellValuesByColumnId || r.cellValues || {},
-      })),
+      search: search || null,
+      count: filtered.length,
+      rows: filtered,
     };
   }
 

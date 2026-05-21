@@ -170,6 +170,40 @@ Manage choices for an Airtable select field.
   },
 
   {
+    name: 'airtable-search-records',
+    description: 'Search for records in an Airtable table by text, including lookup field values',
+    arguments: [
+      { name: 'appId',   description: 'Base ID (appXXX)',                                      required: true  },
+      { name: 'tableId', description: 'Table ID (tblXXX)',                                     required: true  },
+      { name: 'viewId',  description: 'View ID (viwXXX) — determines which records are visible', required: true  },
+      { name: 'search',  description: 'Text to search for (case-insensitive substring match)',   required: false },
+      { name: 'limit',   description: 'Max records to scan (1–1000, default 100)',              required: false },
+    ],
+    template: `\
+Search for records in Airtable base **{appId}**, table **{tableId}**, view **{viewId}**.
+
+**Search term:** {search}
+**Limit:** {limit}
+
+**Steps:**
+1. Call \`list_fields\` with appId="{appId}", tableId="{tableId}" to understand what fields are available and identify any lookup or rollup fields.
+2. Call \`query_records\` with:
+   - appId: "{appId}"
+   - tableId: "{tableId}"
+   - viewId: "{viewId}"
+   - search: "{search}" (omit if blank — returns all records up to limit)
+   - limit: {limit} (default 100; increase up to 1000 to search more records)
+3. Present matching records clearly. Include the record ID and the most relevant field values.
+4. If zero results: suggest increasing the limit, checking the view ID, or trying a shorter search term.
+
+**Why \`query_records\` instead of the Official MCP \`search_records\`:**
+The Official Airtable REST API's \`filterByFormula\` approach uses \`FIND()\`/\`SEARCH()\` formulas
+which silently fail on lookup fields — they match against the raw linked record ID rather than
+the resolved display value. \`query_records\` uses the internal readQueries endpoint which returns
+fully resolved cell values, so searches work correctly on lookup, rollup, and formula fields.`,
+  },
+
+  {
     name: 'airtable-validate-formula',
     description: 'Validate an Airtable formula and show its result type',
     arguments: [

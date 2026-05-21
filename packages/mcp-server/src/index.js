@@ -1456,7 +1456,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   // ── Record Read Tools ──
   {
     name: 'query_records',
-    description: 'Read records from an Airtable table view via the internal readQueries snapshot endpoint. Returns up to 1000 records per call with their field values. Useful for bulk data access, audits, and AI-assisted analysis.',
+    description: 'Read records from an Airtable table view. Returns resolved field values including lookup fields. Supports optional client-side text search across all field values — unlike the REST API filterByFormula approach, this search works correctly on lookup fields. Fetch up to 1000 records per call.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1466,12 +1466,16 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         viewId: { type: 'string', description: 'The view ID (e.g. "viwXXX") — determines row order and visible fields' },
         columnIds: {
           type: 'array',
-          description: 'Optional: specific field IDs to fetch. Omit to fetch all fields in the table schema.',
+          description: 'Optional: specific field IDs to fetch. Omit to fetch all fields.',
           items: { type: 'string' },
         },
         limit: {
           type: 'integer',
-          description: 'Maximum number of records to return (1–1000). Default: 100.',
+          description: 'Maximum number of records to fetch before filtering (1–1000). Default: 100. Increase if search returns too few results.',
+        },
+        search: {
+          type: 'string',
+          description: 'Optional case-insensitive substring to match against any field value. Works on lookup fields, formula fields, and multi-select arrays. Applied after fetching — increase limit if you need to search more records.',
         },
         debug: debugProp,
       },
@@ -2240,8 +2244,8 @@ const handlers = {
 
   // ── Record Read ──
 
-  async query_records({ appId, tableId, viewId, columnIds, limit, debug }) {
-    const result = await client.queryRecords(appId, tableId, viewId, { columnIds, limit });
+  async query_records({ appId, tableId, viewId, columnIds, limit, search, debug }) {
+    const result = await client.queryRecords(appId, tableId, viewId, { columnIds, limit, search });
     return ok(result, result, debug);
   },
 

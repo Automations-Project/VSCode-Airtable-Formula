@@ -304,7 +304,7 @@ When user wants to convert an Excel formula to Airtable.
 export const MCP_TOOLS_GUIDE = `# Airtable MCP — Tools Guide
 
 > **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
-> **Tools**: 61 tools across 11 categories + \`manage_tools\`
+> **Tools**: 66 tools across 13 categories + \`manage_tools\`
 
 ---
 
@@ -314,7 +314,10 @@ Two MCPs are available and designed to work together:
 
 | Task | Which MCP |
 |------|-----------|
-| Read, create, update, delete **records** | **Official** \`mcp.airtable.com\` |
+| **Read records** (snapshot, up to 1000/call, works on lookup fields) | **airtable-user-mcp** \`query_records\` |
+| **Search records** by text (including values from lookup fields) | **airtable-user-mcp** \`query_records\` with \`search\` param |
+| **Duplicate records** | **airtable-user-mcp** \`duplicate_records\` |
+| Create / update / delete **records** (full REST CRUD) | **Official** \`mcp.airtable.com\` |
 | List all bases you have access to | **Official** \`mcp.airtable.com\` |
 | Create / rename / delete **tables** | **airtable-user-mcp** |
 | Create / update / delete **fields** (including formula fields) | **airtable-user-mcp** |
@@ -330,6 +333,7 @@ Two MCPs are available and designed to work together:
 1. Use airtable-user-mcp to create tables, fields, and views (schema setup)
 2. Use Official MCP to populate records (data CRUD)
 3. Use airtable-user-mcp to refine view filters/sorts after data is in
+4. Use airtable-user-mcp query_records to read/search data (especially lookup fields)
 \`\`\`
 
 ### Authentication
@@ -345,7 +349,7 @@ Most schema tools require \`appId\` (e.g. \`"appXXX"\`) as their first parameter
 
 ---
 
-### Category 1: Read / Inspect (9 tools)
+### Category 1: Read / Inspect (11 tools)
 
 Read-only. Safe to call at any time. Always call a read tool before mutating.
 
@@ -360,10 +364,33 @@ Read-only. Safe to call at any time. Always call a read tool before mutating.
 | \`validate_formula\` | **Always call before** \`create_formula_field\` or \`update_formula_field\`. Returns validity + result type. |
 | \`list_view_sections\` | List sidebar view sections (groups) in a table. |
 | \`list_record_templates\` | List record templates defined in a table. |
+| \`download_formula_field\` | Download a formula field to a local \`.formula\` file with \`AT:\` header. Pass \`outputPath\` to save, or omit to read inline. |
+| \`download_base_formulas\` | Download ALL formula fields in a base to \`.formula\` files, organised into per-table subfolders. |
 
 ---
 
-### Category 2: Table Write (9 tools)
+### Category 2: Record Read (1 tool)
+
+Reads resolved record data via the internal readQueries endpoint. Bypasses REST API limitations — see [REST API Limitations](#rest-api-limitations) below.
+
+| Tool | When to Use |
+|------|-------------|
+| \`query_records\` | Read up to 1000 records from a view. Pass \`search\` for case-insensitive text matching across all field values including lookup fields, formula fields, and multi-select arrays. Increase \`limit\` (max 1000) to widen the search window. |
+
+#### query_records — search parameter
+\`\`\`json
+{
+  "appId": "appXXX", "tableId": "tblXXX", "viewId": "viwXXX",
+  "search": "john",
+  "limit": 500
+}
+\`\`\`
+Returns only records where at least one field value contains "john" (case-insensitive).
+Works on text, number, formula, **lookup**, rollup, and array (multi-select) fields.
+
+---
+
+### Category 3: Table Write (9 tools)
 
 Non-destructive table and record-template operations.
 
@@ -381,7 +408,7 @@ Non-destructive table and record-template operations.
 
 ---
 
-### Category 3: Table Destructive (2 tools)
+### Category 4: Table Destructive (2 tools)
 
 ⚠️ Always confirm with the user before calling.
 
@@ -392,7 +419,7 @@ Non-destructive table and record-template operations.
 
 ---
 
-### Category 4: Field Write (7 tools)
+### Category 5: Field Write (7 tools)
 
 Non-destructive field operations.
 
@@ -431,17 +458,18 @@ Non-destructive field operations.
 
 ---
 
-### Category 5: Field Destructive (1 tool)
+### Category 6: Field Destructive (2 tools)
 
 ⚠️ Always confirm with the user before calling.
 
 | Tool | When to Use |
 |------|-------------|
-| \`delete_field\` | Delete a field. Requires \`fieldId\` + \`expectedName\` (exact match). Auto-checks dependencies first; set \`force: true\` only after user reviews them. |
+| \`delete_field\` | Delete a single field. Requires \`fieldId\` + \`expectedName\` (exact match). Auto-checks dependencies first; set \`force: true\` only after user reviews them. |
+| \`delete_fields\` | Delete multiple fields in one call. Each entry needs \`fieldId\` + \`expectedName\`. Processed sequentially — partial results always returned. Pass \`checkpointPath\` to save progress so a batch can be resumed if interrupted. |
 
 ---
 
-### Category 6: View Write (19 tools)
+### Category 7: View Write (19 tools)
 
 Non-destructive view creation and configuration.
 
@@ -516,7 +544,7 @@ Do **NOT** use \`exactDate\`, \`thisMonth\`, or \`thisYear\` — these are rejec
 
 ---
 
-### Category 7: View Destructive (1 tool)
+### Category 8: View Destructive (1 tool)
 
 ⚠️ Cannot delete the last view in a table.
 
@@ -526,7 +554,7 @@ Do **NOT** use \`exactDate\`, \`thisMonth\`, or \`thisYear\` — these are rejec
 
 ---
 
-### Category 8: View Sections (3 tools)
+### Category 9: View Sections (3 tools)
 
 Manage the sidebar view groupings (sections/folders).
 
@@ -538,7 +566,7 @@ Manage the sidebar view groupings (sections/folders).
 
 ---
 
-### Category 9: View Sections — Destructive (1 tool)
+### Category 10: View Sections — Destructive (1 tool)
 
 | Tool | When to Use |
 |------|-------------|
@@ -546,7 +574,7 @@ Manage the sidebar view groupings (sections/folders).
 
 ---
 
-### Category 10: Form Metadata (2 tools)
+### Category 11: Form Metadata (2 tools)
 
 Configure legacy form views (public-facing, so gated separately from other view-write ops).
 
@@ -557,7 +585,7 @@ Configure legacy form views (public-facing, so gated separately from other view-
 
 ---
 
-### Category 11: Extension Management (7 tools)
+### Category 12: Extension Management (7 tools)
 
 | Tool | When to Use |
 |------|-------------|
@@ -575,6 +603,53 @@ Configure legacy form views (public-facing, so gated separately from other view-
 2. create_extension_dashboard → get pageId
 3. install_extension          → install onto page
 \`\`\`
+
+---
+
+### Category 13: Record Write (1 tool)
+
+| Tool | When to Use |
+|------|-------------|
+| \`duplicate_records\` | Duplicate one or more existing records within the same table. Pass \`sourceRowIds\` array. Returns new record IDs. |
+
+---
+
+## REST API Limitations — and Our Fixes {#rest-api-limitations}
+
+The official Airtable REST API (\`mcp.airtable.com\`) has several well-known limitations.
+\`airtable-user-mcp\` uses Airtable's **internal API** directly and avoids most of them.
+
+| Limitation | Official REST API | airtable-user-mcp Fix |
+|------------|------------------|----------------------|
+| \`filterByFormula\` with \`FIND()\`/\`SEARCH()\` doesn't match lookup-resolved values | ❌ Fails silently for lookup/rollup fields — returns 0 results or wrong results | ✅ \`query_records\` fetches resolved cell values; \`search\` param does substring matching on actual data |
+| No formula validation endpoint | ❌ Invalid formulas only fail at save time | ✅ \`validate_formula\` validates before saving and reports result type |
+| No view configuration (filters, sorts, groups, column order) | ❌ Not available | ✅ Full set of 19 view-write tools |
+| No formula field creation/update | ❌ REST API can create some field types but not formula fields reliably | ✅ \`create_formula_field\` and \`update_formula_field\` |
+| No bulk field deletion | ❌ One delete per request | ✅ \`delete_fields\` deletes multiple fields in one call with checkpoint/resume |
+
+### Searching records with lookup fields — in detail
+
+The REST API approach breaks for lookup fields:
+\`\`\`
+// ❌ FAILS — FIND() operates on the unresolved cell value, not the linked record's text
+filterByFormula: "FIND('John Smith', {Name Lookup})"
+// Returns 0 results even when "John Smith" exists in the linked table
+\`\`\`
+
+Our \`query_records\` fix:
+\`\`\`json
+{
+  "appId": "appXXX", "tableId": "tblXXX", "viewId": "viwXXX",
+  "search": "john smith",
+  "limit": 1000
+}
+\`\`\`
+The internal readQueries endpoint returns **resolved** cell values for every field type.
+The \`search\` filter runs over the already-resolved strings — lookup/rollup/formula fields all work.
+
+**Known limit**: \`search\` only scans records within the \`limit\` window (1–1000).
+If you need to search across a very large table, paginate by fetching multiple views or
+increasing \`limit\` to 1000 first.
 
 ---
 
@@ -600,6 +675,7 @@ Use to inspect or change the active tool profile without leaving your AI session
 5. **Prefer shorthands** — \`create_formula_field\` over \`create_field\` with formula type; \`update_formula_field\` over \`update_field_config\`.
 6. **Check dependencies** — \`delete_field\` auto-checks downstream deps; show them to the user before \`force: true\`.
 7. **debug sparingly** — \`debug: true\` returns large raw payloads; only use when troubleshooting.
+8. **Using REST API filterByFormula on lookup fields** — it doesn't work; use \`query_records\` with \`search\` instead.
 
 ## ID Format Reference
 
@@ -629,7 +705,9 @@ alwaysApply: true
 
 | Need | Use |
 |------|-----|
-| Read / create / update / delete **records** | **Official MCP** (\`mcp.airtable.com\`) |
+| **Read records / search by text** (incl. lookup fields) | **airtable-user-mcp** \`query_records\` |
+| **Duplicate records** | **airtable-user-mcp** \`duplicate_records\` |
+| Create / update / delete **records** (full CRUD) | **Official MCP** (\`mcp.airtable.com\`) |
 | List bases you have access to | **Official MCP** |
 | **Schema work** — tables, fields, formulas, views | **airtable-user-mcp** |
 | **Formula validation** before applying | **airtable-user-mcp** (\`validate_formula\`) |
@@ -637,13 +715,14 @@ alwaysApply: true
 | **View sections**, form metadata, extensions | **airtable-user-mcp** |
 | **Record templates** | **airtable-user-mcp** |
 
-Use them together: set up schema with airtable-user-mcp, populate records with the Official MCP.
+Use them together: set up schema with airtable-user-mcp, populate records with the Official MCP,
+and use airtable-user-mcp \`query_records\` to read/search data (especially when lookup fields are involved).
 
 ## airtable-user-mcp — Server Identity
 
 - **Name**: airtable-user-mcp  |  **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (JSON-RPC 2.0)
-- **Tools**: 61 tools across 11 categories + \`manage_tools\`
+- **Tools**: 66 tools across 13 categories + \`manage_tools\`
 - **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ## Mandatory Workflows
@@ -668,6 +747,12 @@ Use them together: set up schema with airtable-user-mcp, populate records with t
 1. \`create_extension\` → get \`blockId\`
 2. \`create_extension_dashboard\` → get \`pageId\`
 3. \`install_extension\` → install onto page
+
+### Searching / Reading Records
+1. Prefer \`query_records\` over Official MCP \`list_records_for_table\` when fields include lookups or rollups
+2. Pass \`search\` for text matching — works on ALL field types including lookup-resolved strings
+3. Increase \`limit\` (up to 1000) if you need to search across a larger record set
+4. For very large tables, note that \`search\` only scans within the \`limit\` window — use a filtered view to pre-narrow the scope
 
 ## Safety Rules
 
@@ -695,7 +780,10 @@ Use them together: set up schema with airtable-user-mcp, populate records with t
 | "Set column order to X, Y, Z" | \`set_view_columns\` (full reset) or sequential \`move_visible_columns\` calls |
 | "Organise views into sections" | \`create_view_section\` → \`move_view_to_section\` |
 | "Install an extension" | \`create_extension\` → \`create_extension_dashboard\` → \`install_extension\` |
-| "Create records" | **Official MCP** — airtable-user-mcp has no record CRUD |
+| "Read / search records" | \`query_records\` (especially when lookup fields are involved) |
+| "Find a record by name when name is a lookup" | \`query_records\` with \`search\` — REST API \`filterByFormula\` doesn't work here |
+| "Duplicate records" | \`duplicate_records\` |
+| "Create brand-new records" | **Official MCP** |
 | "What profiles/tools are active?" | \`manage_tools\` with action \`get_tool_status\` |
 
 ## Common Mistakes to Avoid
@@ -707,5 +795,6 @@ Use them together: set up schema with airtable-user-mcp, populate records with t
 5. **Deleting the last view in a table** — will fail; a table must always have at least one view
 6. **Passing multiple IDs to \`move_visible_columns\` expecting ordered placement** — the API ignores input array order; make one call per column with incrementing \`targetVisibleIndex\`
 7. **Using \`emptyGroupState: "visible"\` in \`update_view_group_levels\`** — the API rejects this value; omit the field (defaults to "hidden")
-8. **Trying to use airtable-user-mcp for record CRUD** — it has no record read/write tools; use the Official MCP for that
+8. **Using REST API \`filterByFormula\` with \`FIND()\`/\`SEARCH()\` on lookup fields** — returns wrong/empty results; use \`query_records\` with \`search\` instead
+9. **Using Official MCP to read records when lookup field values matter** — Official MCP may return unresolved IDs; \`query_records\` returns fully resolved strings
 `;
