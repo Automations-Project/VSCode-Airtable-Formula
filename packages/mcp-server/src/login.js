@@ -77,14 +77,75 @@ async function generateTOTP(secretBase32) {
   return totp.generate();
 }
 
+async function mainManual(profileDir) {
+  console.log('Opening browser for manual login...');
+  console.log(`Profile: ${profileDir}`);
+  console.log('Please log in to Airtable in the browser window that opens.\n');
+
+  const chromium = await getChromium();
+  const context = await chromium.launchPersistentContext(profileDir, {
+    headless: false,
+    channel: 'chrome',
+    viewport: null,
+  });
+
+  let outerError;
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    await page.goto('https://airtable.com/login', { waitUntil: 'domcontentloaded' });
+
+    let loggedIn = false;
+    let attempts = 0;
+    while (!loggedIn && attempts < 150) {
+      attempts++;
+      await page.waitForTimeout(2000);
+      try {
+        const result = await page.evaluate(async () => {
+          try {
+            const res = await fetch('/v0.3/getUserProperties', {
+              headers: {
+                'x-airtable-inter-service-client': 'webClient',
+                'x-requested-with': 'XMLHttpRequest',
+              },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              return { ok: true, userId: data?.data?.userId };
+            }
+            return { ok: false, status: res.status };
+          } catch (e) {
+            return { ok: false, error: e.message };
+          }
+        });
+        if (result.ok) {
+          loggedIn = true;
+          console.log('✅ Login verified! User:', result.userId);
+        }
+      } catch {
+        // Page navigating, keep waiting
+      }
+    }
+
+    if (!loggedIn) throw new Error('Login not detected after 5 minutes');
+
+    console.log('\nSession stored in Chrome profile.');
+    console.log('MCP server will use this session headlessly.');
+    console.log('\nClosing browser...');
+    console.log('Done!');
+  } catch (err) {
+    outerError = err;
+  } finally {
+    try { await context.close(); } catch { /* best-effort */ }
+  }
+  if (outerError) throw outerError;
+}
+
 async function main() {
   const { email, password, otpSecret, profileDir } = parseArgs();
 
   if (!email || !password) {
-    console.error('ERROR: Provide credentials via env vars or arguments:');
-    console.error('  node src/login.js --email <email> --password <pass> [--otp-secret <secret>]');
-    console.error('  Or set AIRTABLE_EMAIL, AIRTABLE_PASSWORD, AIRTABLE_OTP_SECRET in .env');
-    process.exit(1);
+    await mainManual(profileDir);
+    return;
   }
 
   console.log('Opening Chrome with Patchright (undetected)...');

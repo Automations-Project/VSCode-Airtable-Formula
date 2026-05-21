@@ -239,7 +239,29 @@ jobs:
         if: |
           !inputs.dry_run &&
           (inputs.target == 'extension' || inputs.target == 'both')
-        run: npx ovsx publish "${{ steps.vsix.outputs.file }}" --pat $OVSX_PAT
+        run: |
+          npx ovsx publish "${{ steps.vsix.outputs.file }}" --pat $OVSX_PAT
+
+          # Verify the version actually landed (Open VSX indexes asynchronously)
+          VERSION="${{ steps.ext_version.outputs.next }}"
+          echo "Verifying Open VSX indexed v${VERSION}..."
+          for i in $(seq 1 18); do
+            FOUND=$(curl -s "https://open-vsx.org/api/Nskha/airtable-formula/${VERSION}" \
+              | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+                  try{const p=JSON.parse(d);console.log(p.version||'not-found')}
+                  catch{console.log('error')}
+                })")
+            if [[ "$FOUND" == "$VERSION" ]]; then
+              echo "✓ Open VSX confirmed: v${VERSION}"
+              break
+            fi
+            echo "  not indexed yet (attempt $i/18), waiting 10s..."
+            sleep 10
+          done
+          if [[ "$FOUND" != "$VERSION" ]]; then
+            echo "::error::Open VSX did not index v${VERSION} within 3 minutes — check token and registry status"
+            exit 1
+          fi
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
