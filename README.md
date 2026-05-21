@@ -6,25 +6,41 @@
 
 **Formula, script & automation editor · MCP server (66 tools) · Language server · AI skills**
 
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/version-short/Nskha.airtable-formula.svg?style=for-the-badge&label=VS%20Code&colorB=007ACC" alt="VS Code version" /></a>
-  <a href="https://open-vsx.org/extension/Nskha/airtable-formula"><img src="https://img.shields.io/open-vsx/v/Nskha/airtable-formula?style=for-the-badge&logo=eclipseide&logoColor=white&label=Open%20VSX&color=C160EF" alt="Open VSX version" /></a>
-  <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm&color=CB3837" alt="npm version" /></a>
-  <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP%20Registry-Listed-1D4ED8?style=for-the-badge" alt="MCP Registry listing" /></a>
-  <a href="https://www.npmjs.com/package/airtable-user-lsp"><img src="https://img.shields.io/npm/v/airtable-user-lsp?style=for-the-badge&logo=npm&logoColor=white&label=LSP&color=CB3837" alt="npm airtable-user-lsp version" /></a>
-</p>
-
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/installs-short/Nskha.airtable-formula.svg?style=for-the-badge&label=VS%20Code%20Installs&colorB=1E8CBE" alt="VS Code installs" /></a>
-  <a href="https://open-vsx.org/extension/Nskha/airtable-formula"><img src="https://img.shields.io/open-vsx/dt/Nskha/airtable-formula?style=for-the-badge&logo=eclipseide&logoColor=white&label=Open%20VSX%20Downloads&color=A855F7" alt="Open VSX downloads" /></a>
-  <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/dw/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=npm%20Downloads%2FWeek&color=F43F5E" alt="npm downloads per week" /></a>
-  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/stargazers"><img src="https://img.shields.io/github/stars/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=github&logoColor=white&label=GitHub%20Stars&color=FBBF24" alt="GitHub stars" /></a>
-</p>
+<table align="center">
+<tr>
+  <th align="center">VS Code</th>
+  <th align="center">Open VSX</th>
+  <th align="center">npm · MCP</th>
+  <th align="center">npm · LSP</th>
+  <th align="center">MCP Registry</th>
+</tr>
+<tr>
+  <td align="center">
+    <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/version-short/Nskha.airtable-formula.svg?style=for-the-badge&label=Version&colorB=007ACC" alt="VS Code version" /></a><br/>
+    <a href="https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula"><img src="https://vsmarketplacebadges.dev/installs-short/Nskha.airtable-formula.svg?style=for-the-badge&label=Installs&colorB=1E8CBE" alt="VS Code installs" /></a>
+  </td>
+  <td align="center">
+    <a href="https://open-vsx.org/extension/Nskha/airtable-formula"><img src="https://img.shields.io/open-vsx/v/Nskha/airtable-formula?style=for-the-badge&logo=eclipseide&logoColor=white&label=Version&color=C160EF" alt="Open VSX version" /></a><br/>
+    <a href="https://open-vsx.org/extension/Nskha/airtable-formula"><img src="https://img.shields.io/open-vsx/dt/Nskha/airtable-formula?style=for-the-badge&logo=eclipseide&logoColor=white&label=Downloads&color=A855F7" alt="Open VSX downloads" /></a>
+  </td>
+  <td align="center">
+    <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/v/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=Version&color=CB3837" alt="npm version" /></a><br/>
+    <a href="https://www.npmjs.com/package/airtable-user-mcp"><img src="https://img.shields.io/npm/dw/airtable-user-mcp?style=for-the-badge&logo=npm&logoColor=white&label=DL%2FWeek&color=F43F5E" alt="npm downloads per week" /></a>
+  </td>
+  <td align="center">
+    <a href="https://www.npmjs.com/package/airtable-user-lsp"><img src="https://img.shields.io/npm/v/airtable-user-lsp?style=for-the-badge&logo=npm&logoColor=white&label=Version&color=CB3837" alt="LSP version" /></a>
+  </td>
+  <td align="center">
+    <a href="https://registry.modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP%20Registry-Listed-1D4ED8?style=for-the-badge" alt="MCP Registry listing" /></a>
+  </td>
+</tr>
+</table>
 
 <p align="center">
   <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Automations-Project/VSCode-Airtable-Formula/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI" alt="CI status" /></a>
   <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/releases/latest"><img src="https://img.shields.io/github/v/release/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=github&logoColor=white&label=Latest%20Release&color=10B981" alt="Latest release" /></a>
   <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/commits/main"><img src="https://img.shields.io/github/last-commit/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=github&logoColor=white&label=Last%20Commit&color=6366F1" alt="Last commit" /></a>
+  <a href="https://github.com/Automations-Project/VSCode-Airtable-Formula/stargazers"><img src="https://img.shields.io/github/stars/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=github&logoColor=white&label=Stars&color=FBBF24" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Automations-Project/VSCode-Airtable-Formula?style=for-the-badge&logo=opensourceinitiative&logoColor=white&label=License&color=22C55E" alt="License" /></a>
 </p>
 
