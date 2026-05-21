@@ -248,20 +248,25 @@ jobs:
         if: |
           !inputs.dry_run &&
           (inputs.target == 'mcp-server' || inputs.target == 'both')
-        working-directory: packages/mcp-server
-        run: npm publish --provenance --access public
+        run: |
+          npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
+          npm whoami && echo "npm auth OK" || echo "WARNING: npm whoami failed — verify NPM_TOKEN secret"
+          cd packages/mcp-server
+          npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ── Publish LSP server ─────────────────────────────────────
       - name: Publish LSP server to npm
         if: |
           !inputs.dry_run &&
           (inputs.target == 'lsp-server' || inputs.target == 'both')
-        working-directory: packages/lsp-server
-        run: npm publish --provenance --access public
+        run: |
+          npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
+          cd packages/lsp-server
+          npm publish --provenance --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # ── Commit, tag, push ──────────────────────────────────────
       - name: Commit version bump and create tags
