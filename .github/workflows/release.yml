@@ -205,17 +205,21 @@ jobs:
           # Prepare deps for VSIX
           node scripts/prepare-package-deps.mjs
 
-          # Copy README with SVG→PNG transform
+          # Copy README: strip SVGs + collapse <picture> to single <img> for VS Code Marketplace
           node -e "
             const fs = require('fs');
             let readme = fs.readFileSync('README.md', 'utf8');
+            // Replace extension icon SVG with PNG
             readme = readme.replace(/<img src=\"[^\"]*airtable\\.svg\"[^/]*\\/>/,
               '<img src=\"https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png\" alt=\"Airtable Formula\" width=\"80\" />');
+            // Replace claude SVG row in table
             readme = readme.replace(/\| <img src=\"[^\"]*claude\\.svg\"[^|]*\|[^\n]*\n/,
               '| Claude Desktop | Claude Code | Cursor | Windsurf | Cline | Amp |\n');
+            // Remove mcp SVG icons
             readme = readme.replace(/<img src=\"[^\"]*mcp\\.svg\"[^/]*\\/>/g, '');
-            readme = readme.replace(/assets\/banner\.svg/g, 'assets/banner.png');
-            readme = readme.replace(/assets\/architecture\.svg/g, 'assets/architecture.png');
+            // Collapse all <picture> blocks to plain <img> — use the light PNG for the marketplace (white bg)
+            readme = readme.replace(/<picture>[\s\S]*?<img src=\"([^\"]+)\"([^/]*)\/>[\s\S]*?<\/picture>/g,
+              (_, src, attrs) => '<img src=\"' + src.replace(/\.svg$/, '.png') + '\"' + attrs + '/>');
             fs.writeFileSync('packages/extension/README.md', readme);
           "
 

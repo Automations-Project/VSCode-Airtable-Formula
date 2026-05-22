@@ -16,7 +16,7 @@
 
   <g clip-path="url(#bg-clip)">
     <!-- Background -->
-    <rect width="900" height="450" fill="#161b22"/>
+    <rect width="900" height="450" fill="#0d1117"/>
     <!-- Left glow (yellow) -->
     <radialGradient id="glowL" cx="200" cy="220" r="280" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#FCB400" stop-opacity="0.05"/>

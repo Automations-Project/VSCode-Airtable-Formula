@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner.svg" alt="airtable-user-mcp — 66 tools your AI assistant can't get from the official Airtable REST API" width="900" />
+<picture>
+  <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 66 tools your AI assistant can't get from the official Airtable REST API" width="900" />
+</picture>
 
 # airtable-user-mcp
 
@@ -70,7 +74,11 @@ The official Airtable MCP can't — its REST API doesn't expose those surfaces. 
 The official Airtable MCP is a thin wrapper over the public Web API. That API — by design — never exposed some of the most-requested automation surfaces in Airtable. `airtable-user-mcp` uses Airtable's **internal API** (the same one the web UI calls) to close the gap. The two servers cover different surfaces, so the intended setup is **both installed at once** — your MCP client sees the union of their tool sets.
 
 <div align="center">
-<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/architecture.svg" alt="Architecture: AI Client → Official MCP + airtable-user-mcp → Airtable" width="900" />
+<picture>
+  <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/architecture-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/architecture-light.svg">
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/architecture-light.svg" alt="Architecture: AI Client → Official MCP + airtable-user-mcp → Airtable" width="900" />
+</picture>
 </div>
 
 ### Coverage map
