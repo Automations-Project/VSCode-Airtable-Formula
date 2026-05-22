@@ -494,6 +494,20 @@ export class AirtableClient {
     return data;
   }
 
+  // Normalizes the data block from getScaffoldingData into a flat table array.
+  // Guards every candidate with a length check — empty arrays are truthy and
+  // would short-circuit the chain before reaching tableById (the scaffolding
+  // endpoint returns tableById + visibleTableOrder, not tableSchemas/tables).
+  parseScaffoldingTables(d) {
+    return (d?.tableSchemas?.length > 0 && d.tableSchemas) ||
+      (d?.tables?.length > 0 && d.tables) ||
+      (d?.visibleTableOrder || d?.tableOrder)?.map(id => {
+        const t = d?.tableById?.[id] || d?.tableDatas?.[id] || {};
+        return { id, name: t.name || id };
+      }) ||
+      Object.values(d?.tableById || {});
+  }
+
   async getUserProperties() {
     const res = await this.auth.get('https://airtable.com/v0.3/getUserProperties');
     if (!res.ok) {
@@ -2282,11 +2296,37 @@ export class AirtableClient {
       throw new Error(`readQueries failed (${res.status}): ${errText}`);
     }
 
-    const data = await res.json().catch(() => ({}));
-    const queryResult = data?.data?.queryResults?.[queryId] || {};
-    const rows = queryResult.rows || [];
+    // Fetch as text first so a non-JSON (msgpack) response surfaces as an error
+    // instead of silently returning empty results.
+    const text = await res.text().catch(() => '');
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error(
+        `readQueries returned non-JSON (${text.length} bytes, first byte 0x${text.charCodeAt(0).toString(16)}). ` +
+        `The server may not be honoring allowMsgpackOfResult:false. ` +
+        `Try re-authenticating or filing a bug.`,
+      );
+    }
 
-    const mapped = rows.map(r => ({ id: r.id, fields: r.cellValuesByColumnId || r.cellValues || {} }));
+    // Surface query-level failures (e.g. bad viewId, permissions).
+    const failure = data?.data?.failureReasonByQueryId?.[queryId];
+    if (failure) throw new Error(`readQueries query failed: ${JSON.stringify(failure)}`);
+
+    // Response structure (captured 2026-05-21):
+    //   data.querySlices[0].rowIds          — ordered record IDs for this query
+    //   data.tableDataById[tableId]
+    //     .partialRowById[rowId]
+    //     .cellValuesByColumnId             — resolved cell values per field
+    const slice = data?.data?.querySlices?.[0] || {};
+    const rowIds = slice.rowIds || [];
+    const tableData = data?.data?.tableDataById?.[tableId] || {};
+
+    const mapped = rowIds.map(rowId => {
+      const rowData = tableData.partialRowById?.[rowId] || {};
+      return { id: rowId, fields: rowData.cellValuesByColumnId || {} };
+    });
 
     // Client-side substring search across all resolved field values (including lookup fields).
     // This avoids the FIND()/SEARCH() formula limitation of the REST API that doesn't reach
@@ -2305,12 +2345,15 @@ export class AirtableClient {
       : mapped;
 
     return {
-      tableId,
-      viewId,
-      limit: clampedLimit,
-      search: search || null,
-      count: filtered.length,
-      rows: filtered,
+      summary: {
+        tableId,
+        viewId,
+        limit: clampedLimit,
+        search: search || null,
+        count: filtered.length,
+        rows: filtered,
+      },
+      raw: data,
     };
   }
 

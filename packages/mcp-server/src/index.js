@@ -1570,12 +1570,7 @@ const handlers = {
 
   async list_tables({ appId, debug }) {
     const raw = await client.getScaffoldingData(appId);
-    const tables = raw?.data?.tableSchemas || raw?.data?.tables ||
-      raw?.data?.tableOrder?.map(id => {
-        const t = raw?.data?.tableDatas?.[id] || raw?.data?.tableById?.[id] || {};
-        return { id, name: t.name || id };
-      }) ||
-      Object.values(raw?.data?.tableById || {});
+    const tables = client.parseScaffoldingTables(raw?.data);
     const summary = tables.map(t => ({
       id: t.id,
       name: t.name,
@@ -2245,8 +2240,8 @@ const handlers = {
   // ── Record Read ──
 
   async query_records({ appId, tableId, viewId, columnIds, limit, search, debug }) {
-    const result = await client.queryRecords(appId, tableId, viewId, { columnIds, limit, search });
-    return ok(result, result, debug);
+    const { summary, raw } = await client.queryRecords(appId, tableId, viewId, { columnIds, limit, search });
+    return ok(summary, raw, debug);
   },
 
   // ── Record Write ──

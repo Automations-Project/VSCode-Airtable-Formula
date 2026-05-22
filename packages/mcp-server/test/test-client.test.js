@@ -333,6 +333,59 @@ describe('AirtableClient', () => {
     });
   });
 
+  // Regression tests for issue #9 — list_tables returned [] when the scaffolding
+  // endpoint returned tableById + visibleTableOrder (empty arrays are truthy and
+  // previously short-circuited the fallback chain before reaching tableById).
+  describe('parseScaffoldingTables (issue #9 regression)', () => {
+    it('returns tables from tableById when tables:[] is present (empty-array truthy bug)', () => {
+      const result = client.parseScaffoldingTables({
+        tables: [],  // empty array — truthy, was short-circuiting the fallback chain
+        tableById: {
+          tblAAA: { id: 'tblAAA', name: 'Tasks' },
+          tblBBB: { id: 'tblBBB', name: 'Projects' },
+        },
+        visibleTableOrder: ['tblAAA', 'tblBBB'],
+      });
+      assert.equal(result.length, 2);
+      assert.deepEqual(result.map(t => t.id), ['tblAAA', 'tblBBB']);
+    });
+
+    it('respects visibleTableOrder for correct sort', () => {
+      const result = client.parseScaffoldingTables({
+        tableById: {
+          tblAAA: { id: 'tblAAA', name: 'Tasks' },
+          tblBBB: { id: 'tblBBB', name: 'Projects' },
+        },
+        visibleTableOrder: ['tblBBB', 'tblAAA'],
+      });
+      assert.equal(result[0].name, 'Projects');
+      assert.equal(result[1].name, 'Tasks');
+    });
+
+    it('prefers non-empty tableSchemas over tableById', () => {
+      const result = client.parseScaffoldingTables({
+        tableSchemas: [{ id: 'tblXXX', name: 'Schema Table' }],
+        tableById: { tblYYY: { id: 'tblYYY', name: 'Dict Table' } },
+      });
+      assert.equal(result.length, 1);
+      assert.equal(result[0].id, 'tblXXX');
+    });
+
+    it('skips empty tableSchemas and uses tableById', () => {
+      const result = client.parseScaffoldingTables({
+        tableSchemas: [],
+        tableById: { tblAAA: { id: 'tblAAA', name: 'Tasks' } },
+      });
+      assert.equal(result.length, 1);
+      assert.equal(result[0].name, 'Tasks');
+    });
+
+    it('returns [] for empty data', () => {
+      assert.deepEqual(client.parseScaffoldingTables({}), []);
+      assert.deepEqual(client.parseScaffoldingTables(null), []);
+    });
+  });
+
   describe('validateFormula', () => {
     it('returns valid result for good formula', async () => {
       mockAuth.postForm = () => ({
@@ -824,6 +877,106 @@ describe('AirtableClient', () => {
       assert.equal(result.dependencies.fields.length, 1);
       // Raw graph remains available for debug mode consumers
       assert.ok(result.rawDependencyGraph);
+    });
+  });
+
+  // Regression tests for issue #10 — queryRecords returned {count:0, rows:[]} because:
+  //   1. Wrong response field: code used queryResults[queryId] but API returns querySlices[0]
+  //   2. Cell values at tableDataById[tableId].partialRowById[rowId].cellValuesByColumnId
+  //   3. Silent failure: res.json().catch(()=>({})) hid msgpack parse errors
+  describe('queryRecords (issue #10 regression)', () => {
+    function makeReadQueriesAuth(querySlicesResponse) {
+      return createMockAuth({
+        get: (url) => {
+          if (url.includes('/read') || url.includes('getApplicationScaffoldingData')) {
+            return { ok: true, status: 200, json: async () => MOCK_SCHEMA, text: async () => JSON.stringify(MOCK_SCHEMA) };
+          }
+          return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
+        },
+        postForm: () => ({
+          ok: true,
+          status: 200,
+          json: async () => querySlicesResponse,
+          text: async () => JSON.stringify(querySlicesResponse),
+        }),
+      });
+    }
+
+    it('parses querySlices+tableDataById response correctly', async () => {
+      const mockApiResponse = {
+        data: {
+          querySlices: [{
+            tableId: 'tblAAA',
+            rowIds: ['recAAA', 'recBBB'],
+            columnIds: ['fld111', 'fld222'],
+          }],
+          tableDataById: {
+            tblAAA: {
+              partialRowById: {
+                recAAA: { createdTime: '2026-01-01T00:00:00.000Z', cellValuesByColumnId: { fld111: 'Task 1', fld222: 'Done' } },
+                recBBB: { createdTime: '2026-01-02T00:00:00.000Z', cellValuesByColumnId: { fld111: 'Task 2', fld222: 'In Progress' } },
+              },
+            },
+          },
+          failureReasonByQueryId: {},
+        },
+      };
+      const auth = makeReadQueriesAuth(mockApiResponse);
+      const client = new AirtableClient(auth);
+      const { summary } = await client.queryRecords('appXXX', 'tblAAA', 'viwBBB', { limit: 10 });
+      assert.equal(summary.count, 2);
+      assert.equal(summary.rows[0].id, 'recAAA');
+      assert.equal(summary.rows[0].fields.fld111, 'Task 1');
+      assert.equal(summary.rows[1].fields.fld222, 'In Progress');
+    });
+
+    it('returns 0 rows when querySlices is absent (not an error)', async () => {
+      const auth = makeReadQueriesAuth({ data: { querySlices: [], tableDataById: {}, failureReasonByQueryId: {} } });
+      const client = new AirtableClient(auth);
+      const { summary } = await client.queryRecords('appXXX', 'tblAAA', 'viwBBB');
+      assert.equal(summary.count, 0);
+    });
+
+    it('throws on non-JSON response instead of silently returning empty', async () => {
+      const auth = createMockAuth({
+        get: (url) => ({ ok: true, status: 200, json: async () => MOCK_SCHEMA, text: async () => JSON.stringify(MOCK_SCHEMA) }),
+        postForm: () => ({
+          ok: true,
+          status: 200,
+          text: async () => '\xfd\x72\x40binary-not-json',  // msgpack-like binary
+        }),
+      });
+      const client = new AirtableClient(auth);
+      await assert.rejects(
+        () => client.queryRecords('appXXX', 'tblAAA', 'viwBBB'),
+        { message: /non-JSON/ },
+      );
+    });
+
+    it('throws on query-level failure', async () => {
+      const auth = makeReadQueriesAuth({
+        data: {
+          querySlices: [],
+          tableDataById: {},
+          failureReasonByQueryId: { 'qryANYID': { type: 'PERMISSION_DENIED' } },
+        },
+      });
+      // We need to override postForm to capture the dynamic queryId and inject it into failure map.
+      // Instead, test with a static failure that doesn't need the exact queryId:
+      const staticAuth = createMockAuth({
+        get: (url) => ({ ok: true, status: 200, json: async () => MOCK_SCHEMA, text: async () => JSON.stringify(MOCK_SCHEMA) }),
+        postForm: (url, params) => {
+          const payload = JSON.parse(params.stringifiedObjectParams);
+          const qid = payload.queries[0].id;
+          const resp = { data: { querySlices: [], tableDataById: {}, failureReasonByQueryId: { [qid]: { type: 'PERMISSION_DENIED' } } } };
+          return { ok: true, status: 200, text: async () => JSON.stringify(resp) };
+        },
+      });
+      const client = new AirtableClient(staticAuth);
+      await assert.rejects(
+        () => client.queryRecords('appXXX', 'tblAAA', 'viwBBB'),
+        { message: /PERMISSION_DENIED/ },
+      );
     });
   });
 
