@@ -218,8 +218,9 @@ jobs:
             // Remove mcp SVG icons
             readme = readme.replace(/<img src=\"[^\"]*mcp\\.svg\"[^/]*\\/>/g, '');
             // Collapse all <picture> blocks to plain <img> — use the light PNG for the marketplace (white bg)
+            // Strip -light/-dark variant suffix before swapping .svg → .png (only banner.png / architecture.png exist)
             readme = readme.replace(/<picture>[\s\S]*?<img src=\"([^\"]+)\"([^/]*)\/>[\s\S]*?<\/picture>/g,
-              (_, src, attrs) => '<img src=\"' + src.replace(/\.svg$/, '.png') + '\"' + attrs + '/>');
+              (_, src, attrs) => '<img src=\"' + src.replace(/-(light|dark)\.svg$/, '.png').replace(/\.svg$/, '.png') + '\"' + attrs + '/>');
             fs.writeFileSync('packages/extension/README.md', readme);
           "
 
@@ -249,7 +250,7 @@ jobs:
           # Verify the version actually landed (Open VSX indexes asynchronously)
           VERSION="${{ steps.ext_version.outputs.next }}"
           echo "Verifying Open VSX indexed v${VERSION}..."
-          for i in $(seq 1 18); do
+          for i in $(seq 1 54); do
             FOUND=$(curl -s "https://open-vsx.org/api/Nskha/airtable-formula/${VERSION}" \
               | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
                   try{const p=JSON.parse(d);console.log(p.version||'not-found')}
@@ -259,11 +260,11 @@ jobs:
               echo "✓ Open VSX confirmed: v${VERSION}"
               break
             fi
-            echo "  not indexed yet (attempt $i/18), waiting 10s..."
+            echo "  not indexed yet (attempt $i/54), waiting 10s..."
             sleep 10
           done
           if [[ "$FOUND" != "$VERSION" ]]; then
-            echo "::error::Open VSX did not index v${VERSION} within 3 minutes — check token and registry status"
+            echo "::error::Open VSX did not index v${VERSION} within 9 minutes — check token and registry status"
             exit 1
           fi
         env:
