@@ -79,6 +79,16 @@ run('node', ['scripts/prepare-package-deps.mjs'], repoRoot);
 const readmeSrc = path.join(repoRoot, 'README.md');
 const readmeDst = path.join(packageRoot, 'README.md');
 let readme = fs.readFileSync(readmeSrc, 'utf8');
+// Replace all <picture> blocks (dark/light SVG variants) with PNG fallbacks.
+// vsce rejects any SVG URL in README, including inside <picture> srcset attributes.
+readme = readme.replace(
+	/<picture>[\s\S]*?banner[^<]*<\/picture>/,
+	'<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner.png" alt="airtable-user-mcp" width="900" />'
+);
+readme = readme.replace(
+	/<picture>[\s\S]*?architecture[^<]*<\/picture>/,
+	'<img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/architecture.png" alt="Architecture diagram" width="900" />'
+);
 // Replace Airtable SVG logo with the extension PNG icon
 readme = readme.replace(
 	/<img src="[^"]*airtable\.svg"[^/]*\/>/,
