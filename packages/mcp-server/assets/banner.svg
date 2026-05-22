@@ -13,7 +13,7 @@
 
   <g clip-path="url(#bg-clip)">
     <!-- Background -->
-    <rect width="900" height="210" fill="#161b22"/>
+    <rect width="900" height="210" fill="#212830"/>
 
     <!-- Subtle left glow (yellow) -->
     <radialGradient id="glowY" cx="160" cy="56" r="220" gradientUnits="userSpaceOnUse">
