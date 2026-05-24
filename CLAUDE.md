@@ -56,7 +56,7 @@ Standalone users install via `npx airtable-user-mcp` or `npm i -g airtable-user-
 Key files:
 - `src/index.js` — MCP server entry point, tool registration
 - `src/auth.js` — `AirtableAuth` class, browser launch, CSRF/secretSocketId capture
-- `src/client.js` — `AirtableClient`, wraps internal API with caching
+- `src/client.js` — `AirtableClient`, wraps internal API with caching. `normalizeFieldType()` translates public-API type names to internal names before every request: `multipleSelects` → `multiSelect`, `singleSelect` → `select`. Always use the public names (`singleSelect`, `multipleSelects`) in tool calls — never the internal names. Choices arrays are also normalised here from `[{ name, color }]` to the keyed-object format the internal API requires.
 - `src/cache.js` — request cache
 - `src/login.js` — interactive CLI login
 - `src/login-runner.js` — programmatic login spawned by extension host

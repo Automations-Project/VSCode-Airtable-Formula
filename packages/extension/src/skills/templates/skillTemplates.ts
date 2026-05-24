@@ -428,7 +428,7 @@ Non-destructive field operations.
 | \`create_field\` | Create any field type (text, number, checkbox, formula, rollup, lookup, count, …). |
 | \`create_formula_field\` | Shorthand for creating a formula field. |
 | \`update_formula_field\` | Update the formula text of an existing formula field. |
-| \`update_field_config\` | Update config of any computed field (rollup, lookup, count, formula). |
+| \`update_field_config\` | Update config of any field type — computed (rollup, lookup, count, formula) or non-computed (singleSelect, multipleSelects, number, date, …). |
 | \`rename_field\` | Rename a field. |
 | \`update_field_description\` | Set or clear a field's description/documentation. |
 | \`duplicate_field\` | Clone a field. Pass \`duplicateCells: true\` to copy values too. |
@@ -454,7 +454,21 @@ Non-destructive field operations.
 | rollup | \`{ fieldIdInLinkedTable, recordLinkFieldId, resultType, referencedFieldIds }\` |
 | lookup | \`{ recordLinkFieldId, fieldIdInLinkedTable }\` |
 | count | \`{ recordLinkFieldId }\` |
+| singleSelect | \`{ choices: [{ name: "Option A", color: "blueLight2" }] }\` |
+| multipleSelects | \`{ choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }\` |
 | text, number, checkbox | \`{}\` (no typeOptions needed) |
+
+#### Working with Select Choices
+Pass choices as an array of \`{ name, color? }\` objects — IDs are auto-generated for new choices.
+
+To **add choices without losing existing ones**, call \`get_table_schema\` first to get existing choice IDs, then pass the full merged list:
+\`\`\`json
+{ "choices": [
+    { "id": "selXXXXXXXXXXXXXX", "name": "Existing Choice" },
+    { "name": "New Choice", "color": "pinkLight2" }
+] }
+\`\`\`
+Choices **not** in the list are deleted. Omitting \`id\` creates a new choice.
 
 ---
 
@@ -797,4 +811,6 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 7. **Using \`emptyGroupState: "visible"\` in \`update_view_group_levels\`** — the API rejects this value; omit the field (defaults to "hidden")
 8. **Using REST API \`filterByFormula\` with \`FIND()\`/\`SEARCH()\` on lookup fields** — returns wrong/empty results; use \`query_records\` with \`search\` instead
 9. **Using Official MCP to read records when lookup field values matter** — Official MCP may return unresolved IDs; \`query_records\` returns fully resolved strings
+10. **Passing \`fieldType: "singleSelect"\` to \`create_field\` / \`update_field_config\` and expecting raw API type matching** — the internal Airtable API uses \`"select"\` (not \`"singleSelect"\`); airtable-user-mcp normalises this automatically so always pass \`"singleSelect"\` — never pass \`"select"\` directly
+11. **Passing a partial choices list to \`update_field_config\` on a select field** — choices NOT included are deleted; always fetch existing choice IDs first with \`get_table_schema\` and include them in the list
 `;

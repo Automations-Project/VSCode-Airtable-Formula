@@ -319,10 +319,10 @@ function normalizeFieldType(type, typeOptions = {}) {
       typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
     };
   }
-  // Normalize singleSelect choices to object form (type name kept as-is until confirmed).
+  // "singleSelect" is the public/REST API name; internal API uses "select" (mirrors multipleSelects → multiSelect).
   if (type === 'singleSelect' || type === 'select') {
     return {
-      type,
+      type: 'select',
       typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
     };
   }
