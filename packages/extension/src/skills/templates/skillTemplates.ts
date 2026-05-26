@@ -451,12 +451,12 @@ Non-destructive field operations.
 | Field Type | typeOptions |
 |------------|-------------|
 | formula | \`{ formulaText: "IF({A},1,0)" }\` |
-| rollup | \`{ fieldIdInLinkedTable, recordLinkFieldId, resultType, referencedFieldIds }\` |
-| lookup | \`{ recordLinkFieldId, fieldIdInLinkedTable }\` |
+| rollup | \`{ relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET", formulaText: "SUM(values)" }\` — **formulaText required**. Old keys \`fieldIdInLinkedTable\`/\`recordLinkFieldId\` are auto-translated. |
+| lookup | \`{ relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET" }\` — old keys auto-translated. |
 | count | \`{ recordLinkFieldId }\` |
 | singleSelect | \`{ choices: [{ name: "Option A", color: "blueLight2" }] }\` |
 | multipleSelects | \`{ choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }\` |
-| text, number, checkbox | \`{}\` (no typeOptions needed) |
+| text, multilineText, number, checkbox | omit typeOptions entirely (passing \`{}\` causes 422) |
 
 #### Working with Select Choices
 Pass choices as an array of \`{ name, color? }\` objects — IDs are auto-generated for new choices.

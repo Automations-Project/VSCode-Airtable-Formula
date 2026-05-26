@@ -319,6 +319,22 @@ function normalizeFieldType(type, typeOptions = {}) {
       typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
     };
   }
+  // Rollup and lookup use different key names in the internal API vs the public REST API.
+  // Translate the public names (fieldIdInLinkedTable, recordLinkFieldId) to the internal
+  // names (foreignTableRollupColumnId, relationColumnId) so callers can use either vocabulary.
+  // formulaText is required for rollup; relationColumnId + foreignTableRollupColumnId for lookup.
+  if (type === 'rollup' || type === 'lookup') {
+    const translated = { ...opts };
+    if (opts.recordLinkFieldId !== undefined && opts.relationColumnId === undefined) {
+      translated.relationColumnId = opts.recordLinkFieldId;
+      delete translated.recordLinkFieldId;
+    }
+    if (opts.fieldIdInLinkedTable !== undefined && opts.foreignTableRollupColumnId === undefined) {
+      translated.foreignTableRollupColumnId = opts.fieldIdInLinkedTable;
+      delete translated.fieldIdInLinkedTable;
+    }
+    return { type, typeOptions: translated };
+  }
   // "singleSelect" is the public/REST API name; internal API uses "select" (mirrors multipleSelects → multiSelect).
   if (type === 'singleSelect' || type === 'select') {
     return {
@@ -592,13 +608,15 @@ export class AirtableClient {
 
     const normalized = normalizeFieldType(fieldConfig.type, fieldConfig.typeOptions);
 
+    const config = { type: normalized.type };
+    if (normalized.typeOptions && Object.keys(normalized.typeOptions).length > 0) {
+      config.typeOptions = normalized.typeOptions;
+    }
+
     const payload = {
       tableId,
       name: fieldConfig.name,
-      config: {
-        type: normalized.type,
-        typeOptions: normalized.typeOptions,
-      },
+      config,
     };
 
     if (fieldConfig.description) {
@@ -634,11 +652,12 @@ export class AirtableClient {
 
     const normalized = normalizeFieldType(config.type, config.typeOptions);
 
-    // Flat payload — matches real Airtable requests
-    const payload = {
-      type: normalized.type,
-      typeOptions: normalized.typeOptions,
-    };
+    // Flat payload — matches real Airtable requests. Omit typeOptions when empty;
+    // the internal API rejects typeOptions: {} for field types that have no options.
+    const payload = { type: normalized.type };
+    if (normalized.typeOptions && Object.keys(normalized.typeOptions).length > 0) {
+      payload.typeOptions = normalized.typeOptions;
+    }
 
     const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
 

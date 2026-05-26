@@ -488,8 +488,11 @@ FIELD TYPES (fieldType parameter):
 
 TYPE OPTIONS by fieldType:
   formula:                { formulaText: "..." }
-  rollup:                 { fieldIdInLinkedTable, recordLinkFieldId, resultType, referencedFieldIds }
-  lookup:                 { recordLinkFieldId, fieldIdInLinkedTable }
+  rollup:                 { relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET", formulaText: "SUM(values)" }
+                          (formulaText is REQUIRED — e.g. "SUM(values)", "COUNTA(values)", "IF(OR(values='X'),1,0)"))
+                          (old keys fieldIdInLinkedTable/recordLinkFieldId are auto-translated for backward compat)
+  lookup:                 { relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET" }
+                          (old keys fieldIdInLinkedTable/recordLinkFieldId are auto-translated for backward compat)
   count:                  { recordLinkFieldId }
   number (integer):       { format: "integer", negative: false }
   number (currency):      { format: "currency", symbol: "$", precision: 2, negative: false }
@@ -497,6 +500,7 @@ TYPE OPTIONS by fieldType:
   date / dateTime:        { dateFormat: "Local"|"us"|"european"|"iso"|"friendly", timeFormat: "12hour"|"24hour", timeZone: "UTC"|"client"|<IANA-tz>, shouldDisplayTimeZone: true|false, isDateTime: true (auto for dateTime) }
   singleSelect:           { choices: [{ name: "Option A", color: "blueLight2" }] }
   multipleSelects:        { choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }
+  text / multilineText / checkbox / rating: omit typeOptions entirely — passing {} causes a 422
 
 SELECT CHOICES: pass an array of { name, color? } objects — the client auto-converts to the object format the internal API requires and generates valid choice IDs.`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -596,12 +600,15 @@ Works for formula, rollup, lookup, count, singleSelect, multipleSelects, number,
 COMMON typeOptions by fieldType:
 
   formula:         { formulaText: "IF({Field}, 1, 0)" }
-  rollup:          { relationColumnId: "fldXXX", formulaText: "SUM(values)" }
-  lookup:          { relationColumnId: "fldXXX", foreignTableRollupColumnId: "fldYYY" }
+  rollup:          { relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET", formulaText: "SUM(values)" }
+                   (formulaText is REQUIRED; old keys fieldIdInLinkedTable/recordLinkFieldId auto-translated)
+  lookup:          { relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET" }
+                   (old keys fieldIdInLinkedTable/recordLinkFieldId auto-translated)
   count:           { recordLinkFieldId: "fldXXX" }
   singleSelect:    { choices: [{ name: "Option A", color: "blueLight2" }] }
   multipleSelects: { choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }
   number:          { format: "integer"|"decimal"|"currency"|"percentV2", precision: 2, symbol: "$", negative: false }
+  text / multilineText / checkbox: omit typeOptions entirely — passing {} causes a 422
 
 SELECT CHOICES — pass an array of { name, color? } objects; the client handles the internal format.
 
@@ -1771,7 +1778,12 @@ const handlers = {
     if (foundField.type !== 'formula') {
       return { content: [{ type: 'text', text: JSON.stringify({ error: `Field ${fieldId} is type "${foundField.type}", not formula` }) }], isError: true };
     }
-    const formulaText = foundField.typeOptions?.formulaText ?? '';
+    // Airtable's internal API has stored formula text at typeOptions.formulaText historically.
+    // Defensive fallback chain handles potential key renames in future API responses.
+    const formulaText = foundField.typeOptions?.formulaText
+      || foundField.typeOptions?.formula
+      || foundField.formula
+      || '';
     const fieldName = foundField.name ?? fieldId;
     const description = foundField.description ?? '';
     const resultType = foundField.typeOptions?.resultType ?? '';
@@ -1805,7 +1817,10 @@ const handlers = {
       await mkdir(tableDir, { recursive: true });
 
       for (const field of formulaFields) {
-        const formulaText = field.typeOptions?.formulaText ?? '';
+        const formulaText = field.typeOptions?.formulaText
+          || field.typeOptions?.formula
+          || field.formula
+          || '';
         const fieldName = field.name ?? field.id;
         const description = field.description ?? '';
         const resultType = field.typeOptions?.resultType ?? '';
