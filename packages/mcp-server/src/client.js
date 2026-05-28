@@ -515,12 +515,14 @@ export class AirtableClient {
   // would short-circuit the chain before reaching tableById (the scaffolding
   // endpoint returns tableById + visibleTableOrder, not tableSchemas/tables).
   parseScaffoldingTables(d) {
+    const order = (d?.visibleTableOrder?.length > 0 && d.visibleTableOrder) ||
+      (d?.tableOrder?.length > 0 && d.tableOrder);
     return (d?.tableSchemas?.length > 0 && d.tableSchemas) ||
       (d?.tables?.length > 0 && d.tables) ||
-      (d?.visibleTableOrder || d?.tableOrder)?.map(id => {
+      (order && order.map(id => {
         const t = d?.tableById?.[id] || d?.tableDatas?.[id] || {};
         return { id, name: t.name || id };
-      }) ||
+      })) ||
       Object.values(d?.tableById || {});
   }
 

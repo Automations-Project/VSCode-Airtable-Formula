@@ -1778,9 +1778,11 @@ const handlers = {
     if (foundField.type !== 'formula') {
       return { content: [{ type: 'text', text: JSON.stringify({ error: `Field ${fieldId} is type "${foundField.type}", not formula` }) }], isError: true };
     }
-    // Airtable's internal API has stored formula text at typeOptions.formulaText historically.
-    // Defensive fallback chain handles potential key renames in future API responses.
-    const formulaText = foundField.typeOptions?.formulaText
+    // Live Airtable internal API stores formula text under typeOptions.formulaTextParsed.
+    // typeOptions.formulaText is the historical key kept as a fallback.
+    // Note: formulaTextParsed encodes field refs as {column_value_fldXXX} placeholders.
+    const formulaText = foundField.typeOptions?.formulaTextParsed
+      || foundField.typeOptions?.formulaText
       || foundField.typeOptions?.formula
       || foundField.formula
       || '';
@@ -1817,7 +1819,8 @@ const handlers = {
       await mkdir(tableDir, { recursive: true });
 
       for (const field of formulaFields) {
-        const formulaText = field.typeOptions?.formulaText
+        const formulaText = field.typeOptions?.formulaTextParsed
+          || field.typeOptions?.formulaText
           || field.typeOptions?.formula
           || field.formula
           || '';
@@ -1877,10 +1880,19 @@ const handlers = {
     } else {
       formula = stripHeader(formulaText, 'formula').text;
     }
+    // Fetch current typeOptions so format/precision settings (e.g. PercentV2, precision)
+    // are preserved — sending only { formulaText } would wipe them (#17).
+    let existingTypeOptions = {};
+    try {
+      const { field } = await client.resolveField(appId, fieldId);
+      existingTypeOptions = field?.typeOptions || {};
+    } catch (_) {
+      // resolveField failure is non-fatal; proceed with formula update only
+    }
     return handlers.update_field_config({
       appId, fieldId,
       fieldType: 'formula',
-      typeOptions: { formulaText: formula },
+      typeOptions: { ...existingTypeOptions, formulaText: formula },
       debug,
     });
   },
