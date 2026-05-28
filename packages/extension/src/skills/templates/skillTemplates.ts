@@ -454,18 +454,20 @@ Non-destructive field operations.
 | rollup | \`{ relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET", formulaText: "SUM(values)" }\` — **formulaText required**. Old keys \`fieldIdInLinkedTable\`/\`recordLinkFieldId\` are auto-translated. |
 | lookup | \`{ relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET" }\` — old keys auto-translated. |
 | count | \`{ recordLinkFieldId }\` |
-| singleSelect | \`{ choices: [{ name: "Option A", color: "blueLight2" }] }\` |
-| multipleSelects | \`{ choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }\` |
+| singleSelect | \`{ choices: [{ name: "Option A", color: "blue" }], default: "selXXX" }\` |
+| multipleSelects | \`{ choices: [{ name: "PC", color: "blue" }, { name: "Xbox", color: "cyan" }], default: ["selXXX"] }\` |
 | text, multilineText, number, checkbox | omit typeOptions entirely (passing \`{}\` causes 422) |
 
 #### Working with Select Choices
 Pass choices as an array of \`{ name, color? }\` objects — IDs are auto-generated for new choices.
+Color names (confirmed from API): \`"blue"\`, \`"cyan"\`, \`"teal"\`, \`"green"\`, \`"yellow"\`, \`"orange"\`, \`"red"\`, \`"pink"\`, \`"purple"\`, \`"gray"\`.
+Set a default: \`"default": "selXXX"\` (string) for singleSelect, \`"default": ["selXXX"]\` (array) for multipleSelects.
 
 To **add choices without losing existing ones**, call \`get_table_schema\` first to get existing choice IDs, then pass the full merged list:
 \`\`\`json
 { "choices": [
     { "id": "selXXXXXXXXXXXXXX", "name": "Existing Choice" },
-    { "name": "New Choice", "color": "pinkLight2" }
+    { "name": "New Choice", "color": "pink" }
 ] }
 \`\`\`
 Choices **not** in the list are deleted. Omitting \`id\` creates a new choice.

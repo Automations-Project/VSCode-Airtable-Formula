@@ -135,10 +135,11 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable bases with 35+ tools: schema inspection, table CRUD, ' +
-      'field CRUD (formula, rollup, lookup, count, url, dateTime, email, phone), ' +
-      'view configuration (filters, sorts, grouping, visibility), formula validation, ' +
-      'extension/block management, and tool profile control (read-only, safe-write, full, custom).',
+      'Manage Airtable base structure with 62 tools: schema inspection, table/field/view CRUD, ' +
+      'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
+      'select field choices with color support, formula validation and file-based bulk editing, ' +
+      'extension management, and granular tool profile control (read-only / safe-write / full / custom). ' +
+      'Record read/write/delete is handled by the official Airtable MCP — this server focuses on schema and structure.',
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },
@@ -172,7 +173,7 @@ const TOOLS = [
   // ── Read Tools ──
   {
     name: 'get_base_schema',
-    description: 'Get the full schema of an Airtable base including all tables, fields, and views.',
+    description: 'Get the full schema of an Airtable base — all tables, fields (with typeOptions), and views in one call. Use this when you need fields or views; use `list_tables` when you only need table names/IDs (faster, lighter). Returns { tables: [...] }.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -185,7 +186,7 @@ const TOOLS = [
   },
   {
     name: 'list_tables',
-    description: 'List all tables in an Airtable base with their IDs and names. Uses lightweight scaffolding data.',
+    description: 'List all tables in a base with their IDs and names — lightweight scaffolding call (no field data). Use this when you only need table IDs/names; use `get_base_schema` or `get_table_schema` when you also need fields or views. Returns [{ id, name }].',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -198,7 +199,7 @@ const TOOLS = [
   },
   {
     name: 'get_table_schema',
-    description: 'Get the full schema for a single table including all fields and views.',
+    description: 'Get the full schema for a single table — all fields (with typeOptions) and views. Use instead of `get_base_schema` when you only need one table (faster, less context). Use `list_fields` when you need fields only without view data. Returns { id, name, fields: [...], views: [...] }.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -212,7 +213,7 @@ const TOOLS = [
   },
   {
     name: 'list_fields',
-    description: 'List fields (columns) in a table. Returns id, name, type, and typeOptions for each field. On large tables (100+ fields) use fieldType or nameContains to filter the response and reduce context size.',
+    description: 'List fields in a table — returns id, name, type, and typeOptions per field. Use instead of `get_table_schema` when you need fields only (no view data). Use `fieldType` or `nameContains` filters on large tables to reduce context size. Returns [{ id, name, type, typeOptions }].',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -498,11 +499,16 @@ TYPE OPTIONS by fieldType:
   number (currency):      { format: "currency", symbol: "$", precision: 2, negative: false }
   number (percent):       { format: "percentV2", precision: 2, negative: false }
   date / dateTime:        { dateFormat: "Local"|"us"|"european"|"iso"|"friendly", timeFormat: "12hour"|"24hour", timeZone: "UTC"|"client"|<IANA-tz>, shouldDisplayTimeZone: true|false, isDateTime: true (auto for dateTime) }
-  singleSelect:           { choices: [{ name: "Option A", color: "blueLight2" }] }
-  multipleSelects:        { choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }
+  singleSelect:           { choices: [{ name: "Option A", color: "blue" }], default: "selXXX" }
+  multipleSelects:        { choices: [{ name: "PC", color: "blue" }, { name: "Xbox", color: "cyan" }], default: ["selXXX"] }
   text / multilineText / checkbox / rating: omit typeOptions entirely — passing {} causes a 422
 
-SELECT CHOICES: pass an array of { name, color? } objects — the client auto-converts to the object format the internal API requires and generates valid choice IDs.`,
+SELECT CHOICES:
+  - Pass choices as an array [{ name, color? }] or as an object { selXXX: { name, color? } }.
+  - The client auto-adds id inside each choice value, generates choiceOrder, and sets disableColors: false.
+  - Color names (confirmed): "blue", "cyan", "teal", "green", "yellow", "orange", "red", "pink", "purple", "gray".
+  - "default" sets the pre-selected value: string ID for singleSelect, array of IDs for multipleSelects.
+  - To add/remove choices without losing existing ones, call get_table_schema first and include ALL choices in the update.`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -530,7 +536,7 @@ SELECT CHOICES: pass an array of { name, color? } objects — the client auto-co
   },
   {
     name: 'create_formula_field',
-    description: 'Create a new formula field in a table. Shorthand for create_field with type "formula".',
+    description: 'Create a new formula field — shorthand for `create_field` with type "formula". Use `create_field` for all other field types (singleSelect, rollup, number, etc.). Returns { columnId }.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -605,18 +611,21 @@ COMMON typeOptions by fieldType:
   lookup:          { relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET" }
                    (old keys fieldIdInLinkedTable/recordLinkFieldId auto-translated)
   count:           { recordLinkFieldId: "fldXXX" }
-  singleSelect:    { choices: [{ name: "Option A", color: "blueLight2" }] }
-  multipleSelects: { choices: [{ name: "PC" }, { name: "Xbox", color: "greenLight2" }] }
+  singleSelect:    { choices: [{ name: "Option A", color: "blue" }], default: "selXXX" }
+  multipleSelects: { choices: [{ name: "PC", color: "blue" }, { name: "Xbox", color: "cyan" }], default: ["selXXX"] }
   number:          { format: "integer"|"decimal"|"currency"|"percentV2", precision: 2, symbol: "$", negative: false }
   text / multilineText / checkbox: omit typeOptions entirely — passing {} causes a 422
 
-SELECT CHOICES — pass an array of { name, color? } objects; the client handles the internal format.
+SELECT CHOICES:
+  - Pass choices as array [{ name, color? }] or object { selXXX: { name, color? } }.
+  - Color names (confirmed): "blue", "cyan", "teal", "green", "yellow", "orange", "red", "pink", "purple", "gray".
+  - "default" = pre-selected value: string ID for singleSelect, array of IDs for multipleSelects.
 
 ADDING TO AN EXISTING SELECT FIELD (merge, not replace):
   Choices not in the list are DELETED. To add without losing existing choices:
   1. Call get_table_schema — each existing choice has { id, name, color }
   2. Pass the full list: existing entries WITH their id, new entries WITHOUT:
-     { choices: [{ id: "selXXXXXXXXXXXXXX", name: "Existing" }, { name: "New Choice", color: "pinkLight2" }] }
+     { choices: [{ id: "selXXXXXXXXXXXXXX", name: "Existing" }, { name: "New Choice", color: "pink" }] }
 
 REPLACING ALL CHOICES: just pass the new choices without any IDs.`,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -637,7 +646,7 @@ REPLACING ALL CHOICES: just pass the new choices without any IDs.`,
   },
   {
     name: 'update_formula_field',
-    description: 'Update the formula text of an existing formula field. Shorthand for update_field_config with type "formula".',
+    description: 'Update the formula body of an existing formula field — shorthand for `update_field_config` with type "formula". Automatically preserves existing format/precision typeOptions (e.g. percentV2, precision). Use `update_field_config` to change the field type or other typeOptions.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -671,7 +680,7 @@ REPLACING ALL CHOICES: just pass the new choices without any IDs.`,
   },
   {
     name: 'delete_field',
-    description: 'Delete a field from an Airtable table. Requires both fieldId AND the expected field name as a safety guard. First checks for downstream dependencies — if found, returns dependency info instead of deleting. Set force=true to delete even with dependencies.',
+    description: 'Delete a field from an Airtable table. Requires fieldId AND expectedName as a safety guard — deletion is refused if the name does not match. ⚠️ Irreversible: deleted field data is permanently lost and cannot be recovered. Always checks downstream dependencies first (formula fields, lookups, rollups referencing this field); returns dependency info without deleting unless force=true.',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -933,7 +942,7 @@ EXAMPLES:
   },
   {
     name: 'show_or_hide_view_columns',
-    description: 'Show or hide specific fields (columns) in a view. Pass an array of column IDs and a single visibility flag — every ID in the array is set to that visibility. To toggle many fields at once, send the full set in one call (no separate "show all" / "hide all" tool exists today; that lives in 2.4.0+).',
+    description: 'Show or hide specific columns in a view without affecting others. Pass field IDs + a visibility flag — every listed ID is set to that state, all other columns are untouched. Use `set_view_columns` instead when you want to define the full visible set from scratch. Use `show_or_hide_all_columns` to bulk-toggle every column at once.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1115,7 +1124,7 @@ For section reorders, targetIndex is into the table's top-level mixed viewOrder;
   // ── View Columns (bulk visibility, ordering, freezing) ──
   {
     name: 'set_view_columns',
-    description: 'One-shot view-column setup. Hides every column in the view, then shows only `visibleColumnIds` in the order given (left-to-right), then optionally sets the frozen-column divider. Use this to turn a brand-new view from "all 168 fields visible" into a curated layout in a single tool call.',
+    description: 'One-shot view-column reset: hides every column then shows only `visibleColumnIds` in the given left-to-right order, with optional freeze. Use this for fresh view setup or full layout rewrites. Use `show_or_hide_view_columns` when you only want to toggle specific columns without touching the rest.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1131,7 +1140,7 @@ For section reorders, targetIndex is into the table's top-level mixed viewOrder;
   },
   {
     name: 'show_or_hide_all_columns',
-    description: 'Show or hide every column in a view in one call. Use `set_view_columns` for "hide all then show these specific ones" — this tool is the bulk all-or-nothing primitive.',
+    description: 'Show or hide every column in a view in one call. Use when you want a clean all-visible or all-hidden baseline. Use `set_view_columns` when you want to show a specific subset (it hides all then shows only the listed IDs). Use `show_or_hide_view_columns` for selective per-column toggles.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1146,7 +1155,7 @@ For section reorders, targetIndex is into the table's top-level mixed viewOrder;
   },
   {
     name: 'move_visible_columns',
-    description: 'Move one or more columns to a new position in the *visible-only* index. Index 0 is the leftmost visible column. Distinct from `reorder_view_fields` (which writes the full overall order — visible + hidden) and `move_overall_columns` (which also operates on overall index but accepts a partial array of columns to move).',
+    description: 'Move columns by visible-only index (index 0 = leftmost shown column, hidden columns not counted). Use when you want to position relative to what the user sees. Use `move_overall_columns` when you need to position relative to the full underlying column order including hidden fields. ⚠️ The API preserves existing relative order of supplied IDs — to place columns in a custom sequence, issue one call per column with incrementing targets.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',

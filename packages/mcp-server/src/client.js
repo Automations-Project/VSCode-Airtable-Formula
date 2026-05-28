@@ -267,11 +267,19 @@ function generateChoiceId() {
  */
 function normalizeChoices(choices) {
   if (!choices) return choices;
-  if (!Array.isArray(choices)) return choices; // already object-keyed, pass through
+  if (!Array.isArray(choices)) {
+    // Already object-keyed — ensure each value includes its own id (required by internal API).
+    const result = {};
+    for (const [key, val] of Object.entries(choices)) {
+      result[key] = { id: key, ...val };
+    }
+    return result;
+  }
+  // Array form: generate IDs for new choices, preserve existing ids.
   const result = {};
   for (const { id, name, color, ...rest } of choices) {
     const key = id || generateChoiceId();
-    result[key] = { name, ...(color ? { color } : {}), ...rest };
+    result[key] = { id: key, name, ...(color ? { color } : {}), ...rest };
   }
   return result;
 }
@@ -312,12 +320,19 @@ function normalizeFieldType(type, typeOptions = {}) {
     };
   }
   // "multipleSelects" is the public/REST API name; internal API uses "multiSelect" (no "s").
-  // Also normalize choices from array form to the object form the internal API requires.
+  // Internal API requires: choices as keyed object with id inside each value, choiceOrder array,
+  // disableColors bool. default (array of IDs) lives OUTSIDE typeOptions at the payload root.
   if (type === 'multipleSelects' || type === 'multiSelect') {
-    return {
-      type: 'multiSelect',
-      typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
-    };
+    const { default: defaultVal, choices, choiceOrder: inputOrder, disableColors, ...restOpts } = opts;
+    const normalizedChoices = choices ? normalizeChoices(choices) : null;
+    const order = inputOrder || (normalizedChoices ? Object.keys(normalizedChoices) : null);
+    const typeOpts = { ...restOpts };
+    if (normalizedChoices) typeOpts.choices = normalizedChoices;
+    if (order) typeOpts.choiceOrder = order;
+    typeOpts.disableColors = disableColors !== undefined ? disableColors : false;
+    const result = { type: 'multiSelect', typeOptions: typeOpts };
+    if (defaultVal !== undefined) result.default = defaultVal;
+    return result;
   }
   // Rollup and lookup use different key names in the internal API vs the public REST API.
   // Translate the public names (fieldIdInLinkedTable, recordLinkFieldId) to the internal
@@ -335,12 +350,20 @@ function normalizeFieldType(type, typeOptions = {}) {
     }
     return { type, typeOptions: translated };
   }
-  // "singleSelect" is the public/REST API name; internal API uses "select" (mirrors multipleSelects → multiSelect).
+  // "singleSelect" is the public/REST API name; internal API uses "select".
+  // Internal API requires: choices as keyed object with id inside each value, choiceOrder array,
+  // disableColors bool. default (single ID string) lives OUTSIDE typeOptions at the payload root.
   if (type === 'singleSelect' || type === 'select') {
-    return {
-      type: 'select',
-      typeOptions: { ...opts, ...(opts.choices ? { choices: normalizeChoices(opts.choices) } : {}) },
-    };
+    const { default: defaultVal, choices, choiceOrder: inputOrder, disableColors, ...restOpts } = opts;
+    const normalizedChoices = choices ? normalizeChoices(choices) : null;
+    const order = inputOrder || (normalizedChoices ? Object.keys(normalizedChoices) : null);
+    const typeOpts = { ...restOpts };
+    if (normalizedChoices) typeOpts.choices = normalizedChoices;
+    if (order) typeOpts.choiceOrder = order;
+    typeOpts.disableColors = disableColors !== undefined ? disableColors : false;
+    const result = { type: 'select', typeOptions: typeOpts };
+    if (defaultVal !== undefined) result.default = defaultVal;
+    return result;
   }
   return { type, typeOptions: opts };
 }
@@ -611,6 +634,7 @@ export class AirtableClient {
     const normalized = normalizeFieldType(fieldConfig.type, fieldConfig.typeOptions);
 
     const config = { type: normalized.type };
+    if (normalized.default !== undefined) config.default = normalized.default;
     if (normalized.typeOptions && Object.keys(normalized.typeOptions).length > 0) {
       config.typeOptions = normalized.typeOptions;
     }
@@ -657,6 +681,7 @@ export class AirtableClient {
     // Flat payload — matches real Airtable requests. Omit typeOptions when empty;
     // the internal API rejects typeOptions: {} for field types that have no options.
     const payload = { type: normalized.type };
+    if (normalized.default !== undefined) payload.default = normalized.default;
     if (normalized.typeOptions && Object.keys(normalized.typeOptions).length > 0) {
       payload.typeOptions = normalized.typeOptions;
     }

@@ -150,7 +150,7 @@ Manage choices for an Airtable select field.
    \`\`\`json
    [
      { "id": "selXXXXXXXXXXXXXX", "name": "Existing Choice" },
-     { "name": "New Choice", "color": "blueLight2" }
+     { "name": "New Choice", "color": "blue" }
    ]
    \`\`\`
 
@@ -166,6 +166,7 @@ Manage choices for an Airtable select field.
 
 4. Confirm the result to the user.
 
+**Color names:** "blue", "cyan", "teal", "green", "yellow", "orange", "red", "pink", "purple", "gray".
 **Important:** Choices omitted from the list are permanently deleted. Always fetch the current schema first when adding or removing specific choices.`,
   },
 
@@ -201,6 +202,138 @@ The Official Airtable REST API's \`filterByFormula\` approach uses \`FIND()\`/\`
 which silently fail on lookup fields — they match against the raw linked record ID rather than
 the resolved display value. \`query_records\` uses the internal readQueries endpoint which returns
 fully resolved cell values, so searches work correctly on lookup, rollup, and formula fields.`,
+  },
+
+  {
+    name: 'airtable-setup-rollup-lookup',
+    description: 'Create or update a rollup or lookup field with guided field-ID resolution',
+    arguments: [
+      { name: 'appId',      description: 'Base ID (appXXX)',                                            required: true  },
+      { name: 'tableId',    description: 'Table ID (tblXXX) where the rollup/lookup field will live',   required: true  },
+      { name: 'fieldType',  description: '"rollup" or "lookup"',                                        required: true  },
+      { name: 'fieldName',  description: 'Name for the new field (or existing fieldId to update)',      required: true  },
+      { name: 'goal',       description: 'What to roll up or look up (plain English)',                  required: false },
+    ],
+    template: `\
+Set up an Airtable {fieldType} field in base **{appId}**, table **{tableId}**.
+
+**Field name / ID:** {fieldName}
+**Goal:** {goal}
+
+**Steps:**
+
+1. Call \`get_table_schema\` with appId="{appId}", tableIdOrName="{tableId}" to list all fields.
+
+2. Identify the **link field** — the field of type "foreignKey" (linked record field) that connects to the table you want to roll up from. Note its field ID — this is \`relationColumnId\`.
+
+3. Call \`get_base_schema\` with appId="{appId}" to find the **linked table**. Look for the table whose ID matches the link field's \`typeOptions.foreignTableId\`.
+
+4. From the linked table's fields, identify the **target field** to roll up or look up. Note its ID — this is \`foreignTableRollupColumnId\`.
+
+5. Build the typeOptions:
+   - For **rollup**: \`{ relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET", formulaText: "SUM(values)" }\`
+     Common aggregations: \`SUM(values)\`, \`COUNTA(values)\`, \`MAX(values)\`, \`MIN(values)\`, \`CONCATENATE(ARRAYJOIN(values, ", "))\`
+   - For **lookup**: \`{ relationColumnId: "fldLINK", foreignTableRollupColumnId: "fldTARGET" }\`
+
+6. If {fieldName} looks like a field ID (starts with "fld"), call \`update_field_config\`. Otherwise call \`create_field\` with the name "{fieldName}".
+
+7. Confirm the created/updated field with the user.
+
+**Note:** \`relationColumnId\` = the link field in THIS table. \`foreignTableRollupColumnId\` = the field in the LINKED table.`,
+  },
+
+  {
+    name: 'airtable-build-table',
+    description: 'Design and create a complete table structure from plain-language requirements',
+    arguments: [
+      { name: 'appId',        description: 'Base ID (appXXX)',                           required: true  },
+      { name: 'tableName',    description: 'Name for the new table',                     required: true  },
+      { name: 'requirements', description: 'What the table should track (plain English)', required: true  },
+    ],
+    template: `\
+Design and build an Airtable table in base **{appId}**.
+
+**Table name:** {tableName}
+**Requirements:** {requirements}
+
+**Steps:**
+
+1. Call \`get_base_schema\` with appId="{appId}" to understand the existing base structure — note any related tables and linked-record relationships.
+
+2. Design the field schema from the requirements. For each field decide:
+   - Name (clear, noun-first)
+   - Type: text, multilineText, number, checkbox, date, singleSelect, multipleSelects, formula, rollup, lookup, foreignKey (linked record), url, email, phone
+   - typeOptions where needed (choices for select, formulaText for formula, etc.)
+
+3. Present the proposed schema to the user as a clear table: | Field | Type | Notes |. Wait for approval or adjustments.
+
+4. Call \`create_table\` with appId="{appId}", name="{tableName}", and the primary field name.
+
+5. For each additional field, call \`create_field\` with the confirmed schema. Create fields in dependency order — link fields before rollups/lookups that reference them.
+
+6. Suggest a default view configuration (which fields to show, sensible sort).
+
+**Field type quick reference:**
+- Text / long text → \`text\` / \`multilineText\`
+- Number / currency / % → \`number\` with format: "integer" / "currency" / "percentV2"
+- Date → \`date\`; datetime → \`date\` with isDateTime: true
+- Single choice → \`singleSelect\`; multi-choice → \`multipleSelects\`
+- Computed → \`formula\`, \`rollup\`, \`lookup\`, \`count\``,
+  },
+
+  {
+    name: 'airtable-bulk-formula-edit',
+    description: 'Download all formula fields from a base, edit them offline, then upload changes',
+    arguments: [
+      { name: 'appId',     description: 'Base ID (appXXX)',                                      required: true  },
+      { name: 'outputDir', description: 'Local directory to write .formula files into',           required: false },
+      { name: 'mode',      description: '"download", "upload", or "review" (default: download)',  required: false },
+    ],
+    template: `\
+Bulk formula workflow for Airtable base **{appId}**.
+
+**Output directory:** {outputDir}
+**Mode:** {mode}
+
+---
+
+### Mode: download (default)
+
+1. Call \`download_base_formulas\` with appId="{appId}", outputDir="{outputDir}".
+   - Each formula field is written as \`<TableName>/<FieldName>.formula\`.
+   - Each file starts with a \`# AT:\` metadata header (appId, tableId, fieldId, fieldName).
+
+2. Report a summary: how many files were written, grouped by table.
+
+3. Tell the user: "Edit any .formula file, then run this prompt again with mode=upload to push changes back."
+
+---
+
+### Mode: upload
+
+1. Ask the user for the list of .formula files they edited (or scan {outputDir} for recently modified files).
+
+2. For each file, call \`update_formula_field\` with:
+   - appId: "{appId}"
+   - fieldId: read from the \`# AT: fieldId=\` header in the file
+   - formulaFilePath: the path to the file
+
+   The \`# AT:\` header is stripped automatically — only the formula body is sent.
+
+3. Report success/failure per field.
+
+---
+
+### Mode: review
+
+1. Call \`download_base_formulas\` with appId="{appId}" (no outputDir — returns formula text without writing files when omitted from individual calls, or writes to a temp dir).
+
+2. Display all formulas grouped by table. Flag any that:
+   - Are empty or very short (possibly broken)
+   - Reference \`{column_value_fldXXX}\` placeholder IDs instead of readable field names (means the formula was stored internally and never had its field refs resolved)
+   - Have mismatched parentheses
+
+3. Ask the user which formulas they want to fix.`,
   },
 
   {
