@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { writeIfMissing, cursorWrap, checkAiFiles } from '../skills/installer.js';
+import { writeIfMissing, cursorWrap, checkAiFiles, installAiFiles } from '../skills/installer.js';
 
 const tmpDir = path.join(os.tmpdir(), 'airtable-test-' + Date.now());
 
@@ -52,11 +52,37 @@ describe('checkAiFiles', () => {
     expect(result.rules).toBe('missing');
   });
 
-  it('returns "ok" for present files', async () => {
+  it('returns "ok" for present files (legacy .windsurf path)', async () => {
     const skillPath = path.join(tmpDir, '.windsurf', 'skills', 'airtable-formula.md');
     fs.mkdirSync(path.dirname(skillPath), { recursive: true });
     fs.writeFileSync(skillPath, 'skill');
     const result = await checkAiFiles('windsurf', tmpDir);
     expect(result.skills).toBe('ok');
+  });
+
+  it('returns "ok" for the .devin primary path', async () => {
+    const skillPath = path.join(tmpDir, '.devin', 'skills', 'airtable-formula.md');
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, 'skill');
+    const result = await checkAiFiles('windsurf', tmpDir);
+    expect(result.skills).toBe('ok');
+  });
+});
+
+// Windsurf → Devin Desktop (2026-06-02): primary .devin/, legacy .windsurf/.
+describe('Devin Desktop dual-write', () => {
+  it('installs both .devin (primary) and .windsurf (legacy) for skills/rules/workflows', async () => {
+    await installAiFiles('windsurf', tmpDir, false, false);
+    for (const dir of ['.devin', '.windsurf']) {
+      expect(fs.existsSync(path.join(tmpDir, dir, 'skills', 'airtable-formula.md'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, dir, 'rules', 'airtable-formula.md'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, dir, 'workflows', 'airtable-formula.md'))).toBe(true);
+    }
+  });
+
+  it('windsurf-next installs the same dual paths', async () => {
+    await installAiFiles('windsurf-next', tmpDir, false, false);
+    expect(fs.existsSync(path.join(tmpDir, '.devin', 'rules', 'airtable-formula.md'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.windsurf', 'rules', 'airtable-formula.md'))).toBe(true);
   });
 });

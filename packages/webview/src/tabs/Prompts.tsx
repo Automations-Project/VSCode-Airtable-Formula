@@ -17,7 +17,7 @@ function ReconnectNotice() {
         <span style={{ color: 'var(--fg-info)', fontWeight: 600 }}>Reconnect required after changes. </span>
         Clients cache MCP capabilities at connect-time. After saving or adding prompts:
         <ul style={{ marginTop: 4, paddingLeft: 14 }}>
-          <li><b>Cursor / Windsurf</b> — Reload Window (Ctrl+Shift+P)</li>
+          <li><b>Cursor / Devin Desktop (Windsurf)</b> — Reload Window (Ctrl+Shift+P)</li>
           <li><b>Claude Code</b> — Restart session or run <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.64rem' }}>/mcp</code></li>
           <li><b>Claude Desktop</b> — Restart the app</li>
         </ul>

@@ -6,6 +6,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Extension — Windsurf renamed to Devin Desktop, legacy-compatible (2026-06-05)
+
+Cognition rebranded the Windsurf editor to **Devin Desktop** on 2026-06-02 (in-place OTA rename) and moved workspace AI assets from `.windsurf/` to `.devin/`, keeping `.windsurf/` as a read fallback (Windsurf-import is on by default).
+
+- **Relabel:** the Setup IDE picker and auto-config now show **"Devin Desktop (Windsurf)"** / **"Devin Desktop Next (Windsurf Next)"** ([`ide-configs.ts`](packages/extension/src/auto-config/ide-configs.ts), [`Setup.tsx`](packages/webview/src/tabs/Setup.tsx), [`Prompts.tsx`](packages/webview/src/tabs/Prompts.tsx)).
+- **AI-files install** ([`skills/installer.ts`](packages/extension/src/skills/installer.ts)) now **dual-writes** skills/rules/workflows to both `.devin/{skills,rules,workflows}/airtable-formula.md` (new primary) and `.windsurf/…` (legacy — for pre-rebrand Windsurf + the vendor import path); `checkAiFiles` reports "ok" if either exists. New optional `AiInstallConfig.legacy` field drives this.
+- **Unchanged (back-compat):** the `windsurf` / `windsurf-next` IDE ids and the `.codeium/windsurf*/mcp_config.json` MCP config paths — the `.codeium` tree is unchanged per the vendor docs.
+- Tests: [`installer.test.ts`](packages/extension/src/test/installer.test.ts) covers the `.devin` primary, the `.windsurf` legacy fallback, and dual-write for both ids. Full build + extension (65) + webview (35) tests pass.
+
 ### MCP Server 2.5.0 — Record Templates (9 new tools) + round-4 user-report fixes (2026-05-01)
 
 Promotes record templates to a first-class MCP capability. Templates are

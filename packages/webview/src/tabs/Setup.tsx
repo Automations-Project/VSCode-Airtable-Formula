@@ -191,7 +191,7 @@ const MCP_IDE_TABS = [
   { id: 'claude-code',    label: 'Claude Code' },
   { id: 'claude-desktop', label: 'Claude Desktop' },
   { id: 'cursor',         label: 'Cursor' },
-  { id: 'windsurf',       label: 'Windsurf' },
+  { id: 'windsurf',       label: 'Devin Desktop (Windsurf)' },
   { id: 'cline',          label: 'Cline' },
 ] as const;
 
@@ -200,8 +200,8 @@ const OFFICIAL_MCP_IDES = [
   { id: 'claude-code',    label: 'Claude Code' },
   { id: 'claude-desktop', label: 'Claude Desktop' },
   { id: 'cursor',         label: 'Cursor' },
-  { id: 'windsurf',       label: 'Windsurf' },
-  { id: 'windsurf-next',  label: 'Windsurf Next' },
+  { id: 'windsurf',       label: 'Devin Desktop (Windsurf)' },
+  { id: 'windsurf-next',  label: 'Devin Desktop Next (Windsurf Next)' },
   { id: 'cline',          label: 'Cline' },
   { id: 'amp',            label: 'Amp' },
   { id: 'opencode',       label: 'OpenCode' },

@@ -11,6 +11,18 @@ interface AiInstallConfig {
   workflowPath: string | null;
   agentsPath:   string | null;
   wrapCursor:   boolean;
+  /**
+   * Deprecated-but-still-honored paths written alongside the primary ones and
+   * recognized on check. Used when a client rebrands its config directory but
+   * keeps reading the old one — e.g. Windsurf → Devin Desktop (2026-06-02):
+   * primary `.devin/…`, legacy `.windsurf/…` (read by Devin's on-by-default
+   * Windsurf import + by users still on pre-rebrand Windsurf).
+   */
+  legacy?: {
+    skillPath?:    string;
+    rulesPath?:    string;
+    workflowPath?: string;
+  };
 }
 
 const home = os.homedir();
@@ -26,19 +38,31 @@ const AI_CONFIGS: Record<IdeId, AiInstallConfig> = {
   },
   'windsurf': {
     baseDir: 'workspace',
-    skillPath:    '.windsurf/skills/airtable-formula.md',
-    rulesPath:    '.windsurf/rules/airtable-formula.md',
-    workflowPath: '.windsurf/workflows/airtable-formula.md',
+    // Windsurf was rebranded to "Devin Desktop" (2026-06-02). Devin-native
+    // workspace assets live under .devin/; .windsurf/ is still read as legacy.
+    skillPath:    '.devin/skills/airtable-formula.md',
+    rulesPath:    '.devin/rules/airtable-formula.md',
+    workflowPath: '.devin/workflows/airtable-formula.md',
     agentsPath:   null,
     wrapCursor: false,
+    legacy: {
+      skillPath:    '.windsurf/skills/airtable-formula.md',
+      rulesPath:    '.windsurf/rules/airtable-formula.md',
+      workflowPath: '.windsurf/workflows/airtable-formula.md',
+    },
   },
   'windsurf-next': {
     baseDir: 'workspace',
-    skillPath:    '.windsurf/skills/airtable-formula.md',
-    rulesPath:    '.windsurf/rules/airtable-formula.md',
-    workflowPath: '.windsurf/workflows/airtable-formula.md',
+    skillPath:    '.devin/skills/airtable-formula.md',
+    rulesPath:    '.devin/rules/airtable-formula.md',
+    workflowPath: '.devin/workflows/airtable-formula.md',
     agentsPath:   null,
     wrapCursor: false,
+    legacy: {
+      skillPath:    '.windsurf/skills/airtable-formula.md',
+      rulesPath:    '.windsurf/rules/airtable-formula.md',
+      workflowPath: '.windsurf/workflows/airtable-formula.md',
+    },
   },
   'claude-code': {
     baseDir: 'home',
@@ -92,15 +116,20 @@ export async function installAiFiles(ideId: IdeId, workspaceRoot: string, force 
   const cfg = AI_CONFIGS[ideId];
   const base = resolveBase(cfg, workspaceRoot);
 
-  const written = async (rel: string | null, content: string): Promise<AiFileStatus> => {
+  // Write the primary path and any legacy paths (e.g. .devin/ + .windsurf/).
+  // 'ok' if at least one location ends up present.
+  const written = async (rel: string | null, legacyRel: string | undefined, content: string): Promise<AiFileStatus> => {
     if (!rel) return 'missing';
-    const abs = cfg.baseDir === 'home' ? rel : path.join(base, rel);
-    try {
-      await writeIfMissing(abs, content, force);
-      return 'ok';
-    } catch {
-      return 'missing';
+    let present = false;
+    for (const r of [rel, legacyRel]) {
+      if (!r) continue;
+      const abs = cfg.baseDir === 'home' ? r : path.join(base, r);
+      try {
+        await writeIfMissing(abs, content, force);
+        present = true;
+      } catch { /* skip this location */ }
     }
+    return present ? 'ok' : 'missing';
   };
 
   const skillContent   = cfg.wrapCursor ? cursorWrap(SKILL_CONTENT, 'Airtable Formula skill') : SKILL_CONTENT;
@@ -109,10 +138,10 @@ export async function installAiFiles(ideId: IdeId, workspaceRoot: string, force 
   const agentContent   = AGENTS_CONTENT;
 
   return {
-    skills:    await written(cfg.skillPath, skillContent),
-    rules:     await written(cfg.rulesPath, rulesContent),
-    workflows: await written(cfg.workflowPath, wfContent),
-    agents:    includeAgents ? await written(cfg.agentsPath, agentContent) : 'missing',
+    skills:    await written(cfg.skillPath, cfg.legacy?.skillPath, skillContent),
+    rules:     await written(cfg.rulesPath, cfg.legacy?.rulesPath, rulesContent),
+    workflows: await written(cfg.workflowPath, cfg.legacy?.workflowPath, wfContent),
+    agents:    includeAgents ? await written(cfg.agentsPath, undefined, agentContent) : 'missing',
   };
 }
 
@@ -120,16 +149,20 @@ export async function checkAiFiles(ideId: IdeId, workspaceRoot: string): Promise
   const cfg = AI_CONFIGS[ideId];
   const base = resolveBase(cfg, workspaceRoot);
 
-  const check = async (rel: string | null): Promise<AiFileStatus> => {
-    if (!rel) return 'missing';
-    const abs = cfg.baseDir === 'home' ? rel : path.join(base, rel);
-    try { await fs.promises.access(abs); return 'ok'; } catch { return 'missing'; }
+  // 'ok' if the primary OR any legacy path exists.
+  const check = async (rel: string | null, legacyRel?: string): Promise<AiFileStatus> => {
+    for (const r of [rel, legacyRel]) {
+      if (!r) continue;
+      const abs = cfg.baseDir === 'home' ? r : path.join(base, r);
+      try { await fs.promises.access(abs); return 'ok'; } catch { /* keep checking */ }
+    }
+    return 'missing';
   };
 
   return {
-    skills:    await check(cfg.skillPath),
-    rules:     await check(cfg.rulesPath),
-    workflows: await check(cfg.workflowPath),
+    skills:    await check(cfg.skillPath, cfg.legacy?.skillPath),
+    rules:     await check(cfg.rulesPath, cfg.legacy?.rulesPath),
+    workflows: await check(cfg.workflowPath, cfg.legacy?.workflowPath),
     agents:    await check(cfg.agentsPath),
   };
 }

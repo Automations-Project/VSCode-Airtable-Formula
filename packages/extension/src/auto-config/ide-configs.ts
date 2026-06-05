@@ -40,15 +40,18 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
       path.join(localAppData, 'Programs', 'cursor'),
     ],
   },
+  // Windsurf was rebranded to "Devin Desktop" (2026-06-02, in-place OTA rename).
+  // The `.codeium/windsurf*` paths are unchanged per the vendor docs, so the
+  // MCP config + detection paths stay; only the display label updates.
   'windsurf': {
-    label: 'Windsurf',
+    label: 'Devin Desktop (Windsurf)',
     capabilities: ['mcp'],
     mcpConfigPath:  path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
     mcpServersKey:  'mcpServers',
     detectionPaths: [path.join(home, '.codeium', 'windsurf')],
   },
   'windsurf-next': {
-    label: 'Windsurf Next',
+    label: 'Devin Desktop Next (Windsurf Next)',
     capabilities: ['mcp'],
     mcpConfigPath:  path.join(home, '.codeium', 'windsurf-next', 'mcp_config.json'),
     mcpServersKey:  'mcpServers',
