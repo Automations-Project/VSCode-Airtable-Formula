@@ -150,25 +150,78 @@ describe('#15 — resolveField returns formulaTextParsed for formula fields', ()
   });
 });
 
-// ─── §3 — resolveField provides existing typeOptions for update_formula_field merge (#17) ──
+// ─── §3 — update_formula_field whitelist merge (#17 + #17 regression) ───────
 
-describe('#17 — resolveField exposes existing typeOptions for merge before formula update', () => {
-  it('formula field with format typeOptions is accessible via resolveField', async () => {
+describe('#17 — format keys preserved, read-only keys excluded from formula update', () => {
+  const FORMULA_FORMAT_KEYS = [
+    'format', 'precision', 'symbol', 'negative', 'percentV2',
+    'dateFormat', 'timeFormat', 'timeZone', 'isDateTime', 'shouldDisplayTimeZone',
+  ];
+
+  function pickFormatOptions(typeOptions) {
+    const result = {};
+    for (const key of FORMULA_FORMAT_KEYS) {
+      if (key in typeOptions) result[key] = typeOptions[key];
+    }
+    return result;
+  }
+
+  it('format keys (precision, percentV2) survive the whitelist pick', () => {
+    const typeOptions = {
+      formulaTextParsed: 'SUM(1,2)',  // read-only — must be excluded
+      resultType: 'percent',          // read-only — must be excluded
+      resultIsArray: false,           // read-only — must be excluded
+      dependencies: { fld123: true }, // read-only — must be excluded
+      percentV2: true,
+      precision: 0,
+      format: 'percentV2',
+    };
+    const picked = pickFormatOptions(typeOptions);
+    assert.equal(picked.percentV2, true, 'percentV2 must be preserved');
+    assert.equal(picked.precision, 0, 'precision must be preserved');
+    assert.equal(picked.format, 'percentV2', 'format must be preserved');
+  });
+
+  it('read-only computed keys are excluded from the whitelist pick (#17 regression)', () => {
+    const typeOptions = {
+      formulaTextParsed: 'IF({column_value_fld123}, 1, 0)',
+      resultType: 'number',
+      resultIsArray: false,
+      dependencies: { fld123: true },
+      precision: 2,
+    };
+    const picked = pickFormatOptions(typeOptions);
+    assert.equal(picked.formulaTextParsed, undefined, 'formulaTextParsed must be excluded');
+    assert.equal(picked.resultType, undefined, 'resultType must be excluded');
+    assert.equal(picked.resultIsArray, undefined, 'resultIsArray must be excluded');
+    assert.equal(picked.dependencies, undefined, 'dependencies must be excluded');
+    assert.equal(picked.precision, 2, 'precision must be preserved');
+  });
+
+  it('merged payload has formulaText updated and format keys intact', () => {
+    const typeOptions = {
+      formulaTextParsed: 'OLD',
+      resultType: 'percent',
+      percentV2: true,
+      precision: 0,
+    };
+    const formatOptions = pickFormatOptions(typeOptions);
+    const merged = { ...formatOptions, formulaText: 'SUM(3,4)' };
+    assert.equal(merged.formulaText, 'SUM(3,4)');
+    assert.equal(merged.percentV2, true);
+    assert.equal(merged.precision, 0);
+    assert.equal(merged.formulaTextParsed, undefined, 'must not bleed into payload');
+    assert.equal(merged.resultType, undefined, 'must not bleed into payload');
+  });
+
+  it('resolveField exposes typeOptions for whitelist extraction', async () => {
     const schema = {
       data: {
         tableSchemas: [{
-          id: 'tblX',
-          name: 'T',
+          id: 'tblX', name: 'T',
           columns: [{
-            id: 'fldPct',
-            name: 'Pct',
-            type: 'formula',
-            typeOptions: {
-              formulaText: 'SUM(1,2)',
-              resultType: 'percent',
-              percentV2: true,
-              precision: 0,
-            },
+            id: 'fldPct', name: 'Pct', type: 'formula',
+            typeOptions: { formulaTextParsed: 'SUM(1,2)', resultType: 'percent', percentV2: true, precision: 0 },
           }],
           views: [],
         }],
@@ -176,12 +229,10 @@ describe('#17 — resolveField exposes existing typeOptions for merge before for
     };
     const client = new AirtableClient(createMockAuth(schema));
     const { field } = await client.resolveField('appX', 'fldPct');
-    const existing = field?.typeOptions || {};
-    // Simulates what update_formula_field does: merge existing into new formula update
-    const merged = { ...existing, formulaText: 'SUM(3,4)' };
-    assert.equal(merged.resultType, 'percent', 'resultType must survive merge');
-    assert.equal(merged.precision, 0, 'precision must survive merge');
-    assert.equal(merged.percentV2, true, 'percentV2 must survive merge');
-    assert.equal(merged.formulaText, 'SUM(3,4)', 'formulaText must be updated');
+    const picked = pickFormatOptions(field?.typeOptions || {});
+    assert.equal(picked.percentV2, true);
+    assert.equal(picked.precision, 0);
+    assert.equal(picked.formulaTextParsed, undefined);
+    assert.equal(picked.resultType, undefined);
   });
 });

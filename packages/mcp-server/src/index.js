@@ -1889,19 +1889,29 @@ const handlers = {
     } else {
       formula = stripHeader(formulaText, 'formula').text;
     }
-    // Fetch current typeOptions so format/precision settings (e.g. PercentV2, precision)
-    // are preserved — sending only { formulaText } would wipe them (#17).
-    let existingTypeOptions = {};
+    // Preserve writable format settings (format, precision, symbol, etc.) from the
+    // existing field so they survive the formula update (#17).
+    // Only whitelisted keys are picked — spreading all typeOptions causes a 422 because
+    // the schema response includes read-only computed keys (formulaTextParsed, dependencies,
+    // resultType, resultIsArray) that the internal API rejects on write (#17 regression).
+    const FORMULA_FORMAT_KEYS = [
+      'format', 'precision', 'symbol', 'negative', 'percentV2',
+      'dateFormat', 'timeFormat', 'timeZone', 'isDateTime', 'shouldDisplayTimeZone',
+    ];
+    let formatOptions = {};
     try {
       const { field } = await client.resolveField(appId, fieldId);
-      existingTypeOptions = field?.typeOptions || {};
+      const to = field?.typeOptions || {};
+      for (const key of FORMULA_FORMAT_KEYS) {
+        if (key in to) formatOptions[key] = to[key];
+      }
     } catch (_) {
-      // resolveField failure is non-fatal; proceed with formula update only
+      // resolveField failure is non-fatal; proceed with formulaText only
     }
     return handlers.update_field_config({
       appId, fieldId,
       fieldType: 'formula',
-      typeOptions: { ...existingTypeOptions, formulaText: formula },
+      typeOptions: { ...formatOptions, formulaText: formula },
       debug,
     });
   },
