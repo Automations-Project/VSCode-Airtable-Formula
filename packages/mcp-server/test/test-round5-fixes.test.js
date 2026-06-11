@@ -92,6 +92,37 @@ describe('#9 — parseScaffoldingTables', () => {
     assert.deepEqual(ps(undefined), []);
     assert.deepEqual(ps({}), []);
   });
+
+  // The REAL live #9 bug: the scaffolding endpoint returns tableById/visibleTableOrder
+  // at the TOP level (no `.data` wrapper), and list_tables was passing raw?.data
+  // (undefined) to the parser. The earlier tests passed because they fed the unwrapped
+  // object directly — they never exercised the handler's `.data` access.
+  it('live shape: full raw response with top-level tableById (no .data wrapper) is parsed', () => {
+    const raw = {
+      tableById: { tblooKJLpdRd2SI3I: { id: 'tblooKJLpdRd2SI3I', name: 'Table 1' } },
+      lastTableIdUsed: 'tblooKJLpdRd2SI3I',
+      visibleTableOrder: ['tblooKJLpdRd2SI3I'],
+      isEkmKeyDisabledForApplication: false,
+      error: null,
+    };
+    const result = ps(raw);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, 'tblooKJLpdRd2SI3I');
+    assert.equal(result[0].name, 'Table 1');
+  });
+
+  it('tolerates a legacy `.data`-wrapped response shape too', () => {
+    const wrapped = {
+      data: {
+        visibleTableOrder: ['tbl1'],
+        tableById: { tbl1: { name: 'Wrapped' } },
+      },
+    };
+    const result = ps(wrapped);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].id, 'tbl1');
+    assert.equal(result[0].name, 'Wrapped');
+  });
 });
 
 // ─── §2 — formulaTextParsed fallback (#15) ───────────────────────────────────

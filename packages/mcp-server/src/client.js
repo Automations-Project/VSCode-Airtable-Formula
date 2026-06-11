@@ -534,10 +534,13 @@ export class AirtableClient {
   }
 
   // Normalizes the data block from getScaffoldingData into a flat table array.
-  // Guards every candidate with a length check — empty arrays are truthy and
-  // would short-circuit the chain before reaching tableById (the scaffolding
-  // endpoint returns tableById + visibleTableOrder, not tableSchemas/tables).
+  // The scaffolding endpoint (getApplicationScaffoldingData) returns tableById +
+  // visibleTableOrder at the TOP level (no `.data` wrapper) — unlike getApplicationData,
+  // which nests under `.data`. Accept either shape so callers can pass the raw response.
+  // Guards every candidate with a length check — empty arrays are truthy and would
+  // short-circuit the chain before reaching tableById.
   parseScaffoldingTables(d) {
+    d = d?.data ?? d;
     const order = (d?.visibleTableOrder?.length > 0 && d.visibleTableOrder) ||
       (d?.tableOrder?.length > 0 && d.tableOrder);
     return (d?.tableSchemas?.length > 0 && d.tableSchemas) ||
@@ -2180,11 +2183,14 @@ export class AirtableClient {
     assertAirtableId(appId, 'appId');
     assertAirtableId(tableId, 'tableId');
     const raw = await this.getScaffoldingData(appId);
-    const tableData = raw?.data?.tableById?.[tableId]
-      || raw?.data?.tableDatas?.[tableId]
-      || raw?.data?.tableSchemas?.find(t => t.id === tableId);
+    // Scaffolding response is unwrapped (tableById at top level), but tolerate a
+    // `.data` wrapper too in case getApplicationData-shaped data is ever passed.
+    const d = raw?.data ?? raw;
+    const tableData = d?.tableById?.[tableId]
+      || d?.tableDatas?.[tableId]
+      || d?.tableSchemas?.find(t => t.id === tableId);
     const templates = tableData?.rowTemplates
-      || raw?.data?.rowTemplatesByTableId?.[tableId]
+      || d?.rowTemplatesByTableId?.[tableId]
       || [];
     return { tableId, templates, _raw: raw };
   }

@@ -1586,7 +1586,9 @@ const handlers = {
 
   async list_tables({ appId, debug }) {
     const raw = await client.getScaffoldingData(appId);
-    const tables = client.parseScaffoldingTables(raw?.data);
+    // Pass the full response — the scaffolding endpoint returns tableById at the top
+    // level (no `.data` wrapper). parseScaffoldingTables accepts either shape.
+    const tables = client.parseScaffoldingTables(raw);
     const summary = tables.map(t => ({
       id: t.id,
       name: t.name,
