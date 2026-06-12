@@ -6,6 +6,57 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Security hardening — critical-tier fixes from full-codebase audit (2026-06-12)
+
+A multi-agent security audit (71 findings raised, 49 confirmed under adversarial
+verification — full report in `.planning/audits/2026-06-12-hardening-audit.md`)
+produced these fixes for the highest-impact tier:
+
+- **`daemon.lock` no longer world-readable** ([`lockfile.js`](packages/mcp-server/src/daemon/lockfile.js)) —
+  the lockfile carries the plaintext daemon bearer token but was created with
+  default permissions. `acquire()` now opens with mode `0o600`, `replace()`
+  stages its temp file at `0o600` (via `safeAtomicWriteFileSync`), and both
+  apply the same Windows ACL restriction `daemon.token` already used. The LSP
+  server's `port_lsp` writer ([`lockfile-writer.ts`](packages/lsp-server/src/lockfile-writer.ts))
+  stages at `0o600` too so its atomic rename doesn't undo the hardening. The
+  shared `applyPrivatePermissions` helper ([`token.js`](packages/mcp-server/src/daemon/token.js))
+  is now exported and sanitizes `USERNAME`/`USERDOMAIN` before building the
+  icacls principal.
+- **Login credentials moved off the child environment** ([`auth-manager.ts`](packages/extension/src/mcp/auth-manager.ts),
+  [`login-runner.js`](packages/mcp-server/src/login-runner.js)) — auto-login
+  previously passed `AIRTABLE_EMAIL`/`AIRTABLE_PASSWORD`/`AIRTABLE_OTP_SECRET`
+  via env, visible in `/proc/<pid>/environ` and core dumps. The runner now
+  requests credentials over the `fork()` IPC channel
+  (`request-credentials` → `credentials` handshake) with env retained only as
+  a standalone-use fallback. The VS Code MCP stdio definition
+  (`registration.ts`) still uses env — VS Code owns that spawn and env is the
+  only channel there.
+- **Unknown tool profile now fails closed** ([`tool-config.js`](packages/mcp-server/src/tool-config.js)) —
+  a hand-edited or corrupted `tools-config.json` with an unrecognized
+  `activeProfile` used to silently enable **all 66 tools** including
+  destructive ones; it now falls back to the `read-only` set and logs a
+  warning. `tools-config.json` is also written `0o600`.
+- **Release workflow supply-chain pinning** ([`release.yml`](.github/workflows/release.yml)) —
+  `@vscode/vsce@3.9.2` / `ovsx@1.0.1` installed with exact pins, all
+  invocations use `npx --no-install` (publish tokens are in scope of those
+  steps), and Marketplace/npm version replies are validated as strict semver
+  before being interpolated into version-bump scripts.
+- **VSIX packaging symlink guard** ([`prepare-package-deps.mjs`](scripts/prepare-package-deps.mjs)) —
+  the `dereference: true` copy follows every symlink in the copied packages;
+  a trojanized dependency could ship a symlink at `~/.ssh` or CI credentials
+  and have the target land in the published VSIX. The build now walks each
+  package tree (cycle-safe, through directory-symlink targets) and fails if
+  any symlink resolves outside the workspace `node_modules` tree.
+- **Daemon token hygiene** ([`server.js`](packages/mcp-server/src/daemon/server.js),
+  [`cli.js`](packages/mcp-server/src/cli.js)) — bearer comparison is now
+  constant-time (`crypto.timingSafeEqual`), and `airtable-user-mcp daemon
+  status` redacts the bearer token instead of printing it into shell
+  history/scrollback.
+
+Tests: mcp-server 273 (incl. new fail-closed profile test), extension 65,
+lsp-server 21 — all pass; `check:tool-sync` green; packaging script verified
+against the real pnpm tree; IPC handshake smoke-tested end-to-end.
+
 ### Extension — Windsurf renamed to Devin Desktop, legacy-compatible (2026-06-05)
 
 Cognition rebranded the Windsurf editor to **Devin Desktop** on 2026-06-02 (in-place OTA rename) and moved workspace AI assets from `.windsurf/` to `.devin/`, keeping `.windsurf/` as a read fallback (Windsurf-import is on by default).
