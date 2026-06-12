@@ -88,7 +88,10 @@ const isWithin = (child, parent) => {
 };
 
 function assertSafeSymlinks(rootDir) {
-  const allowedRoots = [realpathSync(rootDir), join(workspaceRoot, 'node_modules')];
+  // Both roots must be canonicalized — symlink targets are compared after
+  // realpathSync, so an un-resolved allowlist entry (workspace itself behind
+  // a symlink, e.g. a git worktree) would reject legitimate pnpm links.
+  const allowedRoots = [realpathSync(rootDir), realpathSync(join(workspaceRoot, 'node_modules'))];
   const visited = new Set();
   const stack = [realpathSync(rootDir)];
 
