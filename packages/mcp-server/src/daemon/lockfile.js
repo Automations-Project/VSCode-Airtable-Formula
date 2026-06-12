@@ -1,6 +1,8 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { getHomeDir } from '../paths.js';
+import { safeAtomicWriteFileSync } from '../safe-write.js';
+import { applyPrivatePermissions } from './token.js';
 
 /**
  * @typedef {Object} DaemonLockRecord
@@ -27,7 +29,9 @@ export function acquire(record, options = {}) {
   for (let attempt = 0; attempt < 2; attempt++) {
     let fd;
     try {
-      fd = openSync(lockPath, 'wx');
+      // 0o600 — the lockfile carries the plaintext bearerToken; without an
+      // explicit mode it would be created world-readable (default 0o644).
+      fd = openSync(lockPath, 'wx', 0o600);
     } catch (error) {
       if (isExistsError(error)) {
         if (attempt === 0 && tryReclaimStale(lockPath)) {
@@ -49,6 +53,7 @@ export function acquire(record, options = {}) {
       }
     }
 
+    applyPrivatePermissions(lockPath);
     return true;
   }
 
@@ -117,9 +122,8 @@ export function replace(record, options = {}) {
   }
 
   mkdirSync(dirname(lockPath), { recursive: true });
-  const tempPath = `${lockPath}.tmp`;
-  writeFileSync(tempPath, serialize(normalized), 'utf8');
-  renameSync(tempPath, lockPath);
+  safeAtomicWriteFileSync(lockPath, serialize(normalized), { encoding: 'utf8', mode: 0o600 });
+  applyPrivatePermissions(lockPath);
   return true;
 }
 

@@ -21,7 +21,10 @@ export function writeLspPort(lockPath: string, port: number): boolean {
   const updated = { ...existing, port_lsp: port };
   const tempPath = `${lockPath}.lsp.tmp`; // Must be same directory as lockPath for atomic rename
   mkdirSync(dirname(lockPath), { recursive: true });
-  writeFileSync(tempPath, JSON.stringify(updated, null, 2) + '\n', 'utf8');
+  // mode 0o600 — daemon.lock carries the bearer token; rename preserves the
+  // temp file's permissions, so an unrestricted temp would undo the daemon's
+  // own permission hardening (lockfile.js writes it 0o600).
+  writeFileSync(tempPath, JSON.stringify(updated, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   renameSync(tempPath, lockPath); // atomic replace (lockfile.js lines 121-123 pattern)
   return true;
 }
