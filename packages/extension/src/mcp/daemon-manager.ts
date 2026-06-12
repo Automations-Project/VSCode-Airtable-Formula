@@ -13,6 +13,8 @@ export interface DaemonStatus {
   bearerToken: string | null;
   tunnelUrl: string | null;
   uptime: number | null;
+  /** Lockfile uuid — used to verify daemon identity before kill escalation. */
+  uuid: string | null;
 }
 
 export interface DaemonConnectionInfo {
@@ -27,7 +29,7 @@ export interface DaemonConnectionInfo {
 
 const EMPTY_STATUS: DaemonStatus = {
   running: false, healthy: false, pid: null, port: null,
-  port_lsp: null, bearerToken: null, tunnelUrl: null, uptime: null,
+  port_lsp: null, bearerToken: null, tunnelUrl: null, uptime: null, uuid: null,
 };
 
 export interface StopResult {
@@ -91,6 +93,7 @@ export class DaemonManager implements vscode.Disposable {
         bearerToken,
         tunnelUrl: typeof record.tunnelUrl === 'string' ? record.tunnelUrl : null,
         uptime: typeof record.startedAt === 'string' ? Date.now() - Date.parse(record.startedAt) : null,
+        uuid: typeof record.uuid === 'string' && record.uuid.length > 0 ? record.uuid : null,
       };
       this._status = status;
       return status;
@@ -193,10 +196,19 @@ export class DaemonManager implements vscode.Disposable {
     const pid = status.pid;
     const pidAlive = typeof pid === 'number' && pid > 0 && this._isPidAlive(pid);
 
-    // 3) The port answered, so the pid in the lockfile really is the daemon —
-    //    safe to kill. When the port is unreachable we do NOT kill: after a
-    //    crash the OS may have recycled the pid onto an innocent process.
-    if (outcome !== 'unreachable' && pidAlive && typeof pid === 'number') {
+    // 3) Escalate to kill ONLY with proven daemon identity. An accepted
+    //    (bearer-authenticated) shutdown proves it. A rejected response does
+    //    NOT — it only proves SOMETHING answered on the port; a stale lock
+    //    whose port was reused by an unrelated HTTP service also rejects,
+    //    while the recorded pid may belong to an innocent recycled process.
+    //    For rejected, require /daemon/health to echo the lockfile's uuid.
+    const provenOurDaemon = outcome === 'accepted' || (
+      outcome === 'rejected'
+      && status.port != null && status.bearerToken != null
+      && await this._verifyDaemonIdentity(status.port, status.bearerToken, status.uuid)
+    );
+
+    if (provenOurDaemon && pidAlive && typeof pid === 'number') {
       this._killPid(pid);
       const deadline = Date.now() + 3_000;
       let escalated = false;
@@ -214,17 +226,41 @@ export class DaemonManager implements vscode.Disposable {
       return { stopped: true, forced: true };
     }
 
-    // 4) Unreachable: the lockfile is stale (dead pid) or points at a process
-    //    that is not serving the daemon port. Reclaim the lock either way so
-    //    the dashboard stops showing a phantom daemon.
+    // 4) Unreachable or unproven identity: the lockfile is stale (dead pid),
+    //    or whatever answers on the port could not be verified as our daemon.
+    //    Reclaim the lock so the dashboard stops showing a phantom daemon,
+    //    but leave the recorded pid untouched (PID-reuse safety).
     this._reclaimLockfile();
     return {
       stopped: true,
       forced: false,
       reason: pidAlive
-        ? `Removed stale daemon.lock; process ${pid} was not answering on the daemon port and was left untouched.`
+        ? `Removed stale daemon.lock; process ${pid} could not be verified as the daemon and was left untouched.`
         : undefined,
     };
+  }
+
+  /**
+   * Proof of identity for kill escalation: /daemon/health, authenticated with
+   * the lockfile's bearer token, must echo the lockfile's uuid.
+   */
+  private async _verifyDaemonIdentity(port: number, bearerToken: string, uuid: string | null): Promise<boolean> {
+    if (!uuid) return false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_000);
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/daemon/health`, {
+        headers: { Authorization: `Bearer ${bearerToken}` },
+        signal: controller.signal,
+      });
+      if (!res.ok) return false;
+      const body = await res.json().catch(() => null) as { uuid?: unknown } | null;
+      return body?.uuid === uuid;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async restartDaemon(): Promise<DaemonConnectionInfo> {

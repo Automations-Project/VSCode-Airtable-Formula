@@ -135,8 +135,13 @@ describe('DaemonManager.stopDaemon', () => {
     expect(lockExists()).toBe(false);
   });
 
-  it('rejected shutdown (401): escalates to killing the recorded pid and reclaims the lock', async () => {
-    const port = await listen((_req, res) => {
+  it('rejected shutdown with PROVEN identity (health echoes lock uuid): escalates to kill', async () => {
+    const port = await listen((req, res) => {
+      if (req.method === 'GET' && req.url === '/daemon/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, uuid: 'uuid-1' }));
+        return;
+      }
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end('{"error":"Unauthorized"}');
     });
@@ -150,6 +155,25 @@ describe('DaemonManager.stopDaemon', () => {
     expect((dm as any)._killPid).toHaveBeenCalledWith(12345);
     expect(result.stopped).toBe(true);
     expect(result.forced).toBe(true);
+    expect(lockExists()).toBe(false);
+  });
+
+  it('rejected shutdown WITHOUT proven identity: does NOT kill (PID reuse), reclaims the lock', async () => {
+    // Simulates a stale lock whose port was reused by an unrelated HTTP
+    // service: it answers (non-2xx) but cannot echo the lockfile uuid.
+    const port = await listen((_req, res) => {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end('{"error":"Not found"}');
+    });
+    writeLock(port, process.pid);
+
+    (dm as any)._killPid = vi.fn();
+    (dm as any)._isPidAlive = vi.fn(() => true);
+
+    const result = await dm.stopDaemon();
+    expect((dm as any)._killPid).not.toHaveBeenCalled();
+    expect(result.stopped).toBe(true);
+    expect(result.reason).toBeTruthy();
     expect(lockExists()).toBe(false);
   });
 

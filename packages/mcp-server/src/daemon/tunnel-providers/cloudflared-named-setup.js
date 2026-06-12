@@ -11,7 +11,6 @@
  */
 
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -21,10 +20,10 @@ import { safeAtomicWriteFileSync } from '../../safe-write.js';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 
 import { getTunnelBinaryPath } from '../install-tunnel.js';
 import { getHomeDir } from '../../paths.js';
+import { applyPrivatePermissions } from '../token.js';
 
 const CONFIG_FILENAME = 'cloudflared-named.yml';
 const DEFAULT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -676,20 +675,7 @@ function unquoteYaml(value) {
   return value;
 }
 
-/**
- * @param {string} path
- */
-function applyPrivatePermissions(path) {
-  if (process.platform === 'win32') {
-    const username = process.env.USERNAME;
-    const domain = process.env.USERDOMAIN;
-    const target = domain && username ? `${domain}\\${username}` : username ?? '';
-    if (!target) return;
-    spawnSync('icacls', [path, '/inheritance:r', '/grant:r', `${target}:(R,W)`], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    return;
-  }
-  chmodSync(path, 0o600);
-}
+// applyPrivatePermissions is imported from ../token.js — the shared helper
+// sanitizes USERNAME/USERDOMAIN before building the icacls principal. Do not
+// re-introduce a local copy here (a previous unsanitized duplicate was a
+// security regression).
