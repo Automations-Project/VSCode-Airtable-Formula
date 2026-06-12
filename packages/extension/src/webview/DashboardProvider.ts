@@ -535,9 +535,19 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
     if (msg.type === 'daemon:stop') {
       try {
-        await this._daemonManager?.stopDaemon();
+        const result = await this._daemonManager?.stopDaemon();
         await this.pushState();
-        this.postResult(msg.id, true);
+        if (result && !result.stopped) {
+          const reason = result.reason ?? 'Daemon did not exit.';
+          vscode.window.showErrorMessage(`Daemon stop failed: ${reason}`);
+          this.postResult(msg.id, false, reason);
+        } else {
+          if (result?.reason) {
+            // Stopped, but with a caveat (e.g. stale lock cleaned up) — inform, don't alarm.
+            vscode.window.showInformationMessage(`Daemon stopped: ${result.reason}`);
+          }
+          this.postResult(msg.id, true);
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Daemon stop failed: ${err instanceof Error ? err.message : String(err)}`);
         this.postResult(msg.id, false, String(err));

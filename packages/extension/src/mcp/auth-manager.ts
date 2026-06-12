@@ -242,9 +242,15 @@ export class AuthManager implements vscode.Disposable {
    * Returns undefined if no credentials are stored.
    */
   async getCredentials(): Promise<{ email: string; password: string; otpSecret?: string } | undefined> {
-    // D-02: ensure daemon is running before handing off credentials
+    // D-02: ensure daemon is running before handing off credentials.
+    // Implicit + best-effort: credentials don't require the daemon, and this
+    // path runs from provideMcpServerDefinitions — it must neither resurrect
+    // a daemon the user explicitly stopped nor block login when the daemon
+    // can't start.
     if (getSettings().mcp.useDaemon && this._daemonManager) {
-      await this._daemonManager.ensureDaemon();
+      try {
+        await this._daemonManager.ensureDaemon({ implicit: true });
+      } catch { /* user-stopped latch or startup failure — proceed without daemon */ }
     }
     const email = await this.getEmail();
     const password = await this.getPassword();
