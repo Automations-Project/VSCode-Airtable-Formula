@@ -1,6 +1,6 @@
 {
   "name": "airtable-user-lsp",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Airtable language server for formula, script, and automation files. Works with any LSP-capable editor.",
   "type": "module",
   "main": "dist/index.mjs",
