@@ -209,7 +209,9 @@ export class ToolConfigManager {
     const tmp = `${configFile}.${randomBytes(6).toString('hex')}.tmp`;
     try {
       try {
-        await writeFile(tmp, JSON.stringify(this._config, null, 2), 'utf8');
+        // 0o600 — this file gates which (potentially destructive) tools are
+        // exposed; don't leave it writable through lax default permissions.
+        await writeFile(tmp, JSON.stringify(this._config, null, 2), { encoding: 'utf8', mode: 0o600 });
         await rename(tmp, configFile);
       } catch (err) {
         // Best-effort cleanup — rename may have happened before a later failure
@@ -268,8 +270,17 @@ export class ToolConfigManager {
 
     const def = BUILTIN_PROFILES[profile];
     if (!def) {
-      // Unknown profile → fall back to full
-      return new Set(Object.keys(TOOL_CATEGORIES));
+      // Unknown profile → fail CLOSED to read-only. switchProfile() validates
+      // names, so this only happens when tools-config.json was hand-edited or
+      // tampered with — silently exposing destructive tools in that state
+      // would defeat the gating the user configured.
+      console.error(`[tool-config] Unknown activeProfile "${profile}" — failing closed to read-only`);
+      const readOnly = new Set(BUILTIN_PROFILES['read-only'].categories);
+      const enabled = new Set();
+      for (const [tool, category] of Object.entries(TOOL_CATEGORIES)) {
+        if (readOnly.has(category)) enabled.add(tool);
+      }
+      return enabled;
     }
 
     const cats = new Set(def.categories);

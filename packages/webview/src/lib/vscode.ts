@@ -8,11 +8,19 @@ declare function acquireVsCodeApi(): {
 
 const vscodeApi = (() => {
   try { return acquireVsCodeApi(); }
-  catch { return null; }
+  catch {
+    // Expected in the browser dev preview (vite dev); fatal inside VS Code.
+    console.warn('[webview] acquireVsCodeApi unavailable — messages to the extension will be dropped');
+    return null;
+  }
 })();
 
 export function sendToExtension(msg: WebviewMessage): void {
-  vscodeApi?.postMessage(msg);
+  if (!vscodeApi) {
+    console.warn('[webview] dropped message (no VS Code API):', msg.type);
+    return;
+  }
+  vscodeApi.postMessage(msg);
 }
 
 export function onExtensionMessage(handler: (msg: ExtensionMessage) => void): () => void {

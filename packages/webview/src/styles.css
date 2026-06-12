@@ -7,6 +7,9 @@
   --at-gray700: rgb(49,53,62);
   --at-gray600: rgb(65,69,77);
   --at-gray500: rgb(97,102,112);
+  /* gray450: between gray500/gray400 — gray500 on --bg is 2.86:1, failing
+     WCAG AA (4.5:1) for the small muted text it backs; this hits ~4.8:1. */
+  --at-gray450: rgb(133,139,150);
   --at-gray400: rgb(151,154,160);
   --at-blue:    rgb(22,110,225);
   --at-blueLight1: rgb(160,198,255);
@@ -35,10 +38,18 @@
   --border:    rgba(255,255,255,0.10);
   --border-em: rgba(255,255,255,0.25);
   --border-focus: var(--at-blue);
+  --border-error: rgba(220,4,59,0.25);
+  --border-warn:  rgba(255,186,5,0.25);
+
+  /* LSP status badge fills (IdeCard) — derived from --at-green / --at-red */
+  --bg-lsp-ok:      rgba(34,197,94,0.12);
+  --bg-lsp-err:     rgba(239,68,68,0.10);
+  --border-lsp-ok:  rgba(34,197,94,0.3);
+  --border-lsp-err: rgba(239,68,68,0.25);
 
   --fg:        #ffffff;
   --fg-subtle: var(--at-gray400);
-  --fg-muted:  var(--at-gray500);
+  --fg-muted:  var(--at-gray450);
   --fg-ai:     var(--at-pinkLight1);
   --fg-info:   var(--at-blueLight1);
   --fg-ok:     var(--at-greenLight1);
@@ -65,8 +76,43 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; cursor: pointer; border: none; background: none; }
+/* Keyboard focus must be visible on every interactive control, including
+   icon-only buttons that carry no .btn/.action-card class. */
+button:focus-visible,
+.input-field:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+button:disabled,
+button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.input-field:focus-visible { border-color: var(--at-blue); }
 
 /* ─── Design System Classes ─── */
+
+/* Small uppercase form/section labels — one source of truth for the
+   fontSize/tracking so design changes don't require editing every tab. */
+.uppercase-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Skeleton loading rows (Setup tab while IDE detection runs) */
+.skeleton-row {
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 
 /* Glass Panel */
 .glass-panel {

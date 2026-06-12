@@ -101,7 +101,12 @@ function normalizeRecord(value) {
   };
 }
 
-function applyPrivatePermissions(tokenPath) {
+/**
+ * Restrict a secret-bearing file to the current user. Best-effort and
+ * non-fatal on every platform — shared by daemon.token and daemon.lock,
+ * both of which hold the plaintext bearer token.
+ */
+export function applyPrivatePermissions(tokenPath) {
   if (process.platform === 'win32') {
     restrictWindowsAcl(tokenPath);
   } else {
@@ -109,10 +114,17 @@ function applyPrivatePermissions(tokenPath) {
   }
 }
 
+// icacls parses its `principal:permissions` argument itself; characters like
+// `(`, `)`, `,`, `:` in an unsanitized USERNAME/USERDOMAIN could corrupt the
+// grant (see extension/src/mcp/secure-permissions.ts for the same defense).
+function sanitizeAclPart(value) {
+  return (value ?? '').replace(/[^A-Za-z0-9 ._-]/g, '');
+}
+
 function restrictWindowsAcl(tokenPath) {
   try {
-    const username = process.env.USERNAME;
-    const domain = process.env.USERDOMAIN;
+    const username = sanitizeAclPart(process.env.USERNAME);
+    const domain = sanitizeAclPart(process.env.USERDOMAIN);
     const target = domain && username ? `${domain}\\${username}` : username;
     if (!target) throw new Error('Cannot resolve Windows username');
     const result = spawnSync('icacls', [tokenPath, '/inheritance:r', '/grant:r', `${target}:(R,W)`], {

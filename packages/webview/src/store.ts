@@ -7,6 +7,10 @@ interface Store extends DashboardState {
   activeTab: 'overview' | 'setup' | 'prompts' | 'settings';
   pendingActions: Set<string>;
   pendingIdeActions: Map<string, string>; // ideId → actionId
+  /** Daemon start/stop/restart in flight — daemon controls disable on THIS,
+   *  not on the global pendingActions, so an unrelated slow action (e.g. an
+   *  open file dialog) can't lock the user out of stopping the daemon. */
+  pendingDaemonActions: Set<string>;
   setTab: (tab: Store['activeTab']) => void;
   applyState: (state: DashboardState) => void;
   applyAuthState: (state: AuthState) => void;
@@ -42,9 +46,14 @@ interface Store extends DashboardState {
   copyAirtablePat: () => void;
   configureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
   unconfigureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
-  savePrompt: (prompt: PromptDef) => void;
-  deletePrompt: (name: string) => void;
-  resetPrompt: (name: string) => void;
+  /** Prompt actions return their action id so callers can await completion
+   *  (via pendingActions + consumeActionResult) before navigating away. */
+  savePrompt: (prompt: PromptDef) => string;
+  deletePrompt: (name: string) => string;
+  resetPrompt: (name: string) => string;
+  /** Read-and-clear the success flag recorded by markActionDone. Undefined
+   *  when no result was recorded (e.g. id unknown). */
+  consumeActionResult: (id: string) => boolean | undefined;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -77,7 +86,34 @@ const defaultAuth: AuthState = {
   hasCredentials: false,
 };
 
-export const useStore = create<Store>((set, get) => ({
+// If the extension never answers (host crash, lost message, webview reload),
+// pending actions must not keep buttons disabled forever — auto-expire them.
+const PENDING_TIMEOUT_MS = 60_000;
+const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Per-action outcomes recorded by markActionDone, consumed by components that
+// wait for confirmation before navigating (PromptEditor). Bounded — unclaimed
+// results from fire-and-forget actions are evicted oldest-first.
+const actionResults = new Map<string, boolean>();
+const ACTION_RESULTS_MAX = 50;
+
+export const useStore = create<Store>((set, get) => {
+  /** Track an in-flight action and schedule its auto-expiry. */
+  const beginAction = (id: string, timeoutMs = PENDING_TIMEOUT_MS) => {
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    pendingTimers.set(id, setTimeout(() => {
+      pendingTimers.delete(id);
+      get().markActionDone(id, false);
+    }, timeoutMs));
+  };
+
+  /** beginAction + membership in the daemon-specific pending set. */
+  const beginDaemonAction = (id: string, timeoutMs?: number) => {
+    beginAction(id, timeoutMs);
+    set(s => ({ pendingDaemonActions: new Set([...s.pendingDaemonActions, id]) }));
+  };
+
+  return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
   aiFilesCount: 0,
@@ -87,6 +123,7 @@ export const useStore = create<Store>((set, get) => ({
   activeTab: 'overview',
   pendingActions: new Set(),
   pendingIdeActions: new Map(),
+  pendingDaemonActions: new Set(),
 
   setTab: (tab) => set({ activeTab: tab }),
   applyState: (state) => set(s => {
@@ -111,213 +148,243 @@ export const useStore = create<Store>((set, get) => ({
 
   setupIde: (ideId) => {
     const id = randomId();
+    beginAction(id);
     set(s => {
-      const nextPending = new Set([...s.pendingActions, id]);
       const nextIde = new Map(s.pendingIdeActions);
       nextIde.set(ideId, id);
-      return { pendingActions: nextPending, pendingIdeActions: nextIde };
+      return { pendingIdeActions: nextIde };
     });
     sendToExtension({ type: 'action:setupIde', id, ideId: ideId as any });
   },
 
   setupAll: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:setupAll', id });
   },
 
   refresh: () => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:refresh', id });
   },
 
   login: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    // Auto-login drives a real browser — can legitimately take minutes.
+    beginAction(id, 360_000);
     sendToExtension({ type: 'action:login', id });
   },
 
   logout: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:logout', id });
   },
 
   status: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:status', id });
   },
 
   saveCredentials: (email, password, otpSecret) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:saveCredentials', id, email, password, otpSecret });
   },
 
   installBrowser: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    // Chromium download can take minutes on slow connections.
+    beginAction(id, 600_000);
     sendToExtension({ type: 'action:install-browser', id });
   },
 
   removeBrowser: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:removeBrowser', id });
   },
 
   unconfigureIde: (ideId) => {
     const id = randomId();
+    beginAction(id);
     set(s => {
-      const nextPending = new Set([...s.pendingActions, id]);
       const nextIde = new Map(s.pendingIdeActions);
       nextIde.set(ideId, id);
-      return { pendingActions: nextPending, pendingIdeActions: nextIde };
+      return { pendingIdeActions: nextIde };
     });
     sendToExtension({ type: 'action:unconfigureIde', id, ideId: ideId as any });
   },
 
   debugStartSession: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:debug.startSession', id });
   },
 
   debugStopAndExport: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:debug.stopAndExport', id });
   },
 
   debugExport: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:debug.export', id });
   },
 
   manualLogin: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    // Manual login waits for the user to finish in the browser (up to ~5.5m).
+    beginAction(id, 360_000);
     sendToExtension({ type: 'action:manualLogin', id });
   },
 
   backupSession: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:backupSession', id });
   },
 
   restoreSession: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:restoreSession', id });
   },
 
   selectCustomBrowser: () => {
     const id = randomId();
+    // Long timeout — the native file dialog stays open until the user acts.
+    beginAction(id, 600_000);
     sendToExtension({ type: 'action:selectCustomBrowser', id });
   },
 
   setBrowserChoice: (choice) => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:setBrowserChoice', id, choice });
   },
 
   openStoragePath: (p) => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:openStoragePath', id, path: p });
   },
 
   enableTunnel: (provider, authtoken, domain) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'tunnel:enable', id, provider, authtoken, domain });
   },
 
   disableTunnel: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'tunnel:disable', id });
   },
 
   setNgrokAuthtoken: (authtoken) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'tunnel:set-ngrok-authtoken', id, authtoken });
   },
 
   startDaemon: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginDaemonAction(id);
     sendToExtension({ type: 'daemon:start', id });
   },
 
   stopDaemon: () => {
+    // Graceful wait (10s) + kill escalation (3s) can exceed the default expiry.
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginDaemonAction(id, 30_000);
     sendToExtension({ type: 'daemon:stop', id });
   },
 
   restartDaemon: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginDaemonAction(id, 45_000);
     sendToExtension({ type: 'daemon:restart', id });
   },
 
   copyBearerToken: () => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'daemon:copy-bearer-token', id });
   },
 
   rotateToken: () => {
+    // Daemon-scoped: rotating invalidates connected clients, so daemon
+    // controls should reflect the in-flight rotation too.
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginDaemonAction(id);
     sendToExtension({ type: 'daemon:rotate-token', id });
   },
 
   saveAirtablePat: (pat) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:save-airtable-pat', id, pat });
   },
 
   copyAirtablePat: () => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:copy-airtable-pat', id });
   },
 
   configureOfficialAirtable: (ideId) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:configure-official-airtable', id, ideId });
   },
 
   unconfigureOfficialAirtable: (ideId) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
   },
 
   savePrompt: (prompt) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:save-prompt', id, prompt });
+    return id;
   },
 
   deletePrompt: (name) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:delete-prompt', id, name });
+    return id;
   },
 
   resetPrompt: (name) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:reset-prompt', id, name });
+    return id;
   },
 
-  markActionDone: (id, _ok) => {
+  consumeActionResult: (id) => {
+    const result = actionResults.get(id);
+    actionResults.delete(id);
+    return result;
+  },
+
+  markActionDone: (id, ok) => {
+    const timer = pendingTimers.get(id);
+    if (timer) { clearTimeout(timer); pendingTimers.delete(id); }
+    actionResults.set(id, ok);
+    while (actionResults.size > ACTION_RESULTS_MAX) {
+      const oldest = actionResults.keys().next().value;
+      if (oldest === undefined) break;
+      actionResults.delete(oldest);
+    }
     set(s => {
       const next = new Set(s.pendingActions);
       next.delete(id);
@@ -325,7 +392,10 @@ export const useStore = create<Store>((set, get) => ({
       for (const [ideId, actionId] of nextIde) {
         if (actionId === id) { nextIde.delete(ideId); break; }
       }
-      return { pendingActions: next, pendingIdeActions: nextIde };
+      const nextDaemon = new Set(s.pendingDaemonActions);
+      nextDaemon.delete(id);
+      return { pendingActions: next, pendingIdeActions: nextIde, pendingDaemonActions: nextDaemon };
     });
   },
-}));
+  });
+});

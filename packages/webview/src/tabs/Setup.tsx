@@ -225,7 +225,7 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, pendingDaemonActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
 
   const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
@@ -236,13 +236,20 @@ export function Setup() {
     LSP_EDITOR_IDS.has(ide.ideId) ? !ide.lspConfigured : !ide.mcpConfigured
   );
   const isLoading = pendingActions.size > 0;
+  // Daemon controls disable on daemon-specific pending state only — an
+  // unrelated slow action (open file dialog, long install) must not lock the
+  // user out of stopping the daemon.
+  const daemonBusy = pendingDaemonActions.size > 0 || !!daemon?.starting;
   // Derive tunnel pending state from store pendingActions (consistent with IDE actions)
   const isTunnelPending = pendingActions.size > 0;
 
   const [selectedProvider, setSelectedProvider] = React.useState<'cf-quick' | 'ngrok' | 'cf-named'>('cf-quick');
   const [ngrokAuthtokenInput, setNgrokAuthtokenInput] = React.useState('');
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
+  const [namedHostnameInput, setNamedHostnameInput] = React.useState('');
+  const [editNgrokToken, setEditNgrokToken] = React.useState(false);
   const [copiedUrl, setCopiedUrl] = React.useState(false);
+  const [copiedDaemonUrl, setCopiedDaemonUrl] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState(false);
   const [rotatedToken, setRotatedToken] = React.useState(false);
   const [patInput, setPatInput] = React.useState('');
@@ -273,7 +280,11 @@ export function Setup() {
     const authtoken = (selectedProvider === 'ngrok' && ngrokAuthtokenInput)
       ? ngrokAuthtokenInput
       : undefined;
-    enableTunnel(selectedProvider, authtoken, ngrokDomainInput || undefined);
+    const domain =
+      selectedProvider === 'cf-named' ? (namedHostnameInput.trim() || undefined)
+      : selectedProvider === 'ngrok' ? (ngrokDomainInput.trim() || undefined)
+      : undefined;
+    enableTunnel(selectedProvider, authtoken, domain);
   };
 
   const handleDisableTunnel = () => {
@@ -365,14 +376,31 @@ export function Setup() {
             )}
 
             {daemon.tunnelUrl && (
-              <div className="list-row">
-                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Tunnel URL</span>
-                <span style={{
-                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%',
-                }}>
+              <div className="list-row" style={{ alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flexShrink: 0 }}>Tunnel URL</span>
+                <span
+                  title={daemon.tunnelUrl}
+                  style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
+                    textAlign: 'right',
+                  }}
+                >
                   {daemon.tunnelUrl}
                 </span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  aria-label="Copy tunnel URL"
+                  onClick={() => {
+                    if (daemon.tunnelUrl) {
+                      navigator.clipboard.writeText(daemon.tunnelUrl).catch(() => undefined);
+                      setCopiedDaemonUrl(true);
+                      setTimeout(() => setCopiedDaemonUrl(false), 1500);
+                    }
+                  }}
+                >
+                  {copiedDaemonUrl ? 'Copied!' : 'Copy'}
+                </button>
               </div>
             )}
 
@@ -388,6 +416,7 @@ export function Setup() {
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleCopyToken}
+                disabled={isLoading}
                 title="Copy bearer token to clipboard"
                 style={{ marginLeft: 8 }}
               >
@@ -396,6 +425,8 @@ export function Setup() {
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleRotateToken}
+                disabled={daemonBusy}
+                aria-busy={daemonBusy}
                 title="Rotate bearer token — all connected clients will need the new token"
                 style={{ marginLeft: 4, color: rotatedToken ? 'var(--fg-ok)' : undefined }}
               >
@@ -406,18 +437,18 @@ export function Setup() {
         )}
 
         {/* Daemon controls */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           {!daemon?.running ? (
-            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
               {daemon?.starting ? 'Starting...' : 'Start Daemon'}
             </button>
           ) : (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
                 {daemon?.starting ? 'Restarting...' : 'Restart'}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1, color: 'var(--fg-err)' }}>
-                {isLoading ? 'Stopping...' : 'Stop'}
+              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1, color: 'var(--fg-err)' }}>
+                {daemonBusy && !daemon?.starting ? 'Stopping...' : 'Stop'}
               </button>
             </>
           )}
@@ -465,7 +496,7 @@ export function Setup() {
 
         {/* Provider picker */}
         <div style={{ marginBottom: 8 }}>
-          <label htmlFor="tunnel-provider" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+          <label htmlFor="tunnel-provider" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
             Provider
           </label>
           <select
@@ -482,39 +513,76 @@ export function Setup() {
           </select>
         </div>
 
-        {/* ngrok authtoken input (shown when ngrok selected + no token stored) */}
-        {selectedProvider === 'ngrok' && !tunnel?.ngrokAuthtokenSet && (
+        {/* ngrok inputs — token entry until stored, then a Replace flow; domain always */}
+        {selectedProvider === 'ngrok' && (
           <div style={{ marginBottom: 8 }}>
-            <label htmlFor="ngrok-authtoken" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
-              ngrok Auth Token
-            </label>
-            <input
-              id="ngrok-authtoken"
-              type="password"
-              placeholder="Paste token from ngrok dashboard"
-              aria-describedby="ngrok-authtoken-helper"
-              value={ngrokAuthtokenInput}
-              onChange={e => setNgrokAuthtokenInput(e.target.value)}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.7rem',
-                background: 'var(--bg-input)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '4px 8px',
-                color: 'var(--fg)',
-                marginBottom: 4,
-              }}
-            />
-            <div id="ngrok-authtoken-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>
-              Stored securely in VS Code SecretStorage
-            </div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', marginTop: 4 }}>
-              ngrok tunnels must be manually re-enabled after daemon restarts (authtoken stored in VS Code SecretStorage is not accessible to the daemon at startup).
-            </div>
-            <label htmlFor="ngrok-domain" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4, marginTop: 8 }}>
+            {(!tunnel?.ngrokAuthtokenSet || editNgrokToken) ? (
+              <>
+                <label htmlFor="ngrok-authtoken" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
+                  ngrok Auth Token
+                </label>
+                <input
+                  id="ngrok-authtoken"
+                  type="password"
+                  placeholder="Paste token from ngrok dashboard"
+                  aria-describedby="ngrok-authtoken-helper"
+                  value={ngrokAuthtokenInput}
+                  onChange={e => setNgrokAuthtokenInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.7rem',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '6px 10px',
+                    color: 'var(--fg)',
+                    marginBottom: 4,
+                  }}
+                />
+                <div id="ngrok-authtoken-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)' }}>
+                  Stored securely in VS Code SecretStorage
+                </div>
+                {editNgrokToken && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={!ngrokAuthtokenInput.trim() || isLoading}
+                      onClick={() => {
+                        setNgrokAuthtoken(ngrokAuthtokenInput.trim());
+                        setNgrokAuthtokenInput('');
+                        setEditNgrokToken(false);
+                      }}
+                    >
+                      Save token
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => { setNgrokAuthtokenInput(''); setEditNgrokToken(false); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                <div style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)', marginTop: 4, marginBottom: 8 }}>
+                  ngrok tunnels must be manually re-enabled after daemon restarts (authtoken stored in VS Code SecretStorage is not accessible to the daemon at startup).
+                </div>
+              </>
+            ) : (
+              <div className="list-row" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span className="chip chip-ok">Auth token stored</span>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setEditNgrokToken(true)}
+                  title="Replace the stored ngrok auth token"
+                >
+                  Replace…
+                </button>
+              </div>
+            )}
+            <label htmlFor="ngrok-domain" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
               Reserved Domain (optional)
             </label>
             <input
@@ -531,10 +599,56 @@ export function Setup() {
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-md)',
-                padding: '4px 8px',
+                padding: '6px 10px',
                 color: 'var(--fg)',
               }}
             />
+          </div>
+        )}
+
+        {/* Cloudflare named tunnel — hostname is required for first-time setup */}
+        {selectedProvider === 'cf-named' && (
+          <div style={{ marginBottom: 8 }}>
+            {tunnel?.namedTunnelHostname && (
+              <div className="list-row" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span className="chip chip-ok">Configured</span>
+                <span
+                  title={tunnel.namedTunnelHostname}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}
+                >
+                  {tunnel.namedTunnelHostname}
+                </span>
+              </div>
+            )}
+            <label htmlFor="cf-named-hostname" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
+              {tunnel?.namedTunnelHostname ? 'New Hostname (optional)' : 'Hostname'}
+            </label>
+            <input
+              id="cf-named-hostname"
+              type="text"
+              placeholder={tunnel?.namedTunnelHostname ?? 'mcp.your-domain.com'}
+              aria-describedby="cf-named-hostname-helper"
+              value={namedHostnameInput}
+              onChange={e => setNamedHostnameInput(e.target.value)}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.7rem',
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '6px 10px',
+                color: 'var(--fg)',
+                marginBottom: 4,
+              }}
+            />
+            <div id="cf-named-hostname-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)' }}>
+              {tunnel?.namedTunnelHostname
+                ? <>Leave empty to reuse <strong>{tunnel.namedTunnelHostname}</strong>, or enter a different Cloudflare-managed hostname to reconfigure.</>
+                : <>A domain you manage in Cloudflare (the tunnel gets a permanent URL there).
+                   Required the first time — setup opens a one-time Cloudflare login in your browser.</>}
+            </div>
           </div>
         )}
 
@@ -679,8 +793,13 @@ export function Setup() {
       )}
 
       {ideStatuses.length === 0 && (
-        <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.72rem', padding: '24px 12px' }}>
-          No IDE data available yet. Loading...
+        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '14px 12px' }} aria-busy="true" aria-label="Scanning for installed IDEs">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="skeleton-row" style={{ animationDelay: `${i * 120}ms` }} />
+          ))}
+          <div style={{ textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.68rem', marginTop: 2 }}>
+            Scanning for installed IDEs…
+          </div>
         </div>
       )}
 
@@ -767,7 +886,7 @@ export function Setup() {
                 {mcpActiveVariant === 'http' && (
                   <div className="list-row" style={{ marginTop: 8, alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: '0.68rem', color: 'var(--fg-muted)', flex: 1 }}>
-                      Replace <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>{'{'}{'{'}'BEARER_TOKEN{'}'}{'}'}</code> with your daemon token
+                      Replace <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>{'{'}{'{'}'BEARER_TOKEN{'}'}{'}'}</code> with your daemon token — the access password the daemon generates so only your own tools can call it
                     </span>
                     <button
                       className="btn btn-ghost btn-sm"
@@ -885,7 +1004,7 @@ export function Setup() {
 
         {/* PAT input */}
         <div style={{ marginBottom: 12 }}>
-          <label htmlFor="airtable-pat" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+          <label htmlFor="airtable-pat" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
             Personal Access Token
           </label>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -899,7 +1018,7 @@ export function Setup() {
                 flex: 1,
                 fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
                 background: 'var(--bg-input)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', padding: '4px 8px',
+                borderRadius: 'var(--radius-md)', padding: '6px 10px',
                 color: 'var(--fg)',
               }}
             />
@@ -914,6 +1033,7 @@ export function Setup() {
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleCopyPat}
+                disabled={isLoading}
                 title="Copy saved PAT to clipboard"
               >
                 {copiedPat ? 'Copied!' : 'Copy PAT'}
@@ -933,7 +1053,7 @@ export function Setup() {
           if (detectedOfficial.length === 0) return null;
           return (
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--fg-muted)', marginBottom: 6 }}>
+              <div className="uppercase-label" style={{ color: 'var(--fg-muted)', marginBottom: 6 }}>
                 Detected IDEs
               </div>
               <div className="stack stack-sm">
@@ -975,7 +1095,7 @@ export function Setup() {
 
         {/* Official Airtable MCP snippet */}
         <div>
-          <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--fg-muted)', marginBottom: 6 }}>
+          <div className="uppercase-label" style={{ color: 'var(--fg-muted)', marginBottom: 6 }}>
             Config Snippet
           </div>
 

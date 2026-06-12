@@ -79,7 +79,7 @@ export function Overview() {
           <span style={{ fontSize: '0.85rem' }}>Extension {versions.extension}</span>
           <span style={{ fontSize: '0.85rem' }}>MCP {versions.mcpServerBundled} <span style={{ color: 'var(--fg-muted)', fontSize: '0.7rem' }}>bundled</span></span>
           {versions.mcpServerPublished && (
-            <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)' }}>↑ update: {versions.mcpServerPublished}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--fg-ok)' }}>↑ update: {versions.mcpServerPublished}</span>
           )}
         </div>
       </div>

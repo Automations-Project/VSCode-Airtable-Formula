@@ -6,6 +6,190 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### LSP server — fix runtime startup + CI bin-link warning (2026-06-12)
+
+- **`airtable-user-lsp` was runtime-broken when executed with Node directly**
+  (both `--stdio` and `--tcp` — i.e. every editor config using
+  `npx -y airtable-user-lsp` and the daemon's TCP spawn): the bundle imported
+  the extensionless `vscode-languageserver/node` subpath, which Node's ESM
+  resolver rejects because that package ships no `exports` map (build tools
+  resolve it bundler-style, which is why tsup/vitest never caught it). Fixed
+  with explicit `/node.js` deep imports. A second masked failure —
+  `Dynamic require of "util" is not supported` from CJS code bundled into the
+  ESM output — is fixed with a `createRequire` banner in
+  [`tsup.config.ts`](packages/lsp-server/tsup.config.ts) (same pattern
+  `bundle-mcp.mjs` already uses). Both modes smoke-tested via the real bin.
+- **CI install warning eliminated:** the `airtable-user-lsp` bin pointed at
+  `dist/index.mjs`, which doesn't exist at install time on fresh checkouts, so
+  every CI run logged `WARN Failed to create bin … ENOENT`. The bin now points
+  at a committed launcher shim ([`bin/airtable-user-lsp.mjs`](packages/lsp-server/bin/airtable-user-lsp.mjs))
+  that defers to the built entry and prints an actionable error when `dist/`
+  is missing.
+- Known follow-up (pre-existing, unchanged): the extension never bundles an
+  LSP copy at `dist/lsp/index.mjs`, so the daemon's first spawn candidate is
+  dead in installed extensions; editors use the npm package instead.
+
+### Dashboard — named-tunnel hostname display + confirmed prompt saves (2026-06-12)
+
+- **`TunnelState.namedTunnelHostname`** (new optional shared-protocol field):
+  the extension now reads the hostname from `cloudflared-named.yml` (same
+  mechanical format the daemon writes) and the Setup tab shows a
+  "Configured: <hostname>" row for the named-tunnel provider, relabels the
+  input "New Hostname (optional)", and explains that leaving it empty reuses
+  the configured tunnel ([`types.ts`](packages/shared/src/types.ts),
+  [`DashboardProvider.ts`](packages/extension/src/webview/DashboardProvider.ts),
+  [`Setup.tsx`](packages/webview/src/tabs/Setup.tsx)).
+- **PromptEditor waits for confirmation**: `savePrompt`/`deletePrompt`/
+  `resetPrompt` now return their action id, `markActionDone` records a
+  consumable per-action result, and the editor navigates back only after the
+  extension confirms success — a failure keeps the editor open with the
+  user's input intact and shows an inline error
+  ([`store.ts`](packages/webview/src/store.ts), [`Prompts.tsx`](packages/webview/src/tabs/Prompts.tsx)).
+  3 new store tests cover the id/result round-trip.
+
+### Dashboard — second-pass dead-end & cosmetics sweep (2026-06-12)
+
+A targeted second audit (flow dead-ends, unreachable conditional UI, stale
+affordances, cosmetics) confirmed 12 more issues; all fixed:
+
+- **ngrok auth token now has an update path** — once a token was stored, the
+  input vanished forever (`!ngrokAuthtokenSet` gate) and the existing
+  `setNgrokAuthtoken` store action was never wired to any UI. A "token
+  stored" chip with a **Replace…** flow now lets users rotate/update the
+  token without disabling the tunnel ([`Setup.tsx`](packages/webview/src/tabs/Setup.tsx)).
+- **PromptEditor feedback** — Save/Reset/Delete now disable (+`aria-busy`)
+  while the action is in flight ([`Prompts.tsx`](packages/webview/src/tabs/Prompts.tsx)).
+- **Token/PAT buttons** — Copy Token tracks pending state and disables;
+  Rotate is daemon-scoped (`beginDaemonAction`) and disables with the other
+  daemon controls; Copy PAT disables while busy ([`store.ts`](packages/webview/src/store.ts)).
+- **Credentials form state** — email is now cleared along with password/OTP
+  on save, and Cancel resets all fields (stale pre-filled email no longer
+  reappears on "Update credentials") ([`Settings.tsx`](packages/webview/src/tabs/Settings.tsx)).
+- **Cosmetics:** input padding unified at `6px 10px` across tunnel/PAT/
+  credentials fields; helper text consistently `--fg-subtle`; daemon button
+  row gap aligned to 8px; chip casing normalized (Ready/Missing/Via
+  extension); repeated uppercase-label inline styles extracted to a shared
+  `.uppercase-label` class; the ngrok section's state-dependent spacing
+  asymmetry (introduced by the hostname-field fix) removed.
+
+### Setup tab — Cloudflare Named Tunnel hostname field (2026-06-12)
+
+Selecting **Cloudflare Named Tunnel** and pressing Enable always failed with
+"Named tunnel requires a hostname (domain)" — the Setup tab never rendered a
+field to enter one (only ngrok had inputs). Fixes:
+
+- New **Hostname** input shown when `cf-named` is selected, with helper text
+  (Cloudflare-managed domain, one-time browser login, empty = reuse existing
+  config) ([`Setup.tsx`](packages/webview/src/tabs/Setup.tsx)).
+- `handleEnableTunnel` now sends the hostname for `cf-named` (it previously
+  sent the ngrok field's value for every provider).
+- Same bug class for ngrok: the **Reserved Domain** field was hidden once an
+  authtoken was stored — it now always renders for ngrok.
+- Host-side fallback: if the setup flow is reached without a hostname (e.g.
+  via a command), an input box prompts for it instead of dead-ending; the
+  post-setup enable retry uses the resolved hostname (previously re-sent the
+  original empty value) ([`DashboardProvider.ts`](packages/extension/src/webview/DashboardProvider.ts)).
+
+### Daemon Stop reliability + dashboard UI/UX hardening (2026-06-12)
+
+**Daemon Stop button** — root-caused "stop sometimes does nothing":
+
+- [`daemon-manager.ts`](packages/extension/src/mcp/daemon-manager.ts) `stopDaemon()`
+  now mirrors the CLI launcher semantics: verifies the shutdown HTTP response
+  (a 401 from a stale lockfile token no longer counts as success), waits for
+  the daemon to release `daemon.lock` before reporting done, escalates
+  SIGTERM → SIGKILL when the daemon answers but won't exit, and reclaims
+  stale lockfiles so a crashed daemon can't leave the dashboard stuck on
+  "running". When the port is unreachable, the recorded pid is *not* killed
+  (PID-reuse safety) — the stale lock is just removed.
+- **No more auto-resurrect:** with `useDaemon` + `loginMode: auto`, VS Code
+  re-querying MCP definitions used to respawn the daemon seconds after the
+  user stopped it (via `getCredentials → ensureDaemon`). A user-stopped latch
+  now blocks implicit respawns; explicit Start/Restart clears it.
+- Stop failures are surfaced in the UI / `stopDaemon` command instead of
+  silently reporting success. 6 new DaemonManager tests.
+
+**Dashboard webview** — 26 confirmed findings from a 44-agent UI/UX audit
+(action feedback, state sync, theming, accessibility, content):
+
+- **Action feedback:** every async store action now tracks pending state
+  (`refresh`, `selectCustomBrowser`, `setBrowserChoice`, `copyAirtablePat`,
+  `openStoragePath` were missing it), and pending actions **auto-expire**
+  (60s default; longer for login/downloads) so a lost `action:result` can
+  no longer leave buttons disabled forever ([`store.ts`](packages/webview/src/store.ts)).
+- **State sync:** `pushState()` is serialized + coalesced (concurrent file-watch
+  bursts could previously post a stale `state:update` last); the dashboard
+  re-syncs on `onDidChangeVisibility` when the sidebar is re-opened;
+  `daemon:start` reports failure when the daemon manager is unavailable; the
+  toolProfile fallback now includes all 13 categories (was missing
+  `recordRead`/`recordWrite`); dropped webview messages are logged
+  ([`DashboardProvider.ts`](packages/extension/src/webview/DashboardProvider.ts), [`vscode.ts`](packages/webview/src/lib/vscode.ts)).
+- **Theming:** fixed undefined `--accent-green` token (Overview update badge);
+  LSP badges and error/warning banners now use theme tokens instead of
+  hard-coded rgba; new `--border-error/--border-warn/--bg-lsp-*` tokens.
+- **Accessibility:** global `:focus-visible` outlines for buttons/inputs/selects
+  (credentials form and icon-only buttons had none); `--fg-muted` brightened
+  from 2.86:1 to ~4.8:1 contrast (WCAG AA); login-mode toggle gets
+  `role="switch"` + aria-label; daemon buttons get `aria-busy`; disabled
+  buttons get `cursor: not-allowed`.
+- **Content:** raw exception text (auth errors, browser download failures) is
+  now mapped to human-readable guidance with the raw detail in a tooltip
+  ([`friendlyError.ts`](packages/webview/src/lib/friendlyError.ts)); TOTP and
+  bearer-token jargon explained inline; tunnel URL row in Daemon Status is
+  responsive with a Copy button (was fixed 60% truncation, no copy); IDE
+  detection shows an animated skeleton instead of static "Loading...".
+
+### Security hardening — critical-tier fixes from full-codebase audit (2026-06-12)
+
+A multi-agent security audit (71 findings raised, 49 confirmed under adversarial
+verification — full report in `.planning/audits/2026-06-12-hardening-audit.md`)
+produced these fixes for the highest-impact tier:
+
+- **`daemon.lock` no longer world-readable** ([`lockfile.js`](packages/mcp-server/src/daemon/lockfile.js)) —
+  the lockfile carries the plaintext daemon bearer token but was created with
+  default permissions. `acquire()` now opens with mode `0o600`, `replace()`
+  stages its temp file at `0o600` (via `safeAtomicWriteFileSync`), and both
+  apply the same Windows ACL restriction `daemon.token` already used. The LSP
+  server's `port_lsp` writer ([`lockfile-writer.ts`](packages/lsp-server/src/lockfile-writer.ts))
+  stages at `0o600` too so its atomic rename doesn't undo the hardening. The
+  shared `applyPrivatePermissions` helper ([`token.js`](packages/mcp-server/src/daemon/token.js))
+  is now exported and sanitizes `USERNAME`/`USERDOMAIN` before building the
+  icacls principal.
+- **Login credentials moved off the child environment** ([`auth-manager.ts`](packages/extension/src/mcp/auth-manager.ts),
+  [`login-runner.js`](packages/mcp-server/src/login-runner.js)) — auto-login
+  previously passed `AIRTABLE_EMAIL`/`AIRTABLE_PASSWORD`/`AIRTABLE_OTP_SECRET`
+  via env, visible in `/proc/<pid>/environ` and core dumps. The runner now
+  requests credentials over the `fork()` IPC channel
+  (`request-credentials` → `credentials` handshake) with env retained only as
+  a standalone-use fallback. The VS Code MCP stdio definition
+  (`registration.ts`) still uses env — VS Code owns that spawn and env is the
+  only channel there.
+- **Unknown tool profile now fails closed** ([`tool-config.js`](packages/mcp-server/src/tool-config.js)) —
+  a hand-edited or corrupted `tools-config.json` with an unrecognized
+  `activeProfile` used to silently enable **all 66 tools** including
+  destructive ones; it now falls back to the `read-only` set and logs a
+  warning. `tools-config.json` is also written `0o600`.
+- **Release workflow supply-chain pinning** ([`release.yml`](.github/workflows/release.yml)) —
+  `@vscode/vsce@3.9.2` / `ovsx@1.0.1` installed with exact pins, all
+  invocations use `npx --no-install` (publish tokens are in scope of those
+  steps), and Marketplace/npm version replies are validated as strict semver
+  before being interpolated into version-bump scripts.
+- **VSIX packaging symlink guard** ([`prepare-package-deps.mjs`](scripts/prepare-package-deps.mjs)) —
+  the `dereference: true` copy follows every symlink in the copied packages;
+  a trojanized dependency could ship a symlink at `~/.ssh` or CI credentials
+  and have the target land in the published VSIX. The build now walks each
+  package tree (cycle-safe, through directory-symlink targets) and fails if
+  any symlink resolves outside the workspace `node_modules` tree.
+- **Daemon token hygiene** ([`server.js`](packages/mcp-server/src/daemon/server.js),
+  [`cli.js`](packages/mcp-server/src/cli.js)) — bearer comparison is now
+  constant-time (`crypto.timingSafeEqual`), and `airtable-user-mcp daemon
+  status` redacts the bearer token instead of printing it into shell
+  history/scrollback.
+
+Tests: mcp-server 273 (incl. new fail-closed profile test), extension 65,
+lsp-server 21 — all pass; `check:tool-sync` green; packaging script verified
+against the real pnpm tree; IPC handshake smoke-tested end-to-end.
+
 ### Extension — Windsurf renamed to Devin Desktop, legacy-compatible (2026-06-05)
 
 Cognition rebranded the Windsurf editor to **Devin Desktop** on 2026-06-02 (in-place OTA rename) and moved workspace AI assets from `.windsurf/` to `.devin/`, keeping `.windsurf/` as a read fallback (Windsurf-import is on by default).

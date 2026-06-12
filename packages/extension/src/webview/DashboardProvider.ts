@@ -71,6 +71,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     };
     webviewView.webview.html = getWebviewHtml(webviewView.webview, this.context);
     webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg as WebviewMessage));
+    // Re-sync when the sidebar is re-opened — daemon/tunnel/auth state may
+    // have changed while the view was hidden and no watcher fired since.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) void this.pushState();
+    });
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -450,6 +455,38 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             authtoken = await this.context.secrets.get('airtable-formula.ngrok.authtoken') ?? undefined;
           }
         }
+
+        // cf-named with an explicit hostname: run named-create FIRST. The
+        // daemon's enable-tunnel starts from the on-disk YAML, so without
+        // this pre-step a changed hostname would be silently ignored and the
+        // old one kept serving. named-create is idempotent for the same
+        // hostname and reconfigures (route dns + YAML rewrite) for a new one.
+        if (msg.provider === 'cf-named' && msg.domain) {
+          try {
+            const createResp = await fetch(`http://127.0.0.1:${status.port}/daemon/tunnel/named-create`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${status.bearerToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hostname: msg.domain }),
+              signal: AbortSignal.timeout(60_000),
+            });
+            if (!createResp.ok) {
+              const b = await createResp.json().catch(() => ({})) as Record<string, unknown>;
+              const createErr = typeof b.error === 'string' ? b.error : `HTTP ${createResp.status}`;
+              if (/not installed|login required|cert/i.test(createErr)) {
+                // First-time setup missing — fall through; enable-tunnel's
+                // error path routes into the full setup wizard below.
+              } else {
+                // Real failure (e.g. DNS route rejected). Abort rather than
+                // silently starting the tunnel on the previous hostname.
+                void vscode.window.showErrorMessage(`Tunnel hostname configuration failed: ${createErr}`);
+                this.postResult(msg.id, false, createErr);
+                await this.pushState();
+                return;
+              }
+            }
+          } catch { /* daemon unreachable — the enable call below surfaces it */ }
+        }
+
         const enableResp = await fetch(`http://127.0.0.1:${status.port}/daemon/enable-tunnel`, {
           method: 'POST',
           headers: {
@@ -516,9 +553,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // feedback, then run ensureDaemon in the background (can take ~15s).
       this._daemonStarting = true;
       void this.pushState();
-      this.postResult(msg.id, true);
       const dm = this._daemonManager;
       if (dm) {
+        this.postResult(msg.id, true);
         dm.restartDaemon()
           .then(() => { this._daemonStarting = false; void this._initLockfileWatch(); return this.pushState(); })
           .catch(err => {
@@ -529,15 +566,26 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       } else {
         this._daemonStarting = false;
         void this.pushState();
+        this.postResult(msg.id, false, 'Daemon manager unavailable');
       }
       return;
     }
 
     if (msg.type === 'daemon:stop') {
       try {
-        await this._daemonManager?.stopDaemon();
+        const result = await this._daemonManager?.stopDaemon();
         await this.pushState();
-        this.postResult(msg.id, true);
+        if (result && !result.stopped) {
+          const reason = result.reason ?? 'Daemon did not exit.';
+          vscode.window.showErrorMessage(`Daemon stop failed: ${reason}`);
+          this.postResult(msg.id, false, reason);
+        } else {
+          if (result?.reason) {
+            // Stopped, but with a caveat (e.g. stale lock cleaned up) — inform, don't alarm.
+            vscode.window.showInformationMessage(`Daemon stopped: ${result.reason}`);
+          }
+          this.postResult(msg.id, true);
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Daemon stop failed: ${err instanceof Error ? err.message : String(err)}`);
         this.postResult(msg.id, false, String(err));
@@ -701,7 +749,36 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  async pushState(): Promise<void> {
+  // pushState is async and reads daemon.lock / settings from disk; concurrent
+  // runs (e.g. several fs.watch events in a burst) can finish out of order and
+  // post a STALE state:update last. Serialize: one run at a time, and coalesce
+  // requests that arrive mid-run into a single trailing re-run.
+  private _pushInFlight: Promise<void> | null = null;
+  private _pushQueued = false;
+
+  pushState(): Promise<void> {
+    // The lockfile watcher fails silently when ~/.airtable-user-mcp doesn't
+    // exist yet (cold start before any daemon spawn). Retry here — by the
+    // time state changes are worth pushing, the daemon has created the dir.
+    if (!this._lockfileWatcher && this._daemonManager) void this._initLockfileWatch();
+    if (this._pushInFlight) {
+      this._pushQueued = true;
+      return this._pushInFlight;
+    }
+    this._pushInFlight = (async () => {
+      try {
+        do {
+          this._pushQueued = false;
+          await this._computeAndPostState();
+        } while (this._pushQueued);
+      } finally {
+        this._pushInFlight = null;
+      }
+    })();
+    return this._pushInFlight;
+  }
+
+  private async _computeAndPostState(): Promise<void> {
     if (!this.view) return;
     this._debugCollector?.trace('ext', 'webview', 'webview:message_out', {
       type: 'state:update',
@@ -731,15 +808,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     // during very early activation.
     const toolProfile: ToolProfileSnapshot = this.toolProfileManager?.getSnapshot() ?? {
       profile:      'full',
-      enabledCount: 62,
-      totalCount:   62,
+      enabledCount: 66,
+      totalCount:   66,
       categories: {
-        read: true,
+        read: true,                 recordRead: true,
         tableWrite: true,           tableDestructive: true,
         fieldWrite: true,           fieldDestructive: true,
         viewWrite: true,            viewDestructive: true,
         viewSection: true,          viewSectionDestructive: true,
-        formWrite: true,
+        formWrite: true,            recordWrite: true,
         extension: true,
       },
     };
@@ -909,6 +986,27 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // Check SecretStorage for ngrok authtoken
       const ngrokAuthtokenSet = !!(await this.context.secrets.get('airtable-formula.ngrok.authtoken'));
 
+      // Read the named-tunnel hostname from cloudflared-named.yml (written by
+      // the daemon's writeTunnelConfig — fixed mechanical format, same
+      // `- hostname:` extraction as the daemon's parseConfigYaml).
+      let namedTunnelHostname: string | null = null;
+      const namedConfigPath = pathMod.join(configDir, 'cloudflared-named.yml');
+      if (fsMod.existsSync(namedConfigPath)) {
+        try {
+          const rawYaml = fsMod.readFileSync(namedConfigPath, 'utf8');
+          for (const line of rawYaml.split(/\r?\n/)) {
+            const m = line.trim().match(/^- hostname:\s*(.+)$/u);
+            if (m) {
+              const value = m[1].trim();
+              namedTunnelHostname = value.startsWith('"') && value.endsWith('"')
+                ? value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+                : value;
+              break;
+            }
+          }
+        } catch { /* unreadable — treat as not configured */ }
+      }
+
       // Determine TunnelStatus
       let status: import('@airtable-formula/shared').TunnelStatus = 'disabled';
       if (tunnelUrl) {
@@ -925,6 +1023,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         provider,
         ngrokAuthtokenSet,
         autoDisabledReason,
+        namedTunnelHostname,
       };
     } catch {
       return undefined;
@@ -1084,8 +1183,20 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           }
 
           // Step 2: Create tunnel (no-op if already configured)
-          const hostname = originalMsg.domain;
-          if (!hostname) throw new Error('Named tunnel requires a hostname (domain). Enter it in the tunnel settings.');
+          let hostname = originalMsg.domain;
+          if (!hostname) {
+            // Last-resort prompt — the Setup tab has a Hostname field, but the
+            // flow can also be reached from commands that never showed it.
+            hostname = await vscode.window.showInputBox({
+              title: 'Cloudflare Named Tunnel',
+              prompt: 'Hostname for the tunnel — a domain you manage in Cloudflare',
+              placeHolder: 'mcp.your-domain.com',
+              ignoreFocusOut: true,
+              validateInput: (v) => (v.trim().length === 0 ? 'Hostname is required for first-time setup' : undefined),
+            });
+            hostname = hostname?.trim() || undefined;
+          }
+          if (!hostname) throw new Error('Named tunnel requires a hostname (domain). Enter it in the Hostname field under the tunnel provider in the Setup tab.');
           progress.report({ message: `Creating tunnel for ${hostname}…` });
           const createResp = await fetch(`${base}/daemon/tunnel/named-create`, {
             method: 'POST', headers,
@@ -1097,11 +1208,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             throw new Error(`Tunnel creation failed: ${b.error ?? createResp.status}`);
           }
 
-          // Step 3: Retry enable-tunnel now that setup is complete
+          // Step 3: Retry enable-tunnel now that setup is complete — with the
+          // RESOLVED hostname (originalMsg.domain may have been empty).
           progress.report({ message: 'Starting tunnel…' });
           const enableResp = await fetch(`${base}/daemon/enable-tunnel`, {
             method: 'POST', headers,
-            body: JSON.stringify({ provider: originalMsg.provider, domain: originalMsg.domain }),
+            body: JSON.stringify({ provider: originalMsg.provider, domain: hostname }),
             signal: AbortSignal.timeout(90_000),
           });
           if (!enableResp.ok) {

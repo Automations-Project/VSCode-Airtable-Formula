@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -23,6 +24,7 @@ import {
   createNamedTunnel,
   writeTunnelConfig,
   readNamedTunnelConfig,
+  routeTunnelDns,
 } from './tunnel-providers/cloudflared-named-setup.js';
 import { getTunnelBinaryPath } from './install-tunnel.js';
 import { homedir } from 'node:os';
@@ -286,11 +288,21 @@ export async function startDaemonServer(options = {}) {
     }
   };
 
+  // Constant-time comparison — `===` short-circuits on the first differing
+  // byte, which lets a tunnel-side attacker time their way through the token.
+  const tokensMatch = (provided, expected) => {
+    if (typeof provided !== 'string' || typeof expected !== 'string') return false;
+    const a = Buffer.from(provided, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  };
+
   const requireBearer = (req, res, next) => {
     const header = req.headers?.authorization ?? '';
     const match = header.match(/^Bearer\s+(.+)$/i);
     const provided = match ? match[1] : null;
-    if (provided !== currentToken.bearerToken) {
+    if (!tokensMatch(provided, currentToken.bearerToken)) {
       track401Burst(req);  // 401-burst tripwire (D-06)
       const wantHtml = (req.headers?.accept ?? '').includes('text/html');
       if (wantHtml) {
@@ -450,10 +462,26 @@ export async function startDaemonServer(options = {}) {
         return;
       }
 
-      // Idempotent: if already configured, just return existing config
+      // Idempotent for the SAME hostname; a DIFFERENT hostname reconfigures
+      // the existing tunnel in place (route dns + rewrite managed YAML) —
+      // same uuid and credentials, no new tunnel. Without this branch a new
+      // hostname was silently ignored and the old one kept serving.
       const existing = readNamedTunnelConfig(options.configDir);
       if (existing) {
-        res.json({ ok: true, uuid: existing.uuid, hostname: existing.hostname, configPath: existing.configPath, alreadyConfigured: true });
+        if (existing.hostname === hostname) {
+          res.json({ ok: true, uuid: existing.uuid, hostname: existing.hostname, configPath: existing.configPath, alreadyConfigured: true });
+          return;
+        }
+        const binaryPath = getTunnelBinaryPath(options.configDir);
+        await routeTunnelDns({ configDir: options.configDir, uuid: existing.uuid, hostname, binaryPath });
+        const rewritten = writeTunnelConfig({
+          configDir: options.configDir,
+          uuid: existing.uuid,
+          hostname,
+          port: getBoundPort(httpServer),
+          credentialsPath: existing.credentialsPath,
+        });
+        res.json({ ok: true, uuid: existing.uuid, hostname, configPath: rewritten.configPath, reconfigured: true });
         return;
       }
 

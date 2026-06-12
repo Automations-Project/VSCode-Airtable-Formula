@@ -1,4 +1,4 @@
-import { createConnection, ProposedFeatures } from 'vscode-languageserver/node';
+import { createConnection, ProposedFeatures } from 'vscode-languageserver/node.js';
 import { registerHandlers } from './server.js';
 import { startTcpServer } from './tcp-server.js';
 

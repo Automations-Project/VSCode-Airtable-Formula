@@ -54,7 +54,9 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm install -wD @vscode/vsce ovsx
+      # Exact pins — these tools run with VSCE_PAT/OVSX_PAT/NODE_AUTH_TOKEN in
+      # scope, so a compromised latest release must not be auto-pulled here.
+      - run: pnpm install -wD @vscode/vsce@3.9.2 ovsx@1.0.1
 
       # ── Compute versions ───────────────────────────────────────
       # For each target, we check both package.json AND the registry.
@@ -69,11 +71,18 @@ jobs:
           LOCAL=$(node -p "require('./$PKG').version")
 
           # Query VS Code Marketplace for the latest published version
-          PUBLISHED=$(npx vsce show Nskha.airtable-formula --json 2>/dev/null \
+          PUBLISHED=$(pnpm exec vsce show Nskha.airtable-formula --json 2>/dev/null \
             | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
                 try{console.log(JSON.parse(d).versions[0].version)}
                 catch{console.log('0.0.0')}
               })" || echo "0.0.0")
+
+          # The Marketplace reply is external input that gets interpolated into
+          # node -e below — accept strict semver only.
+          if ! [[ "$PUBLISHED" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::warning::Marketplace returned non-semver version '${PUBLISHED}' — ignoring"
+            PUBLISHED="0.0.0"
+          fi
 
           echo "Local: ${LOCAL}, Marketplace: ${PUBLISHED}"
 
@@ -118,6 +127,12 @@ jobs:
           # Query npm for the latest published version
           PUBLISHED=$(npm view airtable-user-mcp version 2>/dev/null || echo "0.0.0")
 
+          # External input interpolated into node -e below — strict semver only
+          if ! [[ "$PUBLISHED" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::warning::npm returned non-semver version '${PUBLISHED}' — ignoring"
+            PUBLISHED="0.0.0"
+          fi
+
           echo "Local: ${LOCAL}, npm: ${PUBLISHED}"
 
           # Pick the higher version as the base for bumping
@@ -158,6 +173,12 @@ jobs:
 
           # Query npm for the latest published version
           PUBLISHED=$(npm view airtable-user-lsp version 2>/dev/null || echo "0.0.0")
+
+          # External input interpolated into node -e below — strict semver only
+          if ! [[ "$PUBLISHED" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::warning::npm returned non-semver version '${PUBLISHED}' — ignoring"
+            PUBLISHED="0.0.0"
+          fi
 
           echo "Local: ${LOCAL}, npm: ${PUBLISHED}"
 
@@ -226,7 +247,7 @@ jobs:
 
           # Package
           cd packages/extension
-          npx vsce package --no-dependencies
+          pnpm exec vsce package --no-dependencies
           VSIX=$(ls *.vsix | head -1)
           echo "file=packages/extension/${VSIX}" >> $GITHUB_OUTPUT
           echo "Packaged: ${VSIX}"
@@ -236,7 +257,7 @@ jobs:
         if: |
           !inputs.dry_run &&
           (inputs.target == 'extension' || inputs.target == 'both')
-        run: npx vsce publish --packagePath "${{ steps.vsix.outputs.file }}"
+        run: pnpm exec vsce publish --packagePath "${{ steps.vsix.outputs.file }}"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
@@ -245,7 +266,7 @@ jobs:
           !inputs.dry_run &&
           (inputs.target == 'extension' || inputs.target == 'both')
         run: |
-          npx ovsx publish "${{ steps.vsix.outputs.file }}" --pat $OVSX_PAT
+          pnpm exec ovsx publish "${{ steps.vsix.outputs.file }}" --pat "$OVSX_PAT"
 
           # Verify the version actually landed (Open VSX indexes asynchronously)
           VERSION="${{ steps.ext_version.outputs.next }}"

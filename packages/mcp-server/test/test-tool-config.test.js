@@ -126,6 +126,19 @@ describe('ToolConfigManager', () => {
       const enabled = mgr.enabledToolNames();
       assert.equal(enabled.size, 66);
     });
+
+    it('unknown profile fails closed to read-only', async () => {
+      // switchProfile() rejects unknown names, so simulate a hand-edited /
+      // tampered tools-config.json by mutating loaded state directly.
+      mgr._config.activeProfile = 'totally-bogus';
+      const enabled = mgr.enabledToolNames();
+      assert.equal(enabled.size, 12, 'must match the read-only tool count');
+      assert.ok(enabled.has('get_base_schema'));
+      assert.ok(!enabled.has('delete_table'));
+      assert.ok(!enabled.has('delete_field'));
+      assert.ok(!enabled.has('create_table'));
+      await mgr.switchProfile('full');
+    });
   });
 
   describe('switchProfile()', () => {

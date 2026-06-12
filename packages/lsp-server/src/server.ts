@@ -1,7 +1,7 @@
 import {
   TextDocuments, TextDocumentSyncKind,
   type Connection, type InitializeResult,
-} from 'vscode-languageserver/node';
+} from 'vscode-languageserver/node.js';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import type { LsPosition } from '@airtable-formula/language-services';
 import {

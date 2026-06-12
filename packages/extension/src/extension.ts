@@ -562,13 +562,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await toolProfileManager.openConfigFile();
         }),
         vscode.commands.registerCommand('airtable-formula.stopDaemon', async () => {
-            await daemonManager.stopDaemon();
-            vscode.window.showInformationMessage('Airtable Formula: Daemon stopped.');
+            const result = await daemonManager.stopDaemon();
+            if (result.stopped) {
+                vscode.window.showInformationMessage(`Airtable Formula: Daemon stopped.${result.reason ? ` (${result.reason})` : ''}`);
+            } else {
+                vscode.window.showErrorMessage(`Airtable Formula: Daemon stop failed — ${result.reason ?? 'daemon did not exit'}.`);
+            }
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.restartDaemon', async () => {
-            await daemonManager.restartDaemon();
-            vscode.window.showInformationMessage('Airtable Formula: Daemon restarted.');
+            try {
+                await daemonManager.restartDaemon();
+                vscode.window.showInformationMessage('Airtable Formula: Daemon restarted.');
+            } catch (err) {
+                vscode.window.showErrorMessage(`Airtable Formula: Daemon restart failed — ${err instanceof Error ? err.message : String(err)}`);
+            }
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtableFormula.tunnel.disable', async () => {

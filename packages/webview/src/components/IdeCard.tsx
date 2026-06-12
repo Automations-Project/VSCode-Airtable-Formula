@@ -35,8 +35,8 @@ function LspBadge({ active = true }: { active?: boolean }) {
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       fontSize: '0.58rem', fontWeight: 700, fontFamily: 'var(--font-mono)',
       color: active ? 'var(--fg-ok)' : 'var(--fg-err)',
-      background: active ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.1)',
-      border: `1px solid ${active ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+      background: active ? 'var(--bg-lsp-ok)' : 'var(--bg-lsp-err)',
+      border: `1px solid ${active ? 'var(--border-lsp-ok)' : 'var(--border-lsp-err)'}`,
       borderRadius: 3, padding: '0 4px', lineHeight: '16px', flexShrink: 0,
     }}>LSP</span>
   );
@@ -101,7 +101,7 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
                 MCP {status.mcpConfigured ? 'configured' : 'not configured'}
               </span>
               <span className={status.mcpConfigured ? 'chip chip-ok' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
-                {status.mcpConfigured ? 'ready' : 'missing'}
+                {status.mcpConfigured ? 'Ready' : 'Missing'}
               </span>
             </div>
           )}
@@ -113,7 +113,7 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
               <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--fg-ok)', flex: 1 }}>
                 Formula · Script · Automation
               </span>
-              <span className="chip chip-ok" style={{ fontSize: '0.6rem' }}>via extension</span>
+              <span className="chip chip-ok" style={{ fontSize: '0.6rem' }}>Via extension</span>
             </div>
           )}
 
@@ -125,7 +125,7 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
                 LSP {status.lspConfigured ? 'configured' : 'not configured'}
               </span>
               <span className={status.lspConfigured ? 'chip chip-ok' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
-                {status.lspConfigured ? 'ready' : 'missing'}
+                {status.lspConfigured ? 'Ready' : 'Missing'}
               </span>
             </div>
           )}
@@ -138,7 +138,7 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
                 LSP {status.lspConfigured ? 'configured' : 'not configured'}
               </span>
               <span className={status.lspConfigured ? 'chip chip-ok' : 'chip chip-err'} style={{ fontSize: '0.6rem' }}>
-                {status.lspConfigured ? 'ready' : 'missing'}
+                {status.lspConfigured ? 'Ready' : 'Missing'}
               </span>
             </div>
           )}

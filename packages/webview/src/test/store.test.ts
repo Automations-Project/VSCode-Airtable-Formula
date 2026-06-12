@@ -106,3 +106,31 @@ describe('store daemon field', () => {
     expect(useStore.getState().daemon).toBeUndefined();
   });
 });
+
+describe('action result confirmation (PromptEditor wait-for-result)', () => {
+  it('savePrompt returns its action id and tracks it as pending', () => {
+    const id = useStore.getState().savePrompt({
+      name: 'my-prompt', description: 'd', arguments: [], template: 't',
+      isBuiltin: false, isModified: false,
+    });
+    expect(typeof id).toBe('string');
+    expect(id.length).toBeGreaterThan(0);
+    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+    expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:save-prompt', id }));
+  });
+
+  it('markActionDone records a consumable result and clears pending', () => {
+    const id = useStore.getState().deletePrompt('my-prompt');
+    useStore.getState().markActionDone(id, false);
+    expect(useStore.getState().pendingActions.has(id)).toBe(false);
+    expect(useStore.getState().consumeActionResult(id)).toBe(false);
+    // consumed — second read is undefined
+    expect(useStore.getState().consumeActionResult(id)).toBeUndefined();
+  });
+
+  it('resetPrompt success result round-trips as true', () => {
+    const id = useStore.getState().resetPrompt('built-in');
+    useStore.getState().markActionDone(id, true);
+    expect(useStore.getState().consumeActionResult(id)).toBe(true);
+  });
+});

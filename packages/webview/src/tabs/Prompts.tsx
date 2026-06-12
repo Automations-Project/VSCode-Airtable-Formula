@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../store.js';
 import type { PromptDef, PromptArg } from '@shared/types.js';
 import { Plus, ArrowLeft, Trash2, RotateCcw, Save, X, Info } from 'lucide-react';
@@ -85,31 +85,50 @@ function PromptEditor({
   isNew: boolean;
   onBack: () => void;
 }) {
-  const { savePrompt, deletePrompt, resetPrompt } = useStore();
+  const { savePrompt, deletePrompt, resetPrompt, pendingActions, consumeActionResult } = useStore();
   const [name, setName]           = useState(initial.name);
   const [desc, setDesc]           = useState(initial.description);
   const [args, setArgs]           = useState<PromptArg[]>(initial.arguments);
   const [template, setTemplate]   = useState(initial.template);
   const [dirty, setDirty]         = useState(isNew);
+  // The action we are waiting on — navigation back happens only once the
+  // extension confirms it (action:result), and a failure keeps the editor
+  // open with the user's input intact instead of silently discarding it.
+  const [inFlightId, setInFlightId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
+  const busy = inFlightId !== null || pendingActions.size > 0;
   const nameIsValid = /^[a-z][a-z0-9-]*$/.test(name);
+
+  useEffect(() => {
+    if (!inFlightId || pendingActions.has(inFlightId)) return;
+    const ok = consumeActionResult(inFlightId);
+    setInFlightId(null);
+    if (ok === false) {
+      setActionError('The change did not apply — check the VS Code notifications for details, then try again.');
+    } else {
+      onBack();
+    }
+  }, [pendingActions, inFlightId, consumeActionResult, onBack]);
 
   function markDirty() { setDirty(true); }
 
   function handleSave() {
-    if (!dirty || !nameIsValid) return;
-    savePrompt({ name, description: desc, arguments: args, template, isBuiltin: initial.isBuiltin, isModified: initial.isBuiltin });
-    onBack();
+    if (!dirty || !nameIsValid || inFlightId) return;
+    setActionError(null);
+    setInFlightId(savePrompt({ name, description: desc, arguments: args, template, isBuiltin: initial.isBuiltin, isModified: initial.isBuiltin }));
   }
 
   function handleDelete() {
-    deletePrompt(initial.name);
-    onBack();
+    if (inFlightId) return;
+    setActionError(null);
+    setInFlightId(deletePrompt(initial.name));
   }
 
   function handleReset() {
-    resetPrompt(initial.name);
-    onBack();
+    if (inFlightId) return;
+    setActionError(null);
+    setInFlightId(resetPrompt(initial.name));
   }
 
   function addArg() {
@@ -217,25 +236,33 @@ function PromptEditor({
         />
       </div>
 
+      {/* Action failure — stay on the editor so the user's input is kept */}
+      {actionError && (
+        <div role="alert" style={{ fontSize: '0.7rem', color: 'var(--fg-warn)', padding: '6px 10px', background: 'var(--bg-warn)', borderRadius: 'var(--radius-md)' }}>
+          {actionError}
+        </div>
+      )}
+
       {/* Actions */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button
           onClick={handleSave}
-          disabled={!dirty || !nameIsValid}
+          disabled={!dirty || !nameIsValid || busy}
+          aria-busy={busy}
           className="btn btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: !dirty || !nameIsValid ? 0.5 : 1 }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: !dirty || !nameIsValid || busy ? 0.5 : 1 }}
         >
-          <Save size={12} /> Save
+          <Save size={12} /> {inFlightId ? 'Saving…' : 'Save'}
         </button>
 
         {initial.isBuiltin && initial.isModified && (
-          <button onClick={handleReset} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <button onClick={handleReset} disabled={busy} aria-busy={busy} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
             <RotateCcw size={12} /> Reset to default
           </button>
         )}
 
         {!initial.isBuiltin && (
-          <button onClick={handleDelete} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--fg-err)' }}>
+          <button onClick={handleDelete} disabled={busy} aria-busy={busy} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--fg-err)' }}>
             <Trash2 size={12} /> Delete
           </button>
         )}
