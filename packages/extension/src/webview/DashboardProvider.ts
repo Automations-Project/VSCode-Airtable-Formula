@@ -1129,8 +1129,20 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           }
 
           // Step 2: Create tunnel (no-op if already configured)
-          const hostname = originalMsg.domain;
-          if (!hostname) throw new Error('Named tunnel requires a hostname (domain). Enter it in the tunnel settings.');
+          let hostname = originalMsg.domain;
+          if (!hostname) {
+            // Last-resort prompt — the Setup tab has a Hostname field, but the
+            // flow can also be reached from commands that never showed it.
+            hostname = await vscode.window.showInputBox({
+              title: 'Cloudflare Named Tunnel',
+              prompt: 'Hostname for the tunnel — a domain you manage in Cloudflare',
+              placeHolder: 'mcp.your-domain.com',
+              ignoreFocusOut: true,
+              validateInput: (v) => (v.trim().length === 0 ? 'Hostname is required for first-time setup' : undefined),
+            });
+            hostname = hostname?.trim() || undefined;
+          }
+          if (!hostname) throw new Error('Named tunnel requires a hostname (domain). Enter it in the Hostname field under the tunnel provider in the Setup tab.');
           progress.report({ message: `Creating tunnel for ${hostname}…` });
           const createResp = await fetch(`${base}/daemon/tunnel/named-create`, {
             method: 'POST', headers,
@@ -1142,11 +1154,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             throw new Error(`Tunnel creation failed: ${b.error ?? createResp.status}`);
           }
 
-          // Step 3: Retry enable-tunnel now that setup is complete
+          // Step 3: Retry enable-tunnel now that setup is complete — with the
+          // RESOLVED hostname (originalMsg.domain may have been empty).
           progress.report({ message: 'Starting tunnel…' });
           const enableResp = await fetch(`${base}/daemon/enable-tunnel`, {
             method: 'POST', headers,
-            body: JSON.stringify({ provider: originalMsg.provider, domain: originalMsg.domain }),
+            body: JSON.stringify({ provider: originalMsg.provider, domain: hostname }),
             signal: AbortSignal.timeout(90_000),
           });
           if (!enableResp.ok) {

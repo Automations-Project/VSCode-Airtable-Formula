@@ -246,6 +246,7 @@ export function Setup() {
   const [selectedProvider, setSelectedProvider] = React.useState<'cf-quick' | 'ngrok' | 'cf-named'>('cf-quick');
   const [ngrokAuthtokenInput, setNgrokAuthtokenInput] = React.useState('');
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
+  const [namedHostnameInput, setNamedHostnameInput] = React.useState('');
   const [copiedUrl, setCopiedUrl] = React.useState(false);
   const [copiedDaemonUrl, setCopiedDaemonUrl] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState(false);
@@ -278,7 +279,11 @@ export function Setup() {
     const authtoken = (selectedProvider === 'ngrok' && ngrokAuthtokenInput)
       ? ngrokAuthtokenInput
       : undefined;
-    enableTunnel(selectedProvider, authtoken, ngrokDomainInput || undefined);
+    const domain =
+      selectedProvider === 'cf-named' ? (namedHostnameInput.trim() || undefined)
+      : selectedProvider === 'ngrok' ? (ngrokDomainInput.trim() || undefined)
+      : undefined;
+    enableTunnel(selectedProvider, authtoken, domain);
   };
 
   const handleDisableTunnel = () => {
@@ -504,39 +509,43 @@ export function Setup() {
           </select>
         </div>
 
-        {/* ngrok authtoken input (shown when ngrok selected + no token stored) */}
-        {selectedProvider === 'ngrok' && !tunnel?.ngrokAuthtokenSet && (
+        {/* ngrok inputs — authtoken only until one is stored; domain always */}
+        {selectedProvider === 'ngrok' && (
           <div style={{ marginBottom: 8 }}>
-            <label htmlFor="ngrok-authtoken" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
-              ngrok Auth Token
-            </label>
-            <input
-              id="ngrok-authtoken"
-              type="password"
-              placeholder="Paste token from ngrok dashboard"
-              aria-describedby="ngrok-authtoken-helper"
-              value={ngrokAuthtokenInput}
-              onChange={e => setNgrokAuthtokenInput(e.target.value)}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.7rem',
-                background: 'var(--bg-input)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '4px 8px',
-                color: 'var(--fg)',
-                marginBottom: 4,
-              }}
-            />
-            <div id="ngrok-authtoken-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>
-              Stored securely in VS Code SecretStorage
-            </div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', marginTop: 4 }}>
-              ngrok tunnels must be manually re-enabled after daemon restarts (authtoken stored in VS Code SecretStorage is not accessible to the daemon at startup).
-            </div>
-            <label htmlFor="ngrok-domain" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4, marginTop: 8 }}>
+            {!tunnel?.ngrokAuthtokenSet && (
+              <>
+                <label htmlFor="ngrok-authtoken" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+                  ngrok Auth Token
+                </label>
+                <input
+                  id="ngrok-authtoken"
+                  type="password"
+                  placeholder="Paste token from ngrok dashboard"
+                  aria-describedby="ngrok-authtoken-helper"
+                  value={ngrokAuthtokenInput}
+                  onChange={e => setNgrokAuthtokenInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.7rem',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '4px 8px',
+                    color: 'var(--fg)',
+                    marginBottom: 4,
+                  }}
+                />
+                <div id="ngrok-authtoken-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>
+                  Stored securely in VS Code SecretStorage
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', marginTop: 4 }}>
+                  ngrok tunnels must be manually re-enabled after daemon restarts (authtoken stored in VS Code SecretStorage is not accessible to the daemon at startup).
+                </div>
+              </>
+            )}
+            <label htmlFor="ngrok-domain" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4, marginTop: tunnel?.ngrokAuthtokenSet ? 0 : 8 }}>
               Reserved Domain (optional)
             </label>
             <input
@@ -557,6 +566,40 @@ export function Setup() {
                 color: 'var(--fg)',
               }}
             />
+          </div>
+        )}
+
+        {/* Cloudflare named tunnel — hostname is required for first-time setup */}
+        {selectedProvider === 'cf-named' && (
+          <div style={{ marginBottom: 8 }}>
+            <label htmlFor="cf-named-hostname" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+              Hostname
+            </label>
+            <input
+              id="cf-named-hostname"
+              type="text"
+              placeholder="mcp.your-domain.com"
+              aria-describedby="cf-named-hostname-helper"
+              value={namedHostnameInput}
+              onChange={e => setNamedHostnameInput(e.target.value)}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.7rem',
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '4px 8px',
+                color: 'var(--fg)',
+                marginBottom: 4,
+              }}
+            />
+            <div id="cf-named-hostname-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>
+              A domain you manage in Cloudflare (the tunnel gets a permanent URL there).
+              Required the first time — setup opens a one-time Cloudflare login in your browser.
+              Leave empty to reuse an already-configured tunnel.
+            </div>
           </div>
         )}
 

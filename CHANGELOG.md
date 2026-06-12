@@ -6,6 +6,24 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Setup tab — Cloudflare Named Tunnel hostname field (2026-06-12)
+
+Selecting **Cloudflare Named Tunnel** and pressing Enable always failed with
+"Named tunnel requires a hostname (domain)" — the Setup tab never rendered a
+field to enter one (only ngrok had inputs). Fixes:
+
+- New **Hostname** input shown when `cf-named` is selected, with helper text
+  (Cloudflare-managed domain, one-time browser login, empty = reuse existing
+  config) ([`Setup.tsx`](packages/webview/src/tabs/Setup.tsx)).
+- `handleEnableTunnel` now sends the hostname for `cf-named` (it previously
+  sent the ngrok field's value for every provider).
+- Same bug class for ngrok: the **Reserved Domain** field was hidden once an
+  authtoken was stored — it now always renders for ngrok.
+- Host-side fallback: if the setup flow is reached without a hostname (e.g.
+  via a command), an input box prompts for it instead of dead-ending; the
+  post-setup enable retry uses the resolved hostname (previously re-sent the
+  original empty value) ([`DashboardProvider.ts`](packages/extension/src/webview/DashboardProvider.ts)).
+
 ### Daemon Stop reliability + dashboard UI/UX hardening (2026-06-12)
 
 **Daemon Stop button** — root-caused "stop sometimes does nothing":
