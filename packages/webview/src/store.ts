@@ -77,7 +77,22 @@ const defaultAuth: AuthState = {
   hasCredentials: false,
 };
 
-export const useStore = create<Store>((set, get) => ({
+// If the extension never answers (host crash, lost message, webview reload),
+// pending actions must not keep buttons disabled forever — auto-expire them.
+const PENDING_TIMEOUT_MS = 60_000;
+const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export const useStore = create<Store>((set, get) => {
+  /** Track an in-flight action and schedule its auto-expiry. */
+  const beginAction = (id: string, timeoutMs = PENDING_TIMEOUT_MS) => {
+    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    pendingTimers.set(id, setTimeout(() => {
+      pendingTimers.delete(id);
+      get().markActionDone(id, false);
+    }, timeoutMs));
+  };
+
+  return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
   aiFilesCount: 0,
@@ -111,157 +126,165 @@ export const useStore = create<Store>((set, get) => ({
 
   setupIde: (ideId) => {
     const id = randomId();
+    beginAction(id);
     set(s => {
-      const nextPending = new Set([...s.pendingActions, id]);
       const nextIde = new Map(s.pendingIdeActions);
       nextIde.set(ideId, id);
-      return { pendingActions: nextPending, pendingIdeActions: nextIde };
+      return { pendingIdeActions: nextIde };
     });
     sendToExtension({ type: 'action:setupIde', id, ideId: ideId as any });
   },
 
   setupAll: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:setupAll', id });
   },
 
   refresh: () => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:refresh', id });
   },
 
   login: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    // Auto-login drives a real browser — can legitimately take minutes.
+    beginAction(id, 360_000);
     sendToExtension({ type: 'action:login', id });
   },
 
   logout: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:logout', id });
   },
 
   status: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:status', id });
   },
 
   saveCredentials: (email, password, otpSecret) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:saveCredentials', id, email, password, otpSecret });
   },
 
   installBrowser: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    // Chromium download can take minutes on slow connections.
+    beginAction(id, 600_000);
     sendToExtension({ type: 'action:install-browser', id });
   },
 
   removeBrowser: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:removeBrowser', id });
   },
 
   unconfigureIde: (ideId) => {
     const id = randomId();
+    beginAction(id);
     set(s => {
-      const nextPending = new Set([...s.pendingActions, id]);
       const nextIde = new Map(s.pendingIdeActions);
       nextIde.set(ideId, id);
-      return { pendingActions: nextPending, pendingIdeActions: nextIde };
+      return { pendingIdeActions: nextIde };
     });
     sendToExtension({ type: 'action:unconfigureIde', id, ideId: ideId as any });
   },
 
   debugStartSession: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:debug.startSession', id });
   },
 
   debugStopAndExport: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:debug.stopAndExport', id });
   },
 
   debugExport: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:debug.export', id });
   },
 
   manualLogin: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    // Manual login waits for the user to finish in the browser (up to ~5.5m).
+    beginAction(id, 360_000);
     sendToExtension({ type: 'action:manualLogin', id });
   },
 
   backupSession: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:backupSession', id });
   },
 
   restoreSession: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:restoreSession', id });
   },
 
   selectCustomBrowser: () => {
     const id = randomId();
+    // Long timeout — the native file dialog stays open until the user acts.
+    beginAction(id, 600_000);
     sendToExtension({ type: 'action:selectCustomBrowser', id });
   },
 
   setBrowserChoice: (choice) => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:setBrowserChoice', id, choice });
   },
 
   openStoragePath: (p) => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:openStoragePath', id, path: p });
   },
 
   enableTunnel: (provider, authtoken, domain) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'tunnel:enable', id, provider, authtoken, domain });
   },
 
   disableTunnel: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'tunnel:disable', id });
   },
 
   setNgrokAuthtoken: (authtoken) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'tunnel:set-ngrok-authtoken', id, authtoken });
   },
 
   startDaemon: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'daemon:start', id });
   },
 
   stopDaemon: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'daemon:stop', id });
   },
 
   restartDaemon: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'daemon:restart', id });
   },
 
@@ -272,52 +295,55 @@ export const useStore = create<Store>((set, get) => ({
 
   rotateToken: () => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'daemon:rotate-token', id });
   },
 
   saveAirtablePat: (pat) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:save-airtable-pat', id, pat });
   },
 
   copyAirtablePat: () => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'action:copy-airtable-pat', id });
   },
 
   configureOfficialAirtable: (ideId) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:configure-official-airtable', id, ideId });
   },
 
   unconfigureOfficialAirtable: (ideId) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
   },
 
   savePrompt: (prompt) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:save-prompt', id, prompt });
   },
 
   deletePrompt: (name) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:delete-prompt', id, name });
   },
 
   resetPrompt: (name) => {
     const id = randomId();
-    set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
+    beginAction(id);
     sendToExtension({ type: 'action:reset-prompt', id, name });
   },
 
   markActionDone: (id, _ok) => {
+    const timer = pendingTimers.get(id);
+    if (timer) { clearTimeout(timer); pendingTimers.delete(id); }
     set(s => {
       const next = new Set(s.pendingActions);
       next.delete(id);
@@ -328,4 +354,5 @@ export const useStore = create<Store>((set, get) => ({
       return { pendingActions: next, pendingIdeActions: nextIde };
     });
   },
-}));
+  });
+});

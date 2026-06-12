@@ -71,6 +71,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     };
     webviewView.webview.html = getWebviewHtml(webviewView.webview, this.context);
     webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg as WebviewMessage));
+    // Re-sync when the sidebar is re-opened — daemon/tunnel/auth state may
+    // have changed while the view was hidden and no watcher fired since.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) void this.pushState();
+    });
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -516,9 +521,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // feedback, then run ensureDaemon in the background (can take ~15s).
       this._daemonStarting = true;
       void this.pushState();
-      this.postResult(msg.id, true);
       const dm = this._daemonManager;
       if (dm) {
+        this.postResult(msg.id, true);
         dm.restartDaemon()
           .then(() => { this._daemonStarting = false; void this._initLockfileWatch(); return this.pushState(); })
           .catch(err => {
@@ -529,6 +534,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       } else {
         this._daemonStarting = false;
         void this.pushState();
+        this.postResult(msg.id, false, 'Daemon manager unavailable');
       }
       return;
     }
@@ -711,7 +717,32 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  async pushState(): Promise<void> {
+  // pushState is async and reads daemon.lock / settings from disk; concurrent
+  // runs (e.g. several fs.watch events in a burst) can finish out of order and
+  // post a STALE state:update last. Serialize: one run at a time, and coalesce
+  // requests that arrive mid-run into a single trailing re-run.
+  private _pushInFlight: Promise<void> | null = null;
+  private _pushQueued = false;
+
+  pushState(): Promise<void> {
+    if (this._pushInFlight) {
+      this._pushQueued = true;
+      return this._pushInFlight;
+    }
+    this._pushInFlight = (async () => {
+      try {
+        do {
+          this._pushQueued = false;
+          await this._computeAndPostState();
+        } while (this._pushQueued);
+      } finally {
+        this._pushInFlight = null;
+      }
+    })();
+    return this._pushInFlight;
+  }
+
+  private async _computeAndPostState(): Promise<void> {
     if (!this.view) return;
     this._debugCollector?.trace('ext', 'webview', 'webview:message_out', {
       type: 'state:update',
@@ -741,15 +772,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     // during very early activation.
     const toolProfile: ToolProfileSnapshot = this.toolProfileManager?.getSnapshot() ?? {
       profile:      'full',
-      enabledCount: 62,
-      totalCount:   62,
+      enabledCount: 66,
+      totalCount:   66,
       categories: {
-        read: true,
+        read: true,                 recordRead: true,
         tableWrite: true,           tableDestructive: true,
         fieldWrite: true,           fieldDestructive: true,
         viewWrite: true,            viewDestructive: true,
         viewSection: true,          viewSectionDestructive: true,
-        formWrite: true,
+        formWrite: true,            recordWrite: true,
         extension: true,
       },
     };

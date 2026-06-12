@@ -243,6 +243,7 @@ export function Setup() {
   const [ngrokAuthtokenInput, setNgrokAuthtokenInput] = React.useState('');
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
   const [copiedUrl, setCopiedUrl] = React.useState(false);
+  const [copiedDaemonUrl, setCopiedDaemonUrl] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState(false);
   const [rotatedToken, setRotatedToken] = React.useState(false);
   const [patInput, setPatInput] = React.useState('');
@@ -365,14 +366,31 @@ export function Setup() {
             )}
 
             {daemon.tunnelUrl && (
-              <div className="list-row">
-                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Tunnel URL</span>
-                <span style={{
-                  fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%',
-                }}>
+              <div className="list-row" style={{ alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flexShrink: 0 }}>Tunnel URL</span>
+                <span
+                  title={daemon.tunnelUrl}
+                  style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
+                    textAlign: 'right',
+                  }}
+                >
                   {daemon.tunnelUrl}
                 </span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  aria-label="Copy tunnel URL"
+                  onClick={() => {
+                    if (daemon.tunnelUrl) {
+                      navigator.clipboard.writeText(daemon.tunnelUrl).catch(() => undefined);
+                      setCopiedDaemonUrl(true);
+                      setTimeout(() => setCopiedDaemonUrl(false), 1500);
+                    }
+                  }}
+                >
+                  {copiedDaemonUrl ? 'Copied!' : 'Copy'}
+                </button>
               </div>
             )}
 
@@ -408,15 +426,15 @@ export function Setup() {
         {/* Daemon controls */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
           {!daemon?.running ? (
-            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading || !!daemon?.starting} aria-busy={!!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
               {daemon?.starting ? 'Starting...' : 'Start Daemon'}
             </button>
           ) : (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading || !!daemon?.starting} aria-busy={!!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
                 {daemon?.starting ? 'Restarting...' : 'Restart'}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading || !!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1, color: 'var(--fg-err)' }}>
+              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading || !!daemon?.starting} aria-busy={isLoading} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1, color: 'var(--fg-err)' }}>
                 {isLoading ? 'Stopping...' : 'Stop'}
               </button>
             </>
@@ -679,8 +697,13 @@ export function Setup() {
       )}
 
       {ideStatuses.length === 0 && (
-        <div className="glass-panel" style={{ textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.72rem', padding: '24px 12px' }}>
-          No IDE data available yet. Loading...
+        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '14px 12px' }} aria-busy="true" aria-label="Scanning for installed IDEs">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="skeleton-row" style={{ animationDelay: `${i * 120}ms` }} />
+          ))}
+          <div style={{ textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.68rem', marginTop: 2 }}>
+            Scanning for installed IDEs…
+          </div>
         </div>
       )}
 
@@ -767,7 +790,7 @@ export function Setup() {
                 {mcpActiveVariant === 'http' && (
                   <div className="list-row" style={{ marginTop: 8, alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: '0.68rem', color: 'var(--fg-muted)', flex: 1 }}>
-                      Replace <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>{'{'}{'{'}'BEARER_TOKEN{'}'}{'}'}</code> with your daemon token
+                      Replace <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', background: 'var(--bg-input)', padding: '1px 4px', borderRadius: 3 }}>{'{'}{'{'}'BEARER_TOKEN{'}'}{'}'}</code> with your daemon token — the access password the daemon generates so only your own tools can call it
                     </span>
                     <button
                       className="btn btn-ghost btn-sm"

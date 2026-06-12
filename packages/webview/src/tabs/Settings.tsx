@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store.js';
 import { sendToExtension } from '../lib/vscode.js';
+import { friendlyError } from '../lib/friendlyError.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson, FolderOpen, ChevronDown, ChevronRight, Archive, Upload } from 'lucide-react';
 
@@ -131,7 +132,14 @@ export function Settings() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.68rem' }}>
               <span style={{ color: isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: isManual ? 600 : 400 }}>Manual</span>
               <label className="toggle-switch">
-                <input type="checkbox" checked={!isManual} onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })} />
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-checked={!isManual}
+                  aria-label={isManual ? 'Switch to automatic login with stored credentials' : 'Switch to manual login in the browser'}
+                  checked={!isManual}
+                  onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })}
+                />
                 <span className="toggle-track" />
               </label>
               <span style={{ color: !isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: !isManual ? 600 : 400 }}>Auto</span>
@@ -216,7 +224,7 @@ export function Settings() {
           )}
 
           {chromeMissing && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', background: 'rgba(220,4,59,0.08)', border: '1px solid rgba(220,4,59,0.22)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', background: 'var(--bg-error)', border: '1px solid var(--border-error)', borderRadius: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <AlertTriangle size={14} style={{ color: 'var(--at-red)', flexShrink: 0, marginTop: 1 }} />
                 <div style={{ fontSize: '0.66rem', lineHeight: 1.4, color: 'var(--fg)' }}>
@@ -261,11 +269,17 @@ export function Settings() {
                 </div>
               )}
 
-              {downloadError && (
-                <div style={{ fontSize: '0.62rem', color: 'var(--fg-warn)' }}>
-                  Download failed: {dl?.error}
-                </div>
-              )}
+              {downloadError && (() => {
+                const fe = friendlyError(dl?.error);
+                return (
+                  <div style={{ fontSize: '0.62rem', color: 'var(--fg-warn)' }} title={fe?.raw}>
+                    Download failed: {fe?.message}
+                    {fe?.hint && (
+                      <span style={{ display: 'block', color: 'var(--fg-muted)', marginTop: 2 }}>{fe.hint}</span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -306,11 +320,16 @@ export function Settings() {
               <input
                 className="input-field"
                 type="password"
-                placeholder="TOTP secret (optional)"
+                placeholder="2FA secret (optional)"
+                aria-label="Two-factor authentication TOTP secret, optional"
                 value={otpSecret}
                 onChange={e => setOtpSecret(e.target.value)}
                 style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--fg)' }}
               />
+              <div style={{ fontSize: '0.6rem', color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+                2FA secret: the base32 code Airtable shows when you set up an authenticator
+                app (also called a TOTP secret). Leave empty if 2FA is disabled.
+              </div>
               <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
                 <button
                   className="btn btn-primary"
@@ -350,11 +369,17 @@ export function Settings() {
             )}
           </div>
 
-          {auth.error && (
-            <div style={{ fontSize: '0.65rem', color: 'var(--fg-warn)', padding: '4px 8px', background: 'rgba(255,180,0,0.08)', borderRadius: 6 }}>
-              {auth.error}
-            </div>
-          )}
+          {auth.error && (() => {
+            const fe = friendlyError(auth.error);
+            return (
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-warn)', padding: '4px 8px', background: 'var(--bg-warn)', borderRadius: 6 }} title={fe?.raw}>
+                {fe?.message}
+                {fe?.hint && (
+                  <span style={{ display: 'block', color: 'var(--fg-muted)', marginTop: 2 }}>{fe.hint}</span>
+                )}
+              </div>
+            );
+          })()}
 
           {(auth.lastChecked || auth.lastLogin) && (
             <div style={{ display: 'flex', gap: 12, fontSize: '0.62rem', color: 'var(--fg-muted)' }}>
