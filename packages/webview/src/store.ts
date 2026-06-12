@@ -302,12 +302,15 @@ export const useStore = create<Store>((set, get) => {
 
   copyBearerToken: () => {
     const id = randomId();
+    beginAction(id);
     sendToExtension({ type: 'daemon:copy-bearer-token', id });
   },
 
   rotateToken: () => {
+    // Daemon-scoped: rotating invalidates connected clients, so daemon
+    // controls should reflect the in-flight rotation too.
     const id = randomId();
-    beginAction(id);
+    beginDaemonAction(id);
     sendToExtension({ type: 'daemon:rotate-token', id });
   },
 

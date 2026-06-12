@@ -93,6 +93,14 @@ button[aria-disabled="true"] {
 
 /* ─── Design System Classes ─── */
 
+/* Small uppercase form/section labels — one source of truth for the
+   fontSize/tracking so design changes don't require editing every tab. */
+.uppercase-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
 /* Skeleton loading rows (Setup tab while IDE detection runs) */
 .skeleton-row {
   height: 38px;

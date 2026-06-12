@@ -6,6 +6,31 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Dashboard — second-pass dead-end & cosmetics sweep (2026-06-12)
+
+A targeted second audit (flow dead-ends, unreachable conditional UI, stale
+affordances, cosmetics) confirmed 12 more issues; all fixed:
+
+- **ngrok auth token now has an update path** — once a token was stored, the
+  input vanished forever (`!ngrokAuthtokenSet` gate) and the existing
+  `setNgrokAuthtoken` store action was never wired to any UI. A "token
+  stored" chip with a **Replace…** flow now lets users rotate/update the
+  token without disabling the tunnel ([`Setup.tsx`](packages/webview/src/tabs/Setup.tsx)).
+- **PromptEditor feedback** — Save/Reset/Delete now disable (+`aria-busy`)
+  while the action is in flight ([`Prompts.tsx`](packages/webview/src/tabs/Prompts.tsx)).
+- **Token/PAT buttons** — Copy Token tracks pending state and disables;
+  Rotate is daemon-scoped (`beginDaemonAction`) and disables with the other
+  daemon controls; Copy PAT disables while busy ([`store.ts`](packages/webview/src/store.ts)).
+- **Credentials form state** — email is now cleared along with password/OTP
+  on save, and Cancel resets all fields (stale pre-filled email no longer
+  reappears on "Update credentials") ([`Settings.tsx`](packages/webview/src/tabs/Settings.tsx)).
+- **Cosmetics:** input padding unified at `6px 10px` across tunnel/PAT/
+  credentials fields; helper text consistently `--fg-subtle`; daemon button
+  row gap aligned to 8px; chip casing normalized (Ready/Missing/Via
+  extension); repeated uppercase-label inline styles extracted to a shared
+  `.uppercase-label` class; the ngrok section's state-dependent spacing
+  asymmetry (introduced by the hostname-field fix) removed.
+
 ### Setup tab — Cloudflare Named Tunnel hostname field (2026-06-12)
 
 Selecting **Cloudflare Named Tunnel** and pressing Enable always failed with

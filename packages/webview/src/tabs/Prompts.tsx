@@ -85,7 +85,8 @@ function PromptEditor({
   isNew: boolean;
   onBack: () => void;
 }) {
-  const { savePrompt, deletePrompt, resetPrompt } = useStore();
+  const { savePrompt, deletePrompt, resetPrompt, pendingActions } = useStore();
+  const busy = pendingActions.size > 0;
   const [name, setName]           = useState(initial.name);
   const [desc, setDesc]           = useState(initial.description);
   const [args, setArgs]           = useState<PromptArg[]>(initial.arguments);
@@ -221,21 +222,22 @@ function PromptEditor({
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button
           onClick={handleSave}
-          disabled={!dirty || !nameIsValid}
+          disabled={!dirty || !nameIsValid || busy}
+          aria-busy={busy}
           className="btn btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: !dirty || !nameIsValid ? 0.5 : 1 }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: !dirty || !nameIsValid || busy ? 0.5 : 1 }}
         >
           <Save size={12} /> Save
         </button>
 
         {initial.isBuiltin && initial.isModified && (
-          <button onClick={handleReset} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <button onClick={handleReset} disabled={busy} aria-busy={busy} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
             <RotateCcw size={12} /> Reset to default
           </button>
         )}
 
         {!initial.isBuiltin && (
-          <button onClick={handleDelete} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--fg-err)' }}>
+          <button onClick={handleDelete} disabled={busy} aria-busy={busy} className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--fg-err)' }}>
             <Trash2 size={12} /> Delete
           </button>
         )}

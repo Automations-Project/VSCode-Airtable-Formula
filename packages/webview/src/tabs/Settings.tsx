@@ -90,11 +90,16 @@ export function Settings() {
     sendToExtension({ type: 'setting:change', key: 'auth.refreshIntervalHours', value: Number(e.target.value) });
   };
 
+  const resetCredsForm = () => {
+    setEmail('');
+    setPassword('');
+    setOtpSecret('');
+  };
+
   const handleSaveCredentials = () => {
     if (!email || !password) return;
     saveCredentials(email, password, otpSecret);
-    setPassword('');
-    setOtpSecret('');
+    resetCredsForm();
     setShowCreds(false);
   };
 
@@ -341,7 +346,7 @@ export function Settings() {
                 </button>
                 <button
                   className="btn btn-ghost"
-                  onClick={() => setShowCreds(false)}
+                  onClick={() => { resetCredsForm(); setShowCreds(false); }}
                   style={{ fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer' }}
                 >
                   Cancel

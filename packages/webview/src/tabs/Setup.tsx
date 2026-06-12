@@ -225,7 +225,7 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, pendingDaemonActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, pendingDaemonActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
 
   const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
@@ -247,6 +247,7 @@ export function Setup() {
   const [ngrokAuthtokenInput, setNgrokAuthtokenInput] = React.useState('');
   const [ngrokDomainInput, setNgrokDomainInput] = React.useState('');
   const [namedHostnameInput, setNamedHostnameInput] = React.useState('');
+  const [editNgrokToken, setEditNgrokToken] = React.useState(false);
   const [copiedUrl, setCopiedUrl] = React.useState(false);
   const [copiedDaemonUrl, setCopiedDaemonUrl] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState(false);
@@ -415,6 +416,7 @@ export function Setup() {
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleCopyToken}
+                disabled={isLoading}
                 title="Copy bearer token to clipboard"
                 style={{ marginLeft: 8 }}
               >
@@ -423,6 +425,8 @@ export function Setup() {
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleRotateToken}
+                disabled={daemonBusy}
+                aria-busy={daemonBusy}
                 title="Rotate bearer token — all connected clients will need the new token"
                 style={{ marginLeft: 4, color: rotatedToken ? 'var(--fg-ok)' : undefined }}
               >
@@ -433,7 +437,7 @@ export function Setup() {
         )}
 
         {/* Daemon controls */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           {!daemon?.running ? (
             <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
               {daemon?.starting ? 'Starting...' : 'Start Daemon'}
@@ -492,7 +496,7 @@ export function Setup() {
 
         {/* Provider picker */}
         <div style={{ marginBottom: 8 }}>
-          <label htmlFor="tunnel-provider" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+          <label htmlFor="tunnel-provider" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
             Provider
           </label>
           <select
@@ -509,12 +513,12 @@ export function Setup() {
           </select>
         </div>
 
-        {/* ngrok inputs — authtoken only until one is stored; domain always */}
+        {/* ngrok inputs — token entry until stored, then a Replace flow; domain always */}
         {selectedProvider === 'ngrok' && (
           <div style={{ marginBottom: 8 }}>
-            {!tunnel?.ngrokAuthtokenSet && (
+            {(!tunnel?.ngrokAuthtokenSet || editNgrokToken) ? (
               <>
-                <label htmlFor="ngrok-authtoken" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+                <label htmlFor="ngrok-authtoken" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
                   ngrok Auth Token
                 </label>
                 <input
@@ -532,20 +536,53 @@ export function Setup() {
                     background: 'var(--bg-input)',
                     border: '1px solid var(--border)',
                     borderRadius: 'var(--radius-md)',
-                    padding: '4px 8px',
+                    padding: '6px 10px',
                     color: 'var(--fg)',
                     marginBottom: 4,
                   }}
                 />
-                <div id="ngrok-authtoken-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>
+                <div id="ngrok-authtoken-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)' }}>
                   Stored securely in VS Code SecretStorage
                 </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', marginTop: 4 }}>
+                {editNgrokToken && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={!ngrokAuthtokenInput.trim() || isLoading}
+                      onClick={() => {
+                        setNgrokAuthtoken(ngrokAuthtokenInput.trim());
+                        setNgrokAuthtokenInput('');
+                        setEditNgrokToken(false);
+                      }}
+                    >
+                      Save token
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => { setNgrokAuthtokenInput(''); setEditNgrokToken(false); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+                <div style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)', marginTop: 4, marginBottom: 8 }}>
                   ngrok tunnels must be manually re-enabled after daemon restarts (authtoken stored in VS Code SecretStorage is not accessible to the daemon at startup).
                 </div>
               </>
+            ) : (
+              <div className="list-row" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span className="chip chip-ok">Auth token stored</span>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setEditNgrokToken(true)}
+                  title="Replace the stored ngrok auth token"
+                >
+                  Replace…
+                </button>
+              </div>
             )}
-            <label htmlFor="ngrok-domain" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4, marginTop: tunnel?.ngrokAuthtokenSet ? 0 : 8 }}>
+            <label htmlFor="ngrok-domain" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
               Reserved Domain (optional)
             </label>
             <input
@@ -562,7 +599,7 @@ export function Setup() {
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-md)',
-                padding: '4px 8px',
+                padding: '6px 10px',
                 color: 'var(--fg)',
               }}
             />
@@ -572,7 +609,7 @@ export function Setup() {
         {/* Cloudflare named tunnel — hostname is required for first-time setup */}
         {selectedProvider === 'cf-named' && (
           <div style={{ marginBottom: 8 }}>
-            <label htmlFor="cf-named-hostname" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+            <label htmlFor="cf-named-hostname" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
               Hostname
             </label>
             <input
@@ -590,12 +627,12 @@ export function Setup() {
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-md)',
-                padding: '4px 8px',
+                padding: '6px 10px',
                 color: 'var(--fg)',
                 marginBottom: 4,
               }}
             />
-            <div id="cf-named-hostname-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-muted)' }}>
+            <div id="cf-named-hostname-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)' }}>
               A domain you manage in Cloudflare (the tunnel gets a permanent URL there).
               Required the first time — setup opens a one-time Cloudflare login in your browser.
               Leave empty to reuse an already-configured tunnel.
@@ -955,7 +992,7 @@ export function Setup() {
 
         {/* PAT input */}
         <div style={{ marginBottom: 12 }}>
-          <label htmlFor="airtable-pat" style={{ display: 'block', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>
+          <label htmlFor="airtable-pat" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
             Personal Access Token
           </label>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -969,7 +1006,7 @@ export function Setup() {
                 flex: 1,
                 fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
                 background: 'var(--bg-input)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', padding: '4px 8px',
+                borderRadius: 'var(--radius-md)', padding: '6px 10px',
                 color: 'var(--fg)',
               }}
             />
@@ -984,6 +1021,7 @@ export function Setup() {
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={handleCopyPat}
+                disabled={isLoading}
                 title="Copy saved PAT to clipboard"
               >
                 {copiedPat ? 'Copied!' : 'Copy PAT'}
@@ -1003,7 +1041,7 @@ export function Setup() {
           if (detectedOfficial.length === 0) return null;
           return (
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--fg-muted)', marginBottom: 6 }}>
+              <div className="uppercase-label" style={{ color: 'var(--fg-muted)', marginBottom: 6 }}>
                 Detected IDEs
               </div>
               <div className="stack stack-sm">
@@ -1045,7 +1083,7 @@ export function Setup() {
 
         {/* Official Airtable MCP snippet */}
         <div>
-          <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--fg-muted)', marginBottom: 6 }}>
+          <div className="uppercase-label" style={{ color: 'var(--fg-muted)', marginBottom: 6 }}>
             Config Snippet
           </div>
 
