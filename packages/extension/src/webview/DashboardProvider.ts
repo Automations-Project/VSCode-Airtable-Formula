@@ -455,6 +455,38 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             authtoken = await this.context.secrets.get('airtable-formula.ngrok.authtoken') ?? undefined;
           }
         }
+
+        // cf-named with an explicit hostname: run named-create FIRST. The
+        // daemon's enable-tunnel starts from the on-disk YAML, so without
+        // this pre-step a changed hostname would be silently ignored and the
+        // old one kept serving. named-create is idempotent for the same
+        // hostname and reconfigures (route dns + YAML rewrite) for a new one.
+        if (msg.provider === 'cf-named' && msg.domain) {
+          try {
+            const createResp = await fetch(`http://127.0.0.1:${status.port}/daemon/tunnel/named-create`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${status.bearerToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hostname: msg.domain }),
+              signal: AbortSignal.timeout(60_000),
+            });
+            if (!createResp.ok) {
+              const b = await createResp.json().catch(() => ({})) as Record<string, unknown>;
+              const createErr = typeof b.error === 'string' ? b.error : `HTTP ${createResp.status}`;
+              if (/not installed|login required|cert/i.test(createErr)) {
+                // First-time setup missing — fall through; enable-tunnel's
+                // error path routes into the full setup wizard below.
+              } else {
+                // Real failure (e.g. DNS route rejected). Abort rather than
+                // silently starting the tunnel on the previous hostname.
+                void vscode.window.showErrorMessage(`Tunnel hostname configuration failed: ${createErr}`);
+                this.postResult(msg.id, false, createErr);
+                await this.pushState();
+                return;
+              }
+            }
+          } catch { /* daemon unreachable — the enable call below surfaces it */ }
+        }
+
         const enableResp = await fetch(`http://127.0.0.1:${status.port}/daemon/enable-tunnel`, {
           method: 'POST',
           headers: {

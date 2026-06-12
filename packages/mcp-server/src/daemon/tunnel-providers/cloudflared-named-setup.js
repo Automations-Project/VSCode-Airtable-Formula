@@ -301,19 +301,53 @@ export async function createNamedTunnel(options) {
       return { uuid, name: parsedName || options.name, credentialsPath };
     })
     .then(async (tunnel) => {
-      const { code, stdout, stderr } = await runCapture(
-        spawnImpl,
+      await routeTunnelDns({
+        configDir: options.configDir,
+        uuid: tunnel.uuid,
+        hostname: options.hostname,
         binaryPath,
-        ['tunnel', 'route', 'dns', tunnel.uuid, options.hostname],
-        options.signal,
-      );
-      if (code !== 0) {
-        throw new Error(
-          `cloudflared route dns exited with code ${code}: ${stderr.trim() || stdout.trim()}`,
-        );
-      }
+        signal: options.signal,
+        dependencies: options.dependencies,
+      });
       return tunnel;
     });
+}
+
+/**
+ * Route an additional/replacement hostname to an EXISTING tunnel
+ * (`cloudflared tunnel route dns <uuid> <hostname>`). Used to reconfigure a
+ * named tunnel's hostname without creating a new tunnel — the uuid and
+ * credentials stay the same; only the DNS route (and our managed YAML,
+ * rewritten by the caller) change.
+ *
+ * @param {{
+ *   configDir?: string,
+ *   uuid: string,
+ *   hostname: string,
+ *   binaryPath?: string,
+ *   signal?: AbortSignal,
+ *   dependencies?: { spawn?: typeof nodeSpawn },
+ * }} options
+ * @returns {Promise<void>}
+ */
+export async function routeTunnelDns(options) {
+  if (!options.uuid) throw new Error('routeTunnelDns: uuid is required.');
+  if (!options.hostname) throw new Error('routeTunnelDns: hostname is required.');
+  const binaryPath = options.binaryPath ?? getTunnelBinaryPath(options.configDir);
+  assertBinaryExists(binaryPath);
+  const spawnImpl = options.dependencies?.spawn ?? nodeSpawn;
+
+  const { code, stdout, stderr } = await runCapture(
+    spawnImpl,
+    binaryPath,
+    ['tunnel', 'route', 'dns', options.uuid, options.hostname],
+    options.signal,
+  );
+  if (code !== 0) {
+    throw new Error(
+      `cloudflared route dns exited with code ${code}: ${stderr.trim() || stdout.trim()}`,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
