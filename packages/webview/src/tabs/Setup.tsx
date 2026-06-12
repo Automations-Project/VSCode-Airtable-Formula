@@ -225,7 +225,7 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
+  const { ideStatuses, pendingActions, pendingIdeActions, pendingDaemonActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
 
   const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
@@ -236,6 +236,10 @@ export function Setup() {
     LSP_EDITOR_IDS.has(ide.ideId) ? !ide.lspConfigured : !ide.mcpConfigured
   );
   const isLoading = pendingActions.size > 0;
+  // Daemon controls disable on daemon-specific pending state only — an
+  // unrelated slow action (open file dialog, long install) must not lock the
+  // user out of stopping the daemon.
+  const daemonBusy = pendingDaemonActions.size > 0 || !!daemon?.starting;
   // Derive tunnel pending state from store pendingActions (consistent with IDE actions)
   const isTunnelPending = pendingActions.size > 0;
 
@@ -426,16 +430,16 @@ export function Setup() {
         {/* Daemon controls */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
           {!daemon?.running ? (
-            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={isLoading || !!daemon?.starting} aria-busy={!!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
               {daemon?.starting ? 'Starting...' : 'Start Daemon'}
             </button>
           ) : (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={isLoading || !!daemon?.starting} aria-busy={!!daemon?.starting} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1 }}>
+              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
                 {daemon?.starting ? 'Restarting...' : 'Restart'}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={isLoading || !!daemon?.starting} aria-busy={isLoading} style={{ opacity: (isLoading || daemon?.starting) ? 0.6 : 1, color: 'var(--fg-err)' }}>
-                {isLoading ? 'Stopping...' : 'Stop'}
+              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1, color: 'var(--fg-err)' }}>
+                {daemonBusy && !daemon?.starting ? 'Stopping...' : 'Stop'}
               </button>
             </>
           )}

@@ -7,6 +7,10 @@ interface Store extends DashboardState {
   activeTab: 'overview' | 'setup' | 'prompts' | 'settings';
   pendingActions: Set<string>;
   pendingIdeActions: Map<string, string>; // ideId → actionId
+  /** Daemon start/stop/restart in flight — daemon controls disable on THIS,
+   *  not on the global pendingActions, so an unrelated slow action (e.g. an
+   *  open file dialog) can't lock the user out of stopping the daemon. */
+  pendingDaemonActions: Set<string>;
   setTab: (tab: Store['activeTab']) => void;
   applyState: (state: DashboardState) => void;
   applyAuthState: (state: AuthState) => void;
@@ -92,6 +96,12 @@ export const useStore = create<Store>((set, get) => {
     }, timeoutMs));
   };
 
+  /** beginAction + membership in the daemon-specific pending set. */
+  const beginDaemonAction = (id: string, timeoutMs?: number) => {
+    beginAction(id, timeoutMs);
+    set(s => ({ pendingDaemonActions: new Set([...s.pendingDaemonActions, id]) }));
+  };
+
   return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
@@ -102,6 +112,7 @@ export const useStore = create<Store>((set, get) => {
   activeTab: 'overview',
   pendingActions: new Set(),
   pendingIdeActions: new Map(),
+  pendingDaemonActions: new Set(),
 
   setTab: (tab) => set({ activeTab: tab }),
   applyState: (state) => set(s => {
@@ -272,19 +283,20 @@ export const useStore = create<Store>((set, get) => {
 
   startDaemon: () => {
     const id = randomId();
-    beginAction(id);
+    beginDaemonAction(id);
     sendToExtension({ type: 'daemon:start', id });
   },
 
   stopDaemon: () => {
+    // Graceful wait (10s) + kill escalation (3s) can exceed the default expiry.
     const id = randomId();
-    beginAction(id);
+    beginDaemonAction(id, 30_000);
     sendToExtension({ type: 'daemon:stop', id });
   },
 
   restartDaemon: () => {
     const id = randomId();
-    beginAction(id);
+    beginDaemonAction(id, 45_000);
     sendToExtension({ type: 'daemon:restart', id });
   },
 
@@ -351,7 +363,9 @@ export const useStore = create<Store>((set, get) => {
       for (const [ideId, actionId] of nextIde) {
         if (actionId === id) { nextIde.delete(ideId); break; }
       }
-      return { pendingActions: next, pendingIdeActions: nextIde };
+      const nextDaemon = new Set(s.pendingDaemonActions);
+      nextDaemon.delete(id);
+      return { pendingActions: next, pendingIdeActions: nextIde, pendingDaemonActions: nextDaemon };
     });
   },
   });

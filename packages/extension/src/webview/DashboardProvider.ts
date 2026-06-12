@@ -725,6 +725,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private _pushQueued = false;
 
   pushState(): Promise<void> {
+    // The lockfile watcher fails silently when ~/.airtable-user-mcp doesn't
+    // exist yet (cold start before any daemon spawn). Retry here — by the
+    // time state changes are worth pushing, the daemon has created the dir.
+    if (!this._lockfileWatcher && this._daemonManager) void this._initLockfileWatch();
     if (this._pushInFlight) {
       this._pushQueued = true;
       return this._pushInFlight;
