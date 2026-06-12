@@ -571,8 +571,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.restartDaemon', async () => {
-            await daemonManager.restartDaemon();
-            vscode.window.showInformationMessage('Airtable Formula: Daemon restarted.');
+            try {
+                await daemonManager.restartDaemon();
+                vscode.window.showInformationMessage('Airtable Formula: Daemon restarted.');
+            } catch (err) {
+                vscode.window.showErrorMessage(`Airtable Formula: Daemon restart failed — ${err instanceof Error ? err.message : String(err)}`);
+            }
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtableFormula.tunnel.disable', async () => {

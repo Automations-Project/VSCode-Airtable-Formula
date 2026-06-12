@@ -51,6 +51,8 @@ export class DaemonManager implements vscode.Disposable {
    * any explicit start/restart.
    */
   private _userStopped = false;
+  /** Graceful-shutdown wait before kill escalation (overridable in tests). */
+  private _stopWaitMs = 10_000;
 
   constructor(
     private readonly configDir: string,
@@ -185,28 +187,27 @@ export class DaemonManager implements vscode.Disposable {
 
     // 2) Accepted — the daemon releases its lockfile as it exits; wait for it.
     if (outcome === 'accepted') {
-      const deadline = Date.now() + 10_000;
+      const deadline = Date.now() + this._stopWaitMs;
       while (Date.now() < deadline) {
         if (!this._lockfileExists()) return { stopped: true, forced: false };
         await this._delay(200);
       }
-      // Daemon acknowledged but never exited — fall through to escalation.
+      // Acknowledged but the lock never released — fall through to escalation.
     }
 
     const pid = status.pid;
     const pidAlive = typeof pid === 'number' && pid > 0 && this._isPidAlive(pid);
 
-    // 3) Escalate to kill ONLY with proven daemon identity. An accepted
-    //    (bearer-authenticated) shutdown proves it. A rejected response does
-    //    NOT — it only proves SOMETHING answered on the port; a stale lock
-    //    whose port was reused by an unrelated HTTP service also rejects,
-    //    while the recorded pid may belong to an innocent recycled process.
-    //    For rejected, require /daemon/health to echo the lockfile's uuid.
-    const provenOurDaemon = outcome === 'accepted' || (
-      outcome === 'rejected'
+    // 3) Escalate to kill ONLY with proven daemon identity: /daemon/health,
+    //    authenticated with the lockfile's bearer, echoing the lockfile's
+    //    uuid. NEITHER an accepted nor a rejected shutdown response proves
+    //    identity by itself — a stale lock whose port was reused by an
+    //    unrelated local service can produce either (catch-all routes 200
+    //    anything and ignore the bearer header), while the recorded pid may
+    //    belong to an innocent recycled process.
+    const provenOurDaemon = outcome !== 'unreachable'
       && status.port != null && status.bearerToken != null
-      && await this._verifyDaemonIdentity(status.port, status.bearerToken, status.uuid)
-    );
+      && await this._verifyDaemonIdentity(status.port, status.bearerToken, status.uuid);
 
     if (provenOurDaemon && pidAlive && typeof pid === 'number') {
       this._killPid(pid);
@@ -264,7 +265,12 @@ export class DaemonManager implements vscode.Disposable {
   }
 
   async restartDaemon(): Promise<DaemonConnectionInfo> {
-    await this.stopDaemon();
+    const stop = await this.stopDaemon();
+    if (!stop.stopped) {
+      // Proceeding would let ensureDaemon() find the old daemon's lockfile
+      // and "restart" by reconnecting to the very process that refused to die.
+      throw new Error(`Restart aborted — the running daemon could not be stopped: ${stop.reason ?? 'unknown reason'}`);
+    }
     await this._delay(500);
     return this.ensureDaemon();
   }
