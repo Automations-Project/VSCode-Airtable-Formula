@@ -3,14 +3,20 @@
  * Programmatic login runner for the VS Code extension.
  *
  * Same flow as login.js but designed for non-interactive use:
- *   - Reads credentials from environment variables only (no CLI args for security)
+ *   - Receives credentials over the fork() IPC channel when spawned by the
+ *     extension (preferred — keeps secrets out of the child environment),
+ *     falling back to environment variables for standalone use
  *   - Outputs structured JSON to stdout
  *   - Uses exit codes for success/failure
  *
+ * IPC protocol (when process.send is available):
+ *   child → parent: { type: 'request-credentials' }
+ *   parent → child: { type: 'credentials', email, password, otpSecret }
+ *
  * Environment variables:
- *   AIRTABLE_EMAIL           — (required) Airtable account email
- *   AIRTABLE_PASSWORD        — (required) Airtable account password
- *   AIRTABLE_OTP_SECRET      — (optional) TOTP 2FA base32 secret
+ *   AIRTABLE_EMAIL           — (fallback) Airtable account email
+ *   AIRTABLE_PASSWORD        — (fallback) Airtable account password
+ *   AIRTABLE_OTP_SECRET      — (optional fallback) TOTP 2FA base32 secret
  *   AIRTABLE_PROFILE         — (optional) profile dir name (default: .chrome-profile)
  *   AIRTABLE_BROWSER_CHANNEL — (optional) patchright channel (chrome|msedge|chromium)
  *   AIRTABLE_BROWSER_PATH    — (optional) absolute path to browser executable
@@ -68,17 +74,65 @@ function generateTOTP(secretBase32) {
   return totp.generate();
 }
 
+/**
+ * Ask the parent process for credentials over the IPC channel.
+ * Resolves null when no parent answers within the timeout (standalone run,
+ * or a parent that doesn't speak the protocol) — caller falls back to env.
+ */
+function requestCredentialsOverIpc(timeoutMs = 10_000) {
+  return new Promise((resolve) => {
+    const onMessage = (msg) => {
+      if (msg && msg.type === 'credentials') {
+        cleanup();
+        resolve({
+          email: msg.email || null,
+          password: msg.password || null,
+          otpSecret: msg.otpSecret || null,
+        });
+      }
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      process.removeListener('message', onMessage);
+    };
+    process.on('message', onMessage);
+    try {
+      process.send({ type: 'request-credentials' });
+    } catch {
+      cleanup();
+      resolve(null);
+    }
+  });
+}
+
 async function main() {
-  const email = process.env.AIRTABLE_EMAIL;
-  const password = process.env.AIRTABLE_PASSWORD;
-  const otpSecret = process.env.AIRTABLE_OTP_SECRET || null;
+  let email = process.env.AIRTABLE_EMAIL;
+  let password = process.env.AIRTABLE_PASSWORD;
+  let otpSecret = process.env.AIRTABLE_OTP_SECRET || null;
+
+  // IPC-first: when spawned via fork() the parent holds the credentials and
+  // sends them on request, so they never enter this process's environment.
+  if ((!email || !password) && typeof process.send === 'function') {
+    console.error('[login-runner] Requesting credentials over IPC...');
+    const ipcCreds = await requestCredentialsOverIpc();
+    if (ipcCreds) {
+      email = ipcCreds.email || email;
+      password = ipcCreds.password || password;
+      otpSecret = ipcCreds.otpSecret || otpSecret;
+    }
+  }
+
   const { getProfileDir } = await import('./paths.js');
   const profileDir = getProfileDir();
   const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
   const browserPath    = process.env.AIRTABLE_BROWSER_PATH || undefined;
 
   if (!email || !password) {
-    output({ ok: false, error: 'AIRTABLE_EMAIL and AIRTABLE_PASSWORD environment variables are required' });
+    output({ ok: false, error: 'Credentials required: send them over IPC (fork) or set AIRTABLE_EMAIL and AIRTABLE_PASSWORD' });
     process.exit(1);
   }
 

@@ -238,10 +238,10 @@ export class AuthManager implements vscode.Disposable {
   }
 
   /**
-   * Get credentials as env vars for passing to child processes.
+   * Read stored credentials from SecretStorage.
    * Returns undefined if no credentials are stored.
    */
-  async getCredentialsEnv(): Promise<Record<string, string> | undefined> {
+  async getCredentials(): Promise<{ email: string; password: string; otpSecret?: string } | undefined> {
     // D-02: ensure daemon is running before handing off credentials
     if (getSettings().mcp.useDaemon && this._daemonManager) {
       await this._daemonManager.ensureDaemon();
@@ -250,12 +250,26 @@ export class AuthManager implements vscode.Disposable {
     const password = await this.getPassword();
     if (!email || !password) return undefined;
 
-    const env: Record<string, string> = {
-      AIRTABLE_EMAIL: email,
-      AIRTABLE_PASSWORD: password,
-    };
     const otp = await this.getOtpSecret();
-    if (otp) env.AIRTABLE_OTP_SECRET = otp;
+    return { email, password, ...(otp ? { otpSecret: otp } : {}) };
+  }
+
+  /**
+   * Get credentials as env vars. ONLY for the VS Code MCP stdio definition
+   * (registration.ts), where VS Code owns the spawn and env is the only
+   * channel. Helper scripts we fork ourselves receive credentials over the
+   * IPC channel instead (_spawnScript) so they never appear in the child's
+   * environment (/proc/<pid>/environ, process listings, core dumps).
+   */
+  async getCredentialsEnv(): Promise<Record<string, string> | undefined> {
+    const creds = await this.getCredentials();
+    if (!creds) return undefined;
+
+    const env: Record<string, string> = {
+      AIRTABLE_EMAIL: creds.email,
+      AIRTABLE_PASSWORD: creds.password,
+    };
+    if (creds.otpSecret) env.AIRTABLE_OTP_SECRET = creds.otpSecret;
     return env;
   }
 
@@ -328,16 +342,17 @@ export class AuthManager implements vscode.Disposable {
     const loginMode = this._getLoginMode();
 
     if (loginMode === 'auto') {
-      const creds = await this.getCredentialsEnv();
+      const creds = await this.getCredentials();
       if (!creds) {
         this._updateState({ status: 'error', error: 'No credentials stored. Save credentials first.' });
         return this._state;
       }
       this._updateState({ status: 'logging-in' });
       try {
+        // Credentials go over the IPC channel, never the child environment.
         const result = await this._spawnScript('login-runner.mjs', {
-          ...creds, ...this._browserEnv(), ...this._profileEnv(),
-        });
+          ...this._browserEnv(), ...this._profileEnv(),
+        }, undefined, creds);
         const now = new Date().toISOString();
         if (result.ok) {
           this._updateState({ status: 'valid', userId: result.userId || undefined, lastLogin: now, lastChecked: now, error: undefined });
@@ -513,8 +528,17 @@ export class AuthManager implements vscode.Disposable {
   /**
    * Spawn a bundled MCP helper script as a child process.
    * Returns parsed JSON from stdout.
+   *
+   * `credentials` are delivered over the fork() IPC channel on the child's
+   * request — never via env, which is world-visible on Linux through
+   * /proc/<pid>/environ and survives in core dumps.
    */
-  private _spawnScript(scriptName: string, extraEnv?: Record<string, string>, timeoutMs = 120_000): Promise<any> {
+  private _spawnScript(
+    scriptName: string,
+    extraEnv?: Record<string, string>,
+    timeoutMs = 120_000,
+    credentials?: { email: string; password: string; otpSecret?: string },
+  ): Promise<any> {
     return new Promise((resolve, reject) => {
       const scriptPath = path.join(this.extensionPath, 'dist', 'mcp', scriptName);
       const nodeModulesPath = path.join(this.extensionPath, 'dist', 'node_modules');
@@ -529,6 +553,23 @@ export class AuthManager implements vscode.Disposable {
         stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
         execArgv: ['--experimental-vm-modules'],
       });
+
+      if (credentials) {
+        child.on('message', (msg: unknown) => {
+          if ((msg as { type?: string } | null)?.type === 'request-credentials') {
+            try {
+              child.send({
+                type: 'credentials',
+                email: credentials.email,
+                password: credentials.password,
+                otpSecret: credentials.otpSecret ?? null,
+              });
+            } catch {
+              // Child exited between request and reply — close handler reports it
+            }
+          }
+        });
+      }
 
       let stdout = '';
       let stderr = '';
