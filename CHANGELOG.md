@@ -6,6 +6,29 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### LSP server — fix runtime startup + CI bin-link warning (2026-06-12)
+
+- **`airtable-user-lsp` was runtime-broken when executed with Node directly**
+  (both `--stdio` and `--tcp` — i.e. every editor config using
+  `npx -y airtable-user-lsp` and the daemon's TCP spawn): the bundle imported
+  the extensionless `vscode-languageserver/node` subpath, which Node's ESM
+  resolver rejects because that package ships no `exports` map (build tools
+  resolve it bundler-style, which is why tsup/vitest never caught it). Fixed
+  with explicit `/node.js` deep imports. A second masked failure —
+  `Dynamic require of "util" is not supported` from CJS code bundled into the
+  ESM output — is fixed with a `createRequire` banner in
+  [`tsup.config.ts`](packages/lsp-server/tsup.config.ts) (same pattern
+  `bundle-mcp.mjs` already uses). Both modes smoke-tested via the real bin.
+- **CI install warning eliminated:** the `airtable-user-lsp` bin pointed at
+  `dist/index.mjs`, which doesn't exist at install time on fresh checkouts, so
+  every CI run logged `WARN Failed to create bin … ENOENT`. The bin now points
+  at a committed launcher shim ([`bin/airtable-user-lsp.mjs`](packages/lsp-server/bin/airtable-user-lsp.mjs))
+  that defers to the built entry and prints an actionable error when `dist/`
+  is missing.
+- Known follow-up (pre-existing, unchanged): the extension never bundles an
+  LSP copy at `dist/lsp/index.mjs`, so the daemon's first spawn candidate is
+  dead in installed extensions; editors use the npm package instead.
+
 ### Dashboard — named-tunnel hostname display + confirmed prompt saves (2026-06-12)
 
 - **`TunnelState.namedTunnelHostname`** (new optional shared-protocol field):

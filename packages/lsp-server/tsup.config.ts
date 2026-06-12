@@ -11,4 +11,9 @@ export default defineConfig({
   dts: false,
   clean: true,
   outDir: 'dist',
+  // Bundled CJS deps call require('util') etc.; esbuild's ESM require-shim
+  // throws on Node built-ins unless a real require is in scope.
+  banner: {
+    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+  },
 });

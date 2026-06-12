@@ -1,7 +1,7 @@
 import * as net from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createConnection, ProposedFeatures } from 'vscode-languageserver/node';
+import { createConnection, ProposedFeatures } from 'vscode-languageserver/node.js';
 import { StreamMessageReader, StreamMessageWriter } from 'vscode-jsonrpc/node';
 import { registerHandlers } from './server.js';
 import { writeLspPort } from './lockfile-writer.js';
