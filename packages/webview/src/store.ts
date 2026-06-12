@@ -46,9 +46,14 @@ interface Store extends DashboardState {
   copyAirtablePat: () => void;
   configureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
   unconfigureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
-  savePrompt: (prompt: PromptDef) => void;
-  deletePrompt: (name: string) => void;
-  resetPrompt: (name: string) => void;
+  /** Prompt actions return their action id so callers can await completion
+   *  (via pendingActions + consumeActionResult) before navigating away. */
+  savePrompt: (prompt: PromptDef) => string;
+  deletePrompt: (name: string) => string;
+  resetPrompt: (name: string) => string;
+  /** Read-and-clear the success flag recorded by markActionDone. Undefined
+   *  when no result was recorded (e.g. id unknown). */
+  consumeActionResult: (id: string) => boolean | undefined;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -85,6 +90,12 @@ const defaultAuth: AuthState = {
 // pending actions must not keep buttons disabled forever — auto-expire them.
 const PENDING_TIMEOUT_MS = 60_000;
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Per-action outcomes recorded by markActionDone, consumed by components that
+// wait for confirmation before navigating (PromptEditor). Bounded — unclaimed
+// results from fire-and-forget actions are evicted oldest-first.
+const actionResults = new Map<string, boolean>();
+const ACTION_RESULTS_MAX = 50;
 
 export const useStore = create<Store>((set, get) => {
   /** Track an in-flight action and schedule its auto-expiry. */
@@ -342,23 +353,38 @@ export const useStore = create<Store>((set, get) => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:save-prompt', id, prompt });
+    return id;
   },
 
   deletePrompt: (name) => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:delete-prompt', id, name });
+    return id;
   },
 
   resetPrompt: (name) => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:reset-prompt', id, name });
+    return id;
   },
 
-  markActionDone: (id, _ok) => {
+  consumeActionResult: (id) => {
+    const result = actionResults.get(id);
+    actionResults.delete(id);
+    return result;
+  },
+
+  markActionDone: (id, ok) => {
     const timer = pendingTimers.get(id);
     if (timer) { clearTimeout(timer); pendingTimers.delete(id); }
+    actionResults.set(id, ok);
+    while (actionResults.size > ACTION_RESULTS_MAX) {
+      const oldest = actionResults.keys().next().value;
+      if (oldest === undefined) break;
+      actionResults.delete(oldest);
+    }
     set(s => {
       const next = new Set(s.pendingActions);
       next.delete(id);

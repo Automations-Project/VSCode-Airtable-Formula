@@ -6,6 +6,24 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Dashboard — named-tunnel hostname display + confirmed prompt saves (2026-06-12)
+
+- **`TunnelState.namedTunnelHostname`** (new optional shared-protocol field):
+  the extension now reads the hostname from `cloudflared-named.yml` (same
+  mechanical format the daemon writes) and the Setup tab shows a
+  "Configured: <hostname>" row for the named-tunnel provider, relabels the
+  input "New Hostname (optional)", and explains that leaving it empty reuses
+  the configured tunnel ([`types.ts`](packages/shared/src/types.ts),
+  [`DashboardProvider.ts`](packages/extension/src/webview/DashboardProvider.ts),
+  [`Setup.tsx`](packages/webview/src/tabs/Setup.tsx)).
+- **PromptEditor waits for confirmation**: `savePrompt`/`deletePrompt`/
+  `resetPrompt` now return their action id, `markActionDone` records a
+  consumable per-action result, and the editor navigates back only after the
+  extension confirms success — a failure keeps the editor open with the
+  user's input intact and shows an inline error
+  ([`store.ts`](packages/webview/src/store.ts), [`Prompts.tsx`](packages/webview/src/tabs/Prompts.tsx)).
+  3 new store tests cover the id/result round-trip.
+
 ### Dashboard — second-pass dead-end & cosmetics sweep (2026-06-12)
 
 A targeted second audit (flow dead-ends, unreachable conditional UI, stale

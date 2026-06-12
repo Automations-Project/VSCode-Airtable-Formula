@@ -609,13 +609,24 @@ export function Setup() {
         {/* Cloudflare named tunnel — hostname is required for first-time setup */}
         {selectedProvider === 'cf-named' && (
           <div style={{ marginBottom: 8 }}>
+            {tunnel?.namedTunnelHostname && (
+              <div className="list-row" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span className="chip chip-ok">Configured</span>
+                <span
+                  title={tunnel.namedTunnelHostname}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}
+                >
+                  {tunnel.namedTunnelHostname}
+                </span>
+              </div>
+            )}
             <label htmlFor="cf-named-hostname" className="uppercase-label" style={{ display: 'block', marginBottom: 4 }}>
-              Hostname
+              {tunnel?.namedTunnelHostname ? 'New Hostname (optional)' : 'Hostname'}
             </label>
             <input
               id="cf-named-hostname"
               type="text"
-              placeholder="mcp.your-domain.com"
+              placeholder={tunnel?.namedTunnelHostname ?? 'mcp.your-domain.com'}
               aria-describedby="cf-named-hostname-helper"
               value={namedHostnameInput}
               onChange={e => setNamedHostnameInput(e.target.value)}
@@ -633,9 +644,10 @@ export function Setup() {
               }}
             />
             <div id="cf-named-hostname-helper" style={{ fontSize: '0.7rem', color: 'var(--fg-subtle)' }}>
-              A domain you manage in Cloudflare (the tunnel gets a permanent URL there).
-              Required the first time — setup opens a one-time Cloudflare login in your browser.
-              Leave empty to reuse an already-configured tunnel.
+              {tunnel?.namedTunnelHostname
+                ? <>Leave empty to reuse <strong>{tunnel.namedTunnelHostname}</strong>, or enter a different Cloudflare-managed hostname to reconfigure.</>
+                : <>A domain you manage in Cloudflare (the tunnel gets a permanent URL there).
+                   Required the first time — setup opens a one-time Cloudflare login in your browser.</>}
             </div>
           </div>
         )}

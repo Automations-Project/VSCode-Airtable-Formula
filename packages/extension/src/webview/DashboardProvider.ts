@@ -954,6 +954,27 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // Check SecretStorage for ngrok authtoken
       const ngrokAuthtokenSet = !!(await this.context.secrets.get('airtable-formula.ngrok.authtoken'));
 
+      // Read the named-tunnel hostname from cloudflared-named.yml (written by
+      // the daemon's writeTunnelConfig — fixed mechanical format, same
+      // `- hostname:` extraction as the daemon's parseConfigYaml).
+      let namedTunnelHostname: string | null = null;
+      const namedConfigPath = pathMod.join(configDir, 'cloudflared-named.yml');
+      if (fsMod.existsSync(namedConfigPath)) {
+        try {
+          const rawYaml = fsMod.readFileSync(namedConfigPath, 'utf8');
+          for (const line of rawYaml.split(/\r?\n/)) {
+            const m = line.trim().match(/^- hostname:\s*(.+)$/u);
+            if (m) {
+              const value = m[1].trim();
+              namedTunnelHostname = value.startsWith('"') && value.endsWith('"')
+                ? value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+                : value;
+              break;
+            }
+          }
+        } catch { /* unreadable — treat as not configured */ }
+      }
+
       // Determine TunnelStatus
       let status: import('@airtable-formula/shared').TunnelStatus = 'disabled';
       if (tunnelUrl) {
@@ -970,6 +991,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         provider,
         ngrokAuthtokenSet,
         autoDisabledReason,
+        namedTunnelHostname,
       };
     } catch {
       return undefined;

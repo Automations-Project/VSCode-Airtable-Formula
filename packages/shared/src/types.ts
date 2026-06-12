@@ -169,6 +169,10 @@ export interface TunnelState {
   provider:           TunnelProviderId;
   ngrokAuthtokenSet:  boolean;       // true when VS Code SecretStorage has a token for 'airtable-formula.ngrok.authtoken'
   autoDisabledReason: TunnelAutoDisabledReason | null;
+  /** Hostname from an existing cloudflared-named.yml, or null when no named
+   *  tunnel has been configured yet. Lets the UI show what "reuse the
+   *  already-configured tunnel" actually points at. */
+  namedTunnelHostname?: string | null;
 }
 
 export interface DaemonStatusInfo {
