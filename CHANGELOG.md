@@ -6,6 +6,55 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Daemon Stop reliability + dashboard UI/UX hardening (2026-06-12)
+
+**Daemon Stop button** — root-caused "stop sometimes does nothing":
+
+- [`daemon-manager.ts`](packages/extension/src/mcp/daemon-manager.ts) `stopDaemon()`
+  now mirrors the CLI launcher semantics: verifies the shutdown HTTP response
+  (a 401 from a stale lockfile token no longer counts as success), waits for
+  the daemon to release `daemon.lock` before reporting done, escalates
+  SIGTERM → SIGKILL when the daemon answers but won't exit, and reclaims
+  stale lockfiles so a crashed daemon can't leave the dashboard stuck on
+  "running". When the port is unreachable, the recorded pid is *not* killed
+  (PID-reuse safety) — the stale lock is just removed.
+- **No more auto-resurrect:** with `useDaemon` + `loginMode: auto`, VS Code
+  re-querying MCP definitions used to respawn the daemon seconds after the
+  user stopped it (via `getCredentials → ensureDaemon`). A user-stopped latch
+  now blocks implicit respawns; explicit Start/Restart clears it.
+- Stop failures are surfaced in the UI / `stopDaemon` command instead of
+  silently reporting success. 6 new DaemonManager tests.
+
+**Dashboard webview** — 26 confirmed findings from a 44-agent UI/UX audit
+(action feedback, state sync, theming, accessibility, content):
+
+- **Action feedback:** every async store action now tracks pending state
+  (`refresh`, `selectCustomBrowser`, `setBrowserChoice`, `copyAirtablePat`,
+  `openStoragePath` were missing it), and pending actions **auto-expire**
+  (60s default; longer for login/downloads) so a lost `action:result` can
+  no longer leave buttons disabled forever ([`store.ts`](packages/webview/src/store.ts)).
+- **State sync:** `pushState()` is serialized + coalesced (concurrent file-watch
+  bursts could previously post a stale `state:update` last); the dashboard
+  re-syncs on `onDidChangeVisibility` when the sidebar is re-opened;
+  `daemon:start` reports failure when the daemon manager is unavailable; the
+  toolProfile fallback now includes all 13 categories (was missing
+  `recordRead`/`recordWrite`); dropped webview messages are logged
+  ([`DashboardProvider.ts`](packages/extension/src/webview/DashboardProvider.ts), [`vscode.ts`](packages/webview/src/lib/vscode.ts)).
+- **Theming:** fixed undefined `--accent-green` token (Overview update badge);
+  LSP badges and error/warning banners now use theme tokens instead of
+  hard-coded rgba; new `--border-error/--border-warn/--bg-lsp-*` tokens.
+- **Accessibility:** global `:focus-visible` outlines for buttons/inputs/selects
+  (credentials form and icon-only buttons had none); `--fg-muted` brightened
+  from 2.86:1 to ~4.8:1 contrast (WCAG AA); login-mode toggle gets
+  `role="switch"` + aria-label; daemon buttons get `aria-busy`; disabled
+  buttons get `cursor: not-allowed`.
+- **Content:** raw exception text (auth errors, browser download failures) is
+  now mapped to human-readable guidance with the raw detail in a tooltip
+  ([`friendlyError.ts`](packages/webview/src/lib/friendlyError.ts)); TOTP and
+  bearer-token jargon explained inline; tunnel URL row in Daemon Status is
+  responsive with a Copy button (was fixed 60% truncation, no copy); IDE
+  detection shows an animated skeleton instead of static "Loading...".
+
 ### Security hardening — critical-tier fixes from full-codebase audit (2026-06-12)
 
 A multi-agent security audit (71 findings raised, 49 confirmed under adversarial
