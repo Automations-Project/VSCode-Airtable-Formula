@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -286,11 +287,21 @@ export async function startDaemonServer(options = {}) {
     }
   };
 
+  // Constant-time comparison — `===` short-circuits on the first differing
+  // byte, which lets a tunnel-side attacker time their way through the token.
+  const tokensMatch = (provided, expected) => {
+    if (typeof provided !== 'string' || typeof expected !== 'string') return false;
+    const a = Buffer.from(provided, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  };
+
   const requireBearer = (req, res, next) => {
     const header = req.headers?.authorization ?? '';
     const match = header.match(/^Bearer\s+(.+)$/i);
     const provided = match ? match[1] : null;
-    if (provided !== currentToken.bearerToken) {
+    if (!tokensMatch(provided, currentToken.bearerToken)) {
       track401Burst(req);  // 401-burst tripwire (D-06)
       const wantHtml = (req.headers?.accept ?? '').includes('text/html');
       if (wantHtml) {

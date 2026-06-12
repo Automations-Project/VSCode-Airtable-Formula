@@ -261,7 +261,15 @@ export async function runCli(args) {
     if (subcmd === 'status') {
       const { getDaemonStatus } = await import('./daemon/launcher.js');
       const status = await getDaemonStatus({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
-      process.stdout.write(JSON.stringify(status, null, 2) + '\n');
+      // Redact the bearer token — `daemon status` output lands in shell
+      // history, terminal scrollback, and pasted bug reports. The token is
+      // readable from ~/.airtable-user-mcp/daemon.token when actually needed.
+      const redacted = JSON.stringify(
+        status,
+        (key, value) => (key === 'bearerToken' && typeof value === 'string' ? '[redacted]' : value),
+        2,
+      );
+      process.stdout.write(redacted + '\n');
       return true;
     }
     process.stderr.write('Unknown daemon subcommand: ' + (subcmd ?? '(none)') + '\n');
