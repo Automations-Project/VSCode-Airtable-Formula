@@ -2463,6 +2463,52 @@ export class AirtableClient {
     };
   }
 
+  /**
+   * Create records (one row per item). The client generates each rowId locally
+   * (Airtable accepts a client-supplied rec ID in the URL), so the returned
+   * rowId is final — no response parsing needed for the ID map.
+   * Per-row isolation: a failing row is collected in `failed`, not thrown.
+   *
+   * @param {string} appId
+   * @param {string} tableId
+   * @param {{cellValuesByColumnId: object, sourceKey?: string}[]} rows
+   * @param {{viewId?: string}} [opts]
+   * @returns {Promise<{created: {rowId:string, sourceKey:any}[], failed: {sourceKey:any, error:string}[]}>}
+   */
+  async createRecords(appId, tableId, rows, { viewId } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new Error('rows must be a non-empty array');
+    }
+    let activeViewId = viewId;
+    if (!activeViewId) {
+      const table = await this.resolveTable(appId, tableId);
+      activeViewId = (table.views || [])[0]?.id || null;
+    }
+
+    const created = [];
+    const failed = [];
+    for (const row of rows) {
+      const rowId = 'rec' + this._genRandomId();
+      const payload = { tableId, cellValuesByColumnId: row.cellValuesByColumnId || {} };
+      if (activeViewId) payload.activeViewId = activeViewId;
+      const url = `https://airtable.com/v0.3/row/${rowId}/create`;
+      try {
+        const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          failed.push({ sourceKey: row.sourceKey ?? null, error: `createRecord failed (${res.status}): ${body}` });
+          continue;
+        }
+        created.push({ rowId, sourceKey: row.sourceKey ?? null });
+      } catch (err) {
+        failed.push({ sourceKey: row.sourceKey ?? null, error: String(err?.message || err) });
+      }
+    }
+    return { created, failed };
+  }
+
   _genRequestId() {
     return 'req' + this._genRandomId();
   }
