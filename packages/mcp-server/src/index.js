@@ -1529,7 +1529,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
       properties: {
         appId: { type: 'string', description: 'The Airtable base/application ID' },
         tableId: { type: 'string', description: 'The table ID to create records in' },
-        viewId: { type: 'string', description: 'Optional view ID; defaults to the table\'s first view' },
+        viewId: { type: 'string', description: 'Optional view ID used to position new rows within the view\'s row order; defaults to the table\'s first view.' },
         records: {
           type: 'array',
           description: 'Records to create, each { cellValuesByColumnId: { "<fieldId>": <value> }, sourceKey?: <any> }',
@@ -1543,7 +1543,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   {
     name: 'update_records',
     description: 'Update primitive / single-select cells of existing records via cellValuesByColumnId. (Array cells — multi-select, links, attachments — are not set here.) Per-row isolation.',
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
@@ -1561,7 +1561,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   },
   {
     name: 'delete_records',
-    description: 'Delete one or more records from a table in a single batch call. Returns the count deleted.',
+    description: 'Delete one or more records from a table in a single batch call. The returned deleted count equals rowIds.length (optimistic) — already-deleted rows are silently skipped by the server.',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1569,7 +1569,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         appId: { type: 'string', description: 'The Airtable base/application ID' },
         tableId: { type: 'string', description: 'The table ID containing the records' },
         rowIds: { type: 'array', description: 'Record IDs to delete (e.g. ["recXXX"])', items: { type: 'string' } },
-        viewId: { type: 'string', description: 'Optional view ID; defaults to the table\'s first view' },
+        viewId: { type: 'string', description: 'Optional view ID passed as UI context; does NOT filter which records are deleted — rowIds is the sole selector.' },
         debug: debugProp,
       },
       required: ['appId', 'tableId', 'rowIds'],

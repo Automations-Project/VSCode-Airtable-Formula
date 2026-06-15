@@ -119,6 +119,9 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('delete_field'));
       assert.ok(!enabled.has('delete_view'));
       assert.ok(!enabled.has('create_extension'));
+      assert.ok(enabled.has('create_records'));
+      assert.ok(enabled.has('update_records'));
+      assert.ok(enabled.has('delete_records'));
     });
 
     it('full enables all 69 tools', async () => {
