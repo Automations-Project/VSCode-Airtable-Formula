@@ -108,6 +108,9 @@ export const TOOL_CATEGORIES = {
 
   // Record Write (duplicate via pasteCells)
   duplicate_records:      'record-write',
+  create_records:         'record-write',
+  update_records:         'record-write',
+  delete_records:         'record-write',
 };
 
 /** Human-readable labels for categories */

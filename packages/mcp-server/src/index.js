@@ -1520,6 +1520,61 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
       required: ['appId', 'tableId', 'viewId', 'sourceRowIds'],
     },
   },
+  {
+    name: 'create_records',
+    description: 'Create one or more records in a table. Each item supplies cellValuesByColumnId (computed fields are read-only and must be omitted). Returns created record IDs. Per-row isolation: a failing row is reported, not fatal.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID to create records in' },
+        viewId: { type: 'string', description: 'Optional view ID; defaults to the table\'s first view' },
+        records: {
+          type: 'array',
+          description: 'Records to create, each { cellValuesByColumnId: { "<fieldId>": <value> }, sourceKey?: <any> }',
+          items: { type: 'object' },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'records'],
+    },
+  },
+  {
+    name: 'update_records',
+    description: 'Update primitive / single-select cells of existing records via cellValuesByColumnId. (Array cells — multi-select, links, attachments — are not set here.) Per-row isolation.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID containing the records' },
+        updates: {
+          type: 'array',
+          description: 'Updates, each { rowId: "recXXX", cellValuesByColumnId: { "<fieldId>": <value> } }',
+          items: { type: 'object' },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'updates'],
+    },
+  },
+  {
+    name: 'delete_records',
+    description: 'Delete one or more records from a table in a single batch call. Returns the count deleted.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID containing the records' },
+        rowIds: { type: 'array', description: 'Record IDs to delete (e.g. ["recXXX"])', items: { type: 'string' } },
+        viewId: { type: 'string', description: 'Optional view ID; defaults to the table\'s first view' },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'rowIds'],
+    },
+  },
 ];
 
 // ─── Meta-Tool: manage_tools ─────────────────────────────────
@@ -2296,6 +2351,21 @@ const handlers = {
 
   async duplicate_records({ appId, tableId, viewId, sourceRowIds, debug }) {
     const result = await client.duplicateRecords(appId, tableId, viewId, sourceRowIds);
+    return ok(result, result, debug);
+  },
+
+  async create_records({ appId, tableId, viewId, records, debug }) {
+    const result = await client.createRecords(appId, tableId, records, { viewId });
+    return ok(result, result, debug);
+  },
+
+  async update_records({ appId, tableId, updates, debug }) {
+    const result = await client.updateRecords(appId, tableId, updates);
+    return ok(result, result, debug);
+  },
+
+  async delete_records({ appId, tableId, rowIds, viewId, debug }) {
+    const result = await client.deleteRecords(appId, tableId, rowIds, { viewId });
     return ok(result, result, debug);
   },
 
