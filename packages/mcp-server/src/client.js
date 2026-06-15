@@ -2529,24 +2529,28 @@ export class AirtableClient {
     const updated = [];
     const failed = [];
     for (const u of updates) {
-      assertAirtableId(u.rowId, 'rowId');
-      const url = `https://airtable.com/v0.3/row/${u.rowId}/updatePrimitiveCell`;
-      let rowFailed = null;
-      for (const [columnId, cellValue] of Object.entries(u.cellValuesByColumnId || {})) {
-        try {
+      try {
+        assertAirtableId(u.rowId, 'rowId');
+        const entries = Object.entries(u.cellValuesByColumnId || {});
+        if (entries.length === 0) {
+          failed.push({ rowId: u.rowId, error: 'cellValuesByColumnId is empty — nothing to update' });
+          continue;
+        }
+        const url = `https://airtable.com/v0.3/row/${u.rowId}/updatePrimitiveCell`;
+        let rowFailed = null;
+        for (const [columnId, cellValue] of entries) {
           const res = await this.auth.postForm(url, this._mutationParams({ columnId, cellValue }, appId), appId);
           if (!res.ok) {
             const body = await res.text().catch(() => '');
             rowFailed = `updatePrimitiveCell ${columnId} failed (${res.status}): ${body}`;
             break;
           }
-        } catch (err) {
-          rowFailed = String(err?.message || err);
-          break;
         }
+        if (rowFailed) failed.push({ rowId: u.rowId, error: rowFailed });
+        else updated.push({ rowId: u.rowId });
+      } catch (err) {
+        failed.push({ rowId: u.rowId ?? '(unknown)', error: String(err?.message || err) });
       }
-      if (rowFailed) failed.push({ rowId: u.rowId, error: rowFailed });
-      else updated.push({ rowId: u.rowId });
     }
     return { updated, failed };
   }
@@ -2559,6 +2563,7 @@ export class AirtableClient {
    * @param {string[]} rowIds
    * @param {{viewId?: string}} [opts]
    * @returns {Promise<{deleted:number, actionId:string|null}>}
+   * @note deleted count is optimistic (rowIds.length); the server may skip already-deleted rows.
    */
   async deleteRecords(appId, tableId, rowIds, { viewId } = {}) {
     assertAirtableId(appId, 'appId');

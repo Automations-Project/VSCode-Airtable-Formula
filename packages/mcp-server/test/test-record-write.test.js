@@ -85,3 +85,25 @@ describe('AirtableClient.deleteRecords', () => {
     assert.deepEqual(JSON.parse(calls[0].params.stringifiedObjectParams).rowIds, ['rec1', 'rec2']);
   });
 });
+
+describe('AirtableClient.updateRecords isolation', () => {
+  it('isolates a failing row and flags empty updates', async () => {
+    const auth = createMockAuth({
+      postForm(url, params) {
+        const p = JSON.parse(params.stringifiedObjectParams);
+        if (p.cellValue === 'BOOM') return { ok: false, status: 422, json: async () => ({}), text: async () => 'bad' };
+        return { ok: true, status: 200, json: async () => ({ data: {} }), text: async () => '{}' };
+      },
+    });
+    const client = new AirtableClient(auth);
+    const result = await client.updateRecords('appT', 'tblT', [
+      { rowId: 'rec1', cellValuesByColumnId: { fldA: 'ok' } },
+      { rowId: 'rec2', cellValuesByColumnId: { fldA: 'BOOM' } },
+      { rowId: 'rec3', cellValuesByColumnId: {} },
+    ]);
+    assert.equal(result.updated.length, 1);
+    assert.equal(result.updated[0].rowId, 'rec1');
+    assert.equal(result.failed.length, 2);
+    assert.deepEqual(result.failed.map(f => f.rowId).sort(), ['rec2', 'rec3']);
+  });
+});
