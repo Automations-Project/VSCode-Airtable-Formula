@@ -2481,6 +2481,7 @@ export class AirtableClient {
     if (!Array.isArray(rows) || rows.length === 0) {
       throw new Error('rows must be a non-empty array');
     }
+    if (viewId) assertAirtableId(viewId, 'viewId');
     let activeViewId = viewId;
     if (!activeViewId) {
       const table = await this.resolveTable(appId, tableId);
@@ -2498,7 +2499,7 @@ export class AirtableClient {
         const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
         if (!res.ok) {
           const body = await res.text().catch(() => '');
-          failed.push({ sourceKey: row.sourceKey ?? null, error: `createRecord failed (${res.status}): ${body}` });
+          failed.push({ sourceKey: row.sourceKey ?? null, error: `createRecords row failed (${res.status}): ${body}` });
           continue;
         }
         created.push({ rowId, sourceKey: row.sourceKey ?? null });
