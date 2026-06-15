@@ -107,8 +107,11 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   rename_extension:          'extension',
   duplicate_extension:       'extension',
   remove_extension:          'extension',
-  // Record write (duplicate via pasteCells)
+  // Record write (duplicate via pasteCells + direct CRUD)
   duplicate_records:         'record-write',
+  create_records:            'record-write',
+  update_records:            'record-write',
+  delete_records:            'record-write',
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {

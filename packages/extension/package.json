@@ -491,8 +491,8 @@
           ],
           "enumDescriptions": [
             "Schema inspection, formula validation, and record reading only (12 tools)",
-            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (51 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (66 tools)",
+            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
+            "All tools enabled including destructive ops, form metadata, and extensions (69 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -669,7 +669,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 66 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 69 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate), and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
