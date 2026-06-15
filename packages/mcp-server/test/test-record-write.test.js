@@ -55,3 +55,33 @@ describe('AirtableClient.createRecords', () => {
     assert.match(result.failed[0].error, /422/);
   });
 });
+
+describe('AirtableClient.updateRecords', () => {
+  it('sets each primitive cell via updatePrimitiveCell', async () => {
+    const auth = createMockAuth({});
+    const client = new AirtableClient(auth);
+    const result = await client.updateRecords('appT', 'tblT', [
+      { rowId: 'rec1', cellValuesByColumnId: { fldA: 'x', fldB: 'selZ' } },
+    ]);
+    assert.equal(result.updated.length, 1);
+    assert.equal(result.failed.length, 0);
+    const cellCalls = auth.calls.filter(c => /\/row\/rec1\/updatePrimitiveCell$/.test(c.url));
+    assert.equal(cellCalls.length, 2);
+    const cols = cellCalls.map(c => JSON.parse(c.params.stringifiedObjectParams).columnId).sort();
+    assert.deepEqual(cols, ['fldA', 'fldB']);
+  });
+});
+
+describe('AirtableClient.deleteRecords', () => {
+  it('deletes rows in one destroyMultipleRows call', async () => {
+    const auth = createMockAuth({
+      postForm: () => ({ ok: true, status: 200, json: async () => ({ data: { actionId: 'actX' } }), text: async () => '{}' }),
+    });
+    const client = new AirtableClient(auth);
+    const result = await client.deleteRecords('appT', 'tblT', ['rec1', 'rec2'], { viewId: 'viwT' });
+    assert.equal(result.deleted, 2);
+    const calls = auth.calls.filter(c => /\/table\/tblT\/destroyMultipleRows$/.test(c.url));
+    assert.equal(calls.length, 1);
+    assert.deepEqual(JSON.parse(calls[0].params.stringifiedObjectParams).rowIds, ['rec1', 'rec2']);
+  });
+});

@@ -2510,6 +2510,80 @@ export class AirtableClient {
     return { created, failed };
   }
 
+  /**
+   * Update records' PRIMITIVE / single-select cells via updatePrimitiveCell.
+   * Array cells (multi-select / link / attachment) are NOT handled here — the
+   * engine sets those via pasteCells (Milestone 3) where column configs exist.
+   *
+   * @param {string} appId
+   * @param {string} tableId   (kept for symmetry / future routing)
+   * @param {{rowId:string, cellValuesByColumnId:object}[]} updates
+   * @returns {Promise<{updated:{rowId:string}[], failed:{rowId:string, error:string}[]}>}
+   */
+  async updateRecords(appId, tableId, updates) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new Error('updates must be a non-empty array');
+    }
+    const updated = [];
+    const failed = [];
+    for (const u of updates) {
+      assertAirtableId(u.rowId, 'rowId');
+      const url = `https://airtable.com/v0.3/row/${u.rowId}/updatePrimitiveCell`;
+      let rowFailed = null;
+      for (const [columnId, cellValue] of Object.entries(u.cellValuesByColumnId || {})) {
+        try {
+          const res = await this.auth.postForm(url, this._mutationParams({ columnId, cellValue }, appId), appId);
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            rowFailed = `updatePrimitiveCell ${columnId} failed (${res.status}): ${body}`;
+            break;
+          }
+        } catch (err) {
+          rowFailed = String(err?.message || err);
+          break;
+        }
+      }
+      if (rowFailed) failed.push({ rowId: u.rowId, error: rowFailed });
+      else updated.push({ rowId: u.rowId });
+    }
+    return { updated, failed };
+  }
+
+  /**
+   * Delete records in one native batch call (destroyMultipleRows).
+   *
+   * @param {string} appId
+   * @param {string} tableId
+   * @param {string[]} rowIds
+   * @param {{viewId?: string}} [opts]
+   * @returns {Promise<{deleted:number, actionId:string|null}>}
+   */
+  async deleteRecords(appId, tableId, rowIds, { viewId } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!Array.isArray(rowIds) || rowIds.length === 0) {
+      throw new Error('rowIds must be a non-empty array');
+    }
+    if (viewId) assertAirtableId(viewId, 'viewId');
+    let activeViewId = viewId;
+    if (!activeViewId) {
+      const table = await this.resolveTable(appId, tableId);
+      activeViewId = (table.views || [])[0]?.id || null;
+    }
+    const payload = { rowIds };
+    if (activeViewId) payload.activeViewId = activeViewId;
+    const url = `https://airtable.com/v0.3/table/${tableId}/destroyMultipleRows`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`destroyMultipleRows failed (${res.status}): ${body}`);
+    }
+    const data = (await res.json().catch(() => ({})))?.data || {};
+    return { deleted: rowIds.length, actionId: data.actionId || null };
+  }
+
   _genRequestId() {
     return 'req' + this._genRandomId();
   }
