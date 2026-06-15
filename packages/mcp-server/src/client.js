@@ -2592,6 +2592,9 @@ export class AirtableClient {
   /** Raw S3 presigned PUT of file bytes. Returns { ok, etag, error? }. Overridable in tests. */
   async _putBytes(presignedUrl, bytes, checksumB64) {
     try {
+      // Captured presigned URL signs only `host;x-amz-checksum-sha256` (X-Amz-SignedHeaders),
+      // so we send exactly that one header — adding others (e.g. Content-Type) is unnecessary
+      // and risks a signature mismatch if S3 ever signs them.
       const res = await fetch(presignedUrl, {
         method: 'PUT',
         body: bytes,
@@ -2618,6 +2621,7 @@ export class AirtableClient {
   async uploadAttachment(appId, rowId, columnId, { bytes, filename, contentType }) {
     assertAirtableId(appId, 'appId');
     assertAirtableId(rowId, 'rowId');
+    assertAirtableId(columnId, 'columnId');
     const checksumB64 = createHash('sha256').update(bytes).digest('base64');
     const post = async (verb, payload) => {
       const url = `https://airtable.com/v0.3/application/${appId}/${verb}`;
@@ -2635,6 +2639,7 @@ export class AirtableClient {
       const getUrl = await post('getUrlMultipartUpload', {
         uploadPartCandidate: { uploadId: create.uploadId, objectKey: create.objectKey, partNumber: 1, checksumSHA256: checksumB64, directUploadUserContentPurpose: 'directUploadAttachment' },
       });
+      if (!getUrl.presignedUrl) return { ok: false, error: 'getUrlMultipartUpload: no presignedUrl in response' };
       const put = await this._putBytes(getUrl.presignedUrl, bytes, checksumB64);
       if (!put.ok) return { ok: false, error: put.error };
       const complete = await post('completeMultipartUpload', {

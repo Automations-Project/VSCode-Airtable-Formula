@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { AirtableClient } from '../src/client.js';
 
 function mockAuthForUpload() {
@@ -33,6 +34,8 @@ describe('AirtableClient.uploadAttachment', () => {
     assert.ok(result.attachmentId.startsWith('att'));
     assert.equal(putCalls.length, 1);
     assert.equal(putCalls[0].url, 'https://s3.example/put?x=1');
+    const expectedChecksum = createHash('sha256').update(Buffer.from('hello')).digest('base64');
+    assert.equal(putCalls[0].checksum, expectedChecksum);
     const seq = auth.calls.map(c => c.url.split('/').pop());
     assert.deepEqual(seq, ['createMultipartUpload', 'getUrlMultipartUpload', 'completeMultipartUpload', 'updateArrayTypeCellByAddingItem']);
     const completePayload = JSON.parse(auth.calls[2].params.stringifiedObjectParams);
