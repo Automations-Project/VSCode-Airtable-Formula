@@ -1,5 +1,5 @@
 import { SchemaCache } from './cache.js';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 
 /**
  * Generate an Airtable-style filter ID: "flt" + 14 base62 characters.
@@ -2587,6 +2587,75 @@ export class AirtableClient {
     }
     const data = (await res.json().catch(() => ({})))?.data || {};
     return { deleted: rowIds.length, actionId: data.actionId || null };
+  }
+
+  /** Raw S3 presigned PUT of file bytes. Returns { ok, etag, error? }. Overridable in tests. */
+  async _putBytes(presignedUrl, bytes, checksumB64) {
+    try {
+      const res = await fetch(presignedUrl, {
+        method: 'PUT',
+        body: bytes,
+        headers: { 'x-amz-checksum-sha256': checksumB64 },
+      });
+      if (!res.ok) return { ok: false, error: `S3 PUT failed (${res.status})` };
+      return { ok: true, etag: res.headers.get('etag') || '' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
+  /**
+   * Upload a file into an attachment cell via the 5-step multipart flow.
+   * Soft-fails (returns {ok:false,error}) instead of throwing, so one bad
+   * attachment doesn't abort a record sync.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {{bytes: Buffer|Uint8Array, filename: string, contentType: string}} file
+   * @returns {Promise<{ok:boolean, attachmentId?:string, url?:string, error?:string}>}
+   */
+  async uploadAttachment(appId, rowId, columnId, { bytes, filename, contentType }) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(rowId, 'rowId');
+    const checksumB64 = createHash('sha256').update(bytes).digest('base64');
+    const post = async (verb, payload) => {
+      const url = `https://airtable.com/v0.3/application/${appId}/${verb}`;
+      const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`${verb} failed (${res.status}): ${body}`);
+      }
+      return (await res.json().catch(() => ({})))?.data || {};
+    };
+    try {
+      const create = await post('createMultipartUpload', {
+        uploadCandidate: { contentLength: bytes.length, filename, contentType, directUploadUserContentPurpose: 'directUploadAttachment' },
+      });
+      const getUrl = await post('getUrlMultipartUpload', {
+        uploadPartCandidate: { uploadId: create.uploadId, objectKey: create.objectKey, partNumber: 1, checksumSHA256: checksumB64, directUploadUserContentPurpose: 'directUploadAttachment' },
+      });
+      const put = await this._putBytes(getUrl.presignedUrl, bytes, checksumB64);
+      if (!put.ok) return { ok: false, error: put.error };
+      const complete = await post('completeMultipartUpload', {
+        multipartUploadComplete: {
+          uploadId: create.uploadId, objectKey: create.objectKey,
+          parts: [{ etag: put.etag, partNumber: 1, checksumSHA256: checksumB64 }],
+          directUploadUserContentPurpose: 'directUploadAttachment',
+        },
+      });
+      const attachmentId = 'att' + this._genRandomId();
+      const item = { id: attachmentId, ...complete.propsToAddToAttachmentObj, filename, expiringInitialPreviewUrl: complete.signedUrl };
+      const attachUrl = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+      const res = await this.auth.postForm(attachUrl, this._mutationParams({ columnId, item }, appId), appId);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { ok: false, error: `attach failed (${res.status}): ${body}` };
+      }
+      return { ok: true, attachmentId, url: complete.url };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
   }
 
   _genRequestId() {
