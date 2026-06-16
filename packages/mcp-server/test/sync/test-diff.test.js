@@ -158,3 +158,35 @@ describe('diff convergence (apply-aligned typeOptions)', () => {
     assert.equal(plan.actions.filter((a) => a.kind === 'updateField').length, 0);
   });
 });
+
+function vw(id, name, type, config, extra = {}) { return { id, name, type, config: config ?? {}, personalForUserId: extra.personal ?? null }; }
+
+describe('diff view actions', () => {
+  it('createView + applyViewConfig for a source-only view; skip canonical-equal matched view; views after fields', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text')], views: [
+      vw('vS1', 'Grid view', 'grid', { sorts: [{ columnId: 'fS1', ascending: true }] }),
+      vw('vS2', 'New View', 'grid', { frozenColumnCount: 1 }) ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text')], views: [
+      vw('vD1', 'Grid view', 'grid', { sorts: [{ columnId: 'fD1', ascending: true }] }) ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const cv = plan.actions.find((a) => a.kind === 'createView');
+    assert.ok(cv && cv.name === 'New View');
+    // 'Grid view' matched + canonical-equal (sort on 'Name' both sides) → NO applyViewConfig for vS1
+    assert.equal(plan.actions.filter((a) => a.kind === 'applyViewConfig' && a.sourceViewId === 'vS1').length, 0);
+    // view actions come after every field/table action
+    const idxs = plan.actions.map((a, i) => ({ a, i }));
+    const lastField = Math.max(-1, ...idxs.filter(({ a }) => a.kind === 'createTable' || a.kind === 'reconcilePrimary' || a.kind === 'createField' || a.kind === 'updateField').map(({ i }) => i));
+    const firstView = plan.actions.findIndex((a) => a.kind === 'createView' || a.kind === 'applyViewConfig');
+    assert.ok(firstView === -1 || firstView > lastField);
+  });
+
+  it('reports dest-only view as orphan; flags source personal view', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text')], views: [
+      vw('vS1', 'Grid view', 'grid', {}), vw('vSp', 'Mine', 'grid', {}, { personal: 'usr1' }) ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text')], views: [
+      vw('vD1', 'Grid view', 'grid', {}), vw('vDx', 'DestOnly', 'grid', {}) ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.ok(plan.orphans.some((o) => o.kind === 'view' && o.name === 'DestOnly'));
+    assert.ok(plan.warnings.some((w) => w.code === 'VIEW_PERSONAL_SKIPPED'));
+  });
+});

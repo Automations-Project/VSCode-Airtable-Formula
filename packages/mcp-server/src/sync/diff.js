@@ -1,4 +1,4 @@
-import { canonicalizeComputed } from './remap.js';
+import { canonicalizeComputed, canonicalizeViewConfig } from './remap.js';
 
 /**
  * Build a flat map of { fieldId → fieldName } across all tables in a snapshot.
@@ -10,6 +10,23 @@ function fldNameMap(snap) {
   for (const t of snap.tables) for (const f of t.fields) m[f.id] = f.name;
   return m;
 }
+
+/**
+ * Build a flat map of { choiceId → choiceName } across all select-like fields in a snapshot.
+ * @param {{ tables: Array<{fields: Array<{typeOptions: object|null}>}> }} snap
+ * @returns {Record<string, string>}
+ */
+function selNameMap(snap) {
+  const m = {};
+  for (const t of snap.tables) for (const f of t.fields) {
+    const ch = f.typeOptions && f.typeOptions.choices;
+    if (ch) for (const c of Object.values(ch)) m[c.id] = c.name;
+  }
+  return m;
+}
+
+/** Return only collaborative (non-personal) views from a table. */
+function collabViews(table) { return (table.views || []).filter((v) => !v.personalForUserId); }
 
 /**
  * Build a regex that matches any field ID key in the given map, wrapped in
@@ -345,6 +362,36 @@ export function computePlan(srcSnap, destSnap, idmap) {
         orphans.push({ kind: 'field', destId: df.id, name: df.name, tableName: dt.name });
       }
     }
+  }
+
+  // ── View diff (collaborative only; appended AFTER all field/table actions) ──
+  const srcSelNames = selNameMap(srcSnap);
+  const destSelNames = selNameMap(destSnap);
+  const viewActions = [];
+  for (const st of srcSnap.tables) {
+    const destTableId = idmap.tables[st.id];
+    const destTable = destTableId ? destTablesById.get(destTableId) : null;
+    const destViewsByName = destTable ? new Map(collabViews(destTable).map((v) => [v.name, v])) : new Map();
+    for (const sv of (st.views || [])) {
+      if (sv.personalForUserId) { warnings.push({ code: 'VIEW_PERSONAL_SKIPPED', message: `Personal view "${sv.name}" in "${st.name}" skipped` }); continue; }
+      const dv = destViewsByName.get(sv.name);
+      if (!dv) {
+        viewActions.push({ kind: 'createView', sourceTableId: st.id, sourceViewId: sv.id, name: sv.name, type: sv.type });
+        viewActions.push({ kind: 'applyViewConfig', sourceTableId: st.id, sourceViewId: sv.id, type: sv.type, config: sv.config || {} });
+      } else if (canonicalizeViewConfig(sv.config || {}, srcNames, srcSelNames) !== canonicalizeViewConfig(dv.config || {}, destNames, destSelNames)) {
+        viewActions.push({ kind: 'applyViewConfig', sourceTableId: st.id, sourceViewId: sv.id, type: sv.type, config: sv.config || {} });
+      }
+    }
+  }
+  actions.push(...viewActions);
+
+  // View orphans: dest-only collaborative views in a matched table.
+  for (const dt of destSnap.tables) {
+    const srcTableId = srcTableByDestId.get(dt.id);
+    if (!srcTableId) continue; // whole table is already a table orphan
+    const srcTable = srcTablesById.get(srcTableId);
+    const srcViewNames = new Set(collabViews(srcTable).map((v) => v.name));
+    for (const dv of collabViews(dt)) if (!srcViewNames.has(dv.name)) orphans.push({ kind: 'view', destId: dv.id, name: dv.name, tableName: dt.name });
   }
 
   return { sourceBaseId: srcSnap.baseId, destBaseId: destSnap.baseId, idmap, actions, orphans, warnings };
