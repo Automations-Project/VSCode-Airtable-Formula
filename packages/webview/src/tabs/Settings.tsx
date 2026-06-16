@@ -612,6 +612,7 @@ export function Settings() {
               <SettingToggle label="Extension Management" desc="Create / install / duplicate / remove extensions (7 tools)"                   value={settings.mcp.toolProfile.categories.extension}              settingKey="mcp.categories.extension" />
               <SettingToggle label="Record Write"         desc="create_records, update_records, duplicate_records — bulk record create / update / duplication (3 tools)" value={settings.mcp.toolProfile.categories.recordWrite}            settingKey="mcp.categories.recordWrite" />
               <SettingToggle label="Record Destructive"   desc="delete_records — batch record deletion (1 tool)"                              value={settings.mcp.toolProfile.categories.recordDestructive}      settingKey="mcp.categories.recordDestructive" />
+              <SettingToggle label="Sync"                 desc="sync_base — base-to-base schema plan (read-only plan mode) (1 tool)"          value={settings.mcp.toolProfile.categories.sync}                   settingKey="mcp.categories.sync" />
             </div>
           )}
 

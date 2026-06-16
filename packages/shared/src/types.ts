@@ -107,6 +107,7 @@ export interface ToolCategories {
   formWrite:               boolean;
   extension:               boolean;
   recordWrite:             boolean;
+  sync:                    boolean;
 }
 
 export interface ToolProfileSnapshot {
