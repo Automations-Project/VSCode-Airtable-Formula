@@ -185,3 +185,43 @@ describe('apply: createField (link foreignKey) reciprocal-once', () => {
     assert.ok(res.idmap.fields.fldBlink.destFld);
   });
 });
+
+describe('apply: updateField', () => {
+  async function destWith(fieldType, typeOptions) {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const { columnId } = await client.createField('appD', tableId, { name: 'F', type: fieldType, typeOptions });
+    return { client, columnId, destSnapshot: await snapshotBase(client, 'appD') };
+  }
+  function planUpdate(destFld, changes) {
+    return { planId: 'plnU', sourceBaseId: 'appS', destBaseId: 'appD', idmap: { tables: {}, fields: {} },
+      actions: [{ kind: 'updateField', sourceFieldId: 'fS', destFld, changes }], orphans: [], warnings: [] };
+  }
+  const run = (client, plan, destSnapshot) => applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: { tables: {}, fields: {} }, journal: newJournal(plan.planId, 'ts'), persist: () => {} });
+
+  it('applies a description change', async () => {
+    const { client, columnId, destSnapshot } = await destWith('text', null);
+    const res = await run(client, planUpdate(columnId, { description: 'new' }), destSnapshot);
+    assert.equal(res.updated, 1);
+    assert.equal(client._field(columnId).description, 'new');
+  });
+
+  it('skips + reports a type change (RETYPE_DEFERRED), making no client mutation', async () => {
+    const { client, columnId, destSnapshot } = await destWith('text', null);
+    const before = client.calls.length;
+    const res = await run(client, planUpdate(columnId, { type: 'number', typeOptions: { precision: 0 } }), destSnapshot);
+    assert.equal(res.updated, 0);
+    assert.ok(res.warnings.some((w) => w.code === 'RETYPE_DEFERRED'));
+    assert.equal(client.calls.length, before); // no updateFieldConfig issued
+  });
+
+  it('merges select choices (keeps dest-only, adds source-only) without dropping any', async () => {
+    const destChoices = { selD1: { id: 'selD1', name: 'Open' }, selD2: { id: 'selD2', name: 'DestOnly' } };
+    const { client, columnId, destSnapshot } = await destWith('select', { choices: destChoices });
+    const srcChoices = { selS1: { id: 'selS1', name: 'Open' }, selS3: { id: 'selS3', name: 'Closed' } };
+    const res = await run(client, planUpdate(columnId, { typeOptions: { choices: srcChoices } }), destSnapshot);
+    assert.equal(res.updated, 1);
+    const names = Object.values(client._field(columnId).typeOptions.choices).map((c) => c.name).sort();
+    assert.deepEqual(names, ['Closed', 'DestOnly', 'Open']);
+  });
+});

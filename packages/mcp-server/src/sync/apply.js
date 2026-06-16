@@ -72,6 +72,28 @@ function writableLinkOptions(remappedTypeOptions) {
   return out; // drop symmetricColumnId/unreversed (auto-managed by Airtable)
 }
 
+function findDestField(index, destFieldId) {
+  for (const entry of index.tablesById.values()) {
+    for (const f of entry.fieldsByName.values()) if (f.id === destFieldId) return f;
+  }
+  return null;
+}
+function findDestFieldType(index, destFieldId) {
+  const f = findDestField(index, destFieldId);
+  return f ? f.type : undefined;
+}
+// Merge source choices into dest choices by NAME (never drop a dest choice). Dest choices
+// keep their ids; new source choices are added without ids (Airtable assigns).
+function mergeChoices(destField, srcTypeOptions) {
+  if (!srcTypeOptions || !srcTypeOptions.choices) return srcTypeOptions;
+  const destChoices = (destField && destField.typeOptions && destField.typeOptions.choices) || {};
+  const byName = new Map(Object.values(destChoices).map((c) => [c.name, c]));
+  for (const c of Object.values(srcTypeOptions.choices)) if (!byName.has(c.name)) byName.set(c.name, { name: c.name, color: c.color });
+  const merged = {};
+  for (const c of byName.values()) { const id = c.id || c.name; merged[id] = c; }
+  return { ...srcTypeOptions, choices: merged };
+}
+
 export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist }) {
   const index = buildIndex(destSnapshot);
   const state = { createdLinks: new Map(), adoptedReverse: new Set() };
@@ -177,6 +199,25 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
       if (LINK_TYPES.has(a.type)) rememberLink(state, columnId, destTableId);
       result.created++;
+      return;
+    }
+
+    case 'updateField': {
+      const changes = a.changes || {};
+      if (changes.type !== undefined) {
+        result.warnings.push({ code: 'RETYPE_DEFERRED', message: `Field ${a.destFld}: type change to "${changes.type}" deferred (M4)` });
+        return; // never retype an existing field in M2b
+      }
+      let mutated = false;
+      if (changes.name !== undefined) { await client.renameField(destAppId, a.destFld, changes.name); mutated = true; }
+      if (changes.typeOptions !== undefined) {
+        const remapped = remapRefs(changes.typeOptions, idmap);
+        const merged = mergeChoices(findDestField(index, a.destFld), remapped);
+        await client.updateFieldConfig(destAppId, a.destFld, { type: findDestFieldType(index, a.destFld), typeOptions: merged });
+        mutated = true;
+      }
+      if (changes.description !== undefined) { await client.updateFieldDescription(destAppId, a.destFld, changes.description); mutated = true; }
+      if (mutated) result.updated++; else result.skipped++;
       return;
     }
 
