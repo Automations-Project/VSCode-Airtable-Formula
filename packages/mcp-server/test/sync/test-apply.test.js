@@ -73,3 +73,28 @@ describe('apply: createTable + scaffolding-delete + reconcilePrimary', () => {
     assert.equal((await client.getApplicationData('appD')).data.tableSchemas.length, 1);
   });
 });
+
+describe('apply: createField (scalar)', () => {
+  it('creates a scalar field and maps it; skips one that already exists by name', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'Offers');
+    await client.createField('appD', tableId, { name: 'Existing', type: 'text' });
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnF', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fNew', name: 'Score', type: 'number', typeOptions: { precision: 0 }, description: 'pts', computed: false, dependsOn: [], dependsOnTables: [] },
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fExist', name: 'Existing', type: 'text', typeOptions: null, description: null, computed: false, dependsOn: [], dependsOnTables: [] },
+      ],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnF', 'ts'), persist: () => {} });
+    assert.equal(res.created, 1);   // Score
+    assert.equal(res.skipped, 1);   // Existing adopted
+    assert.equal(res.idmap.fields.fNew.destFld.startsWith('fld'), true);
+    assert.ok(res.idmap.fields.fExist.destFld);
+    const score = (await client.getApplicationData('appD')).data.tableSchemas[0].columns.find((c) => c.name === 'Score');
+    assert.equal(score.description, 'pts');
+  });
+});

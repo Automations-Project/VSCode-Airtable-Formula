@@ -110,6 +110,23 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       return;
     }
 
+    case 'createField': {
+      const destTableId = idmap.tables[a.sourceTableId];
+      const entry = index.tablesById.get(destTableId);
+      const existing = entry && entry.fieldsByName.get(a.name);
+      if (existing) {
+        idmap.fields[a.sourceFieldId] = { destFld: existing.id, choices: {} };
+        result.skipped++;
+        return;
+      }
+      const typeOptions = remapRefs(a.typeOptions, idmap);
+      const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
+      idmap.fields[a.sourceFieldId] = { destFld: columnId, choices: {} };
+      if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
+      result.created++;
+      return;
+    }
+
     default:
       throw new Error(`unhandled action kind: ${a.kind}`);
   }
