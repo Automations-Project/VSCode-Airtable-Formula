@@ -110,7 +110,9 @@ export const TOOL_CATEGORIES = {
   duplicate_records:      'record-write',
   create_records:         'record-write',
   update_records:         'record-write',
-  delete_records:         'record-write',
+
+  // Record Destructive (batch record deletion)
+  delete_records:         'record-destructive',
 };
 
 /** Human-readable labels for categories */
@@ -128,6 +130,7 @@ export const CATEGORY_LABELS = {
   'form-write':               'Form Metadata',
   'extension':                'Extension Management',
   'record-write':             'Record Write',
+  'record-destructive':       'Record Destructive',
 };
 
 // ─── Built-in Profiles ───────────────────────────────────────
@@ -144,7 +147,7 @@ export const BUILTIN_PROFILES = {
   full: {
     description: 'All tools enabled including destructive ops, form metadata, and extensions',
     categories: [
-      'read', 'record-read', 'record-write',
+      'read', 'record-read', 'record-write', 'record-destructive',
       'table-write', 'table-destructive',
       'field-write', 'field-destructive',
       'view-write', 'view-destructive',

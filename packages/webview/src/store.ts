@@ -62,11 +62,11 @@ const defaultSettings: SettingsSnapshot = {
     notifyOnUpdates:        true,
     toolProfile: {
       profile:      'safe-write',
-      enabledCount: 54,
+      enabledCount: 53,
       totalCount:   69,
       categories: {
         read: true, recordRead: true, tableWrite: true, tableDestructive: true,
-        fieldWrite: true, fieldDestructive: true,
+        fieldWrite: true, fieldDestructive: true, recordDestructive: true,
         viewWrite: true, viewDestructive: true,
         viewSection: true, viewSectionDestructive: true,
         formWrite: true, extension: true, recordWrite: true,

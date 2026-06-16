@@ -28,7 +28,7 @@ type ExtraCategoryKey =
   | 'view-write' | 'view-destructive'
   | 'view-section' | 'view-section-destructive'
   | 'form-write'
-  | 'record-read' | 'record-write';
+  | 'record-read' | 'record-write' | 'record-destructive';
 export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategoryKey> = {
   // Read-only / inspection
   get_base_schema:           'read',
@@ -111,7 +111,8 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   duplicate_records:         'record-write',
   create_records:            'record-write',
   update_records:            'record-write',
-  delete_records:            'record-write',
+  // Record destructive (batch record deletion)
+  delete_records:            'record-destructive',
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -128,6 +129,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'form-write':               'Form Metadata',
   'extension':                'Extension Management',
   'record-write':             'Record Write',
+  'record-destructive':       'Record Destructive',
 };
 
 interface ProfileDef {
@@ -142,7 +144,7 @@ export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', Profi
                  categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'] },
   full:        { description: 'All tools enabled including destructive ops, form metadata, and extensions',
                  categories: [
-                   'read', 'record-read', 'record-write',
+                   'read', 'record-read', 'record-write', 'record-destructive',
                    'table-write', 'table-destructive',
                    'field-write', 'field-destructive',
                    'view-write', 'view-destructive',
@@ -159,6 +161,7 @@ const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
   tableDestructive:        'table-destructive',
   fieldWrite:              'field-write',
   fieldDestructive:        'field-destructive',
+  recordDestructive:       'record-destructive',
   viewWrite:               'view-write',
   viewDestructive:         'view-destructive',
   viewSection:             'view-section',
@@ -261,6 +264,7 @@ export class ToolProfileManager implements vscode.Disposable {
       tableDestructive:       cfg.get('mcp.categories.tableDestructive',       true),
       fieldWrite:             cfg.get('mcp.categories.fieldWrite',             true),
       fieldDestructive:       cfg.get('mcp.categories.fieldDestructive',       true),
+      recordDestructive:      cfg.get('mcp.categories.recordDestructive',      true),
       viewWrite:              cfg.get('mcp.categories.viewWrite',              true),
       viewDestructive:        cfg.get('mcp.categories.viewDestructive',        true),
       viewSection:            cfg.get('mcp.categories.viewSection',            true),
@@ -322,7 +326,7 @@ export class ToolProfileManager implements vscode.Disposable {
       'view-section', 'view-section-destructive',
       'form-write',
       'extension',
-      'record-write',
+      'record-write', 'record-destructive',
     ];
     for (const cat of categoryOrder) {
       const label = CATEGORY_LABELS[cat] ?? cat;

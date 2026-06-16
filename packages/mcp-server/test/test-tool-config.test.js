@@ -58,6 +58,7 @@ describe('BUILTIN_PROFILES', () => {
   it('safe-write excludes destructive categories', () => {
     const cats = BUILTIN_PROFILES['safe-write'].categories;
     assert.ok(!cats.includes('field-destructive'));
+    assert.ok(!cats.includes('record-destructive'));
     assert.ok(!cats.includes('view-destructive'));
     assert.ok(!cats.includes('table-destructive'));
     assert.ok(!cats.includes('extension'));
@@ -121,7 +122,7 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('create_extension'));
       assert.ok(enabled.has('create_records'));
       assert.ok(enabled.has('update_records'));
-      assert.ok(enabled.has('delete_records'));
+      assert.ok(!enabled.has('delete_records'));
     });
 
     it('full enables all 69 tools', async () => {
@@ -241,9 +242,9 @@ describe('ToolConfigManager', () => {
 });
 
 describe('record-write tools', () => {
-  it('maps create/update/delete_records to record-write', () => {
+  it('maps create/update_records to record-write and delete_records to record-destructive', () => {
     assert.equal(TOOL_CATEGORIES.create_records, 'record-write');
     assert.equal(TOOL_CATEGORIES.update_records, 'record-write');
-    assert.equal(TOOL_CATEGORIES.delete_records, 'record-write');
+    assert.equal(TOOL_CATEGORIES.delete_records, 'record-destructive');
   });
 });

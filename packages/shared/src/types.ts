@@ -99,6 +99,7 @@ export interface ToolCategories {
   tableDestructive:        boolean;
   fieldWrite:              boolean;
   fieldDestructive:        boolean;
+  recordDestructive:       boolean;
   viewWrite:               boolean;
   viewDestructive:         boolean;
   viewSection:             boolean;
