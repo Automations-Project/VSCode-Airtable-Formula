@@ -384,3 +384,38 @@ describe('apply: createTable then createView in one run (adopt default view)', (
     assert.ok(t.views.some((v) => v.name === 'Board'));
   });
 });
+
+describe('apply: applyViewConfig', () => {
+  async function destWithView(type) {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const price = await client.createField('appD', tableId, { name: 'Price', type: 'number' });
+    const { viewId } = await client.createView('appD', tableId, { name: 'V', type });
+    const destSnapshot = await snapshotBase(client, 'appD');
+    return { client, tableId, viewId, price: price.columnId, destSnapshot };
+  }
+  const run = (client, plan, destSnapshot) => applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal(plan.planId, 'ts'), persist: () => {} });
+
+  it('pushes remapped sorts + frozen for a grid view', async () => {
+    const { client, viewId, price, destSnapshot } = await destWithView('grid');
+    const plan = { planId: 'pV1', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: {}, fields: { fSrcPrice: { destFld: price, choices: {} } }, views: { vSrc: viewId } },
+      actions: [{ kind: 'applyViewConfig', sourceTableId: 'tS', sourceViewId: 'vSrc', type: 'grid',
+        config: { sorts: [{ columnId: 'fSrcPrice', ascending: true }], frozenColumnCount: 1 } }], orphans: [], warnings: [] };
+    const res = await run(client, plan, destSnapshot);
+    assert.equal(res.failed, 0);
+    assert.ok(client.calls.some((k) => k === `applySorts:${viewId}`));
+    assert.deepEqual(client._view(viewId).config.sorts, [{ columnId: price, ascending: true }]); // remapped
+  });
+
+  it('kanban whose stack (groupLevels) field is missing in dest → fallback warning, no failure', async () => {
+    const { client, viewId, destSnapshot } = await destWithView('kanban');
+    const plan = { planId: 'pV2', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: {}, fields: {}, views: { vSrc: viewId } },
+      actions: [{ kind: 'applyViewConfig', sourceTableId: 'tS', sourceViewId: 'vSrc', type: 'kanban',
+        config: { groupLevels: [{ columnId: 'fGONE', order: 'ascending', emptyGroupState: 'hidden' }] } }], orphans: [], warnings: [] };
+    const res = await run(client, plan, destSnapshot);
+    assert.equal(res.failed, 0);
+    assert.ok(res.warnings.some((w) => w.code === 'VIEW_ANCHOR_FALLBACK' || w.code === 'VIEW_UNRESOLVABLE_REF'));
+  });
+});

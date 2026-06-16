@@ -2,10 +2,11 @@
 // Live-first + growing idmap + journal (resume) + existence-check (idempotency).
 // POST-SPIKE: primary defaults to Name/text; createTable spawns 6 default fields →
 // delete the 5 non-primary scaffolding fields (D1); links are foreignKey (later task).
-import { remapRefs, toWritableComputedOptions } from './remap.js';
+import { remapRefs, toWritableComputedOptions, remapViewConfig } from './remap.js';
 import { isDone, recordDone, recordFailed } from './journal.js';
 
 const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyncSource']);
+const VIEW_GROUP_ANCHOR = new Set(['select', 'singleSelect', 'multiSelect', 'multipleSelects', 'collaborator']);
 const COMPUTED_TYPES = new Set(['formula', 'rollup', 'lookup', 'multipleLookupValues', 'count']);
 const LINK_TYPES = new Set(['foreignKey', 'multipleRecordLinks']);
 
@@ -257,6 +258,43 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       idmap.views[a.sourceViewId] = viewId;
       if (entry) entry.viewsByName.set(a.name, { id: viewId, type: a.type });
       result.created++;
+      return;
+    }
+
+    case 'applyViewConfig': {
+      const destViewId = idmap.views[a.sourceViewId];
+      if (!destViewId) { result.skipped++; return; } // view not created (e.g. createView failed)
+      const cfg = remapViewConfig(a.config || {}, idmap);
+      const refOk = (id) => !!(id && findDestField(index, id));
+      const warnRef = (facet) => result.warnings.push({ code: 'VIEW_UNRESOLVABLE_REF', message: `View ${destViewId} ${facet}: unresolved field ref dropped` });
+
+      // Anchor validation (PROBE-VERIFIED): kanban stack = groupLevels[0].columnId; calendar = dateColumnRanges startColumnId.
+      let anchorOk = true;
+      if (a.type === 'kanban') { const stack = cfg.groupLevels && cfg.groupLevels[0] && cfg.groupLevels[0].columnId; anchorOk = !!(stack && refOk(stack) && VIEW_GROUP_ANCHOR.has(findDestFieldType(index, stack))); }
+      else if (a.type === 'calendar') anchorOk = !!(cfg.calendar && cfg.calendar.dateColumnRanges && cfg.calendar.dateColumnRanges.every((r) => refOk(r.startColumnId)));
+      if (!anchorOk) result.warnings.push({ code: 'VIEW_ANCHOR_FALLBACK', message: `View ${destViewId} (${a.type}) missing/incompatible anchor → grid-safe config only` });
+
+      const tryFacet = async (name, fn) => { try { await fn(); } catch (e) { result.warnings.push({ code: 'VIEW_FACET_FAILED', message: `View ${destViewId} ${name}: ${e.message ?? e}` }); } };
+
+      // Grid-safe facets (always; drop unresolved-ref ones).
+      if (cfg.filters) await tryFacet('filters', () => client.updateViewFilters(destAppId, destViewId, cfg.filters));
+      if (cfg.sorts && cfg.sorts.length) { if (cfg.sorts.every((s) => refOk(s.columnId))) await tryFacet('sorts', () => client.applySorts(destAppId, destViewId, cfg.sorts)); else warnRef('sorts'); }
+      if (cfg.groupLevels && cfg.groupLevels.length) { if (cfg.groupLevels.every((g) => refOk(g.columnId))) await tryFacet('groups', () => client.updateGroupLevels(destAppId, destViewId, cfg.groupLevels)); else warnRef('groups'); }
+      if (cfg.columnOrder && cfg.columnOrder.length) {
+        const visible = cfg.columnOrder.filter((c) => c.visibility && refOk(c.columnId)).map((c) => c.columnId);
+        await tryFacet('columns', () => client.setViewColumns(destAppId, destViewId, { visibleColumnIds: visible, frozenColumnCount: cfg.frozenColumnCount }));
+      } else if (typeof cfg.frozenColumnCount === 'number') {
+        await tryFacet('frozen', () => client.updateFrozenColumnCount(destAppId, destViewId, cfg.frozenColumnCount));
+      }
+      if (cfg.rowHeight) await tryFacet('rowHeight', () => client.updateRowHeight(destAppId, destViewId, cfg.rowHeight));
+
+      // Type-specific facets — only when the anchor validated.
+      if (anchorOk && cfg.colorConfig && refOk(cfg.colorConfig.selectColumnId)) await tryFacet('color', () => client.setViewColorConfig(destAppId, destViewId, cfg.colorConfig));
+      if (anchorOk && cfg.cover && refOk(cfg.cover.coverColumnId)) await tryFacet('cover', () => client.setViewCover(destAppId, destViewId, cfg.cover));
+      if (anchorOk && cfg.calendar && cfg.calendar.dateColumnRanges && cfg.calendar.dateColumnRanges.every((r) => refOk(r.startColumnId))) await tryFacet('calendar', () => client.setCalendarDateColumns(destAppId, destViewId, cfg.calendar.dateColumnRanges));
+      if (cfg.form) await tryFacet('form', () => client.setFormMetadata(destAppId, destViewId, cfg.form));
+
+      result.updated++;
       return;
     }
 
