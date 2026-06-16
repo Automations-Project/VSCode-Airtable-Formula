@@ -107,6 +107,33 @@ function fieldSignature(field, fldNames) {
 const LINK_TYPES = new Set(['multipleRecordLinks', 'foreignKey']);
 function fieldOrder(f) { return f.isComputed ? 2 : (LINK_TYPES.has(f.type) ? 1 : 0); }
 
+/** Set of choice names for a select-like field, or null if not a select. */
+function choiceNames(typeOptions) {
+  const ch = typeOptions && typeOptions.choices;
+  return ch ? new Set(Object.values(ch).map((c) => c.name)) : null;
+}
+
+/**
+ * Whether a non-computed field's typeOptions genuinely needs an update, aligned with what
+ * apply actually does (so plan converges to zero instead of re-emitting phantom updates):
+ *  - select/multiSelect: apply MERGES choices additively (never drops, invariant 7), so an
+ *    update is needed only when SOURCE has a choice name DEST lacks. dest ⊇ src ⇒ equal.
+ *    (Existing-choice colour/order are kept by apply's merge, so they're not flagged here.)
+ *  - other types: a real typeOptions diff, but skip when source options are empty — apply
+ *    can't clear options non-destructively and sending {} is a no-op that never converges.
+ */
+function scalarTypeOptionsChanged(sf, df) {
+  const srcChoices = choiceNames(sf.typeOptions);
+  if (srcChoices) {
+    const destChoices = choiceNames(df.typeOptions) || new Set();
+    for (const n of srcChoices) if (!destChoices.has(n)) return true; // a source choice missing in dest
+    return false; // dest already has every source choice
+  }
+  if (stableStringify(sf.typeOptions ?? null) === stableStringify(df.typeOptions ?? null)) return false;
+  // ponytail: source has no options to push and we don't strip dest options (destructive, M4) → skip
+  return !!(sf.typeOptions && Object.keys(sf.typeOptions).length > 0);
+}
+
 /**
  * Collect all field IDs referenced by a field (formula tokens, link columns, etc.)
  * so the executor can topologically sort creation order.
@@ -278,7 +305,7 @@ export function computePlan(srcSnap, destSnap, idmap) {
           if (computedSig(sf, srcNames) !== computedSig(df, destNames)) {
             changes.typeOptions = sf.typeOptions;
           }
-        } else if (stableStringify(sf.typeOptions ?? null) !== stableStringify(df.typeOptions ?? null)) {
+        } else if (scalarTypeOptionsChanged(sf, df)) {
           changes.typeOptions = sf.typeOptions;
         }
         if ((sf.description ?? null) !== (df.description ?? null)) {

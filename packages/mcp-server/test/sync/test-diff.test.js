@@ -131,3 +131,30 @@ describe('diff plan contract (M2b extensions)', () => {
     assert.equal(note.description, 'hello');
   });
 });
+
+describe('diff convergence (apply-aligned typeOptions)', () => {
+  const sel = (id, name, names) => field(id, name, 'singleSelect', { typeOptions: { choices: Object.fromEntries(names.map((n, i) => [`sel${id}${i}`, { id: `sel${id}${i}`, name: n }])) } });
+
+  it('no updateField when dest select is a superset of source choices', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text'), sel('fS2', 'Status', ['Open', 'Closed'])] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text'), sel('fD2', 'Status', ['Open', 'Closed', 'DestOnly'])] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.equal(plan.actions.filter((a) => a.kind === 'updateField').length, 0);
+  });
+
+  it('updateField when source select has a choice dest lacks', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text'), sel('fS2', 'Status', ['Open', 'Closed', 'New'])] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text'), sel('fD2', 'Status', ['Open', 'Closed'])] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const u = plan.actions.filter((a) => a.kind === 'updateField');
+    assert.equal(u.length, 1);
+    assert.equal(u[0].destFld, 'fD2');
+  });
+
+  it('no updateField when source typeOptions is empty but dest has options (no phantom {})', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text'), field('fS2', 'Note', 'text')] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text'), field('fD2', 'Note', 'text', { typeOptions: { validatorName: 'url' } })] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.equal(plan.actions.filter((a) => a.kind === 'updateField').length, 0);
+  });
+});
