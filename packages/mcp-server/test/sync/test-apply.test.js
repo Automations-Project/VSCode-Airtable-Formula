@@ -225,3 +225,41 @@ describe('apply: updateField', () => {
     assert.deepEqual(names, ['Closed', 'DestOnly', 'Open']);
   });
 });
+
+describe('apply: resume + idempotency', () => {
+  function fullPlan() {
+    return {
+      planId: 'plnR', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: {}, fields: {} },
+      actions: [
+        { kind: 'createTable', sourceTableId: 'tS', name: 'T' },
+        { kind: 'reconcilePrimary', sourceTableId: 'tS', sourcePrimaryFieldId: 'fS1', toName: 'Title', toType: 'text', toTypeOptions: null },
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fS2', name: 'Score', type: 'number', typeOptions: { precision: 0 }, description: null, computed: false, dependsOn: [], dependsOnTables: [] },
+      ],
+      orphans: [], warnings: [],
+    };
+  }
+
+  it('skips journal-done actions on resume (does not recreate the table)', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T'); // simulate a prior run's createTable
+    const before = client.calls.length;
+    const journal = newJournal('plnR', 'ts');
+    journal.actions.push({ idx: 0, kind: 'createTable', status: 'done', destId: tableId });
+    const idmap = { tables: { tS: tableId }, fields: {} }; // grown idmap a prior run persisted
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const res = await applyPlan({ client, plan: fullPlan(), destAppId: 'appD', destSnapshot, idmap, journal, persist: () => {} });
+    assert.equal(res.failed, 0);
+    assert.ok(res.skipped >= 1);
+    assert.ok(!client.calls.slice(before).some((k) => k === 'createTable:T')); // table NOT recreated
+  });
+
+  it('a second apply over the populated dest is a no-op (existence-skip self-heal)', async () => {
+    const client = new MockClient();
+    const r1 = await applyPlan({ client, plan: fullPlan(), destAppId: 'appD', destSnapshot: await snapshotBase(client, 'appD'), idmap: { tables: {}, fields: {} }, journal: newJournal('plnR', 'ts'), persist: () => {} });
+    assert.equal(r1.failed, 0);
+    const r2 = await applyPlan({ client, plan: fullPlan(), destAppId: 'appD', destSnapshot: await snapshotBase(client, 'appD'), idmap: { tables: {}, fields: {} }, journal: newJournal('plnR', 'ts'), persist: () => {} });
+    assert.equal(r2.created, 0);
+    assert.equal(r2.failed, 0);
+  });
+});
