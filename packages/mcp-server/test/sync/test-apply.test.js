@@ -364,3 +364,23 @@ describe('apply: createView', () => {
     assert.equal(views.filter((v) => v.name === 'Grid view').length, 1); // not duplicated
   });
 });
+
+describe('apply: createTable then createView in one run (adopt default view)', () => {
+  it('adopts the auto-created Grid view (no crash, no duplicate) and creates new views', async () => {
+    const client = new MockClient();
+    const destSnapshot = await snapshotBase(client, 'appD'); // empty base
+    const plan = { planId: 'plnTV', sourceBaseId: 'appS', destBaseId: 'appD', idmap: { tables: {}, fields: {}, views: {} },
+      actions: [
+        { kind: 'createTable', sourceTableId: 'tS', name: 'T' },
+        { kind: 'reconcilePrimary', sourceTableId: 'tS', sourcePrimaryFieldId: 'fS1', toName: 'Name', toType: 'text', toTypeOptions: null },
+        { kind: 'createView', sourceTableId: 'tS', sourceViewId: 'vGrid', name: 'Grid view', type: 'grid' },
+        { kind: 'createView', sourceTableId: 'tS', sourceViewId: 'vNew', name: 'Board', type: 'grid' },
+      ], orphans: [], warnings: [] };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: { tables: {}, fields: {}, views: {} }, journal: newJournal('plnTV', 'ts'), persist: () => {} });
+    assert.equal(res.failed, 0);
+    const t = (await client.getApplicationData('appD')).data.tableSchemas[0];
+    assert.equal(t.views.filter((v) => v.name === 'Grid view').length, 1); // default adopted, not duplicated
+    assert.ok(res.idmap.views.vGrid);
+    assert.ok(t.views.some((v) => v.name === 'Board'));
+  });
+});

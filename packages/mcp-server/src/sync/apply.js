@@ -40,7 +40,7 @@ async function readTable(client, appId, tableId) {
   if (!t) throw new Error(`table ${tableId} not found after create`);
   const cols = t.columns ?? t.fields ?? [];
   const primaryId = t.primaryColumnId ?? t.primaryFieldId ?? cols[0]?.id;
-  return { primaryId, primary: cols.find((c) => c.id === primaryId), cols };
+  return { primaryId, primary: cols.find((c) => c.id === primaryId), cols, views: t.views ?? [] };
 }
 
 function rememberLink(state, forwardFieldId, destTableId) {
@@ -129,7 +129,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       const { tableId } = await client.createTable(destAppId, a.name);
       idmap.tables[a.sourceTableId] = tableId;
       // D1: delete the auto-created non-primary scaffolding fields for a clean mirror.
-      const { primaryId, primary, cols } = await readTable(client, destAppId, tableId);
+      const { primaryId, primary, cols, views } = await readTable(client, destAppId, tableId);
       for (const c of cols) {
         if (c.id === primaryId) continue;
         await client.deleteField(destAppId, c.id, c.name);
@@ -137,6 +137,8 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       const entry = {
         id: tableId, name: a.name, primaryFieldId: primaryId,
         fieldsByName: new Map([[primary.name, { id: primaryId, name: primary.name, type: primary.type, typeOptions: primary.typeOptions ?? null }]]),
+        // include the auto-created default view(s) so a same-run createView adopts (not duplicates) them
+        viewsByName: new Map((views || []).map((v) => [v.name, { id: v.id, type: v.type }])),
       };
       index.tablesById.set(tableId, entry);
       index.tablesByName.set(a.name, entry);
