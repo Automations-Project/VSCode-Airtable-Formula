@@ -1,0 +1,139 @@
+import { join } from 'node:path';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { getHomeDir } from '../paths.js';
+import { safeAtomicWriteFileSync } from '../safe-write.js';
+
+/**
+ * Build a name→item Map from an array of objects with a `.name` property.
+ * First occurrence wins; duplicates are silently dropped (diff phase warns).
+ * @param {Array<{name: string}>} items
+ * @returns {Map<string, object>}
+ */
+function indexByName(items) {
+  const m = new Map();
+  for (const it of items) {
+    if (!m.has(it.name)) m.set(it.name, it);
+  }
+  return m;
+}
+
+/**
+ * Match choice IDs from a source field to dest field by choice name.
+ * Returns `{}` if either field has no typeOptions.choices.
+ * @param {{ typeOptions?: { choices?: object } }} srcField
+ * @param {{ typeOptions?: { choices?: object } }} destField
+ * @returns {Record<string, string>}  srcChoiceId → destChoiceId
+ */
+function matchChoices(srcField, destField) {
+  const sc = srcField.typeOptions?.choices;
+  const dc = destField.typeOptions?.choices;
+  if (!sc || !dc) return {};
+  const destByName = new Map(Object.values(dc).map((c) => [c.name, c.id]));
+  const out = {};
+  for (const c of Object.values(sc)) {
+    const destId = destByName.get(c.name);
+    if (destId) out[c.id] = destId;
+  }
+  return out;
+}
+
+/**
+ * Produce an ID-map by matching tables, fields, and select choices by name.
+ *
+ * @param {{ tables: Array<{id:string, name:string, fields:Array<{id:string,name:string,typeOptions?:object}>}> }} srcSnap
+ * @param {{ tables: Array<{id:string, name:string, fields:Array<{id:string,name:string,typeOptions?:object}>}> }} destSnap
+ * @returns {{
+ *   tables: Record<string,string>,
+ *   fields: Record<string, { destFld: string, choices: Record<string,string> }>
+ * }}
+ */
+export function matchByName(srcSnap, destSnap) {
+  const destTables = indexByName(destSnap.tables);
+  const tables = {};
+  const fields = {};
+
+  for (const st of srcSnap.tables) {
+    const dt = destTables.get(st.name);
+    if (!dt) continue;
+    tables[st.id] = dt.id;
+
+    const destFields = indexByName(dt.fields);
+    for (const sf of st.fields) {
+      const df = destFields.get(sf.name);
+      if (!df) continue;
+      fields[sf.id] = { destFld: df.id, choices: matchChoices(sf, df) };
+    }
+  }
+
+  return { tables, fields };
+}
+
+// ── State I/O ──────────────────────────────────────────────────────────────
+
+/**
+ * Return the per-pair sync directory path.
+ * Does NOT create the directory.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @returns {string}
+ */
+export function syncDir(sourceBaseId, destBaseId) {
+  return join(getHomeDir(), 'sync', `${sourceBaseId}__${destBaseId}`);
+}
+
+/**
+ * @param {string} dir   Parent directory (created if absent).
+ * @param {string} file  File name within dir.
+ * @param {object} obj   Value to JSON-serialise.
+ */
+function writeJson(dir, file, obj) {
+  mkdirSync(dir, { recursive: true });
+  safeAtomicWriteFileSync(join(dir, file), JSON.stringify(obj, null, 2));
+}
+
+/**
+ * Persist an ID-map for a source→dest base pair.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @param {object} idmap
+ */
+export function saveIdmap(sourceBaseId, destBaseId, idmap) {
+  writeJson(syncDir(sourceBaseId, destBaseId), 'idmap.json', idmap);
+}
+
+/**
+ * Load a previously saved ID-map.  Returns `{ tables: {}, fields: {} }` when
+ * the file is absent or unparseable.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @returns {{ tables: Record<string,string>, fields: Record<string,object> }}
+ */
+export function loadIdmap(sourceBaseId, destBaseId) {
+  const p = join(syncDir(sourceBaseId, destBaseId), 'idmap.json');
+  if (!existsSync(p)) return { tables: {}, fields: {} };
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'));
+  } catch {
+    return { tables: {}, fields: {} };
+  }
+}
+
+/**
+ * Persist a sync plan (schema diff output) for a base pair.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @param {{ planId: string }} plan
+ */
+export function savePlan(sourceBaseId, destBaseId, plan) {
+  writeJson(syncDir(sourceBaseId, destBaseId), `plan-${plan.planId}.json`, plan);
+}
+
+/**
+ * Persist sync execution state for a base pair.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @param {object} state
+ */
+export function saveState(sourceBaseId, destBaseId, state) {
+  writeJson(syncDir(sourceBaseId, destBaseId), 'state.json', state);
+}
