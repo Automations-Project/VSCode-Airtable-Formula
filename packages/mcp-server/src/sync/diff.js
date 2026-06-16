@@ -160,6 +160,7 @@ function makeCreateField(srcTable, f) {
     name: f.name,
     type: f.type,
     typeOptions: f.typeOptions,
+    description: f.description,
     computed: f.isComputed,
     dependsOn: referencedFieldIds(f),
     dependsOnTables: referencedTableIds(f),
@@ -221,6 +222,7 @@ export function computePlan(srcSnap, destSnap, idmap) {
         actions.push({
           kind: 'reconcilePrimary',
           sourceTableId: st.id,
+          sourcePrimaryFieldId: primary.id,
           toName: primary.name,
           toType: primary.type,
           toTypeOptions: primary.typeOptions,
@@ -245,6 +247,7 @@ export function computePlan(srcSnap, destSnap, idmap) {
       actions.push({
         kind: 'reconcilePrimary',
         sourceTableId: st.id,
+        sourcePrimaryFieldId: srcPrimary.id,
         toName: srcPrimary.name,
         toType: srcPrimary.type,
         toTypeOptions: srcPrimary.typeOptions,

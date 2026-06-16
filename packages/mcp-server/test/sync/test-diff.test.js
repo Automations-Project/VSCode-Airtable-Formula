@@ -116,3 +116,18 @@ describe('diff.computePlan', () => {
     assert.ok(upd[0].changes.typeOptions, 'carries typeOptions (source choice set; apply engine remaps/merges)');
   });
 });
+
+describe('diff plan contract (M2b extensions)', () => {
+  it('reconcilePrimary carries sourcePrimaryFieldId; createField carries description', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'New', primaryFieldId: 'fS1', fields: [
+      field('fS1', 'Name', 'text'),
+      field('fS2', 'Note', 'multilineText', { description: 'hello' }),
+    ] }] };
+    const dest = { baseId: 'appD', tables: [] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const prim = plan.actions.find((a) => a.kind === 'reconcilePrimary');
+    assert.equal(prim.sourcePrimaryFieldId, 'fS1');
+    const note = plan.actions.find((a) => a.kind === 'createField' && a.name === 'Note');
+    assert.equal(note.description, 'hello');
+  });
+});
