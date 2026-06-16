@@ -289,3 +289,59 @@ describe('apply: unresolvable computed ref (no halt)', () => {
     assert.ok(!cols.some((c) => c.name === 'F')); // formula NOT created
   });
 });
+
+describe('apply: updateField computed + continue-on-failure (live-smoke fixes)', () => {
+  it('computed updateField sends the writable shape (drops read-only keys) when refs resolve', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const price = await client.createField('appD', tableId, { name: 'Price', type: 'number' });
+    const total = await client.createField('appD', tableId, { name: 'Total', type: 'formula', typeOptions: { formulaTextParsed: '{column_value_OLD}' } });
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnUC', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: {}, fields: { [price.columnId]: { destFld: price.columnId, choices: {} } } },
+      actions: [{ kind: 'updateField', sourceFieldId: total.columnId, destFld: total.columnId,
+        changes: { typeOptions: { formulaTextParsed: `{column_value_${price.columnId}}*2`, dependencies: { referencedColumnIdsForValue: [price.columnId] }, resultType: 'number', resultIsArray: false } } }],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnUC', 'ts'), persist: () => {} });
+    assert.equal(res.updated, 1);
+    const f = client._field(total.columnId);
+    assert.equal(f.typeOptions.formulaText, `{${price.columnId}}*2`);
+    assert.equal(f.typeOptions.formulaTextParsed, undefined);
+    assert.equal(f.typeOptions.dependencies, undefined);
+  });
+
+  it('defers a computed update whose ref is not yet created (UNRESOLVABLE_REF, no fail)', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const total = await client.createField('appD', tableId, { name: 'Total', type: 'formula', typeOptions: { formulaTextParsed: 'x' } });
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnUD', sourceBaseId: 'appS', destBaseId: 'appD', idmap: { tables: {}, fields: {} },
+      actions: [{ kind: 'updateField', sourceFieldId: total.columnId, destFld: total.columnId,
+        changes: { typeOptions: { formulaTextParsed: '{column_value_fldNOTYET}', dependencies: { referencedColumnIdsForValue: ['fldNOTYET'] } } } }],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: { tables: {}, fields: {} }, journal: newJournal('plnUD', 'ts'), persist: () => {} });
+    assert.equal(res.failed, 0);
+    assert.ok(res.warnings.some((w) => w.code === 'UNRESOLVABLE_REF'));
+  });
+
+  it('does not halt the rest of the plan when one action fails', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnCont', sourceBaseId: 'appS', destBaseId: 'appD', idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [
+        { kind: 'updateField', sourceFieldId: 'fX', destFld: 'fldGHOST', changes: { description: 'x' } },
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fNew', name: 'Score', type: 'number', typeOptions: { precision: 0 }, description: null, computed: false, dependsOn: [], dependsOnTables: [] },
+      ],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: { tables: { tS: tableId }, fields: {} }, journal: newJournal('plnCont', 'ts'), persist: () => {} });
+    assert.equal(res.failed, 1);  // ghost update failed
+    assert.equal(res.created, 1); // Score still created — no halt
+  });
+});

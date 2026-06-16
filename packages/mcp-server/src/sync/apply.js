@@ -111,7 +111,9 @@ export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, 
       result.failed++;
       result.warnings.push({ code: 'ACTION_FAILED', message: `${a.kind} "${a.name ?? a.sourceFieldId ?? a.sourceTableId}": ${e.message ?? e}` });
       persist(idmap, journal);
-      break; // halt forward progress; resume re-runs from here
+      // ponytail: continue, don't halt. A failed create's dependents are guarded by the
+      // UNRESOLVABLE_REF check; re-run retries non-done actions. Halting on one bad field
+      // blocked the entire sync (494 creates never ran behind one failing update).
     }
   }
   return result;
@@ -217,10 +219,24 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       let mutated = false;
       if (changes.name !== undefined) { await client.renameField(destAppId, a.destFld, changes.name); mutated = true; }
       if (changes.typeOptions !== undefined) {
+        const destType = findDestFieldType(index, a.destFld);
         const remapped = remapRefs(changes.typeOptions, idmap);
-        const merged = mergeChoices(findDestField(index, a.destFld), remapped);
-        await client.updateFieldConfig(destAppId, a.destFld, { type: findDestFieldType(index, a.destFld), typeOptions: merged });
-        mutated = true;
+        if (COMPUTED_TYPES.has(destType)) {
+          // Computed updates need the writable shape (drop read-only formulaTextParsed/
+          // dependencies/resultType — the API 422s on them). Defer if a referenced field
+          // isn't created yet (updates run before creates); a re-plan after creates converges.
+          const refs = (changes.typeOptions.dependencies && changes.typeOptions.dependencies.referencedColumnIdsForValue) || [];
+          const unresolved = refs.filter((d) => !(idmap.fields[d] && idmap.fields[d].destFld));
+          if (unresolved.length) {
+            result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Update of "${a.destFld}" typeOptions deferred — refs [${unresolved.join(', ')}] not yet created (re-plan after creates)` });
+          } else {
+            await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: toWritableComputedOptions(destType, remapped) });
+            mutated = true;
+          }
+        } else {
+          await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: mergeChoices(findDestField(index, a.destFld), remapped) });
+          mutated = true;
+        }
       }
       if (changes.description !== undefined) { await client.updateFieldDescription(destAppId, a.destFld, changes.description); mutated = true; }
       if (mutated) result.updated++; else result.skipped++;
