@@ -7,6 +7,7 @@ import { isDone, recordDone, recordFailed } from './journal.js';
 
 const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyncSource']);
 const COMPUTED_TYPES = new Set(['formula', 'rollup', 'lookup', 'multipleLookupValues', 'count']);
+const LINK_TYPES = new Set(['foreignKey', 'multipleRecordLinks']);
 
 // Types Airtable refuses as a primary field — keep a placeholder + warn instead of
 // retyping. The try/catch around the retype is the ultimate guard (set is an optimization).
@@ -39,6 +40,36 @@ async function readTable(client, appId, tableId) {
   const cols = t.columns ?? t.fields ?? [];
   const primaryId = t.primaryColumnId ?? t.primaryFieldId ?? cols[0]?.id;
   return { primaryId, primary: cols.find((c) => c.id === primaryId), cols };
+}
+
+function rememberLink(state, forwardFieldId, destTableId) {
+  state.createdLinks.set(forwardFieldId, { destTableId });
+}
+
+async function adoptReverseLink({ client, destAppId, a, idmap, index, state, result }) {
+  const destTableId = idmap.tables[a.sourceTableId];
+  const { cols } = await readTable(client, destAppId, destTableId);
+  for (const c of cols) {
+    if (!LINK_TYPES.has(c.type)) continue;
+    const sym = c.typeOptions && c.typeOptions.symmetricColumnId;
+    if (sym && state.createdLinks.has(sym) && !state.adoptedReverse.has(c.id)) {
+      if (c.name !== a.name) await client.renameField(destAppId, c.id, a.name);
+      idmap.fields[a.sourceFieldId] = { destFld: c.id, choices: {} };
+      const entry = index.tablesById.get(destTableId);
+      if (entry) entry.fieldsByName.set(a.name, { id: c.id, name: a.name, type: c.type, typeOptions: c.typeOptions });
+      state.adoptedReverse.add(c.id);
+      result.skipped++;
+      return true;
+    }
+  }
+  return false;
+}
+
+function writableLinkOptions(remappedTypeOptions) {
+  const o = remappedTypeOptions || {};
+  const out = { foreignTableId: o.foreignTableId };
+  if (o.relationship) out.relationship = o.relationship;
+  return out; // drop symmetricColumnId/unreversed (auto-managed by Airtable)
 }
 
 export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist }) {
@@ -116,7 +147,6 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
     case 'createField': {
       const destTableId = idmap.tables[a.sourceTableId];
       const entry = index.tablesById.get(destTableId);
-      // D2: skip types we can't faithfully recreate cross-base (do NOT map them).
       if (UNSUPPORTED_TYPES.has(a.type)) {
         result.warnings.push({ code: 'SKIPPED_UNSUPPORTED', message: `Field "${a.name}" (${a.type}) skipped — unsupported by the apply engine` });
         result.skipped++;
@@ -128,9 +158,14 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
         result.skipped++;
         return;
       }
+      // Reciprocal-once: adopt the auto-created reverse of a link made earlier this run.
+      if (LINK_TYPES.has(a.type) && await adoptReverseLink({ client, destAppId, a, idmap, index, state, result })) return;
+
       const remapped = remapRefs(a.typeOptions, idmap);
       let typeOptions = remapped;
-      if (COMPUTED_TYPES.has(a.type)) {
+      if (LINK_TYPES.has(a.type)) {
+        typeOptions = writableLinkOptions(remapped);
+      } else if (COMPUTED_TYPES.has(a.type)) {
         typeOptions = toWritableComputedOptions(a.type, remapped);
         if (a.type === 'formula') {
           const v = await client.validateFormula(destAppId, destTableId, typeOptions.formulaText ?? '');
@@ -140,6 +175,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
       idmap.fields[a.sourceFieldId] = { destFld: columnId, choices: {} };
       if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
+      if (LINK_TYPES.has(a.type)) rememberLink(state, columnId, destTableId);
       result.created++;
       return;
     }

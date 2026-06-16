@@ -42,8 +42,16 @@ export class MockClient {
   }
   async createField(appId, tableId, cfg) {
     const columnId = this._id('fld');
-    this._table(tableId).columns.push({ id: columnId, name: cfg.name, type: cfg.type, typeOptions: cfg.typeOptions ?? null, description: cfg.description ?? null });
+    const field = { id: columnId, name: cfg.name, type: cfg.type, typeOptions: cfg.typeOptions ?? null, description: cfg.description ?? null };
+    this._table(tableId).columns.push(field);
     this.calls.push(`createField:${cfg.name}:${cfg.type}`);
+    if (cfg.type === 'foreignKey' && cfg.typeOptions && cfg.typeOptions.foreignTableId) {
+      const foreign = this._table(cfg.typeOptions.foreignTableId);
+      const reverseId = this._id('fld');
+      foreign.columns.push({ id: reverseId, name: this._table(tableId).name, type: 'foreignKey',
+        typeOptions: { foreignTableId: tableId, symmetricColumnId: columnId, relationship: cfg.typeOptions.relationship === 'one' ? 'many' : 'one', unreversed: true }, description: null });
+      field.typeOptions = { ...field.typeOptions, symmetricColumnId: reverseId };
+    }
     return { columnId };
   }
   async updateFieldConfig(appId, columnId, cfg) {

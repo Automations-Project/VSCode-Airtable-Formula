@@ -158,3 +158,30 @@ describe('apply: createField (computed + unsupported)', () => {
     assert.equal((await client.getApplicationData('appD')).data.tableSchemas[0].columns.length, before);
   });
 });
+
+describe('apply: createField (link foreignKey) reciprocal-once', () => {
+  it('creates the forward link and adopts the auto-created reverse instead of duplicating', async () => {
+    const client = new MockClient();
+    const a = await client.createTable('appD', 'A');
+    const b = await client.createTable('appD', 'B');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnL', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tA: a.tableId, tB: b.tableId }, fields: {} },
+      actions: [
+        { kind: 'createField', sourceTableId: 'tA', sourceFieldId: 'fldAlink', name: 'Bs', type: 'foreignKey', typeOptions: { foreignTableId: 'tB', relationship: 'many' }, description: null, computed: false, dependsOn: [], dependsOnTables: ['tB'] },
+        { kind: 'createField', sourceTableId: 'tB', sourceFieldId: 'fldBlink', name: 'As', type: 'foreignKey', typeOptions: { foreignTableId: 'tA', relationship: 'many' }, description: null, computed: false, dependsOn: [], dependsOnTables: ['tA'] },
+      ],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnL', 'ts'), persist: () => {} });
+    assert.equal(res.created, 1);  // only the forward link issues a create
+    assert.equal(res.skipped, 1);  // reverse adopted
+    const tables = (await client.getApplicationData('appD')).data.tableSchemas;
+    const tableB = tables.find((t) => t.name === 'B');
+    const links = tableB.columns.filter((c) => c.type === 'foreignKey');
+    assert.equal(links.length, 1, 'reverse link must not be duplicated');
+    assert.equal(links[0].name, 'As'); // adopted reverse renamed to source name
+    assert.ok(res.idmap.fields.fldBlink.destFld);
+  });
+});
