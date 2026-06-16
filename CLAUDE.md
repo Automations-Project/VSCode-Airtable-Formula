@@ -65,6 +65,7 @@ Key files:
 - `dev-tools/` — reverse-engineering helpers (capture.js, analyze.js, debug-*.js), **gitignored** — kept locally for future reference when Airtable changes their internal API
 - `src/daemon/` — daemon subsystem (see daemon subsection below)
 - `src/safe-write.js` — atomic JSON write helper (used by lockfile, token, and settings)
+- `src/sync/` — base-to-base schema sync engine. Plan side: `snapshot` → `idmap` (match-by-name) → `diff` (ordered Plan). Apply side (`apply.js` + `journal.js` + `remap.js`'s `remapRefs`/`toWritableComputedOptions`): executes a saved Plan against the destination — creates tables (deleting Airtable's auto-scaffolding fields), reconciles the primary, creates scalar/link(`foreignKey`)/computed fields with source→dest ref remapping + formula validation, applies non-destructive field updates. Drift-guarded + resumable (journal). Exposed via the `sync_base` tool (`mode: plan | apply`) in the `sync` category. Out of scope: retypes, deletions, records, views.
 
 #### packages/mcp-server — Daemon subsystem
 

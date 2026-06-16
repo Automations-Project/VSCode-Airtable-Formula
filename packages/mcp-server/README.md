@@ -519,6 +519,12 @@ Saved row scaffolds Airtable surfaces under "+ Add record" and the row-create ex
 | `duplicate_extension` | Clone an installed extension |
 | `remove_extension` | Remove an extension from a dashboard |
 
+### Base Sync (1)
+
+| Tool | Description |
+|:-----|:------------|
+| `sync_base` | Copy a base's schema to another base. `mode=plan` snapshots both bases and produces a diff report (no writes). `mode=apply` executes a saved plan — creates tables (removing Airtable's auto-scaffolding fields), reconciles the primary field, creates scalar/link/computed fields with source→dest reference remapping and dest-space formula validation, and applies non-destructive field updates. Drift-guarded (aborts if the destination changed since the plan was generated) and resumable via an on-disk journal. Out of scope: type-changing retypes, deletions, records, views. |
+
 ---
 
 ## Usage Examples

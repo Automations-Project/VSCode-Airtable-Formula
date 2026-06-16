@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP server — sync_base mode=apply (2026-06-16)
+
+#### Added
+- `sync_base mode=apply`: execute a saved base-to-base schema plan against the destination — creates tables, reconciles the primary, creates scalar/link/computed fields (source→dest reference remapping + dest-space formula validation), and applies non-destructive field updates. Drift-guarded (aborts if the destination changed since the plan) and resumable via an on-disk journal. Type-changing retypes, deletions, records, and views are out of scope for this release.
+
 ### LSP server — fix runtime startup + CI bin-link warning (2026-06-12)
 
 - **`airtable-user-lsp` was runtime-broken when executed with Node directly**

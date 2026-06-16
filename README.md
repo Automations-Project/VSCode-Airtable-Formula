@@ -208,6 +208,7 @@ Manage Airtable bases with capabilities **not available through the official RES
 | **Form Metadata** | 2 | Description, redirect URL, attribution, copy-to-respondent, branding (legacy form views) |
 | **Extension Management** | 7 | Create, install, enable/disable, rename, duplicate, remove extensions |
 | **Tool Management** | 1 | List profiles, switch profile, toggle tools/categories (meta-tool, always enabled) |
+| **Base Sync** | 1 | `sync_base` — copy a base's schema to another base. `mode=plan` produces a diff report; `mode=apply` executes it (creates tables/fields with ref remapping, drift-guarded, resumable via journal). Retypes, deletions, records, and views are out of scope. |
 
 See the full tool reference in [`packages/mcp-server/README.md`](packages/mcp-server/README.md).
 
