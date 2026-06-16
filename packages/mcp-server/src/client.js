@@ -1766,8 +1766,11 @@ export class AirtableClient {
 
     // 1. Hide everything.
     await this.showOrHideAllColumns(appId, viewId, false);
-    // 2. Show the requested set in one batched call.
-    await this.showOrHideColumns(appId, viewId, visibleColumnIds, true);
+    // 2. Show the requested set, verifying via read-back and retrying any columns
+    //    that didn't take. Under a bulk run (100s of views configured back-to-back)
+    //    a single showOrHideColumns can return 200 yet leave columns hidden until the
+    //    backend settles — a one-shot call then silently under-applies. Retry-until-confirmed.
+    await this._showColumnsWithRetry(appId, viewId, visibleColumnIds);
     // 3. Identify the primary column (always index 0, immovable) so we can
     //    exclude it from the move call — including it causes FAILED_STATE_CHECK.
     const view = await this.getView(appId, viewId);
@@ -1783,6 +1786,27 @@ export class AirtableClient {
       await this.updateFrozenColumnCount(appId, viewId, frozenColumnCount);
     }
     return { updated: true, viewId, visibleColumnIds, frozenColumnCount: frozenColumnCount ?? null };
+  }
+
+  /**
+   * Show the given columns, re-reading the view and retrying any that didn't take.
+   * Works around the internal API silently under-applying a large showOrHideColumns
+   * call under sustained bulk load (returns 200 but leaves columns hidden until the
+   * backend settles). Returns the number of columns confirmed visible.
+   */
+  async _showColumnsWithRetry(appId, viewId, columnIds, maxAttempts = 5) {
+    const wanted = Array.from(new Set(columnIds));
+    let remaining = wanted;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await this.showOrHideColumns(appId, viewId, remaining, true);
+      const view = await this.getView(appId, viewId);
+      const visible = new Set((view.columnOrder || []).filter((c) => c.visibility).map((c) => c.columnId));
+      remaining = wanted.filter((id) => !visible.has(id));
+      if (remaining.length === 0) return wanted.length;
+      // Let eventual consistency settle before retrying the columns that didn't take.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return wanted.length - remaining.length; // best-effort
   }
 
   // ─── View Presentation (cover image, color rules, cell wrap) ──
