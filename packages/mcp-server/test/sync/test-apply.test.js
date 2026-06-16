@@ -98,3 +98,63 @@ describe('apply: createField (scalar)', () => {
     assert.equal(score.description, 'pts');
   });
 });
+
+describe('apply: createField (computed + unsupported)', () => {
+  it('remaps a formula to dest ids, validates, creates it, strips read-only keys', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnC', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldPrice', name: 'Price', type: 'number', typeOptions: { precision: 2 }, description: null, computed: false, dependsOn: [], dependsOnTables: [] },
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldTotal', name: 'Total', type: 'formula', typeOptions: { formulaTextParsed: '{column_value_fldPrice}*2', dependencies: { referencedColumnIdsForValue: ['fldPrice'] }, resultType: 'number' }, description: null, computed: true, dependsOn: ['fldPrice'], dependsOnTables: [] },
+      ],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnC', 'ts'), persist: () => {} });
+    assert.equal(res.created, 2);
+    assert.equal(res.failed, 0);
+    const destPriceId = res.idmap.fields.fldPrice.destFld;
+    const total = (await client.getApplicationData('appD')).data.tableSchemas[0].columns.find((c) => c.name === 'Total');
+    assert.equal(total.typeOptions.formulaText, `{${destPriceId}}*2`);
+    assert.equal(total.typeOptions.formulaTextParsed, undefined); // read-only key stripped
+    assert.ok(client.calls.some((k) => k === `validateFormula:{${destPriceId}}*2`));
+  });
+
+  it('fails the action when formula validation fails (no create)', async () => {
+    const client = new MockClient({ formulaValid: false });
+    const { tableId } = await client.createTable('appD', 'T');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnBad', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [{ kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldX', name: 'Bad', type: 'formula', typeOptions: { formulaTextParsed: 'NONSENSE(' }, description: null, computed: true, dependsOn: [], dependsOnTables: [] }],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnBad', 'ts'), persist: () => {} });
+    assert.equal(res.created, 0);
+    assert.equal(res.failed, 1);
+    assert.ok(res.warnings.some((w) => w.code === 'ACTION_FAILED'));
+  });
+
+  it('skips an unsupported type (button) with SKIPPED_UNSUPPORTED and no create', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const before = (await client.getApplicationData('appD')).data.tableSchemas[0].columns.length;
+    const plan = {
+      planId: 'plnBtn', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [{ kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldBtn', name: 'OpenIt', type: 'button', typeOptions: { label: {} }, description: null, computed: true, dependsOn: [], dependsOnTables: [] }],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnBtn', 'ts'), persist: () => {} });
+    assert.equal(res.created, 0);
+    assert.equal(res.skipped, 1);
+    assert.ok(res.warnings.some((w) => w.code === 'SKIPPED_UNSUPPORTED'));
+    assert.equal(res.idmap.fields.fldBtn, undefined);
+    assert.equal((await client.getApplicationData('appD')).data.tableSchemas[0].columns.length, before);
+  });
+});

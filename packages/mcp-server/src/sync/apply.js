@@ -2,8 +2,11 @@
 // Live-first + growing idmap + journal (resume) + existence-check (idempotency).
 // POST-SPIKE: primary defaults to Name/text; createTable spawns 6 default fields →
 // delete the 5 non-primary scaffolding fields (D1); links are foreignKey (later task).
-import { remapRefs } from './remap.js';
+import { remapRefs, toWritableComputedOptions } from './remap.js';
 import { isDone, recordDone, recordFailed } from './journal.js';
+
+const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyncSource']);
+const COMPUTED_TYPES = new Set(['formula', 'rollup', 'lookup', 'multipleLookupValues', 'count']);
 
 // Types Airtable refuses as a primary field — keep a placeholder + warn instead of
 // retyping. The try/catch around the retype is the ultimate guard (set is an optimization).
@@ -113,13 +116,27 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
     case 'createField': {
       const destTableId = idmap.tables[a.sourceTableId];
       const entry = index.tablesById.get(destTableId);
+      // D2: skip types we can't faithfully recreate cross-base (do NOT map them).
+      if (UNSUPPORTED_TYPES.has(a.type)) {
+        result.warnings.push({ code: 'SKIPPED_UNSUPPORTED', message: `Field "${a.name}" (${a.type}) skipped — unsupported by the apply engine` });
+        result.skipped++;
+        return;
+      }
       const existing = entry && entry.fieldsByName.get(a.name);
       if (existing) {
         idmap.fields[a.sourceFieldId] = { destFld: existing.id, choices: {} };
         result.skipped++;
         return;
       }
-      const typeOptions = remapRefs(a.typeOptions, idmap);
+      const remapped = remapRefs(a.typeOptions, idmap);
+      let typeOptions = remapped;
+      if (COMPUTED_TYPES.has(a.type)) {
+        typeOptions = toWritableComputedOptions(a.type, remapped);
+        if (a.type === 'formula') {
+          const v = await client.validateFormula(destAppId, destTableId, typeOptions.formulaText ?? '');
+          if (!v.valid) throw new Error(`formula invalid: ${v.message ?? v.error ?? 'rejected'}`);
+        }
+      }
       const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
       idmap.fields[a.sourceFieldId] = { destFld: columnId, choices: {} };
       if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
