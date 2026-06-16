@@ -137,3 +137,17 @@ export function savePlan(sourceBaseId, destBaseId, plan) {
 export function saveState(sourceBaseId, destBaseId, state) {
   writeJson(syncDir(sourceBaseId, destBaseId), 'state.json', state);
 }
+
+/**
+ * Load a previously saved sync plan.  Returns `null` when the file is absent
+ * or unparseable.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @param {string} planId
+ * @returns {object|null}
+ */
+export function loadPlan(sourceBaseId, destBaseId, planId) {
+  const p = join(syncDir(sourceBaseId, destBaseId), `plan-${planId}.json`);
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+}
