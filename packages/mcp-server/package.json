@@ -63,7 +63,7 @@
   "scripts": {
     "start": "node src/index.js",
     "login": "node src/login.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
