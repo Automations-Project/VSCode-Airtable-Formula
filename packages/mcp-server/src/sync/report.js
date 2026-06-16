@@ -12,7 +12,7 @@ export function renderPlan(plan) {
   const counts = {};
   for (const a of plan.actions) counts[a.kind] = (counts[a.kind] || 0) + 1;
   const lines = ['Schema plan:'];
-  for (const k of ['createTable', 'reconcilePrimary', 'createField', 'updateField']) {
+  for (const k of ['createTable', 'reconcilePrimary', 'createField', 'updateField', 'createView', 'applyViewConfig']) {
     if (counts[k]) lines.push(`  ${k}: ${counts[k]}`);
   }
   lines.push(`  orphans: ${plan.orphans.length} (reported, not changed)`);

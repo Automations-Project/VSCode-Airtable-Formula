@@ -17,7 +17,8 @@ const ENGINE_VERSION = '2b';
  */
 export function fingerprintSchema(snap) {
   const basis = snap.tables
-    .map((t) => `${t.id}:${t.name}:` + t.fields.map((f) => `${f.id}=${f.name}=${f.type}`).join(','))
+    .map((t) => `${t.id}:${t.name}:` + t.fields.map((f) => `${f.id}=${f.name}=${f.type}`).join(',')
+      + ';V:' + (t.views || []).map((v) => `${v.id}=${v.name}=${v.type}`).sort().join(','))
     .sort()
     .join('|');
   return createHash('sha256').update(basis).digest('hex');

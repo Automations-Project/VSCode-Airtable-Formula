@@ -37,3 +37,28 @@ describe('index.apply', () => {
     assert.match(out.human, /created: 1/);
   });
 });
+
+describe('index: views', () => {
+  it('fingerprintSchema changes when a table gains a view', () => {
+    const a = { tables: [{ id: 't1', name: 'T', fields: [{ id: 'f1', name: 'Name', type: 'text' }], views: [{ id: 'v1', name: 'Grid view', type: 'grid' }] }] };
+    const b = { tables: [{ id: 't1', name: 'T', fields: [{ id: 'f1', name: 'Name', type: 'text' }], views: [{ id: 'v1', name: 'Grid view', type: 'grid' }, { id: 'v2', name: 'Board', type: 'kanban' }] }] };
+    assert.notEqual(fingerprintSchema(a), fingerprintSchema(b));
+  });
+
+  it('apply creates a source-only view end to end (views applied after fields)', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'apply-v-'));
+    const client = new MockClient();
+    const dest = await snapshotBase(client, 'appDDDDDDDDDDDDDD'); // empty base
+    const plan = { planId: 'plnVI', engineVersion: '2b', destFingerprint: fingerprintSchema(dest), sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {}, views: {} },
+      actions: [
+        { kind: 'createTable', sourceTableId: 'tS', name: 'T' },
+        { kind: 'reconcilePrimary', sourceTableId: 'tS', sourcePrimaryFieldId: 'fS1', toName: 'Name', toType: 'text', toTypeOptions: null },
+        { kind: 'createView', sourceTableId: 'tS', sourceViewId: 'vNew', name: 'Board', type: 'grid' },
+      ], orphans: [], warnings: [] };
+    savePlan('appSSSSSSSSSSSSSS', 'appDDDDDDDDDDDDDD', plan);
+    const out = await apply({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnVI', runStartedAt: 'ts' });
+    assert.match(out.human, /created/);
+    const views = (await client.getApplicationData('appDDDDDDDDDDDDDD')).data.tableSchemas[0].views;
+    assert.ok(views.some((v) => v.name === 'Board'));
+  });
+});
