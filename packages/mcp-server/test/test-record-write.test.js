@@ -107,3 +107,27 @@ describe('AirtableClient.updateRecords isolation', () => {
     assert.deepEqual(result.failed.map(f => f.rowId).sort(), ['rec2', 'rec3']);
   });
 });
+
+describe('AirtableClient.createRecords viewId fallback', () => {
+  it('resolves the first view when no viewId is given', async () => {
+    const auth = createMockAuth({
+      get: () => ({ ok: true, status: 200, json: async () => ({ data: { tableSchemas: [{ id: 'tblT', columns: [], views: [{ id: 'viwFIRST' }, { id: 'viwSECOND' }] }] } }), text: async () => '{}' }),
+    });
+    const client = new AirtableClient(auth);
+    const result = await client.createRecords('appT', 'tblT', [{ cellValuesByColumnId: { fldA: 'x' } }]);
+    assert.equal(result.created.length, 1);
+    const createCall = auth.calls.find(c => /\/row\/rec[A-Za-z0-9]+\/create$/.test(c.url));
+    assert.equal(JSON.parse(createCall.params.stringifiedObjectParams).activeViewId, 'viwFIRST');
+  });
+});
+
+describe('AirtableClient record-write id guards', () => {
+  it('createRecords rejects an invalid appId', async () => {
+    const client = new AirtableClient(createMockAuth({}));
+    await assert.rejects(() => client.createRecords('BAD!', 'tblT', [{ cellValuesByColumnId: {} }], { viewId: 'viwT' }));
+  });
+  it('deleteRecords rejects an invalid tableId', async () => {
+    const client = new AirtableClient(createMockAuth({}));
+    await assert.rejects(() => client.deleteRecords('appT', 'BAD!', ['rec1'], { viewId: 'viwT' }));
+  });
+});

@@ -55,3 +55,31 @@ describe('AirtableClient.uploadAttachment', () => {
     assert.match(result.error, /createMultipartUpload/);
   });
 });
+
+describe('AirtableClient.uploadAttachment guards', () => {
+  it('soft-fails when getUrlMultipartUpload returns no presignedUrl', async () => {
+    const auth = mockAuthForUpload();
+    const orig = auth.postForm;
+    auth.postForm = (url, params) => url.endsWith('/getUrlMultipartUpload')
+      ? { ok: true, status: 200, json: async () => ({ data: {} }), text: async () => '{}' }
+      : orig(url, params);
+    const client = new AirtableClient(auth);
+    client._putBytes = async () => ({ ok: true, etag: '"e"' });
+    const result = await client.uploadAttachment('appT', 'recT', 'fldT', { bytes: Buffer.from('x'), filename: 'x', contentType: 'text/plain' });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /presignedUrl/);
+  });
+
+  it('soft-fails when the final attach call errors', async () => {
+    const auth = mockAuthForUpload();
+    const orig = auth.postForm;
+    auth.postForm = (url, params) => url.includes('/updateArrayTypeCellByAddingItem')
+      ? { ok: false, status: 422, json: async () => ({}), text: async () => 'bad attach' }
+      : orig(url, params);
+    const client = new AirtableClient(auth);
+    client._putBytes = async () => ({ ok: true, etag: '"e"' });
+    const result = await client.uploadAttachment('appT', 'recT', 'fldT', { bytes: Buffer.from('x'), filename: 'x', contentType: 'text/plain' });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /attach failed/);
+  });
+});
