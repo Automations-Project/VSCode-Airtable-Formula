@@ -263,3 +263,29 @@ describe('apply: resume + idempotency', () => {
     assert.equal(r2.failed, 0);
   });
 });
+
+describe('apply: unresolvable computed ref (no halt)', () => {
+  it('skips a computed field referencing a skipped/unmapped field, and keeps going', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnU2', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldBtn', name: 'Btn', type: 'button', typeOptions: {}, description: null, computed: true, dependsOn: [], dependsOnTables: [] },
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldF', name: 'F', type: 'formula', typeOptions: { formulaTextParsed: '{column_value_fldBtn}' }, description: null, computed: true, dependsOn: ['fldBtn'], dependsOnTables: [] },
+        { kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldOk', name: 'OK', type: 'number', typeOptions: { precision: 0 }, description: null, computed: false, dependsOn: [], dependsOnTables: [] },
+      ],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnU2', 'ts'), persist: () => {} });
+    assert.equal(res.failed, 0); // did NOT halt
+    assert.ok(res.warnings.some((w) => w.code === 'SKIPPED_UNSUPPORTED')); // the button
+    assert.ok(res.warnings.some((w) => w.code === 'UNRESOLVABLE_REF'));    // the formula
+    assert.equal(res.created, 1); // only the scalar 'OK'
+    const cols = (await client.getApplicationData('appD')).data.tableSchemas[0].columns;
+    assert.ok(cols.some((c) => c.name === 'OK'));
+    assert.ok(!cols.some((c) => c.name === 'F')); // formula NOT created
+  });
+});

@@ -188,6 +188,12 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       if (LINK_TYPES.has(a.type)) {
         typeOptions = writableLinkOptions(remapped);
       } else if (COMPUTED_TYPES.has(a.type)) {
+        const unresolved = (a.dependsOn || []).filter((d) => !(idmap.fields[d] && idmap.fields[d].destFld));
+        if (unresolved.length) {
+          result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Field "${a.name}" references unresolved field(s) [${unresolved.join(', ')}] (skipped or unmapped) — not created` });
+          result.skipped++;
+          return;
+        }
         typeOptions = toWritableComputedOptions(a.type, remapped);
         if (a.type === 'formula') {
           const v = await client.validateFormula(destAppId, destTableId, typeOptions.formulaText ?? '');
