@@ -25,6 +25,7 @@ function buildIndex(snap) {
     const entry = {
       id: t.id, name: t.name, primaryFieldId: t.primaryFieldId,
       fieldsByName: new Map(t.fields.map((f) => [f.name, { id: f.id, name: f.name, type: f.type, typeOptions: f.typeOptions }])),
+      viewsByName: new Map((t.views || []).map((v) => [v.name, { id: v.id, type: v.type }])),
     };
     tablesById.set(t.id, entry);
     tablesByName.set(t.name, entry);
@@ -97,6 +98,7 @@ function mergeChoices(destField, srcTypeOptions) {
 export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist }) {
   const index = buildIndex(destSnapshot);
   const state = { createdLinks: new Map(), adoptedReverse: new Set() };
+  if (!idmap.views) idmap.views = {};
   const result = { planId: plan.planId, aborted: false, created: 0, updated: 0, skipped: 0, failed: 0, warnings: [], idmap };
 
   for (let idx = 0; idx < plan.actions.length; idx++) {
@@ -240,6 +242,19 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       }
       if (changes.description !== undefined) { await client.updateFieldDescription(destAppId, a.destFld, changes.description); mutated = true; }
       if (mutated) result.updated++; else result.skipped++;
+      return;
+    }
+
+    case 'createView': {
+      const destTableId = idmap.tables[a.sourceTableId];
+      const entry = index.tablesById.get(destTableId);
+      const existing = entry && entry.viewsByName.get(a.name);
+      if (existing) { idmap.views[a.sourceViewId] = existing.id; result.skipped++; return; }
+      const template = entry && [...entry.viewsByName.values()][0]; // dest table always has ≥1 view
+      const { viewId } = await client.createView(destAppId, destTableId, { name: a.name, type: a.type, copyFromViewId: template ? template.id : undefined });
+      idmap.views[a.sourceViewId] = viewId;
+      if (entry) entry.viewsByName.set(a.name, { id: viewId, type: a.type });
+      result.created++;
       return;
     }
 

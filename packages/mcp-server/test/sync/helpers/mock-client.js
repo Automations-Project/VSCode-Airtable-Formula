@@ -22,7 +22,8 @@ export class MockClient {
   async createTable(appId, name) {
     const tableId = this._id('tbl');
     const columns = DEFAULT_FIELDS.map((f) => ({ id: this._id('fld'), name: f.name, type: f.type, typeOptions: f.typeOptions ?? null, description: null }));
-    this.tables.push({ id: tableId, name, primaryColumnId: columns[0].id, columns });
+    this.tables.push({ id: tableId, name, primaryColumnId: columns[0].id, columns,
+      views: [{ id: this._id('viw'), name: 'Grid view', type: 'grid', personalForUserId: null, config: {} }] });
     this.calls.push(`createTable:${name}`);
     return { tableId };
   }
@@ -65,6 +66,26 @@ export class MockClient {
   async updateFieldDescription(appId, columnId, description) {
     this._field(columnId).description = description; this.calls.push(`updateFieldDescription:${columnId}`); return { ok: true };
   }
+  _view(viewId) { for (const t of this.tables) { const v = (t.views || []).find((x) => x.id === viewId); if (v) return v; } throw new Error('no view ' + viewId); }
+  async createView(appId, tableId, cfg) {
+    const id = this._id('viw');
+    this._table(tableId).views.push({ id, name: cfg.name, type: cfg.type || 'grid', personalForUserId: null, config: {} });
+    this.calls.push(`createView:${cfg.name}:${cfg.type}`);
+    return { viewId: id };
+  }
+  async getView(appId, viewId) { return { ...(this._view(viewId).config || {}) }; }
+  async renameView(appId, viewId, name) { this._view(viewId).name = name; this.calls.push(`renameView:${viewId}:${name}`); return { ok: true }; }
+  async updateViewFilters(appId, viewId, filters) { this._view(viewId).config.filters = filters; this.calls.push(`updateViewFilters:${viewId}`); return { ok: true }; }
+  async applySorts(appId, viewId, sortObjs) { this._view(viewId).config.sorts = sortObjs; this.calls.push(`applySorts:${viewId}`); return { ok: true }; }
+  async updateGroupLevels(appId, viewId, groupLevels) { this._view(viewId).config.groupLevels = groupLevels; this.calls.push(`updateGroupLevels:${viewId}`); return { ok: true }; }
+  async setViewColumns(appId, viewId, opts) { this._view(viewId).config.columns = opts; this.calls.push(`setViewColumns:${viewId}`); return { ok: true }; }
+  async updateFrozenColumnCount(appId, viewId, n) { this._view(viewId).config.frozenColumnCount = n; this.calls.push(`updateFrozenColumnCount:${viewId}`); return { ok: true }; }
+  async setViewColorConfig(appId, viewId, cc) { this._view(viewId).config.colorConfig = cc; this.calls.push(`setViewColorConfig:${viewId}`); return { ok: true }; }
+  async setViewCover(appId, viewId, cover) { this._view(viewId).config.cover = cover; this.calls.push(`setViewCover:${viewId}`); return { ok: true }; }
+  async setCalendarDateColumns(appId, viewId, ranges) { this._view(viewId).config.calendar = { dateColumnRanges: ranges }; this.calls.push(`setCalendarDateColumns:${viewId}`); return { ok: true }; }
+  async setFormMetadata(appId, viewId, form) { this._view(viewId).config.form = form; this.calls.push(`setFormMetadata:${viewId}`); return { ok: true }; }
+  async updateRowHeight(appId, viewId, rh) { this._view(viewId).config.rowHeight = rh; this.calls.push(`updateRowHeight:${viewId}`); return { ok: true }; }
+  async updateViewDescription(appId, viewId, d) { this._view(viewId).config.description = d; this.calls.push(`updateViewDescription:${viewId}`); return { ok: true }; }
   async validateFormula(appId, tableId, formulaText) {
     this.calls.push(`validateFormula:${formulaText}`);
     return { valid: this.formulaValid, resultType: 'text' };

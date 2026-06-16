@@ -345,3 +345,22 @@ describe('apply: updateField computed + continue-on-failure (live-smoke fixes)',
     assert.equal(res.created, 1); // Score still created — no halt
   });
 });
+
+describe('apply: createView', () => {
+  it('creates a missing view (copyFromViewId=default), maps it; adopts an existing one by name', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T'); // has default Grid view
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = { planId: 'plnV', sourceBaseId: 'appS', destBaseId: 'appD', idmap: { tables: { tS: tableId }, fields: {}, views: {} },
+      actions: [
+        { kind: 'createView', sourceTableId: 'tS', sourceViewId: 'vGrid', name: 'Grid view', type: 'grid' },
+        { kind: 'createView', sourceTableId: 'tS', sourceViewId: 'vNew', name: 'New View', type: 'grid' },
+      ], orphans: [], warnings: [] };
+    const res = await applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: JSON.parse(JSON.stringify(plan.idmap)), journal: newJournal('plnV', 'ts'), persist: () => {} });
+    assert.ok(res.idmap.views.vGrid);  // adopted the default Grid view
+    assert.ok(res.idmap.views.vNew);   // created
+    const views = (await client.getApplicationData('appD')).data.tableSchemas[0].views;
+    assert.equal(views.filter((v) => v.name === 'New View').length, 1);
+    assert.equal(views.filter((v) => v.name === 'Grid view').length, 1); // not duplicated
+  });
+});
