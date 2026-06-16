@@ -51,6 +51,7 @@ export function matchByName(srcSnap, destSnap) {
   const destTables = indexByName(destSnap.tables);
   const tables = {};
   const fields = {};
+  const views = {};
 
   for (const st of srcSnap.tables) {
     const dt = destTables.get(st.name);
@@ -63,9 +64,16 @@ export function matchByName(srcSnap, destSnap) {
       if (!df) continue;
       fields[sf.id] = { destFld: df.id, choices: matchChoices(sf, df) };
     }
+
+    const destViews = indexByName((dt.views || []).filter((v) => !v.personalForUserId));
+    for (const sv of (st.views || [])) {
+      if (sv.personalForUserId) continue;
+      const dv = destViews.get(sv.name);
+      if (dv) views[sv.id] = dv.id;
+    }
   }
 
-  return { tables, fields };
+  return { tables, fields, views };
 }
 
 // ── State I/O ──────────────────────────────────────────────────────────────
