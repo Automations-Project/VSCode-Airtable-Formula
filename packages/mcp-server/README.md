@@ -523,7 +523,7 @@ Saved row scaffolds Airtable surfaces under "+ Add record" and the row-create ex
 
 | Tool | Description |
 |:-----|:------------|
-| `sync_base` | Copy a base's schema to another base. `mode=plan` snapshots both bases and produces a diff report (no writes). `mode=apply` executes a saved plan — creates tables (removing Airtable's auto-scaffolding fields), reconciles the primary field, creates scalar/link/computed fields with source→dest reference remapping and dest-space formula validation, and applies non-destructive field updates. Drift-guarded (aborts if the destination changed since the plan was generated) and resumable via an on-disk journal. Out of scope: type-changing retypes, deletions, records, views. |
+| `sync_base` | Copy a base's schema to another base. `mode=plan` snapshots both bases and produces a diff report (no writes). `mode=apply` executes a saved plan — creates tables (removing Airtable's auto-scaffolding fields), reconciles the primary field, creates scalar/link/computed fields with source→dest reference remapping and dest-space formula validation, applies non-destructive field updates, and syncs collaborative views (creates missing views + mirrors filters, sorts, group levels, field visibility + column order, frozen columns, color config, cover, calendar date columns, form metadata, and row height, with source→dest field+choice ID remapping). View sync is idempotent (convergent canonical compare); personal views are skipped and orphan destination views are reported (not deleted). Drift-guarded and resumable via an on-disk journal. Out of scope: type-changing retypes, deletions, records. |
 
 ---
 

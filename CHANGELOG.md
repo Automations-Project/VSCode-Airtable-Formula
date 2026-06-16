@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP server — sync_base collaborative view sync (2026-06-17)
+
+#### Added
+- `sync_base`: full collaborative-view sync — create views + mirror filters, sorts, group levels, field visibility + column order, frozen columns, color config, cover, calendar date columns, form metadata, and row height, with source→dest field+choice ID remapping, per-view-type anchor validation + grid fallback, applied after fields. Idempotent (convergent canonical compare). Personal views skipped; orphan views reported (not deleted).
+
 ### MCP server — sync_base mode=apply (2026-06-16)
 
 #### Added
