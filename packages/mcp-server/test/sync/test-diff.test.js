@@ -50,4 +50,34 @@ describe('diff.computePlan', () => {
     assert.deepEqual(orphanNames, ['Extra', 'Ghost']);
     assert.equal(plan.actions.length, 0);
   });
+
+  it('orders new-table fields: scalars before links before computed', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [
+      field('fS1', 'Name', 'text'),
+      field('fS4', 'Formula', 'formula', { isComputed: true, typeOptions: { formulaTextParsed: '1' } }),
+      field('fS3', 'Link', 'multipleRecordLinks'),
+      field('fS2', 'Score', 'number'),
+    ] }] };
+    const dest = { baseId: 'appD', tables: [] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const createNames = plan.actions.filter(a => a.kind === 'createField').map(a => a.name);
+    assert.ok(createNames.indexOf('Score') < createNames.indexOf('Link'), 'scalar before link');
+    assert.ok(createNames.indexOf('Link') < createNames.indexOf('Formula'), 'link before computed');
+  });
+
+  it('computed field differing only by description -> changes has description, not typeOptions', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [
+      field('fS1', 'Name', 'text'),
+      { id: 'fS2', name: 'Total', type: 'formula', typeOptions: { formulaTextParsed: '{fS1}' }, description: 'new', isComputed: true },
+    ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [
+      field('fD1', 'Name', 'text'),
+      { id: 'fD2', name: 'Total', type: 'formula', typeOptions: { formulaTextParsed: '{fD1}' }, description: 'old', isComputed: true },
+    ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const upd = plan.actions.filter(a => a.kind === 'updateField');
+    assert.equal(upd.length, 1);
+    assert.equal(upd[0].changes.description, 'new');
+    assert.equal(upd[0].changes.typeOptions, undefined, 'no spurious typeOptions for ID-only formula difference');
+  });
 });

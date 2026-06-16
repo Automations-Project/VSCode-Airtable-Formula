@@ -56,6 +56,33 @@ function stableStringify(obj) {
 }
 
 /**
+ * Description-free canonical signature for a computed field's typeOptions.
+ * Normalises all field-ID references to their names so cross-base ID churn is
+ * invisible.  Used both by `fieldSignature` (which appends description) and by
+ * the `updateField` diff to decide whether typeOptions genuinely changed.
+ *
+ * @param {{ type:string, typeOptions:object|null }} field
+ * @param {Record<string, string>} fldNames  fieldId → name for the relevant base
+ * @returns {string}
+ */
+function computedSig(field, fldNames) {
+  const opts = field.typeOptions || {};
+  const normalizedOpts = {
+    ...opts,
+    formulaTextParsed: subAllIds(opts.formulaTextParsed ?? '', fldNames),
+    formulaText: subAllIds(opts.formulaText ?? '', fldNames),
+    formula: subAllIds(opts.formula ?? '', fldNames),
+    relationColumnId: fldNames[opts.relationColumnId ?? ''] ?? opts.relationColumnId ?? '',
+    recordLinkFieldId: fldNames[opts.recordLinkFieldId ?? ''] ?? opts.recordLinkFieldId ?? '',
+    foreignTableRollupColumnId: fldNames[opts.foreignTableRollupColumnId ?? ''] ?? opts.foreignTableRollupColumnId ?? '',
+    fieldIdInLinkedTable: fldNames[opts.fieldIdInLinkedTable ?? ''] ?? opts.fieldIdInLinkedTable ?? '',
+  };
+  // canonicalizeComputed handles structured extraction; pass empty idToName
+  // since we already resolved all IDs above.
+  return 'C|' + field.type + '|' + canonicalizeComputed(field.type, normalizedOpts, {});
+}
+
+/**
  * Comparable signature for a field.
  * - Computed fields canonicalize field-ID references to field names so
  *   cross-base ID churn is invisible (two formulas that refer to the same-named field
@@ -71,22 +98,7 @@ function stableStringify(obj) {
  */
 function fieldSignature(field, fldNames) {
   if (field.isComputed) {
-    // Normalize typeOptions: replace all field-ID tokens with names so the
-    // signature is base-agnostic (works for both `fldXYZ` and short test IDs).
-    const opts = field.typeOptions || {};
-    const normalizedOpts = {
-      ...opts,
-      formulaTextParsed: subAllIds(opts.formulaTextParsed ?? '', fldNames),
-      formulaText: subAllIds(opts.formulaText ?? '', fldNames),
-      formula: subAllIds(opts.formula ?? '', fldNames),
-      relationColumnId: fldNames[opts.relationColumnId ?? ''] ?? opts.relationColumnId ?? '',
-      recordLinkFieldId: fldNames[opts.recordLinkFieldId ?? ''] ?? opts.recordLinkFieldId ?? '',
-      foreignTableRollupColumnId: fldNames[opts.foreignTableRollupColumnId ?? ''] ?? opts.foreignTableRollupColumnId ?? '',
-      fieldIdInLinkedTable: fldNames[opts.fieldIdInLinkedTable ?? ''] ?? opts.fieldIdInLinkedTable ?? '',
-    };
-    // canonicalizeComputed handles structured extraction; pass empty idToName
-    // since we already resolved all IDs above.
-    return 'C|' + field.type + '|' + canonicalizeComputed(field.type, normalizedOpts, {}) + '|' + (field.description ?? '');
+    return computedSig(field, fldNames) + '|' + (field.description ?? '');
   }
   return 'S|' + field.type + '|' + stableStringify(field.typeOptions ?? null) + '|' + (field.description ?? '');
 }
@@ -235,7 +247,14 @@ export function computePlan(srcSnap, destSnap, idmap) {
       if (fieldSignature(sf, srcNames) !== fieldSignature(df, destNames)) {
         const changes = {};
         if (sf.type !== df.type) changes.type = sf.type;
-        if (stableStringify(sf.typeOptions ?? null) !== stableStringify(df.typeOptions ?? null)) {
+        // For computed fields, only flag typeOptions when the canonical (ID-stable)
+        // options differ — not when field IDs merely differ across bases.
+        // For scalar fields, use a raw stable-stringify comparison.
+        if (sf.isComputed) {
+          if (computedSig(sf, srcNames) !== computedSig(df, destNames)) {
+            changes.typeOptions = sf.typeOptions;
+          }
+        } else if (stableStringify(sf.typeOptions ?? null) !== stableStringify(df.typeOptions ?? null)) {
           changes.typeOptions = sf.typeOptions;
         }
         if ((sf.description ?? null) !== (df.description ?? null)) {
