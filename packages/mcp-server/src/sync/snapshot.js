@@ -42,9 +42,46 @@ export function normalizeSchema(rawData) {
           description: c.description ?? null,
           isComputed: isComputedType(c.type),
         })),
+        views: (t.views || []).map((v) => ({
+          id: v.id, name: v.name, type: v.type,
+          description: v.description ?? null,
+          personalForUserId: v.personalForUserId ?? null,
+        })),
       };
     }),
   };
+}
+
+// Map a raw getView result into the flat view-config snapshot shape (null facets omitted).
+// PROBE-VERIFIED (spec §11): sorts is {sortSet:[...]} → flatten to array; type-specific config
+// lives under metadata.<type> (calendar.dateColumnRanges, gallery.coverColumnId), NOT top-level.
+export function normalizeViewConfig(v) {
+  const cfg = {};
+  if (v.filters) cfg.filters = v.filters;
+  if (v.sorts && Array.isArray(v.sorts.sortSet)) cfg.sorts = v.sorts.sortSet.map((s) => ({ columnId: s.columnId, ascending: s.ascending }));
+  if (v.groupLevels) cfg.groupLevels = v.groupLevels.map((g) => ({ columnId: g.columnId, order: g.order, emptyGroupState: g.emptyGroupState }));
+  if (v.columnOrder) cfg.columnOrder = v.columnOrder.map((c) => ({ columnId: c.columnId, visibility: c.visibility }));
+  if (typeof v.frozenColumnCount === 'number') cfg.frozenColumnCount = v.frozenColumnCount;
+  if (v.colorConfig) cfg.colorConfig = v.colorConfig;
+  const md = v.metadata || {};
+  if (md.gallery && md.gallery.coverColumnId) cfg.cover = { coverColumnId: md.gallery.coverColumnId, coverFitType: md.gallery.coverFitType };
+  if (md.calendar && Array.isArray(md.calendar.dateColumnRanges)) cfg.calendar = { dateColumnRanges: md.calendar.dateColumnRanges.map((r) => ({ startColumnId: r.startColumnId, ...(r.endColumnId ? { endColumnId: r.endColumnId } : {}) })) };
+  if (md.form) cfg.form = md.form;
+  if (v.rowHeight) cfg.rowHeight = v.rowHeight;
+  return cfg;
+}
+
+/** Attach live config to each COLLABORATIVE view (personal views skipped). Mutates + returns snap. */
+export async function snapshotViews(client, appId, snap) {
+  if (typeof client.getView !== 'function') return snap;
+  for (const t of snap.tables) {
+    for (const v of t.views || []) {
+      if (v.personalForUserId) continue;
+      const live = await client.getView(appId, v.id);
+      v.config = normalizeViewConfig(live);
+    }
+  }
+  return snap;
 }
 
 /**
@@ -56,7 +93,9 @@ export function normalizeSchema(rawData) {
  */
 export async function snapshotBase(client, appId) {
   const raw = await client.getApplicationData(appId);
-  return { baseId: appId, ...normalizeSchema(raw) };
+  const snap = { baseId: appId, ...normalizeSchema(raw) };
+  await snapshotViews(client, appId, snap);
+  return snap;
 }
 
 /**

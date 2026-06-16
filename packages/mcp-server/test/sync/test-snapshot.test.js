@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSchema, isComputedType } from '../../src/sync/snapshot.js';
+import { normalizeSchema, isComputedType, snapshotViews } from '../../src/sync/snapshot.js';
 
 describe('snapshot.isComputedType', () => {
   it('flags computed types and not writable ones', () => {
@@ -36,5 +36,33 @@ describe('snapshot.normalizeSchema', () => {
   it('falls back to .tables and first column for primary', () => {
     const snap = normalizeSchema({ data: { tables: [{ id: 'tbl2', name: 'X', fields: [{ id: 'fldZ', name: 'P', type: 'text' }] }] } });
     assert.equal(snap.tables[0].primaryFieldId, 'fldZ');
+  });
+});
+
+describe('snapshot views', () => {
+  it('normalizeSchema attaches static views with personal flag', () => {
+    const raw = { data: { tableSchemas: [{ id: 'tbl1', name: 'T', primaryColumnId: 'f1', columns: [{ id: 'f1', name: 'Name', type: 'text' }],
+      views: [{ id: 'viwA', name: 'Grid view', type: 'grid', description: null, personalForUserId: null },
+              { id: 'viwP', name: 'Mine', type: 'grid', personalForUserId: 'usr1' }] }] } };
+    const snap = normalizeSchema(raw);
+    assert.equal(snap.tables[0].views.length, 2);
+    assert.equal(snap.tables[0].views[0].id, 'viwA');
+    assert.equal(snap.tables[0].views[1].personalForUserId, 'usr1');
+  });
+  it('snapshotViews attaches live config (sorts unwrapped, calendar lifted from metadata); skips personal', async () => {
+    const snap = { baseId: 'appD', tables: [{ id: 'tbl1', name: 'T', views: [
+      { id: 'viwA', name: 'Grid view', type: 'grid', personalForUserId: null },
+      { id: 'viwP', name: 'Mine', type: 'grid', personalForUserId: 'usr1' } ] }] };
+    const client = { getView: async () => ({ filters: { conjunction: 'and', filterSet: [] },
+      sorts: { sortSet: [{ id: 'srt1', columnId: 'f1', ascending: true }], shouldAutoSort: true },
+      groupLevels: null, columnOrder: null, frozenColumnCount: 1, colorConfig: null,
+      metadata: { calendar: { dateColumnRanges: [{ startColumnId: 'fDate' }] } }, rowHeight: 'small', description: null }) };
+    await snapshotViews(client, 'appD', snap);
+    const cfg = snap.tables[0].views[0].config;
+    assert.ok(cfg);
+    assert.equal(cfg.frozenColumnCount, 1);
+    assert.deepEqual(cfg.sorts, [{ columnId: 'f1', ascending: true }]);                 // sortSet unwrapped
+    assert.deepEqual(cfg.calendar, { dateColumnRanges: [{ startColumnId: 'fDate' }] });   // lifted from metadata
+    assert.equal(snap.tables[0].views[1].config, undefined);                              // personal skipped
   });
 });
