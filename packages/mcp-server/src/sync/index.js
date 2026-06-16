@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
 import { snapshotBase } from './snapshot.js';
-import { matchByName, saveIdmap, savePlan, saveState } from './idmap.js';
+import { matchByName, saveIdmap, savePlan, saveState, loadPlan, loadIdmap } from './idmap.js';
 import { computePlan } from './diff.js';
-import { renderPlan } from './report.js';
+import { renderPlan, renderApplyResult } from './report.js';
+import { applyPlan } from './apply.js';
+import { newJournal, loadJournal, saveJournal } from './journal.js';
 
-const ENGINE_VERSION = '2a';
+const ENGINE_VERSION = '2b';
 
 /**
  * Produce a deterministic SHA-256 fingerprint of a schema snapshot.
@@ -48,4 +50,31 @@ export async function plan({ client, sourceBaseId, destBaseId, planId }) {
     lastPlanId: planId,
   });
   return renderPlan(fullPlan);
+}
+
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt }) {
+  const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
+  if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
+
+  const destSnapshot = await snapshotBase(client, destBaseId);
+  if (fingerprintSchema(destSnapshot) !== fullPlan.destFingerprint) {
+    return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
+  }
+
+  const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
+  const idmap = journal.actions.length > 0 ? mergeIdmaps(sourceBaseId, destBaseId, fullPlan) : JSON.parse(JSON.stringify(fullPlan.idmap));
+
+  const result = await applyPlan({
+    client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
+    persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
+  });
+  saveState(sourceBaseId, destBaseId, { sourceBaseId, destBaseId, engineVersion: ENGINE_VERSION, lastPlanId: planId, lastApplyAt: runStartedAt });
+  return renderApplyResult(result);
+}
+
+// On resume, merge the persisted (grown) idmap over the plan's base matches so this-run
+// creations from a prior crashed run survive.
+function mergeIdmaps(sourceBaseId, destBaseId, fullPlan) {
+  const m = loadIdmap(sourceBaseId, destBaseId);
+  return { tables: { ...fullPlan.idmap.tables, ...m.tables }, fields: { ...fullPlan.idmap.fields, ...m.fields } };
 }

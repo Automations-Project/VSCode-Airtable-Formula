@@ -22,3 +22,22 @@ export function renderPlan(plan) {
   }
   return { human: lines.join('\n'), machine: plan };
 }
+
+export function renderApplyResult(result) {
+  if (result.aborted) {
+    const msg = (result.warnings && result.warnings[0] && result.warnings[0].message) || 'aborted';
+    return { human: `Apply aborted (${result.reason}): ${msg}`, machine: result };
+  }
+  const lines = [
+    `Apply ${result.planId}:`,
+    `  created: ${result.created}`,
+    `  updated: ${result.updated}`,
+    `  skipped: ${result.skipped}`,
+    `  failed: ${result.failed}`,
+  ];
+  if (result.warnings && result.warnings.length) {
+    lines.push('  warnings:');
+    for (const w of result.warnings) lines.push(`    - ${w.code}: ${w.message}`);
+  }
+  return { human: lines.join('\n'), machine: result };
+}
