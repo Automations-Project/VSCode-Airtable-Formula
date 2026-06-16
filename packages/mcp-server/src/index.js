@@ -1578,14 +1578,15 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   // ── Sync Tools ──
   {
     name: 'sync_base',
-    description: 'Plan a base-to-base schema sync (READ-ONLY): compares source and destination schema by name and returns an ordered plan of tables/fields to create or update, plus reported orphans and warnings. Does NOT mutate the destination. (mode "apply" arrives in a later release.)',
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: 'Base-to-base schema sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), and apply non-destructive field updates. apply requires planId and aborts if the destination drifted since the plan. Type-changing retypes, deletions, records and views are out of scope for this release.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
-        mode: { type: 'string', enum: ['plan'], description: 'Only "plan" is supported in this release (read-only).' },
+        mode: { type: 'string', enum: ['plan', 'apply'], description: '"plan" (read-only preview) or "apply" (execute a saved plan).' },
         sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
         destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
+        planId: { type: 'string', description: 'Required for mode="apply": the planId returned by a prior mode="plan" run.' },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2387,12 +2388,20 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, debug }) {
-    if (mode !== 'plan') return err(`Unsupported mode "${mode}". Only "plan" is available in this release.`);
-    const { plan } = await import('./sync/index.js');
-    const planId = 'pln' + client._genRandomId();
-    const out = await plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId });
-    return ok({ planId, summary: out.human }, out.machine, debug);
+  async sync_base({ mode, sourceAppId, destAppId, planId, debug }) {
+    const sync = await import('./sync/index.js');
+    if (mode === 'plan') {
+      const id = 'pln' + client._genRandomId();
+      const out = await sync.plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id });
+      return ok({ planId: id, summary: out.human }, out.machine, debug);
+    }
+    if (mode === 'apply') {
+      if (!planId) return err('mode="apply" requires planId (from a prior mode="plan" run).');
+      const runStartedAt = new Date().toISOString();
+      const out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt });
+      return ok({ planId, summary: out.human }, out.machine, debug);
+    }
+    return err(`Unsupported mode "${mode}". Use "plan" or "apply".`);
   },
 
   // ── Meta: Tool Management ──
