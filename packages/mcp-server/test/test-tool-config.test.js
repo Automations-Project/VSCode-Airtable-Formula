@@ -17,7 +17,7 @@ import {
 describe('TOOL_CATEGORIES', () => {
   it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
-    assert.equal(tools.length, 69, `Expected 69 tools, got ${tools.length}`);
+    assert.equal(tools.length, 70, `Expected 70 tools, got ${tools.length}`);
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       assert.ok(CATEGORY_LABELS[cat], `Tool "${tool}" has unknown category "${cat}"`);
     }
@@ -84,9 +84,9 @@ describe('ToolConfigManager', () => {
       assert.equal(mgr.activeProfile, 'full');
     });
 
-    it('enables all 69 tools on full profile', () => {
+    it('enables all 70 tools on full profile', () => {
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 69);
+      assert.equal(enabled.size, 70);
     });
 
     it('manage_tools is always enabled', () => {
@@ -125,10 +125,10 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('delete_records'));
     });
 
-    it('full enables all 69 tools', async () => {
+    it('full enables all 70 tools', async () => {
       await mgr.switchProfile('full');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 69);
+      assert.equal(enabled.size, 70);
     });
 
     it('unknown profile fails closed to read-only', async () => {
@@ -211,10 +211,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('getToolStatus()', () => {
-    it('returns status for all 69 tools', async () => {
+    it('returns status for all 70 tools', async () => {
       await mgr.switchProfile('full');
       const status = mgr.getToolStatus();
-      assert.equal(status.length, 69);
+      assert.equal(status.length, 70);
       assert.ok(status.every(s => s.enabled === true));
     });
 
@@ -246,5 +246,11 @@ describe('record-write tools', () => {
     assert.equal(TOOL_CATEGORIES.create_records, 'record-write');
     assert.equal(TOOL_CATEGORIES.update_records, 'record-write');
     assert.equal(TOOL_CATEGORIES.delete_records, 'record-destructive');
+  });
+});
+
+describe('sync tools', () => {
+  it('maps sync_base to the sync category', () => {
+    assert.equal(TOOL_CATEGORIES.sync_base, 'sync');
   });
 });

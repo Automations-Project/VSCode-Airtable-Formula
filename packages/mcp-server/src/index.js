@@ -1575,6 +1575,22 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
       required: ['appId', 'tableId', 'rowIds'],
     },
   },
+  // ── Sync Tools ──
+  {
+    name: 'sync_base',
+    description: 'Plan a base-to-base schema sync (READ-ONLY): compares source and destination schema by name and returns an ordered plan of tables/fields to create or update, plus reported orphans and warnings. Does NOT mutate the destination. (mode "apply" arrives in a later release.)',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['plan'], description: 'Only "plan" is supported in this release (read-only).' },
+        sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
+        destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
+        debug: debugProp,
+      },
+      required: ['mode', 'sourceAppId', 'destAppId'],
+    },
+  },
 ];
 
 // ─── Meta-Tool: manage_tools ─────────────────────────────────
@@ -2367,6 +2383,16 @@ const handlers = {
   async delete_records({ appId, tableId, rowIds, viewId, debug }) {
     const result = await client.deleteRecords(appId, tableId, rowIds, { viewId });
     return ok(result, result, debug);
+  },
+
+  // ── Sync ──
+
+  async sync_base({ mode, sourceAppId, destAppId, debug }) {
+    if (mode !== 'plan') return err(`Unsupported mode "${mode}". Only "plan" is available in this release.`);
+    const { plan } = await import('./sync/index.js');
+    const planId = 'pln' + client._genRandomId();
+    const out = await plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId });
+    return ok({ planId, summary: out.human }, out.machine, debug);
   },
 
   // ── Meta: Tool Management ──

@@ -113,6 +113,9 @@ export const TOOL_CATEGORIES = {
 
   // Record Destructive (batch record deletion)
   delete_records:         'record-destructive',
+
+  // Sync (base-to-base schema sync — read-only plan mode)
+  sync_base:              'sync',
 };
 
 /** Human-readable labels for categories */
@@ -131,6 +134,7 @@ export const CATEGORY_LABELS = {
   'extension':                'Extension Management',
   'record-write':             'Record Write',
   'record-destructive':       'Record Destructive',
+  'sync':                     'Sync',
 };
 
 // ─── Built-in Profiles ───────────────────────────────────────
@@ -142,7 +146,7 @@ export const BUILTIN_PROFILES = {
   },
   'safe-write': {
     description: 'Read + record read/write + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
-    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'],
+    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section', 'sync'],
   },
   full: {
     description: 'All tools enabled including destructive ops, form metadata, and extensions',
@@ -152,7 +156,7 @@ export const BUILTIN_PROFILES = {
       'field-write', 'field-destructive',
       'view-write', 'view-destructive',
       'view-section', 'view-section-destructive',
-      'form-write', 'extension',
+      'form-write', 'extension', 'sync',
     ],
   },
 };
