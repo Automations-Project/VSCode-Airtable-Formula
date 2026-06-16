@@ -127,6 +127,26 @@ function referencedFieldIds(field) {
 }
 
 /**
+ * Collect table IDs that a link field's typeOptions references.
+ * Reuses LINK_TYPES which is already authoritative for ordering.
+ * @param {{ type:string, typeOptions:object|null }} field
+ * @returns {string[]}
+ */
+function referencedTableIds(field) {
+  const o = field.typeOptions || {};
+  const ids = [];
+  if (LINK_TYPES.has(field.type) && o.foreignTableId) ids.push(o.foreignTableId);
+  return ids;
+}
+
+// NOTE (contract for the apply engine): every `typeOptions` / formula text in
+// the emitted actions (createField, updateField.changes, reconcilePrimary.toTypeOptions)
+// is in SOURCE id-space — it contains source `fld…`/`tbl…` IDs. The apply engine MUST
+// remap these to destination IDs via `plan.idmap` (and defer refs whose target field
+// is created in the same run) before sending them to Airtable. remap.js is the intended
+// single source of truth for that rewrite.
+
+/**
  * Build a createField action for a source field.
  * @param {{ id:string }} srcTable
  * @param {{ id:string, name:string, type:string, typeOptions:object|null, isComputed:boolean }} f
@@ -142,6 +162,7 @@ function makeCreateField(srcTable, f) {
     typeOptions: f.typeOptions,
     computed: f.isComputed,
     dependsOn: referencedFieldIds(f),
+    dependsOnTables: referencedTableIds(f),
   };
 }
 

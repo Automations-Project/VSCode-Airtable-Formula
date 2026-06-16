@@ -80,4 +80,39 @@ describe('diff.computePlan', () => {
     assert.equal(upd[0].changes.description, 'new');
     assert.equal(upd[0].changes.typeOptions, undefined, 'no spurious typeOptions for ID-only formula difference');
   });
+
+  it('captures foreign table dependency on a link field createField', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [
+      field('fS1','Name','text'),
+      field('fS2','Link','multipleRecordLinks',{ typeOptions:{ foreignTableId: 'tblFOREIGN' } }) ] }] };
+    const dest = { baseId: 'appD', tables: [] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const link = plan.actions.find(a => a.kind === 'createField' && a.name === 'Link');
+    assert.ok(link, 'link createField present');
+    assert.deepEqual(link.dependsOnTables, ['tblFOREIGN']);
+  });
+
+  it('computed createField dependsOn includes referenced source field ids', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [
+      field('fS1','Name','text'),
+      field('fS2','Total','formula',{ isComputed:true, typeOptions:{ formulaTextParsed:'{fldREF1}+{fldREF2}', dependencies:{ referencedColumnIdsForValue:['fldREF1','fldREF2'] } } }) ] }] };
+    const dest = { baseId: 'appD', tables: [] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const f = plan.actions.find(a => a.kind === 'createField' && a.name === 'Total');
+    assert.ok(f.dependsOn.includes('fldREF1') && f.dependsOn.includes('fldREF2'));
+  });
+
+  it('emits updateField when an existing select field gained a source choice', () => {
+    const sel = (choices) => ({ typeOptions: { choices } });
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [
+      field('fS1','Name','text'),
+      field('fS2','Status','singleSelect', sel({ s1:{id:'s1',name:'Open'}, s2:{id:'s2',name:'Closed'} })) ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [
+      field('fD1','Name','text'),
+      field('fD2','Status','singleSelect', sel({ d1:{id:'d1',name:'Open'} })) ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const upd = plan.actions.filter(a => a.kind === 'updateField' && a.destFld === 'fD2');
+    assert.equal(upd.length, 1, 'a select field that gained a choice should produce an updateField');
+    assert.ok(upd[0].changes.typeOptions, 'carries typeOptions (source choice set; apply engine remaps/merges)');
+  });
 });
