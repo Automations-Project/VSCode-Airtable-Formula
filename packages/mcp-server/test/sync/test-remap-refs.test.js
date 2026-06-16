@@ -16,6 +16,11 @@ describe('remap.remapRefs', () => {
     assert.equal(out.formulaTextParsed, '{fldX}+{fldY}');
     assert.equal(out.formulaText, '{fldX}+fldB');
   });
+  it('is brace-aware: a mapped id inside a string literal is NOT remapped (no corruption)', () => {
+    // fldB maps to fldY, but here it appears in a string literal, not a {ref}.
+    const out = remapRefs({ formulaText: 'IF({column_value_fldA}, "fldB is a label", "")' }, idmap);
+    assert.equal(out.formulaText, 'IF({fldX}, "fldB is a label", "")');
+  });
   it('rewrites single-id ref keys and foreignTableId', () => {
     const out = remapRefs({ relationColumnId: 'fldA', foreignTableRollupColumnId: 'fldB', foreignTableId: 'tblSRC' }, idmap);
     assert.equal(out.relationColumnId, 'fldX');
