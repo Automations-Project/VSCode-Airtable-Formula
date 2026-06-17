@@ -99,6 +99,18 @@ export async function snapshotBase(client, appId) {
 }
 
 /**
+ * Pull a table's records via its first collaborative view (single call, ≤1000 rows;
+ * the internal readQueries endpoint has no cursor — Task-11 pre-flight warns on >1000).
+ * @returns {Promise<Array<{id:string, cellValuesByColumnId:object}>>}
+ */
+export async function snapshotTableRecords(client, appId, table) {
+  const view = (table.views || []).find((v) => !v.personalForUserId) || (table.views || [])[0];
+  if (!view) return [];
+  const res = await client.queryRecords(appId, table.id, view.id, { limit: 1000 });
+  return (res?.summary?.rows || []).map((r) => ({ id: r.id, cellValuesByColumnId: r.fields || {} }));
+}
+
+/**
  * @typedef {{ id: string, name: string, type: string, typeOptions: object|null, description: string|null, isComputed: boolean }} NormalizedField
  * @typedef {{ id: string, name: string, primaryFieldId: string|null, fields: NormalizedField[] }} NormalizedTable
  */
