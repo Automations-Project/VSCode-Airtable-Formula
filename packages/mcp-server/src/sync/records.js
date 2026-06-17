@@ -361,27 +361,85 @@ async function defaultFetchBytes(url) {
 const ATTACHMENT_TYPES = new Set(['multipleAttachments', 'multipleAttachment']);
 
 /**
- * Pass 3 record sync: download source attachments → upload to dest base.
+ * Fallback: upload a single attachment via download→upload for cases where the
+ * server-side fast-path skipped or failed it.
  *
- * For each matched table, for each source field of type `multipleAttachments`
- * that has a dest field mapping, for each source record with a non-empty
- * attachment cell whose src row maps (idmap.records[srcRecId]):
- *   - For each attachment { url, filename, size, type }:
- *     - Dedupe key = `${filename}|${size}`. Skip if already uploaded.
- *     - Fetch bytes from source URL (URLs expire ~2h — must download during run).
- *     - Upload to dest via client.uploadAttachment (rate-limited + retried).
- *     - On {ok:true}: record dedupe key, bump attachmentsUploaded counter.
- *     - On {ok:false} OR thrown fetch error: push ATTACHMENT_FAILED warning, CONTINUE.
- *   - persist(idmap, journal) after each source table.
+ * @param {object} opts
+ * @param {object}   opts.client
+ * @param {string}   opts.destAppId
+ * @param {string}   opts.destRowId
+ * @param {string}   opts.destFldId
+ * @param {object}   opts.attachment  - { url, filename, size, type }
+ * @param {object}   opts.idmap
+ * @param {object}   opts.result
+ * @param {Function} opts.fetchBytes
+ * @param {object}   opts.limiter
+ */
+async function uploadAttachmentFallback({ client, destAppId, destRowId, destFldId, attachment, idmap, result, fetchBytes, limiter }) {
+  const { url, filename, size, type } = attachment;
+  if (!url || !filename) return;
+
+  const dedupeKey = `${filename}|${size}`;
+  if (idmap.attachments[dedupeKey]) return; // already uploaded
+
+  let bytes;
+  let contentType = type;
+  try {
+    const fetched = await fetchBytes(url);
+    bytes = fetched.bytes;
+    if (!contentType && fetched.contentType) contentType = fetched.contentType;
+  } catch (fetchErr) {
+    result.warnings.push({
+      code: 'ATTACHMENT_FAILED',
+      message: `Attachment ${filename}: fetch failed — ${fetchErr.message}`,
+    });
+    return;
+  }
+
+  try {
+    const res = await limiter.run(() =>
+      withRetry(() =>
+        client.uploadAttachment(destAppId, destRowId, destFldId, { bytes, filename, contentType }),
+      ),
+    );
+    if (res.ok) {
+      idmap.attachments[dedupeKey] = true;
+      result.attachmentsUploaded = (result.attachmentsUploaded || 0) + 1;
+    } else {
+      result.warnings.push({
+        code: 'ATTACHMENT_FAILED',
+        message: `Attachment ${filename}: upload failed — ${res.error || 'unknown error'}`,
+      });
+    }
+  } catch (uploadErr) {
+    result.warnings.push({
+      code: 'ATTACHMENT_FAILED',
+      message: `Attachment ${filename}: upload threw — ${uploadErr.message}`,
+    });
+  }
+}
+
+/**
+ * Pass 3 record sync: server-side cross-base attachment copy (fast-path), with
+ * per-attachment download→upload fallback for skipped/failed items.
  *
- * NOTE: {ok:true} from uploadAttachment IS the hosting verification per Task-0 spike.
- * The spike confirmed dest attachment URLs are on dl.airtable.com after a successful upload.
- * No separate per-attachment read-back re-query is performed (that would be an extra network
- * call per attachment; the spike already proved {ok:true} guarantees hosting).
+ * Fast-path (per table with ≥1 mapped attachment field):
+ *   1. Collect included source records (mapped in idmap.records, have ≥1 attachment cell).
+ *   2. Build `attachmentIdsWithCellLocation` from all attachment objects in included cells.
+ *   3. Call `createDataTransferPolicy` (POST createDataTransferPolicyV2) to get the signed policy.
+ *   4. Call `pasteAttachmentsCrossBase` (POST pasteCells) which SETS the target cells (idempotent).
+ *   5. Bump result.attachmentsUploaded by pastedRowIds.length (or numUpdatedCells).
+ *
+ * Fallback (per skipped attachment or on fast-path error):
+ *   - For res.skippedAttachments (non-empty): call uploadAttachmentFallback for each skipped att.
+ *   - On thrown error from fast-path: warn ATTACHMENT_FALLBACK, iterate all included attachments
+ *     through uploadAttachmentFallback.
+ *   - Continue-on-failure: per-table errors never throw out of the loop.
+ *   - persist(idmap, journal) after each table.
  *
  * @param {object}   opts
- * @param {object}   opts.client          - AirtableClient instance (must have uploadAttachment)
- * @param {object}   opts.srcSnapshot     - source base snapshot (tables with records attached)
+ * @param {object}   opts.client          - AirtableClient instance (must have createDataTransferPolicy, pasteAttachmentsCrossBase, uploadAttachment)
+ * @param {object}   opts.srcSnapshot     - source base snapshot (tables with records attached; must have baseId)
  * @param {object}   opts.destSnapshot    - dest base snapshot (provides destAppId via baseId)
  * @param {object}   opts.idmap           - live id-map (.tables, .fields, .records, .attachments)
  * @param {object}   opts.limiter         - rate limiter from createLimiter()
@@ -405,82 +463,197 @@ export async function applyAttachments({
   // Initialize dedupe map if not already present (survives across calls for idempotency)
   idmap.attachments ??= {};
 
+  const srcAppId = srcSnapshot.baseId || '';
   const destAppId = destSnapshot.baseId || '';
 
   for (const srcTable of (srcSnapshot.tables || [])) {
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
 
-    // Find attachment fields that have a dest mapping
-    const attFields = (srcTable.fields || []).filter(
-      (f) => ATTACHMENT_TYPES.has(f.type) && idmap.fields[f.id],
-    );
-    if (attFields.length === 0) continue;
+    try {
+      // Find attachment fields that have a dest mapping
+      const attFields = (srcTable.fields || []).filter(
+        (f) => ATTACHMENT_TYPES.has(f.type) && idmap.fields[f.id],
+      );
+      if (attFields.length === 0) continue;
 
-    for (const rec of (srcTable.records || [])) {
-      const destRowId = idmap.records[rec.id];
-      if (!destRowId) continue; // src record not yet mapped → skip
-
-      const srcCells = rec.cellValuesByColumnId || {};
-
-      for (const field of attFields) {
-        const cellValue = srcCells[field.id];
-        if (!cellValue || !Array.isArray(cellValue) || cellValue.length === 0) continue;
-
-        const destFldId = idmap.fields[field.id].destFld;
-
-        for (const attachment of cellValue) {
-          const { url, filename, size, type } = attachment;
-          if (!url || !filename) continue;
-
-          const dedupeKey = `${filename}|${size}`;
-          if (idmap.attachments[dedupeKey]) continue; // already uploaded → skip
-
-          // Fetch bytes from source (URLs expire ~2h)
-          let bytes;
-          let contentType = type;
-          try {
-            const fetched = await fetchBytes(url);
-            bytes = fetched.bytes;
-            if (!contentType && fetched.contentType) contentType = fetched.contentType;
-          } catch (fetchErr) {
-            result.warnings.push({
-              code: 'ATTACHMENT_FAILED',
-              message: `Attachment ${filename}: fetch failed — ${fetchErr.message}`,
-            });
-            continue; // next attachment, don't abort the record
-          }
-
-          // Upload to dest via limiter + retry
-          try {
-            const res = await limiter.run(() =>
-              withRetry(() =>
-                client.uploadAttachment(destAppId, destRowId, destFldId, {
-                  bytes,
-                  filename,
-                  contentType,
-                }),
-              ),
-            );
-
-            if (res.ok) {
-              idmap.attachments[dedupeKey] = true;
-              result.attachmentsUploaded = (result.attachmentsUploaded || 0) + 1;
-            } else {
-              result.warnings.push({
-                code: 'ATTACHMENT_FAILED',
-                message: `Attachment ${filename}: upload failed — ${res.error || 'unknown error'}`,
-              });
-              // Don't set dedupe key on failure so a retry run can re-attempt
+      // Determine a dest viewId for pasteCells (requires a view context)
+      // Use the first collaborative (non-personal) view; fall back to first view of any type.
+      const destTable = (destSnapshot.tables || []).find((t) => t.id === destTableId);
+      const destViews = destTable?.views || [];
+      const destViewId = destViews.find((v) => !v.personalForUserId)?.id ?? destViews[0]?.id;
+      if (!destViewId) {
+        result.warnings.push({
+          code: 'ATTACHMENT_FALLBACK',
+          message: `Table ${srcTable.id}: no dest view found for pasteCells — falling back to per-attachment upload`,
+        });
+        // Fall through to fallback for all records/fields in this table
+        for (const rec of (srcTable.records || [])) {
+          const destRowId = idmap.records[rec.id];
+          if (!destRowId) continue;
+          const srcCells = rec.cellValuesByColumnId || {};
+          for (const field of attFields) {
+            const cellValue = srcCells[field.id];
+            if (!cellValue || !Array.isArray(cellValue) || cellValue.length === 0) continue;
+            const destFldId = idmap.fields[field.id].destFld;
+            for (const att of cellValue) {
+              await uploadAttachmentFallback({ client, destAppId, destRowId, destFldId, attachment: att, idmap, result, fetchBytes, limiter });
             }
-          } catch (uploadErr) {
-            result.warnings.push({
-              code: 'ATTACHMENT_FAILED',
-              message: `Attachment ${filename}: upload threw — ${uploadErr.message}`,
-            });
+          }
+        }
+        persist(idmap, journal);
+        continue;
+      }
+
+      // Collect included records: must be mapped AND have ≥1 attachment cell
+      const includedRecs = [];
+      for (const rec of (srcTable.records || [])) {
+        const destRowId = idmap.records[rec.id];
+        if (!destRowId) continue;
+        const srcCells = rec.cellValuesByColumnId || {};
+        const hasAtt = attFields.some((f) => {
+          const cv = srcCells[f.id];
+          return Array.isArray(cv) && cv.length > 0;
+        });
+        if (hasAtt) includedRecs.push({ rec, destRowId });
+      }
+
+      if (includedRecs.length === 0) {
+        persist(idmap, journal);
+        continue;
+      }
+
+      // Build fast-path payload arrays
+      const sourceColumnConfigs = attFields.map((f) => ({
+        id: f.id,
+        name: f.name,
+        type: f.type,
+        typeOptions: f.typeOptions || {},
+      }));
+      const targetColumnIds = attFields.map((f) => idmap.fields[f.id].destFld);
+      const targetRowIds = includedRecs.map((r) => r.destRowId);
+      const sourceRowIds = includedRecs.map((r) => r.rec.id);
+
+      // 2D grid: [rowIdx][colIdx] = attachment array (or [])
+      const sourceCellValues2dArray = includedRecs.map(({ rec }) => {
+        const srcCells = rec.cellValuesByColumnId || {};
+        return attFields.map((f) => {
+          const cv = srcCells[f.id];
+          return Array.isArray(cv) ? cv : [];
+        });
+      });
+
+      // Flat list of all attachment location refs for the policy request
+      const attachmentIdsWithCellLocation = [];
+      for (const { rec } of includedRecs) {
+        const srcCells = rec.cellValuesByColumnId || {};
+        for (const field of attFields) {
+          const cv = srcCells[field.id];
+          if (!Array.isArray(cv)) continue;
+          for (const att of cv) {
+            if (att.id) {
+              attachmentIdsWithCellLocation.push({
+                rowId: rec.id,
+                columnId: field.id,
+                attachmentId: att.id,
+              });
+            }
           }
         }
       }
+
+      if (attachmentIdsWithCellLocation.length === 0) {
+        persist(idmap, journal);
+        continue;
+      }
+
+      // Fast-path: createDataTransferPolicy → pasteAttachmentsCrossBase
+      let pasteRes;
+      try {
+        const policy = await limiter.run(() =>
+          withRetry(() =>
+            client.createDataTransferPolicy(srcAppId, srcTable.id, attachmentIdsWithCellLocation),
+          ),
+        );
+
+        pasteRes = await limiter.run(() =>
+          withRetry(() =>
+            client.pasteAttachmentsCrossBase(destAppId, destTableId, {
+              viewId: destViewId,
+              sourceAppId: srcAppId,
+              sourceTableId: srcTable.id,
+              sourceColumnConfigs,
+              sourceCellValues2dArray,
+              targetRowIds,
+              targetColumnIds,
+              signedDataTransferPolicy: policy,
+              sourceRowIds,
+            }),
+          ),
+        );
+
+        // Count success by pastedRowIds (most reliable signal)
+        result.attachmentsUploaded = (result.attachmentsUploaded || 0) +
+          (pasteRes.pastedRowIds?.length ?? pasteRes.numUpdatedCells ?? 0);
+
+        // Handle partial skips: fall back per skipped attachment
+        if (Array.isArray(pasteRes.skippedAttachments) && pasteRes.skippedAttachments.length > 0) {
+          result.warnings.push({
+            code: 'ATTACHMENT_FALLBACK',
+            message: `Table ${srcTable.id}: ${pasteRes.skippedAttachments.length} attachment(s) skipped by pasteCells — falling back to per-attachment upload`,
+          });
+
+          // Build lookup: attachmentId → { rec, field } for fallback
+          const attLookup = new Map();
+          for (const { rec } of includedRecs) {
+            const srcCells = rec.cellValuesByColumnId || {};
+            for (const field of attFields) {
+              const cv = srcCells[field.id];
+              if (!Array.isArray(cv)) continue;
+              for (const att of cv) {
+                if (att.id) attLookup.set(att.id, { rec, field, att });
+              }
+            }
+          }
+
+          for (const skipped of pasteRes.skippedAttachments) {
+            const attId = skipped.attachmentId ?? skipped.id;
+            const entry = attLookup.get(attId);
+            if (!entry) continue;
+            const { rec, field, att } = entry;
+            const destRowId = idmap.records[rec.id];
+            if (!destRowId) continue;
+            const destFldId = idmap.fields[field.id]?.destFld;
+            if (!destFldId) continue;
+            await uploadAttachmentFallback({ client, destAppId, destRowId, destFldId, attachment: att, idmap, result, fetchBytes, limiter });
+          }
+        }
+      } catch (fastPathErr) {
+        // Fast-path threw — fall back to per-attachment upload for all included records
+        result.warnings.push({
+          code: 'ATTACHMENT_FALLBACK',
+          message: `Table ${srcTable.id}: fast-path threw (${fastPathErr.message}) — falling back to per-attachment upload`,
+        });
+
+        for (const { rec, destRowId } of includedRecs) {
+          const srcCells = rec.cellValuesByColumnId || {};
+          for (const field of attFields) {
+            const cv = srcCells[field.id];
+            if (!Array.isArray(cv)) continue;
+            const destFldId = idmap.fields[field.id]?.destFld;
+            if (!destFldId) continue;
+            for (const att of cv) {
+              await uploadAttachmentFallback({ client, destAppId, destRowId, destFldId, attachment: att, idmap, result, fetchBytes, limiter });
+            }
+          }
+        }
+      }
+    } catch (tableErr) {
+      // Top-level per-table guard: never throw out of the loop
+      result.warnings.push({
+        code: 'ATTACHMENT_FAILED',
+        message: `Table ${srcTable.id}: unexpected error — ${tableErr.message}`,
+      });
     }
 
     persist(idmap, journal);

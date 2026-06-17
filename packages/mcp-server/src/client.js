@@ -2488,6 +2488,88 @@ export class AirtableClient {
   }
 
   /**
+   * Create a cross-base data transfer policy (step 1 of server-side attachment copy).
+   *
+   * POSTs to `application/{sourceAppId}/createDataTransferPolicyV2` and returns the
+   * `signedDataTransferPolicy` object needed by `pasteAttachmentsCrossBase`.
+   *
+   * @param {string} sourceAppId
+   * @param {string} tableId            - SOURCE table ID
+   * @param {{rowId:string, columnId:string, attachmentId:string}[]} attachmentIdsWithCellLocation
+   * @returns {Promise<object>}         - signedDataTransferPolicy { version, data }
+   */
+  async createDataTransferPolicy(sourceAppId, tableId, attachmentIdsWithCellLocation) {
+    const payload = { attachmentIdsWithCellLocation, tableId };
+    const url = `https://airtable.com/v0.3/application/${sourceAppId}/createDataTransferPolicyV2`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, sourceAppId), sourceAppId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`createDataTransferPolicy failed (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    return data?.data?.signedDataTransferPolicy;
+  }
+
+  /**
+   * Paste attachments cross-base via server-side transfer (step 2 of cross-base attachment copy).
+   *
+   * POSTs to `table/{destTableId}/pasteCells` using a signed data transfer policy acquired from
+   * `createDataTransferPolicy`. The operation SETS (replaces) the target cells, so re-running is
+   * idempotent — no duplicate attachments accumulate.
+   *
+   * @param {string} destAppId
+   * @param {string} destTableId
+   * @param {object} opts
+   * @param {string}   opts.viewId
+   * @param {string}   opts.sourceAppId
+   * @param {string}   opts.sourceTableId
+   * @param {Array}    opts.sourceColumnConfigs     - [{id, name, type, typeOptions}]
+   * @param {Array}    opts.sourceCellValues2dArray - [rowIdx][colIdx] = attachment array
+   * @param {string[]} opts.targetRowIds
+   * @param {string[]} opts.targetColumnIds
+   * @param {object}   opts.signedDataTransferPolicy
+   * @param {string[]} opts.sourceRowIds
+   * @returns {Promise<object>} - { numUpdatedCells, pastedRowIds, pastedColumnIds, skippedAttachments, ... }
+   */
+  async pasteAttachmentsCrossBase(destAppId, destTableId, {
+    viewId,
+    sourceAppId,
+    sourceTableId,
+    sourceColumnConfigs,
+    sourceCellValues2dArray,
+    targetRowIds,
+    targetColumnIds,
+    signedDataTransferPolicy,
+    sourceRowIds,
+  }) {
+    const payload = {
+      viewId,
+      sourceApplicationId: sourceAppId,
+      sourceTableId,
+      sourceColumnConfigs,
+      sourceCellValues2dArray,
+      targetRowIds,
+      targetColumnIds,
+      signedDataTransferPolicy,
+      isCut: false,
+      sourceRowIds,
+    };
+
+    const url = `https://airtable.com/v0.3/table/${destTableId}/pasteCells`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, destAppId), destAppId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`pasteAttachmentsCrossBase failed (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    return data?.data || {};
+  }
+
+  /**
    * Create records (one row per item). The client generates each rowId locally
    * (Airtable accepts a client-supplied rec ID in the URL), so the returned
    * rowId is final — no response parsing needed for the ID map.
