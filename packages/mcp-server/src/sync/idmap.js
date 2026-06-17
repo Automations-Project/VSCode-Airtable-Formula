@@ -110,19 +110,19 @@ export function saveIdmap(sourceBaseId, destBaseId, idmap) {
 }
 
 /**
- * Load a previously saved ID-map.  Returns `{ tables: {}, fields: {} }` when
+ * Load a previously saved ID-map.  Returns `{ tables: {}, fields: {}, records: {} }` when
  * the file is absent or unparseable.
  * @param {string} sourceBaseId
  * @param {string} destBaseId
- * @returns {{ tables: Record<string,string>, fields: Record<string,object> }}
+ * @returns {{ tables: Record<string,string>, fields: Record<string,object>, records: Record<string,string> }}
  */
 export function loadIdmap(sourceBaseId, destBaseId) {
   const p = join(syncDir(sourceBaseId, destBaseId), 'idmap.json');
-  if (!existsSync(p)) return { tables: {}, fields: {} };
+  if (!existsSync(p)) return { tables: {}, fields: {}, records: {} };
   try {
     return JSON.parse(readFileSync(p, 'utf8'));
   } catch {
-    return { tables: {}, fields: {} };
+    return { tables: {}, fields: {}, records: {} };
   }
 }
 

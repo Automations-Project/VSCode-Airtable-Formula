@@ -63,7 +63,14 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   }
 
   const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
-  const idmap = journal.actions.length > 0 ? mergeIdmaps(sourceBaseId, destBaseId, fullPlan) : JSON.parse(JSON.stringify(fullPlan.idmap));
+  let idmap;
+  if (journal.actions.length > 0) {
+    idmap = mergeIdmaps(sourceBaseId, destBaseId, fullPlan);
+  } else {
+    idmap = JSON.parse(JSON.stringify(fullPlan.idmap));
+    idmap.records ??= {};
+    idmap.views ??= {};
+  }
 
   const result = await applyPlan({
     client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
@@ -74,8 +81,17 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
 }
 
 // On resume, merge the persisted (grown) idmap over the plan's base matches so this-run
-// creations from a prior crashed run survive.
-function mergeIdmaps(sourceBaseId, destBaseId, fullPlan) {
+// creations from a prior crashed run survive. Persisted wins on key conflict (has grown).
+export function mergeIdmapsForTest(sourceBaseId, destBaseId, fullPlan) {
   const m = loadIdmap(sourceBaseId, destBaseId);
-  return { tables: { ...fullPlan.idmap.tables, ...m.tables }, fields: { ...fullPlan.idmap.fields, ...m.fields } };
+  return {
+    tables: { ...fullPlan.idmap.tables, ...m.tables },
+    fields: { ...fullPlan.idmap.fields, ...m.fields },
+    records: { ...fullPlan.idmap.records, ...m.records },
+    views: { ...fullPlan.idmap.views, ...m.views },
+  };
+}
+
+function mergeIdmaps(sourceBaseId, destBaseId, fullPlan) {
+  return mergeIdmapsForTest(sourceBaseId, destBaseId, fullPlan);
 }
