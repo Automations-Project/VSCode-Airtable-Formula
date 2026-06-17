@@ -83,11 +83,38 @@ export class AirtableAuth {
     if (this._initPromise) return this._initPromise;
     if (this.context && this.isLoggedIn) return;
 
-    this._initPromise = this._doInit();
+    this._initPromise = this._doInitBounded();
     try {
       await this._initPromise;
     } finally {
       this._initPromise = null;
+    }
+  }
+
+  // Bound the browser (re)launch so a locked/contended .chrome-profile can't block
+  // the serialized request queue forever. `_doInit` -> `launchPersistentContext` has no
+  // built-in timeout; without this watchdog a single hung relaunch (profile contention,
+  // chrome exit 21) stalls every queued request indefinitely. On timeout we reject so the
+  // caller's retry/budget can proceed; a late-arriving context is closed to avoid leaking
+  // a Chromium onto the contended profile.
+  async _doInitBounded() {
+    const ms = Number(process.env.AIRTABLE_INIT_TIMEOUT_MS) || 90_000;
+    let timer;
+    let timedOut = false;
+    const inner = this._doInit();
+    inner.then(() => { if (timedOut) this.context?.close?.().catch(() => {}); }, () => {});
+    try {
+      return await Promise.race([
+        inner,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(new Error(`session init/recovery exceeded ${ms / 1000}s — the browser profile may be locked by another process (profile contention)`));
+          }, ms);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -309,7 +336,8 @@ export class AirtableAuth {
       this.isLoggedIn = false;
       // Atomic assignment — init() observes this as already-in-progress and
       // awaits the same promise, preventing a parallel _doInit().
-      const recovery = this._doInit();
+      // Bounded so a hung relaunch (locked profile) can't block the queue forever.
+      const recovery = this._doInitBounded();
       this._initPromise = recovery;
       try {
         await recovery;
@@ -525,6 +553,33 @@ export class AirtableAuth {
       this.isLoggedIn = false;
       trace('auth', 'auth:refresh', { reason: 'browser_context_lost' });
       await this.init();
+    }
+  }
+
+  /**
+   * Lightweight session check that reuses the already-open browser context —
+   * it never launches a second Chrome. The daemon exposes this via
+   * /daemon/session-health so the extension can verify the session through the
+   * daemon's single shared browser instead of forking a competing health-check
+   * (two Chromes on one persistent profile collide → Chrome exit code 21).
+   *
+   * @returns {Promise<{valid: boolean, userId?: string|null, status?: number, error?: string}>}
+   */
+  async checkSessionHealth() {
+    try {
+      await this.ensureLoggedIn();
+      const res = await this.get('/v0.3/getUserProperties');
+      if (res.ok) {
+        let userId = this.userId;
+        try {
+          const data = await res.json();
+          userId = data?.data?.userId ?? userId;
+        } catch { /* keep cached userId */ }
+        return { valid: true, userId: userId ?? null };
+      }
+      return { valid: false, status: res.status };
+    } catch (err) {
+      return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
