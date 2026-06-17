@@ -2687,6 +2687,36 @@ export class AirtableClient {
     }
   }
 
+  /**
+   * Add linked-record items to a link cell via `updateArrayTypeCellByAddingItem`.
+   * Called once per item (Airtable has no SET endpoint for link cells — only APPEND).
+   * Soft-fails (returns {ok:false,error}) instead of throwing, so one bad link
+   * doesn't abort a record sync.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {Array<{foreignRowId:string, foreignRowDisplayName:string}>} items
+   * @returns {Promise<{ok:boolean, added:number, error?:string}>}
+   */
+  async addLinkItems(appId, rowId, columnId, items) {
+    const url = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+    let added = 0;
+    try {
+      for (const item of items) {
+        const res = await this.auth.postForm(url, this._mutationParams({ columnId, item }, appId), appId);
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          return { ok: false, added, error: `addLinkItem failed (${res.status}): ${body}` };
+        }
+        added++;
+      }
+      return { ok: true, added };
+    } catch (err) {
+      return { ok: false, added, error: String(err?.message || err) };
+    }
+  }
+
   _genRequestId() {
     return 'req' + this._genRandomId();
   }

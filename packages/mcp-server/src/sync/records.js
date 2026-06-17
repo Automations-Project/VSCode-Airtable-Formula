@@ -11,7 +11,7 @@
  * `persist(idmap, journal)` is called after each batch.
  */
 
-import { coercePass1Cell } from './cells.js';
+import { coercePass1Cell, partitionLinkValue } from './cells.js';
 import { withRetry } from './ratelimit.js';
 
 /**
@@ -196,5 +196,120 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       }
       persist(idmap, journal);
     }
+  }
+}
+
+/**
+ * Pass 2 record sync: write link cells (multipleRecordLinks / foreignKey) that
+ * were deferred from Pass 1.
+ *
+ * For each matched table, for each source field of type `multipleRecordLinks`
+ * or `foreignKey` that has a dest field mapping, for each source record with a
+ * non-empty link cell:
+ *   - Map src row → dest row (skip if the src row has no dest mapping).
+ *   - `partitionLinkValue(srcCell, idmap)` → resolved (dest rec ids) + unresolved (src rec ids).
+ *   - Dedup against current dest links: only add ids NOT already present.
+ *   - Call `client.addLinkItems` via the limiter for the new items.
+ *   - Push ONE `RECORD_LINK_UNRESOLVED` warning (count + context) for any unresolved ids.
+ *   - Continue-on-failure: per-field errors are caught and pushed as `RECORD_LINK_FAILED` warnings.
+ *
+ * @param {object} opts
+ * @param {object} opts.client          - AirtableClient instance (must have addLinkItems)
+ * @param {object} opts.srcSnapshot     - source base snapshot (tables with records attached)
+ * @param {object} opts.destSnapshot    - dest base snapshot (tables with records attached; used for dedup)
+ * @param {object} opts.idmap           - live id-map (.tables, .fields, .records)
+ * @param {Map}    opts.destDisplayNames - Map<destRecId, primaryString> for foreignRowDisplayName
+ * @param {object} opts.limiter         - rate limiter from createLimiter()
+ * @param {object} opts.journal         - journal from newJournal()
+ * @param {Function} opts.persist       - persist(idmap, journal) called after each table
+ * @param {object} opts.result          - result accumulator { created, updated, skipped, failed, warnings }
+ * @returns {Promise<void>}
+ */
+export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result }) {
+  const destAppId = destSnapshot.baseId || '';
+
+  // Build a fast lookup: destTableId → Map<destRecId, Set<linkedDestRecId>>
+  // so we can check which links already exist on the dest row.
+  const destLinkIndex = new Map(); // destTableId → Map<destRecId, Map<destFldId, Set<linkedId>>>
+  for (const destTable of (destSnapshot.tables || [])) {
+    const recMap = new Map();
+    for (const rec of (destTable.records || [])) {
+      recMap.set(rec.id, rec.cellValuesByColumnId || {});
+    }
+    destLinkIndex.set(destTable.id, recMap);
+  }
+
+  for (const srcTable of (srcSnapshot.tables || [])) {
+    const destTableId = idmap.tables[srcTable.id];
+    if (!destTableId) continue;
+
+    // Find all link fields in this source table that have a dest mapping
+    const linkFields = (srcTable.fields || []).filter(
+      (f) => (f.type === 'multipleRecordLinks' || f.type === 'foreignKey') && idmap.fields[f.id],
+    );
+    if (linkFields.length === 0) continue;
+
+    const destRecMap = destLinkIndex.get(destTableId) || new Map();
+
+    for (const rec of (srcTable.records || [])) {
+      const destRowId = idmap.records[rec.id];
+      if (!destRowId) continue; // src row not yet mapped → skip
+
+      const srcCells = rec.cellValuesByColumnId || {};
+      const destCells = destRecMap.get(destRowId) || {};
+
+      for (const field of linkFields) {
+        const srcVal = srcCells[field.id];
+        if (!srcVal || (Array.isArray(srcVal) && srcVal.length === 0)) continue;
+
+        const mapping = idmap.fields[field.id];
+        const destFldId = mapping.destFld;
+
+        // Partition: resolved → dest rec ids; unresolved → src rec ids with no mapping
+        const { resolved, unresolved } = partitionLinkValue(srcVal, idmap);
+
+        // Warn for unresolved (one warning per field+record, count in message)
+        if (unresolved.length > 0) {
+          result.warnings.push({
+            code: 'RECORD_LINK_UNRESOLVED',
+            message: `Record ${rec.id} field ${field.id}: ${unresolved.length} linked record(s) could not be resolved (no dest mapping): ${unresolved.join(', ')}`,
+          });
+        }
+
+        if (resolved.length === 0) continue;
+
+        // Dedup against current dest links
+        const currentLinks = destCells[destFldId];
+        const alreadyPresent = new Set(Array.isArray(currentLinks) ? currentLinks : []);
+        const toAdd = resolved.filter((id) => !alreadyPresent.has(id));
+        if (toAdd.length === 0) continue;
+
+        const items = toAdd.map((destRec) => ({
+          foreignRowId: destRec,
+          foreignRowDisplayName: destDisplayNames.get(destRec) ?? '',
+        }));
+
+        try {
+          const res = await limiter.run(() =>
+            withRetry(() => client.addLinkItems(destAppId, destRowId, destFldId, items)),
+          );
+          if (!res.ok) {
+            result.warnings.push({
+              code: 'RECORD_LINK_FAILED',
+              message: `Record ${rec.id} field ${field.id} → dest row ${destRowId}: addLinkItems failed: ${res.error}`,
+            });
+          } else {
+            result.updated++;
+          }
+        } catch (err) {
+          result.warnings.push({
+            code: 'RECORD_LINK_FAILED',
+            message: `Record ${rec.id} field ${field.id} → dest row ${destRowId}: addLinkItems threw: ${err.message}`,
+          });
+        }
+      }
+    }
+
+    persist(idmap, journal);
   }
 }

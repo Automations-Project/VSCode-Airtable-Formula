@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1 } from '../../src/sync/records.js';
+import { applyRecordsPass1, applyRecordsPass2 } from '../../src/sync/records.js';
 import { newJournal } from '../../src/sync/journal.js';
 import { createLimiter } from '../../src/sync/ratelimit.js';
 
@@ -210,5 +210,249 @@ describe('records.applyRecordsPass1', () => {
       result.warnings.some((w) => w.code === 'RECORD_CREATE_FAILED'),
       'expected RECORD_CREATE_FAILED warning',
     );
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// applyRecordsPass2
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('records.applyRecordsPass2', () => {
+  function makeLimiter() {
+    return createLimiter({ rps: 1000, sleep: async () => {} });
+  }
+
+  it('adds resolved link items with correct foreignRowId and displayName', async () => {
+    const addCalls = [];
+    const client = {
+      addLinkItems: async (appId, rowId, columnId, items) => {
+        addCalls.push({ appId, rowId, columnId, items });
+        return { ok: true, added: items.length };
+      },
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldL: { destFld: 'fldLD' } },
+      records: { recS1: 'recD1', recSTarget: 'recDTarget' },
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldL', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recSTarget'] } }],
+      }],
+    };
+
+    // dest row's link cell is currently empty → nothing to dedup against
+    const destSnapshot = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD', name: 'T',
+        fields: [{ id: 'fldLD', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recD1', cellValuesByColumnId: { fldLD: [] } }],
+      }],
+    };
+
+    const destDisplayNames = new Map([['recDTarget', 'Target Row']]);
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames,
+      limiter: makeLimiter(),
+      journal: newJournal('p2-1', 't'),
+      persist: () => {},
+      result,
+    });
+
+    assert.equal(addCalls.length, 1, 'addLinkItems should be called once');
+    assert.equal(addCalls[0].rowId, 'recD1');
+    assert.equal(addCalls[0].columnId, 'fldLD');
+    assert.deepEqual(addCalls[0].items, [{ foreignRowId: 'recDTarget', foreignRowDisplayName: 'Target Row' }]);
+    assert.equal(result.warnings.length, 0, 'no warnings for fully-resolved links');
+  });
+
+  it('emits RECORD_LINK_UNRESOLVED warning for unresolved src ids, does not abort record', async () => {
+    const addCalls = [];
+    const client = {
+      addLinkItems: async (appId, rowId, columnId, items) => {
+        addCalls.push({ rowId, columnId, items });
+        return { ok: true, added: items.length };
+      },
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldL: { destFld: 'fldLD' } },
+      records: { recS1: 'recD1', recSTarget: 'recDTarget' }, // recX has no mapping
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldL', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recSTarget', 'recX'] } }],
+      }],
+    };
+
+    const destSnapshot = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD', name: 'T',
+        fields: [{ id: 'fldLD', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recD1', cellValuesByColumnId: {} }],
+      }],
+    };
+
+    const destDisplayNames = new Map([['recDTarget', 'Target']]);
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames,
+      limiter: makeLimiter(),
+      journal: newJournal('p2-2', 't'),
+      persist: () => {},
+      result,
+    });
+
+    // The resolved link should still be added (record not aborted)
+    assert.equal(addCalls.length, 1, 'addLinkItems still called for resolved items');
+    assert.deepEqual(addCalls[0].items, [{ foreignRowId: 'recDTarget', foreignRowDisplayName: 'Target' }]);
+
+    // One RECORD_LINK_UNRESOLVED warning for the unresolved recX
+    const unresolvedWarns = result.warnings.filter((w) => w.code === 'RECORD_LINK_UNRESOLVED');
+    assert.equal(unresolvedWarns.length, 1, 'expected exactly one RECORD_LINK_UNRESOLVED warning');
+    assert.ok(unresolvedWarns[0].message.includes('recX') || unresolvedWarns[0].message.includes('1'), 'warning should mention unresolved id or count');
+  });
+
+  it('does not re-add links already present in destSnapshot (idempotency)', async () => {
+    const addCalls = [];
+    const client = {
+      addLinkItems: async (appId, rowId, columnId, items) => {
+        addCalls.push({ rowId, columnId, items });
+        return { ok: true, added: items.length };
+      },
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldL: { destFld: 'fldLD' } },
+      records: { recS1: 'recD1', recSTarget: 'recDTarget' },
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldL', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recSTarget'] } }],
+      }],
+    };
+
+    // dest row already has recDTarget linked → must NOT re-add
+    const destSnapshot = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD', name: 'T',
+        fields: [{ id: 'fldLD', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recD1', cellValuesByColumnId: { fldLD: ['recDTarget'] } }],
+      }],
+    };
+
+    const destDisplayNames = new Map([['recDTarget', 'Target']]);
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames,
+      limiter: makeLimiter(),
+      journal: newJournal('p2-3', 't'),
+      persist: () => {},
+      result,
+    });
+
+    // addLinkItems must NOT be called (nothing new to add)
+    assert.equal(addCalls.length, 0, 'addLinkItems must not be called when link already present');
+    assert.equal(result.warnings.length, 0);
+  });
+
+  it('skips src records not in idmap.records', async () => {
+    const addCalls = [];
+    const client = {
+      addLinkItems: async (appId, rowId, columnId, items) => {
+        addCalls.push({ rowId, items });
+        return { ok: true, added: items.length };
+      },
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldL: { destFld: 'fldLD' } },
+      records: {}, // recS1 has no dest mapping
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldL', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recS2'] } }],
+      }],
+    };
+
+    const destSnapshot = { baseId: 'appDest', tables: [{ id: 'tblD', records: [] }] };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames: new Map(),
+      limiter: makeLimiter(),
+      journal: newJournal('p2-4', 't'),
+      persist: () => {},
+      result,
+    });
+
+    assert.equal(addCalls.length, 0, 'no addLinkItems when src row not mapped');
+  });
+
+  it('continues on addLinkItems failure and emits RECORD_LINK_FAILED warning', async () => {
+    const client = {
+      addLinkItems: async () => ({ ok: false, error: 'network error' }),
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldL: { destFld: 'fldLD' } },
+      records: { recS1: 'recD1', recSTarget: 'recDTarget' },
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldL', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recSTarget'] } }],
+      }],
+    };
+
+    const destSnapshot = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD', name: 'T',
+        fields: [{ id: 'fldLD', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recD1', cellValuesByColumnId: {} }],
+      }],
+    };
+
+    const destDisplayNames = new Map([['recDTarget', 'Target']]);
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+
+    // Must not throw
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames,
+      limiter: makeLimiter(),
+      journal: newJournal('p2-5', 't'),
+      persist: () => {},
+      result,
+    });
+
+    const failWarns = result.warnings.filter((w) => w.code === 'RECORD_LINK_FAILED');
+    assert.equal(failWarns.length, 1, 'expected RECORD_LINK_FAILED warning');
   });
 });
