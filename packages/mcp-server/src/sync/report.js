@@ -37,9 +37,13 @@ export function renderApplyResult(result) {
   ];
   if (result.records) {
     const r = result.records;
-    lines.push(
-      `  records: created ${r.created} / updated ${r.updated} / failed ${r.failed} / attachments ${r.attachmentsUploaded} / viewFilters ${r.viewFiltersReapplied}`
-    );
+    if (r.status === 'running') {
+      lines.push(`  records: started in background (jobId=${r.jobId}) — poll with sync_base mode=status, planId="${r.jobId}"`);
+    } else {
+      lines.push(
+        `  records: created ${r.created} / updated ${r.updated} / failed ${r.failed} / attachments ${r.attachmentsUploaded} / viewFilters ${r.viewFiltersReapplied}`
+      );
+    }
   }
   if (result.warnings && result.warnings.length) {
     lines.push('  warnings:');

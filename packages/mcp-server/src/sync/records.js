@@ -12,12 +12,32 @@
  * `persist(idmap, journal)` is called after each batch.
  */
 
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
 import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords } from './snapshot.js';
-import { loadIdmap, saveIdmap } from './idmap.js';
+import { loadIdmap, saveIdmap, syncDir } from './idmap.js';
 import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
+import { safeAtomicWriteFileSync } from '../safe-write.js';
+
+// ── Records-job status file (records-job-<planId>.json) ──
+// The records phase is minutes-long for large bases, so apply() launches it in the BACKGROUND
+// and returns immediately. Status is persisted to disk (survives process restarts) and polled
+// via sync_base mode=status. Progress (records mapped) is derived live from idmap.records.
+function recordsJobPath(sourceBaseId, destBaseId, planId) {
+  return join(syncDir(sourceBaseId, destBaseId), `records-job-${planId}.json`);
+}
+export function writeRecordsJobStatus(sourceBaseId, destBaseId, planId, status) {
+  mkdirSync(syncDir(sourceBaseId, destBaseId), { recursive: true });
+  safeAtomicWriteFileSync(recordsJobPath(sourceBaseId, destBaseId, planId), JSON.stringify({ planId, ...status }, null, 2));
+}
+export function readRecordsJobStatus(sourceBaseId, destBaseId, planId) {
+  const p = recordsJobPath(sourceBaseId, destBaseId, planId);
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+}
 
 /**
  * Returns true if the field type is a multiSelect (arrays not accepted by updateRecords).

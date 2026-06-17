@@ -1578,15 +1578,15 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   // ── Sync Tools ──
   {
     name: 'sync_base',
-    description: 'Base-to-base schema sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), apply non-destructive field updates, and sync records. apply requires planId and aborts if the destination drifted since the plan. mode="reconcile": rebuild/repair the record map — existence-prune dead entries from the idmap, with optional natural-key re-match per table.',
+    description: 'Base-to-base schema + record sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), apply non-destructive field updates; then start the RECORD sync (two-pass cells + links, attachments, view-filter restore) in the BACKGROUND and return immediately with a jobId. apply requires planId and aborts if the destination drifted since the plan. mode="status": poll the background record job (pass the apply planId as planId) for progress/completion. mode="reconcile": rebuild/repair the record map — existence-prune dead entries from the idmap, with optional natural-key re-match per table.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
-        mode: { type: 'string', enum: ['plan', 'apply', 'reconcile'], description: '"plan" (read-only preview), "apply" (execute a saved plan, includes records sync), or "reconcile" (rebuild/repair the record map: existence-prune dead entries; optional natural-key re-match).' },
+        mode: { type: 'string', enum: ['plan', 'apply', 'reconcile', 'status'], description: '"plan" (read-only preview), "apply" (execute a saved plan; starts the record sync in the background and returns a jobId), "status" (poll the background record job by planId), or "reconcile" (rebuild/repair the record map: existence-prune dead entries; optional natural-key re-match).' },
         sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
         destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
-        planId: { type: 'string', description: 'Required for mode="apply": the planId returned by a prior mode="plan" run.' },
+        planId: { type: 'string', description: 'Required for mode="apply" (the planId from a prior mode="plan" run) and mode="status" (the same planId, which is the background record jobId).' },
         naturalKeys: { type: 'object', description: 'Used only by mode="reconcile": map of tableName → fieldName to use as a natural key for re-matching records (e.g. { "Projects": "Name" }). Omit to run existence-prune only.', additionalProperties: { type: 'string' } },
         debug: debugProp,
       },
@@ -2408,7 +2408,19 @@ const handlers = {
       const out = renderApplyResult({ ...raw, planId: 'reconcile' });
       return ok({ summary: out.human }, out.machine, debug);
     }
-    return err(`Unsupported mode "${mode}". Use "plan", "apply", or "reconcile".`);
+    if (mode === 'status') {
+      if (!planId) return err('mode="status" requires planId (the jobId returned by mode="apply").');
+      const raw = sync.recordsStatus({ sourceBaseId: sourceAppId, destBaseId: destAppId, planId });
+      const summary = raw.status === 'running'
+        ? `Records job ${planId}: running — ${raw.recordsMapped} records mapped so far (started ${raw.startedAt})`
+        : raw.status === 'done'
+          ? `Records job ${planId}: done — ${JSON.stringify(raw.result)} (${raw.recordsMapped} records mapped)`
+          : raw.status === 'failed'
+            ? `Records job ${planId}: FAILED — ${raw.error}`
+            : `Records job ${planId}: ${raw.status}${raw.message ? ' — ' + raw.message : ''}`;
+      return ok({ planId, status: raw.status, summary }, raw, debug);
+    }
+    return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", or "status".`);
   },
 
   // ── Meta: Tool Management ──

@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { snapshotBase } from './snapshot.js';
+import { snapshotBase, snapshotSchemaOnly } from './snapshot.js';
 import { matchByName, saveIdmap, savePlan, saveState, loadPlan, loadIdmap } from './idmap.js';
 import { computePlan } from './diff.js';
 import { renderPlan, renderApplyResult } from './report.js';
 import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
-import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl } from './records.js';
+import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -58,7 +58,9 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
-  const destSnapshot = await snapshotBase(client, destBaseId);
+  // Schema-only: fingerprintSchema + buildIndex use table/field/view METADATA only, not per-view
+  // live config — so skip the getView/readData storm (one ~1s read per view) on the dest here.
+  const destSnapshot = await snapshotSchemaOnly(client, destBaseId);
   if (fingerprintSchema(destSnapshot) !== fullPlan.destFingerprint) {
     return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
   }
@@ -78,32 +80,42 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
   });
 
-  // Records phase: runs after schema apply, only if not aborted
+  // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
+  // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single
+  // blocking apply call would look hung / time out. The phase persists progress (idmap + records
+  // journal) and writes a status file; poll via `sync_base mode=status`.
   if (!result.aborted) {
-    try {
-      const recResult = await applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt });
-      // Merge records phase counts + warnings into the schema result
-      result.records = {
-        created: recResult.created,
-        updated: recResult.updated,
-        failed: recResult.failed,
-        attachmentsUploaded: recResult.attachmentsUploaded || 0,
-        viewFiltersReapplied: recResult.viewFiltersReapplied || 0,
-      };
-      if (recResult.warnings && recResult.warnings.length) {
-        result.warnings = (result.warnings || []).concat(recResult.warnings);
-      }
-    } catch (err) {
-      // Records phase failure is non-fatal for the schema result
-      result.warnings = (result.warnings || []).concat([{
-        code: 'RECORDS_PHASE_FAILED',
-        message: `Records phase threw: ${err.message}`,
-      }]);
-    }
+    writeRecordsJobStatus(sourceBaseId, destBaseId, planId, { status: 'running', startedAt: runStartedAt });
+    applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt })
+      .then((r) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
+        status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
+        result: {
+          created: r.created, updated: r.updated, failed: r.failed,
+          attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
+          warnings: (r.warnings || []).length,
+        },
+      }))
+      .catch((err) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
+        status: 'failed', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
+        error: String(err && err.message ? err.message : err),
+      }));
+    result.records = { status: 'running', jobId: planId };
   }
 
   saveState(sourceBaseId, destBaseId, { sourceBaseId, destBaseId, engineVersion: ENGINE_VERSION, lastPlanId: planId, lastApplyAt: runStartedAt });
   return renderApplyResult(result);
+}
+
+/**
+ * Poll the background records job started by apply(). Reads the persisted status file and
+ * derives live progress (records mapped so far) from idmap.records.
+ * @returns {{ planId:string, status:string, recordsMapped:number, startedAt?:string, finishedAt?:string, result?:object, error?:string, message?:string }}
+ */
+export function recordsStatus({ sourceBaseId, destBaseId, planId }) {
+  const job = readRecordsJobStatus(sourceBaseId, destBaseId, planId)
+    || { planId, status: 'unknown', message: 'No records job found for this planId (run mode=apply first).' };
+  const idmap = loadIdmap(sourceBaseId, destBaseId);
+  return { ...job, recordsMapped: Object.keys((idmap && idmap.records) || {}).length };
 }
 
 /**
