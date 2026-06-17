@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isWritableForRecords, coercePass1Cell } from '../../src/sync/cells.js';
+import { isWritableForRecords, coercePass1Cell, partitionLinkValue } from '../../src/sync/cells.js';
 
 const idmap = { fields: { fldSel: { destFld: 'fldSelD', choices: { selA: 'selAD', selB: 'selBD' } } } };
 
@@ -29,5 +29,14 @@ describe('cells.coercePass1Cell', () => {
   });
   it('drops an unmappable choice id (reports via write:false)', () => {
     assert.equal(coercePass1Cell({ id: 'fldSel', type: 'select' }, 'selUNKNOWN', idmap).write, false);
+  });
+});
+describe('cells.partitionLinkValue', () => {
+  const m = { records: { recS1: 'recD1', recS2: 'recD2' } };
+  it('splits resolved vs unresolved by the record map', () => {
+    assert.deepEqual(partitionLinkValue(['recS1', 'recS2', 'recX'], m), { resolved: ['recD1', 'recD2'], unresolved: ['recX'] });
+  });
+  it('null/empty → empty partition', () => {
+    assert.deepEqual(partitionLinkValue(null, m), { resolved: [], unresolved: [] });
   });
 });

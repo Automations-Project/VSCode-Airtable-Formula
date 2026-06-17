@@ -23,3 +23,12 @@ export function coercePass1Cell(field, srcValue, idmap) {
   }
   return { write: true, value: srcValue }; // text/number/currency/date/checkbox/...
 }
+
+export function partitionLinkValue(srcValue, idmap) {
+  const recs = idmap.records || {};
+  const resolved = [], unresolved = [];
+  for (const s of (Array.isArray(srcValue) ? srcValue : [])) {
+    if (recs[s]) resolved.push(recs[s]); else unresolved.push(s);
+  }
+  return { resolved, unresolved };
+}
