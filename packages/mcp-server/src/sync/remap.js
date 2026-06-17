@@ -141,7 +141,9 @@ export function canonicalizeViewConfig(config, fldNames, selNames) {
       hidden: (c.columnOrder || []).filter((co) => !co.visibility).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
     },
     frozen: c.frozenColumnCount ?? null,
-    color: c.colorConfig ? { type: c.colorConfig.type, col: viewNameOf(fldNames, c.colorConfig.selectColumnId) } : null,
+    // Only the select-driven colour rule is syncable; 'colorDefinitions' (conditional rules
+    // whose filters reference specific RECORD ids) are out of scope — exclude so they don't re-flag.
+    color: (c.colorConfig && c.colorConfig.type === 'selectColumn') ? { col: viewNameOf(fldNames, c.colorConfig.selectColumnId) } : null,
     cover: c.cover ? { col: viewNameOf(fldNames, c.cover.coverColumnId), fit: c.cover.coverFitType } : null,
     calendar: c.calendar ? (c.calendar.dateColumnRanges || []).map((r) => ({ s: viewNameOf(fldNames, r.startColumnId), e: r.endColumnId ? viewNameOf(fldNames, r.endColumnId) : null })) : null,
     rowHeight: c.rowHeight ?? null,
