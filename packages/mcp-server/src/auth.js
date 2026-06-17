@@ -74,6 +74,19 @@ export class AirtableAuth {
     // Session recovery state
     this._recovering = false;
     this._initPromise = null;
+    // Circuit-breaker: if the session keeps getting rejected (403/401, or page.evaluate keeps
+    // failing) even AFTER re-auth, stop looping recovery futilely (a dead/blocked/expired login —
+    // observed as endless "403 → recover → 403"). Counts CONSECUTIVE recoveries; any 2xx resets it.
+    // Past the threshold, mark the session dead and fail fast with a re-login message.
+    this._recoveryStreak = 0;
+    this._sessionDead = false;
+    this._sessionDeadAfter = Number(process.env.AIRTABLE_SESSION_DEAD_AFTER) || 6;
+  }
+
+  /** Reset the dead-session circuit-breaker (e.g., after the user re-authenticates). */
+  resetSessionHealth() {
+    this._sessionDead = false;
+    this._recoveryStreak = 0;
   }
 
   // ─── Initialization ──────────────────────────────────────────
@@ -479,6 +492,9 @@ export class AirtableAuth {
 
   async _apiCall(method, urlPath, body = null, appId = null, contentType = 'form', evalTimeoutMs = 15_000) {
     return this._enqueue(async () => {
+      if (this._sessionDead) {
+        throw new Error('SESSION_INVALID: Airtable rejected repeated requests even after re-authentication — the login has expired or been blocked. Re-authenticate (run `login`) and retry.');
+      }
       await this.ensureLoggedIn();
 
       const MAX_RETRIES = 3;
@@ -497,7 +513,11 @@ export class AirtableAuth {
         } catch (evalError) {
           // page.evaluate itself failed (browser crashed, context destroyed)
           if (!this._recovering && attempt < MAX_RETRIES) {
-            console.error(`[auth] page.evaluate failed: ${evalError.message}. Recovering...`);
+            if (++this._recoveryStreak >= this._sessionDeadAfter) {
+              this._sessionDead = true;
+              throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive failures across recoveries (page.evaluate) — re-authenticate (run \`login\`) and retry.`);
+            }
+            console.error(`[auth] page.evaluate failed: ${evalError.message}. Recovering... (streak ${this._recoveryStreak})`);
             await this._recoverSession();
             attempt++;
             continue;
@@ -517,12 +537,18 @@ export class AirtableAuth {
         // Session expired or network failure — attempt one recovery and retry
         const needsRecovery = result.status === 401 || result.status === 403 || result.error;
         if (needsRecovery && !this._recovering && attempt < MAX_RETRIES) {
-          console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering...`);
+          if (++this._recoveryStreak >= this._sessionDeadAfter) {
+            this._sessionDead = true;
+            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive auth failures (status=${result.status}) across recoveries — the Airtable login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
+          }
+          console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering... (streak ${this._recoveryStreak})`);
           await this._recoverSession();
           attempt++;
           continue;
         }
 
+        // Healthy response → reset the dead-session circuit-breaker.
+        if (result.status >= 200 && result.status < 300) this._recoveryStreak = 0;
         return result;
       }
     });
