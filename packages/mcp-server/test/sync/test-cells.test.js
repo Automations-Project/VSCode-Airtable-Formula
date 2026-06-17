@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isWritableForRecords, coercePass1Cell, partitionLinkValue } from '../../src/sync/cells.js';
+import { isWritableForRecords, coercePass1Cell, partitionLinkValue, linkRecId } from '../../src/sync/cells.js';
 
 const idmap = { fields: { fldSel: { destFld: 'fldSelD', choices: { selA: 'selAD', selB: 'selBD' } } } };
 
@@ -31,10 +31,39 @@ describe('cells.coercePass1Cell', () => {
     assert.equal(coercePass1Cell({ id: 'fldSel', type: 'select' }, 'selUNKNOWN', idmap).write, false);
   });
 });
+describe('cells.linkRecId', () => {
+  it('string → string', () => {
+    assert.equal(linkRecId('recXyz'), 'recXyz');
+  });
+  it('object with foreignRowId → foreignRowId', () => {
+    assert.equal(linkRecId({ foreignRowId: 'recAbc' }), 'recAbc');
+  });
+  it('object with id → id', () => {
+    assert.equal(linkRecId({ id: 'recDef' }), 'recDef');
+  });
+  it('object with both foreignRowId and id → foreignRowId preferred', () => {
+    assert.equal(linkRecId({ foreignRowId: 'recA', id: 'recB' }), 'recA');
+  });
+  it('garbage object → null', () => {
+    assert.equal(linkRecId({}), null);
+    assert.equal(linkRecId({ other: 'val' }), null);
+  });
+  it('null/undefined → null', () => {
+    assert.equal(linkRecId(null), null);
+    assert.equal(linkRecId(undefined), null);
+  });
+});
+
 describe('cells.partitionLinkValue', () => {
   const m = { records: { recS1: 'recD1', recS2: 'recD2' } };
   it('splits resolved vs unresolved by the record map', () => {
     assert.deepEqual(partitionLinkValue(['recS1', 'recS2', 'recX'], m), { resolved: ['recD1', 'recD2'], unresolved: ['recX'] });
+  });
+  it('handles mixed string and object shapes in source link cell', () => {
+    assert.deepEqual(
+      partitionLinkValue([{ foreignRowId: 'recS1' }, { id: 'recS2' }, 'recS3'], { records: { recS1: 'recD1', recS2: 'recD2' } }),
+      { resolved: ['recD1', 'recD2'], unresolved: ['recS3'] }
+    );
   });
   it('null/empty → empty partition', () => {
     assert.deepEqual(partitionLinkValue(null, m), { resolved: [], unresolved: [] });

@@ -2,6 +2,21 @@ import { isComputedType } from './snapshot.js';
 
 const ARRAY_DEFERRED = new Set(['multipleRecordLinks', 'multipleAttachments']);
 
+/**
+ * Extract the record ID from a link-cell element.
+ * Link-cell elements can be plain strings ('recXxx') or objects ({ foreignRowId: 'recXxx' } or { id: 'recXxx' }).
+ *
+ * @param {string | object} x - link-cell element
+ * @returns {string | null} - the rec-id string, or null if not found
+ */
+export function linkRecId(x) {
+  if (typeof x === 'string') return x;
+  if (x && typeof x === 'object') {
+    return x.foreignRowId ?? x.id ?? null;
+  }
+  return null;
+}
+
 export function isWritableForRecords(field) {
   return !isComputedType(field.type) && !ARRAY_DEFERRED.has(field.type);
 }
@@ -27,8 +42,10 @@ export function coercePass1Cell(field, srcValue, idmap) {
 export function partitionLinkValue(srcValue, idmap) {
   const recs = idmap.records || {};
   const resolved = [], unresolved = [];
-  for (const s of (Array.isArray(srcValue) ? srcValue : [])) {
-    if (recs[s]) resolved.push(recs[s]); else unresolved.push(s);
+  for (const elem of (Array.isArray(srcValue) ? srcValue : [])) {
+    const srcRecId = linkRecId(elem);
+    if (srcRecId === null) continue; // skip garbage elements
+    if (recs[srcRecId]) resolved.push(recs[srcRecId]); else unresolved.push(srcRecId);
   }
   return { resolved, unresolved };
 }

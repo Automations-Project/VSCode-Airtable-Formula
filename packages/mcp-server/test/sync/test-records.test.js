@@ -375,6 +375,56 @@ describe('records.applyRecordsPass2', () => {
     assert.equal(result.warnings.length, 0);
   });
 
+  it('handles object-shaped dest link cell elements (dedup on foreignRowId)', async () => {
+    const addCalls = [];
+    const client = {
+      addLinkItems: async (appId, rowId, columnId, items) => {
+        addCalls.push({ rowId, columnId, items });
+        return { ok: true, added: items.length };
+      },
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldL: { destFld: 'fldLD' } },
+      records: { recS1: 'recD1', recSTarget: 'recDTarget' },
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldL', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recSTarget'] } }],
+      }],
+    };
+
+    // dest row's link cell is OBJECT-shaped (API returned objects, not strings)
+    // Current link is already { foreignRowId: 'recDTarget' } → must NOT re-add
+    const destSnapshot = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD', name: 'T',
+        fields: [{ id: 'fldLD', type: 'multipleRecordLinks' }],
+        records: [{ id: 'recD1', cellValuesByColumnId: { fldLD: [{ foreignRowId: 'recDTarget' }] } }],
+      }],
+    };
+
+    const destDisplayNames = new Map([['recDTarget', 'Target']]);
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames,
+      limiter: makeLimiter(),
+      journal: newJournal('p2-3b', 't'),
+      persist: () => {},
+      result,
+    });
+
+    // addLinkItems must NOT be called (link already present in object form)
+    assert.equal(addCalls.length, 0, 'addLinkItems must not be called when link already present (object shape)');
+    assert.equal(result.warnings.length, 0);
+  });
+
   it('skips src records not in idmap.records', async () => {
     const addCalls = [];
     const client = {

@@ -11,7 +11,7 @@
  * `persist(idmap, journal)` is called after each batch.
  */
 
-import { coercePass1Cell, partitionLinkValue } from './cells.js';
+import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
 import { withRetry } from './ratelimit.js';
 
 /**
@@ -279,8 +279,10 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
         if (resolved.length === 0) continue;
 
         // Dedup against current dest links
+        // Map link-cell elements through linkRecId to handle both string and object shapes
         const currentLinks = destCells[destFldId];
-        const alreadyPresent = new Set(Array.isArray(currentLinks) ? currentLinks : []);
+        const currentLinkIds = (Array.isArray(currentLinks) ? currentLinks : []).map(linkRecId).filter(Boolean);
+        const alreadyPresent = new Set(currentLinkIds);
         const toAdd = resolved.filter((id) => !alreadyPresent.has(id));
         if (toAdd.length === 0) continue;
 
