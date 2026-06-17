@@ -9,9 +9,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### MCP server — sync_base record sync (2026-06-17)
 
 #### Added
-- `sync_base mode=apply`: after schema + view sync, launches a **background** record sync and returns a `jobId` immediately. Two-pass: Pass 1 creates/updates scalar + single/multi-select cells (computed fields + computed primary are never written) and fills a persisted `idmap.records` (rec→rec map); Pass 2 writes linked-record cells (remapped via record map, unresolved targets reported). Attachments are then downloaded from source and re-uploaded to dest (deduped by filename+size). Record-referencing view filters that were stripped during view sync are restored once records exist. Rate-limited (~5 req/s), resumable (records journal), and continue-on-failure (per-record errors are warnings, not aborts).
+- `sync_base mode=apply`: after schema + view sync, launches a **background** record sync and returns a `jobId` immediately. Two-pass: Pass 1 creates/updates scalar + single/multi-select cells (computed fields + computed primary are never written) and fills a persisted `idmap.records` (rec→rec map); Pass 2 writes linked-record cells (remapped via record map, unresolved targets reported). Attachments are then downloaded from source and re-uploaded to dest (deduped by filename+size). Record-referencing view filters that were stripped during view sync are restored once records exist. Throttling is handled by per-request 429 backoff in the auth queue; resumable (records journal, per-chunk persist) and continue-on-failure (per-record errors are warnings, not aborts).
 - `sync_base mode=status`: poll a background record job by planId — returns running/done/failed plus live records-mapped count.
-- `sync_base mode=reconcile`: rebuild/repair the record map — prunes dead entries and optionally re-matches by per-table natural key.
+- `sync_base mode=reconcile`: **prune** dead record-map entries (existence-prune). Per-table natural-key re-match is planned (not yet implemented); reconcile does not de-duplicate records.
 
 ### MCP server — sync_base collaborative view sync (2026-06-17)
 

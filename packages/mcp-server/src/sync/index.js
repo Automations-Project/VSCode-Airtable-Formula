@@ -66,14 +66,8 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   }
 
   const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
-  let idmap;
-  if (journal.actions.length > 0) {
-    idmap = mergeIdmaps(sourceBaseId, destBaseId, fullPlan);
-  } else {
-    idmap = JSON.parse(JSON.stringify(fullPlan.idmap));
-    idmap.records ??= {};
-    idmap.views ??= {};
-  }
+  // C1: preserve the persisted records/attachments identity map across applies (see buildRunIdmap).
+  const idmap = buildRunIdmap(sourceBaseId, destBaseId, fullPlan, journal);
 
   const result = await applyPlan({
     client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
@@ -140,11 +134,28 @@ export function mergeIdmapsForTest(sourceBaseId, destBaseId, fullPlan) {
   return {
     tables: { ...fullPlan.idmap.tables, ...m.tables },
     fields: { ...fullPlan.idmap.fields, ...m.fields },
-    records: { ...fullPlan.idmap.records, ...m.records },
-    views: { ...fullPlan.idmap.views, ...m.views },
+    records: { ...(fullPlan.idmap.records || {}), ...(m.records || {}) },
+    attachments: { ...(fullPlan.idmap.attachments || {}), ...(m.attachments || {}) },
+    views: { ...(fullPlan.idmap.views || {}), ...(m.views || {}) },
   };
 }
 
 function mergeIdmaps(sourceBaseId, destBaseId, fullPlan) {
   return mergeIdmapsForTest(sourceBaseId, destBaseId, fullPlan);
+}
+
+// Build the idmap for an apply run.
+// CRITICAL (C1 — record-duplication guard): the persisted records/attachments maps are the rec->rec
+// identity and MUST survive across applies. A fresh plan's idmap has NO records, so on the fresh path
+// we seed records/attachments from the ON-DISK idmap. Without this, the schema phase persists an empty
+// records map and the records phase re-creates every record (duplicates) on every re-apply with a new
+// planId. The resume path (journal has actions) goes through mergeIdmaps, which already preserves them.
+export function buildRunIdmap(sourceBaseId, destBaseId, fullPlan, journal) {
+  if (journal.actions.length > 0) return mergeIdmaps(sourceBaseId, destBaseId, fullPlan);
+  const persisted = loadIdmap(sourceBaseId, destBaseId);
+  const idmap = JSON.parse(JSON.stringify(fullPlan.idmap));
+  idmap.records = { ...(persisted.records || {}) };
+  idmap.attachments = { ...(persisted.attachments || {}) };
+  idmap.views ??= {};
+  return idmap;
 }

@@ -171,11 +171,16 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       }
     }
 
-    // ── CREATE batch ──────────────────────────────────────────────────────
-    if (createRows.length > 0) {
+    // ── CREATE batches (chunked) ──────────────────────────────────────────
+    // Chunk + persist per chunk so progress is durable/visible: a crash loses at most one chunk
+    // (not the whole table → bounded duplication on resume), and idmap.records grows during the
+    // run so `sync_base mode=status` reports live progress instead of 0 until a huge table finishes.
+    const CREATE_CHUNK = 50;
+    for (let i = 0; i < createRows.length; i += CREATE_CHUNK) {
+      const chunk = createRows.slice(i, i + CREATE_CHUNK);
       try {
         const res = await limiter.run(() =>
-          withRetry(() => client.createRecords(destAppId, destTableId, createRows, {})),
+          withRetry(() => client.createRecords(destAppId, destTableId, chunk, {})),
         );
         for (const created of (res.created || [])) {
           idmap.records[created.sourceKey] = created.rowId;
@@ -189,7 +194,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
           });
         }
       } catch (err) {
-        result.failed += createRows.length;
+        result.failed += chunk.length;
         result.warnings.push({
           code: 'RECORD_CREATE_FAILED',
           message: `Table ${destTableId}: createRecords threw: ${err.message}`,

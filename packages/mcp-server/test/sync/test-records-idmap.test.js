@@ -4,7 +4,29 @@ import { join } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { loadIdmap, saveIdmap } from '../../src/sync/idmap.js';
-import { mergeIdmapsForTest } from '../../src/sync/index.js';
+import { mergeIdmapsForTest, buildRunIdmap } from '../../src/sync/index.js';
+
+describe('buildRunIdmap — records identity survives across applies (C1 duplication guard)', () => {
+  it('FRESH apply (empty journal) SEEDS records + attachments from the persisted idmap, not the plan', () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-c1-'));
+    // Persisted idmap holds the grown rec->rec identity from a prior apply.
+    saveIdmap('appAAAA', 'appBBBB', { tables: {}, fields: {}, records: { recA: 'recX' }, attachments: { 'photo.png|123': true } });
+    // A fresh plan's idmap has NO records (plan is schema-only).
+    const fullPlan = { idmap: { tables: { tblS: 'tblD' }, fields: {}, views: {} } };
+    const idmap = buildRunIdmap('appAAAA', 'appBBBB', fullPlan, { actions: [] });
+    assert.deepEqual(idmap.records, { recA: 'recX' });               // preserved — NOT wiped (the bug)
+    assert.deepEqual(idmap.attachments, { 'photo.png|123': true });   // attachment dedupe map preserved
+    assert.equal(idmap.tables.tblS, 'tblD');                          // plan's schema matches still present
+  });
+
+  it('RESUME (journal has actions) merges persisted records over the plan', () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-c1r-'));
+    saveIdmap('appAAAA', 'appBBBB', { tables: {}, fields: {}, records: { recA: 'recX' } });
+    const fullPlan = { idmap: { tables: {}, fields: {}, records: {}, views: {} } };
+    const idmap = buildRunIdmap('appAAAA', 'appBBBB', fullPlan, { actions: [{ idx: 0, status: 'done' }] });
+    assert.equal(idmap.records.recA, 'recX');
+  });
+});
 
 describe('idmap records slot', () => {
   it('loadIdmap defaults to { tables: {}, fields: {}, records: {} } when file missing', () => {
