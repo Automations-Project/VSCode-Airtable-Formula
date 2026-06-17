@@ -1,5 +1,6 @@
 /**
- * records.js — Pass 1: sync scalar + select/multiSelect cells.
+ * records.js — Pass 1/2: sync scalar + select/multiSelect cells + link cells.
+ *              Pass 3 (applyAttachments): download source attachments → upload to dest.
  *
  * For each matched table (those with idmap.tables[srcTableId]):
  *   CREATE path — source record not yet in idmap.records → createRecords, fill idmap.records.
@@ -308,6 +309,147 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
             code: 'RECORD_LINK_FAILED',
             message: `Record ${rec.id} field ${field.id} → dest row ${destRowId}: addLinkItems threw: ${err.message}`,
           });
+        }
+      }
+    }
+
+    persist(idmap, journal);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Default fetchBytes: real fetch-based implementation.
+// Injected in tests so no real network is hit.
+// ──────────────────────────────────────────────────────────────────────────────
+async function defaultFetchBytes(url) {
+  const r = await fetch(url);
+  return { bytes: Buffer.from(await r.arrayBuffer()), contentType: r.headers.get('content-type') };
+}
+
+/**
+ * Attachment field type names accepted by Airtable (public API names).
+ */
+const ATTACHMENT_TYPES = new Set(['multipleAttachments', 'multipleAttachment']);
+
+/**
+ * Pass 3 record sync: download source attachments → upload to dest base.
+ *
+ * For each matched table, for each source field of type `multipleAttachments`
+ * that has a dest field mapping, for each source record with a non-empty
+ * attachment cell whose src row maps (idmap.records[srcRecId]):
+ *   - For each attachment { url, filename, size, type }:
+ *     - Dedupe key = `${filename}|${size}`. Skip if already uploaded.
+ *     - Fetch bytes from source URL (URLs expire ~2h — must download during run).
+ *     - Upload to dest via client.uploadAttachment (rate-limited + retried).
+ *     - On {ok:true}: record dedupe key, bump attachmentsUploaded counter.
+ *     - On {ok:false} OR thrown fetch error: push ATTACHMENT_FAILED warning, CONTINUE.
+ *   - persist(idmap, journal) after each source table.
+ *
+ * NOTE: {ok:true} from uploadAttachment IS the hosting verification per Task-0 spike.
+ * The spike confirmed dest attachment URLs are on dl.airtable.com after a successful upload.
+ * No separate per-attachment read-back re-query is performed (that would be an extra network
+ * call per attachment; the spike already proved {ok:true} guarantees hosting).
+ *
+ * @param {object}   opts
+ * @param {object}   opts.client          - AirtableClient instance (must have uploadAttachment)
+ * @param {object}   opts.srcSnapshot     - source base snapshot (tables with records attached)
+ * @param {object}   opts.destSnapshot    - dest base snapshot (provides destAppId via baseId)
+ * @param {object}   opts.idmap           - live id-map (.tables, .fields, .records, .attachments)
+ * @param {object}   opts.limiter         - rate limiter from createLimiter()
+ * @param {object}   opts.journal         - journal from newJournal()
+ * @param {Function} opts.persist         - persist(idmap, journal) called after each table
+ * @param {object}   opts.result          - result accumulator (must include .warnings array and .attachmentsUploaded counter)
+ * @param {Function} [opts.fetchBytes]    - async (url) => { bytes, contentType? } (default: real fetch)
+ * @returns {Promise<void>}
+ */
+export async function applyAttachments({
+  client,
+  srcSnapshot,
+  destSnapshot,
+  idmap,
+  limiter,
+  journal,
+  persist,
+  result,
+  fetchBytes = defaultFetchBytes,
+}) {
+  // Initialize dedupe map if not already present (survives across calls for idempotency)
+  idmap.attachments ??= {};
+
+  const destAppId = destSnapshot.baseId || '';
+
+  for (const srcTable of (srcSnapshot.tables || [])) {
+    const destTableId = idmap.tables[srcTable.id];
+    if (!destTableId) continue; // table not matched → skip
+
+    // Find attachment fields that have a dest mapping
+    const attFields = (srcTable.fields || []).filter(
+      (f) => ATTACHMENT_TYPES.has(f.type) && idmap.fields[f.id],
+    );
+    if (attFields.length === 0) continue;
+
+    for (const rec of (srcTable.records || [])) {
+      const destRowId = idmap.records[rec.id];
+      if (!destRowId) continue; // src record not yet mapped → skip
+
+      const srcCells = rec.cellValuesByColumnId || {};
+
+      for (const field of attFields) {
+        const cellValue = srcCells[field.id];
+        if (!cellValue || !Array.isArray(cellValue) || cellValue.length === 0) continue;
+
+        const destFldId = idmap.fields[field.id].destFld;
+
+        for (const attachment of cellValue) {
+          const { url, filename, size, type } = attachment;
+          if (!url || !filename) continue;
+
+          const dedupeKey = `${filename}|${size}`;
+          if (idmap.attachments[dedupeKey]) continue; // already uploaded → skip
+
+          // Fetch bytes from source (URLs expire ~2h)
+          let bytes;
+          let contentType = type;
+          try {
+            const fetched = await fetchBytes(url);
+            bytes = fetched.bytes;
+            if (!contentType && fetched.contentType) contentType = fetched.contentType;
+          } catch (fetchErr) {
+            result.warnings.push({
+              code: 'ATTACHMENT_FAILED',
+              message: `Attachment ${filename}: fetch failed — ${fetchErr.message}`,
+            });
+            continue; // next attachment, don't abort the record
+          }
+
+          // Upload to dest via limiter + retry
+          try {
+            const res = await limiter.run(() =>
+              withRetry(() =>
+                client.uploadAttachment(destAppId, destRowId, destFldId, {
+                  bytes,
+                  filename,
+                  contentType,
+                }),
+              ),
+            );
+
+            if (res.ok) {
+              idmap.attachments[dedupeKey] = true;
+              result.attachmentsUploaded = (result.attachmentsUploaded || 0) + 1;
+            } else {
+              result.warnings.push({
+                code: 'ATTACHMENT_FAILED',
+                message: `Attachment ${filename}: upload failed — ${res.error || 'unknown error'}`,
+              });
+              // Don't set dedupe key on failure so a retry run can re-attempt
+            }
+          } catch (uploadErr) {
+            result.warnings.push({
+              code: 'ATTACHMENT_FAILED',
+              message: `Attachment ${filename}: upload threw — ${uploadErr.message}`,
+            });
+          }
         }
       }
     }

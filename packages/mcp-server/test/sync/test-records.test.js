@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1, applyRecordsPass2 } from '../../src/sync/records.js';
+import { applyRecordsPass1, applyRecordsPass2, applyAttachments } from '../../src/sync/records.js';
 import { newJournal } from '../../src/sync/journal.js';
 import { createLimiter } from '../../src/sync/ratelimit.js';
 
@@ -504,5 +504,239 @@ describe('records.applyRecordsPass2', () => {
 
     const failWarns = result.warnings.filter((w) => w.code === 'RECORD_LINK_FAILED');
     assert.equal(failWarns.length, 1, 'expected RECORD_LINK_FAILED warning');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// applyAttachments
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('records.applyAttachments', () => {
+  function makeLimiter() {
+    return createLimiter({ rps: 1000, sleep: async () => {} });
+  }
+
+  function makeFixtures({ uploadResult = { ok: true, attachmentId: 'att1' } } = {}) {
+    const uploadCalls = [];
+    const client = {
+      uploadAttachment: async (appId, rowId, columnId, payload) => {
+        uploadCalls.push({ appId, rowId, columnId, payload });
+        return uploadResult;
+      },
+    };
+
+    const fetchCalls = [];
+    const fetchBytes = async (url) => {
+      fetchCalls.push(url);
+      return { bytes: Buffer.from('fake-image-data'), contentType: 'image/png' };
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {
+        fldAtt: { destFld: 'fldAttD' },
+      },
+      records: { recS1: 'recD1' },
+      // attachments intentionally omitted to test initialization
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldAtt', type: 'multipleAttachments' }],
+        records: [{
+          id: 'recS1',
+          cellValuesByColumnId: {
+            fldAtt: [{ id: 'attSrc1', url: 'https://example.com/image.png', filename: 'image.png', size: 1024, type: 'image/png' }],
+          },
+        }],
+      }],
+    };
+
+    const destSnapshot = { baseId: 'appDest' };
+
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+
+    return { client, fetchBytes, fetchCalls, uploadCalls, idmap, srcSnapshot, destSnapshot, result };
+  }
+
+  it('downloads and uploads an attachment with correct destRow/destFld/filename', async () => {
+    const { client, fetchBytes, fetchCalls, uploadCalls, idmap, srcSnapshot, destSnapshot, result } = makeFixtures();
+
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-1', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    assert.equal(fetchCalls.length, 1, 'fetchBytes called once for the attachment URL');
+    assert.equal(fetchCalls[0], 'https://example.com/image.png');
+
+    assert.equal(uploadCalls.length, 1, 'uploadAttachment called once');
+    assert.equal(uploadCalls[0].appId, 'appDest');
+    assert.equal(uploadCalls[0].rowId, 'recD1');
+    assert.equal(uploadCalls[0].columnId, 'fldAttD');
+    assert.equal(uploadCalls[0].payload.filename, 'image.png');
+    assert.ok(uploadCalls[0].payload.bytes, 'bytes must be provided');
+
+    // dedupe key should be set after success
+    assert.equal(idmap.attachments['image.png|1024'], true);
+  });
+
+  it('deduplicates: same filename|size not re-uploaded on second applyAttachments call', async () => {
+    const { client, fetchBytes, uploadCalls, idmap, srcSnapshot, destSnapshot, result } = makeFixtures();
+
+    // First call
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-2a', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    assert.equal(uploadCalls.length, 1, 'first call uploads once');
+
+    // Second call — idmap.attachments is preserved, same attachment must be skipped
+    const result2 = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-2b', 't'),
+      persist: () => {},
+      result: result2,
+      fetchBytes,
+    });
+
+    assert.equal(uploadCalls.length, 1, 'second call must NOT re-upload (dedupe by filename|size)');
+  });
+
+  it('ok:false upload → ATTACHMENT_FAILED warning, no throw, record continues', async () => {
+    const { client, fetchBytes, uploadCalls, idmap, srcSnapshot, destSnapshot, result } = makeFixtures({
+      uploadResult: { ok: false, error: 'upload quota exceeded' },
+    });
+
+    // Must not throw
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-3', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    assert.equal(uploadCalls.length, 1, 'uploadAttachment was still called');
+
+    const failWarns = result.warnings.filter((w) => w.code === 'ATTACHMENT_FAILED');
+    assert.equal(failWarns.length, 1, 'expected exactly one ATTACHMENT_FAILED warning');
+    assert.ok(failWarns[0].message.includes('image.png'), 'warning should mention the filename');
+
+    // dedupe key must NOT be set on failure
+    assert.equal(idmap.attachments['image.png|1024'], undefined);
+  });
+
+  it('fetchBytes error → ATTACHMENT_FAILED warning, no throw, continues to next attachment', async () => {
+    const uploadCalls = [];
+    const client = {
+      uploadAttachment: async (appId, rowId, columnId, payload) => {
+        uploadCalls.push(payload.filename);
+        return { ok: true, attachmentId: 'att99' };
+      },
+    };
+
+    // fetchBytes throws on first URL, succeeds on second
+    let fetchCount = 0;
+    const fetchBytes = async (url) => {
+      fetchCount++;
+      if (fetchCount === 1) throw new Error('network timeout');
+      return { bytes: Buffer.from('ok'), contentType: 'image/jpeg' };
+    };
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldAtt: { destFld: 'fldAttD' } },
+      records: { recS1: 'recD1' },
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldAtt', type: 'multipleAttachments' }],
+        records: [{
+          id: 'recS1',
+          cellValuesByColumnId: {
+            fldAtt: [
+              { id: 'a1', url: 'https://src/a.png', filename: 'a.png', size: 100, type: 'image/png' },
+              { id: 'a2', url: 'https://src/b.jpg', filename: 'b.jpg', size: 200, type: 'image/jpeg' },
+            ],
+          },
+        }],
+      }],
+    };
+
+    const destSnapshot = { baseId: 'appDest' };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-4', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    // First attachment failed (fetch threw), second should still be uploaded
+    const failWarns = result.warnings.filter((w) => w.code === 'ATTACHMENT_FAILED');
+    assert.equal(failWarns.length, 1, 'one warning for the failed fetch');
+    assert.ok(failWarns[0].message.includes('a.png'), 'warning should mention a.png');
+    assert.equal(uploadCalls.length, 1, 'second attachment (b.jpg) should still be uploaded');
+    assert.equal(uploadCalls[0], 'b.jpg');
+  });
+
+  it('skips unmatched tables and fields without a destFld mapping', async () => {
+    const uploadCalls = [];
+    const client = {
+      uploadAttachment: async () => { uploadCalls.push(true); return { ok: true }; },
+    };
+    const fetchBytes = async () => ({ bytes: Buffer.from('x'), contentType: 'text/plain' });
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {}, // fldAtt not mapped
+      records: { recS1: 'recD1' },
+    };
+
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldAtt', type: 'multipleAttachments' }],
+        records: [{
+          id: 'recS1',
+          cellValuesByColumnId: {
+            fldAtt: [{ id: 'a1', url: 'https://src/x.txt', filename: 'x.txt', size: 5, type: 'text/plain' }],
+          },
+        }],
+      }],
+    };
+
+    const destSnapshot = { baseId: 'appDest' };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-5', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    assert.equal(uploadCalls.length, 0, 'no upload when field is not mapped');
   });
 });
