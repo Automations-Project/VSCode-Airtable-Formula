@@ -132,12 +132,12 @@ export function canonicalizeViewConfig(config, fldNames, selNames) {
     filters: c.filters ? { conj: c.filters.conjunction, set: canonFilterSet(c.filters.filterSet || [], fldNames, selNames) } : null,
     sorts: (c.sorts || []).map((s) => ({ col: viewNameOf(fldNames, s.columnId), asc: s.ascending })),
     groups: (c.groupLevels || []).map((g) => ({ col: viewNameOf(fldNames, g.columnId), order: g.order })),
-    // Compare what apply actually controls: the VISIBLE columns in order, plus which
-    // columns are hidden as an order-agnostic set. Apply sets the visible set + order
-    // (setViewColumns), but Airtable appends hidden columns in an order we don't control —
-    // so comparing the full columnOrder order would re-flag forever (never converge).
+    // Compare WHICH columns are visible vs hidden (each as an order-agnostic set), not their
+    // left-to-right order. Apply reliably sets visibility (setViewColumns verify-retry) but the
+    // internal API's reorder is unreliable under bulk, so comparing exact order would re-flag
+    // forever. Column ORDER is therefore best-effort (applied, not gated on convergence).
     columns: {
-      visible: (c.columnOrder || []).filter((co) => co.visibility).map((co) => viewNameOf(fldNames, co.columnId)),
+      visible: (c.columnOrder || []).filter((co) => co.visibility).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
       hidden: (c.columnOrder || []).filter((co) => !co.visibility).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
     },
     frozen: c.frozenColumnCount ?? null,

@@ -59,11 +59,11 @@ describe('remap.canonicalizeViewConfig', () => {
 
 describe('remap.canonicalizeViewConfig columns convergence', () => {
   const names = { fA: 'A', fB: 'B', fC: 'C', fD: 'D' };
-  it('ignores hidden-column ORDER (apply cannot control it) but keeps visible order', () => {
+  it('ignores column ORDER (visible + hidden); only WHICH columns are shown/hidden gates convergence', () => {
     const x = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fB', visibility: true }, { columnId: 'fC', visibility: false }, { columnId: 'fD', visibility: false }] }, names, {});
-    const y = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fB', visibility: true }, { columnId: 'fD', visibility: false }, { columnId: 'fC', visibility: false }] }, names, {});
-    assert.equal(x, y); // hidden order differs → still equal → converges
-    const z = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fB', visibility: true }, { columnId: 'fA', visibility: true }, { columnId: 'fC', visibility: false }, { columnId: 'fD', visibility: false }] }, names, {});
-    assert.notEqual(x, z); // different VISIBLE order → not equal
+    const shuffled = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fB', visibility: true }, { columnId: 'fA', visibility: true }, { columnId: 'fD', visibility: false }, { columnId: 'fC', visibility: false }] }, names, {});
+    assert.equal(x, shuffled); // same visible/hidden SETS, different order → equal → converges
+    const differentVisible = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fC', visibility: true }, { columnId: 'fB', visibility: false }, { columnId: 'fD', visibility: false }] }, names, {});
+    assert.notEqual(x, differentVisible); // C shown instead of B → different visible set → not equal
   });
 });
