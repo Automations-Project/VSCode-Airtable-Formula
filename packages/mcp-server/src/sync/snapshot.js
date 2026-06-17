@@ -99,6 +99,19 @@ export async function snapshotBase(client, appId) {
 }
 
 /**
+ * Schema-only snapshot — like snapshotBase but WITHOUT the per-view live-config reads.
+ * snapshotViews() issues one getView (a table/readData call, ~1s) PER collaborative view —
+ * hundreds of slow sequential requests on a view-heavy base. The records phase only needs
+ * schema (tables/fields) + records, so it uses this; callers needing view configs (e.g.
+ * reapplyViewFilters) run snapshotViews() lazily and only on the base they need.
+ * @returns {Promise<{ baseId: string, tables: Array<NormalizedTable> }>}
+ */
+export async function snapshotSchemaOnly(client, appId) {
+  const raw = await client.getApplicationData(appId);
+  return { baseId: appId, ...normalizeSchema(raw) };
+}
+
+/**
  * Pull a table's records via its first collaborative view (single call, ≤1000 rows;
  * the internal readQueries endpoint has no cursor — Task-11 pre-flight warns on >1000).
  * @returns {Promise<Array<{id:string, cellValuesByColumnId:object}>>}

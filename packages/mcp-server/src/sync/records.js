@@ -15,7 +15,7 @@
 import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
-import { snapshotBase, snapshotTableRecords } from './snapshot.js';
+import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords } from './snapshot.js';
 import { loadIdmap, saveIdmap } from './idmap.js';
 import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
 
@@ -489,6 +489,14 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
   const destAppId = destSnapshot.baseId || '';
   const recs = (idmap && idmap.records) || {};
 
+  // applyRecords takes a SCHEMA-ONLY snapshot (no view configs) to avoid a getView storm.
+  // Populate SOURCE view live-configs now (source-only, once, at the end) so we can find and
+  // remap the record-ref filters. If configs are already present this is a no-op-ish refresh.
+  if (typeof client.getView === 'function') {
+    const needsConfig = (srcSnapshot.tables || []).some((t) => (t.views || []).some((v) => !v.personalForUserId && !v.config));
+    if (needsConfig) await snapshotViews(client, srcSnapshot.baseId || '', srcSnapshot);
+  }
+
   for (const srcTable of (srcSnapshot.tables || [])) {
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched -> skip
@@ -556,10 +564,13 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   idmap.records ??= {};
   idmap.attachments ??= {};
 
-  // 2. Snapshot schemas
+  // 2. Snapshot schemas ONLY (no per-view live-config reads — those are a getView/readData
+  //    storm: ~1s per view, hundreds of views on a view-heavy base, on BOTH bases. The records
+  //    phase needs schema + records, not view configs. reapplyViewFilters reads source view
+  //    configs lazily, source-only, at the end.)
   const [srcSnapshot, destSnapshot] = await Promise.all([
-    snapshotBase(client, sourceBaseId),
-    snapshotBase(client, destBaseId),
+    snapshotSchemaOnly(client, sourceBaseId),
+    snapshotSchemaOnly(client, destBaseId),
   ]);
 
   // 3. Attach records to each table in both snapshots
@@ -669,8 +680,9 @@ export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys 
     idmap,
   };
 
-  // Snapshot dest schema + attach records
-  const destSnapshot = await snapshotBase(client, destBaseId);
+  // Snapshot dest schema + attach records (schema-only — reconcile needs record existence,
+  // not view configs; avoids the getView/readData storm).
+  const destSnapshot = await snapshotSchemaOnly(client, destBaseId);
   for (const table of destSnapshot.tables) {
     table.records = await snapshotTableRecords(client, destBaseId, table);
   }
