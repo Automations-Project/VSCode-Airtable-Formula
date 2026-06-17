@@ -6,6 +6,9 @@ import { safeAtomicWriteFileSync } from '../safe-write.js';
 function journalPath(sourceBaseId, destBaseId, planId) {
   return join(syncDir(sourceBaseId, destBaseId), `journal-${planId}.json`);
 }
+function recordsJournalPath(sourceBaseId, destBaseId, planId) {
+  return join(syncDir(sourceBaseId, destBaseId), `records-journal-${planId}.json`);
+}
 export function newJournal(planId, startedAt) {
   return { planId, startedAt, actions: [] };
 }
@@ -28,6 +31,15 @@ export function saveJournal(sourceBaseId, destBaseId, journal) {
 }
 export function loadJournal(sourceBaseId, destBaseId, planId) {
   const p = journalPath(sourceBaseId, destBaseId, planId);
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+}
+export function saveRecordsJournal(sourceBaseId, destBaseId, journal) {
+  mkdirSync(syncDir(sourceBaseId, destBaseId), { recursive: true });
+  safeAtomicWriteFileSync(recordsJournalPath(sourceBaseId, destBaseId, journal.planId), JSON.stringify(journal, null, 2));
+}
+export function loadRecordsJournal(sourceBaseId, destBaseId, planId) {
+  const p = recordsJournalPath(sourceBaseId, destBaseId, planId);
   if (!existsSync(p)) return null;
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
 }
