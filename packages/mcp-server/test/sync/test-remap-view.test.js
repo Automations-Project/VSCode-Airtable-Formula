@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { remapViewConfig, canonicalizeViewConfig } from '../../src/sync/remap.js';
+import { remapViewConfig, canonicalizeViewConfig, collectFilterRecordRefs } from '../../src/sync/remap.js';
 
 const idmap = { tables: {}, views: {}, fields: {
   fldA: { destFld: 'fldX', choices: { selA: 'selX' } },
@@ -61,6 +61,70 @@ describe('remap.canonicalizeViewConfig', () => {
     assert.equal(noFilter, emptyFilter);
     const realFilter = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: 'contains', value: null }] } }, { fldA: 'ID' }, {});
     assert.notEqual(noFilter, realFilter); // a genuine filter still differs from none
+  });
+});
+
+describe('remap — record-referencing view filters (strip + report + converge)', () => {
+  const REC = 'recAAAAAAAAAAAAAA', REC2 = 'recBBBBBBBBBBBBBB', USR = 'usrCCCCCCCCCCCCCC';
+  it('strips a link-field rec leaf and reports it', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [{ id: 'flt1', columnId: 'fldA', operator: '=', value: [REC] }] } };
+    const out = remapViewConfig(cfg, idmap);
+    assert.equal(out.filters.filterSet.length, 0);                 // rec leaf dropped before write
+    assert.deepEqual(collectFilterRecordRefs(cfg), [REC]);         // surfaced for the warning
+  });
+  it('keeps resolvable (choice) leaves while stripping rec leaves in the same set', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [
+      { columnId: 'fldA', operator: '=', value: [REC] },
+      { columnId: 'fldB', operator: '=', value: 'selA' },
+    ] } };
+    const out = remapViewConfig(cfg, idmap);
+    assert.equal(out.filters.filterSet.length, 1);
+    assert.equal(out.filters.filterSet[0].columnId, 'fldY');       // fldB remapped
+    assert.equal(out.filters.filterSet[0].value, 'selX');          // choice remapped, leaf kept
+  });
+  it('prunes a nested group emptied by stripping; keeps siblings', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [
+      { type: 'nested', conjunction: 'or', filterSet: [{ columnId: 'fldA', operator: '=', value: [REC2] }] },
+      { columnId: 'fldB', operator: '=', value: 'x' },
+    ] } };
+    const out = remapViewConfig(cfg, idmap);
+    assert.equal(out.filters.filterSet.length, 1);                 // emptied nested group pruned
+    assert.equal(out.filters.filterSet[0].columnId, 'fldY');
+  });
+  it('strips collaborator usr ids but keeps the portable "me" sentinel', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [
+      { columnId: 'fldB', operator: '=', value: USR },
+      { columnId: 'fldB', operator: '=', value: 'me' },
+    ] } };
+    const out = remapViewConfig(cfg, idmap);
+    assert.equal(out.filters.filterSet.length, 1);
+    assert.equal(out.filters.filterSet[0].value, 'me');
+  });
+  it('strips structured/dynamic filter values that carry source ids', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '|', value: { tableId: 'tblZ', columnId: 'fldZ', rowId: null } }] } };
+    assert.equal(remapViewConfig(cfg, idmap).filters.filterSet.length, 0);
+  });
+  it('a source filter of only rec leaves canonicalizes equal to no filter (converges)', () => {
+    const src = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: [REC] }] } }, { fldA: 'Game' }, {});
+    const none = canonicalizeViewConfig({ filters: null }, {}, {});
+    assert.equal(src, none);
+  });
+  it('drops record-referencing colorDefinitions defensively (never written)', () => {
+    const out = remapViewConfig({ colorConfig: { type: 'colorDefinitions', colorDefinitions: [{ filterSet: [], color: 'blue' }], defaultColor: 'gray' } }, idmap);
+    assert.equal(out.colorConfig.colorDefinitions, undefined);
+  });
+  it('dest still holding a dangling rec filter diverges from stripped source (forces cleanup), then converges once cleared', () => {
+    const srcCfg = { filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: [REC] }] } };
+    const srcCanon = canonicalizeViewConfig(srcCfg, { fldA: 'Game' }, {}, true);      // source: stripped → no filter
+    const destDangling = canonicalizeViewConfig(srcCfg, { fldA: 'Game' }, {}, false); // dest raw: keeps the dangling rec
+    assert.notEqual(srcCanon, destDangling);                                          // → emits applyViewConfig (cleanup)
+    const destCleared = canonicalizeViewConfig({ filters: null }, {}, {}, false);     // after apply clears it
+    assert.equal(srcCanon, destCleared);                                              // → converged, no re-flag
+  });
+  it('unwraps singleton nested groups in canonical (collapse-agnostic convergence)', () => {
+    const grouped = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ type: 'nested', conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: 'selA' }] }] } }, { fldA: 'X' }, { selA: 'A' });
+    const flat = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: 'selA' }] } }, { fldA: 'X' }, { selA: 'A' });
+    assert.equal(grouped, flat);
   });
 });
 

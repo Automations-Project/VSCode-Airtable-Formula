@@ -378,7 +378,7 @@ export function computePlan(srcSnap, destSnap, idmap) {
       if (!dv) {
         viewActions.push({ kind: 'createView', sourceTableId: st.id, sourceViewId: sv.id, name: sv.name, type: sv.type });
         viewActions.push({ kind: 'applyViewConfig', sourceTableId: st.id, sourceViewId: sv.id, type: sv.type, config: sv.config || {} });
-      } else if (canonicalizeViewConfig(sv.config || {}, srcNames, srcSelNames) !== canonicalizeViewConfig(dv.config || {}, destNames, destSelNames)) {
+      } else if (canonicalizeViewConfig(sv.config || {}, srcNames, srcSelNames, true) !== canonicalizeViewConfig(dv.config || {}, destNames, destSelNames, false)) {
         viewActions.push({ kind: 'applyViewConfig', sourceTableId: st.id, sourceViewId: sv.id, type: sv.type, config: sv.config || {} });
       }
     }

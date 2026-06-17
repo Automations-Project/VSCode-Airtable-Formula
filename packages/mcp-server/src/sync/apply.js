@@ -2,7 +2,7 @@
 // Live-first + growing idmap + journal (resume) + existence-check (idempotency).
 // POST-SPIKE: primary defaults to Name/text; createTable spawns 6 default fields →
 // delete the 5 non-primary scaffolding fields (D1); links are foreignKey (later task).
-import { remapRefs, toWritableComputedOptions, remapViewConfig } from './remap.js';
+import { remapRefs, toWritableComputedOptions, remapViewConfig, collectFilterRecordRefs } from './remap.js';
 import { isDone, recordDone, recordFailed } from './journal.js';
 
 const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyncSource']);
@@ -265,6 +265,8 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       const destViewId = idmap.views[a.sourceViewId];
       if (!destViewId) { result.skipped++; return; } // view not created (e.g. createView failed)
       const cfg = remapViewConfig(a.config || {}, idmap);
+      const strippedRefs = collectFilterRecordRefs(a.config || {});
+      if (strippedRefs.length) result.warnings.push({ code: 'VIEW_UNRESOLVABLE_RECORD_REF', message: `View ${destViewId} filters: ${strippedRefs.length} record/collaborator-ref clause(s) dropped (records not synced; row set will differ from source)` });
       const refOk = (id) => !!(id && findDestField(index, id));
       const warnRef = (facet) => result.warnings.push({ code: 'VIEW_UNRESOLVABLE_REF', message: `View ${destViewId} ${facet}: unresolved field ref dropped` });
 

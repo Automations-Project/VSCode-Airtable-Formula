@@ -97,14 +97,53 @@ function destSelId(idmap, src) {
   for (const v of Object.values(idmap.fields || {})) { const d = ((v && v.choices) || {})[src]; if (d) return d; }
   return src;
 }
+// A filter LEAF whose value references a record/collaborator id — or a structured/dynamic
+// value carrying SOURCE field/table/row ids — cannot be resolved in the dest: records and
+// users are not synced (and ids differ across bases regardless). Detect by value SHAPE, which
+// needs NO source field-type context (those types aren't carried into apply). Portable
+// sentinels (current-user "me", null, booleans) are not id-shaped → kept. Forward-compat: once
+// records sync (M3), a populated idmap.records lets these REMAP instead of strip — see canon note.
+const RECORD_REF_ID = /^(rec|usr)[A-Za-z0-9]{14,}$/;
+function isRecordRefValue(value) {
+  if (typeof value === 'string') return RECORD_REF_ID.test(value);
+  if (Array.isArray(value)) return value.some((v) => typeof v === 'string' && RECORD_REF_ID.test(v));
+  if (value && typeof value === 'object') return 'columnId' in value || 'rowId' in value || 'tableId' in value;
+  return false;
+}
+function collectRecordRefIds(set) {
+  const ids = [];
+  for (const f of set || []) {
+    if (f.filterSet) { ids.push(...collectRecordRefIds(f.filterSet)); continue; }
+    if (!isRecordRefValue(f.value)) continue;
+    if (typeof f.value === 'string') ids.push(f.value);
+    else if (Array.isArray(f.value)) ids.push(...f.value.filter((v) => typeof v === 'string' && RECORD_REF_ID.test(v)));
+    else ids.push('<dynamic>');
+  }
+  return ids;
+}
+// Source record/collaborator ids that view-filter strip will drop (for the apply-side warning).
+export function collectFilterRecordRefs(config) {
+  return (config && config.filters && Array.isArray(config.filters.filterSet)) ? collectRecordRefIds(config.filters.filterSet) : [];
+}
+// Remap resolvable refs (fld/choice ids) and STRIP unresolvable record/collaborator-ref leaves,
+// pruning groups emptied by stripping (bottom-up). Mirrored exactly by canonFilterSet so a
+// stripped source filter canonicalizes identically to the stripped dest readback → converges.
 function remapFilterSet(set, idmap) {
-  return set.map((f) => {
-    if (f.filterSet) return { ...(f.type ? { type: f.type } : {}), conjunction: f.conjunction, filterSet: remapFilterSet(f.filterSet, idmap) };
-    const out = { columnId: destFldId(idmap, f.columnId), operator: f.operator, value: f.value };
-    if (typeof f.value === 'string') out.value = destSelId(idmap, f.value);
-    else if (Array.isArray(f.value)) out.value = f.value.map((v) => (typeof v === 'string' ? destSelId(idmap, v) : v));
-    return out;
-  });
+  const out = [];
+  for (const f of set) {
+    if (f.filterSet) {
+      const inner = remapFilterSet(f.filterSet, idmap);
+      if (inner.length === 0) continue;
+      out.push({ ...(f.type ? { type: f.type } : {}), conjunction: f.conjunction, filterSet: inner });
+      continue;
+    }
+    if (isRecordRefValue(f.value)) continue;
+    const o = { columnId: destFldId(idmap, f.columnId), operator: f.operator, value: f.value };
+    if (typeof f.value === 'string') o.value = destSelId(idmap, f.value);
+    else if (Array.isArray(f.value)) o.value = f.value.map((v) => (typeof v === 'string' ? destSelId(idmap, v) : v));
+    out.push(o);
+  }
+  return out;
 }
 export function remapViewConfig(config, idmap) {
   if (config == null || typeof config !== 'object') return config;
@@ -113,7 +152,13 @@ export function remapViewConfig(config, idmap) {
   if (Array.isArray(c.sorts)) c.sorts = c.sorts.map((s) => ({ columnId: destFldId(idmap, s.columnId), ascending: s.ascending }));
   if (Array.isArray(c.groupLevels)) c.groupLevels = c.groupLevels.map((g) => ({ columnId: destFldId(idmap, g.columnId), order: g.order, emptyGroupState: g.emptyGroupState }));
   if (Array.isArray(c.columnOrder)) c.columnOrder = c.columnOrder.map((co) => ({ columnId: destFldId(idmap, co.columnId), visibility: co.visibility }));
-  if (c.colorConfig && c.colorConfig.selectColumnId) c.colorConfig = { ...c.colorConfig, selectColumnId: destFldId(idmap, c.colorConfig.selectColumnId) };
+  if (c.colorConfig) {
+    const cc = { ...c.colorConfig };
+    if (cc.selectColumnId) cc.selectColumnId = destFldId(idmap, cc.selectColumnId);
+    // Conditional colour rules filter on specific RECORD ids — can't remap, would leak/error. Drop defensively.
+    delete cc.colorDefinitions;
+    c.colorConfig = cc;
+  }
   if (c.cover && c.cover.coverColumnId) c.cover = { ...c.cover, coverColumnId: destFldId(idmap, c.cover.coverColumnId) };
   if (c.calendar && Array.isArray(c.calendar.dateColumnRanges)) c.calendar = { dateColumnRanges: c.calendar.dateColumnRanges.map((r) => ({ startColumnId: destFldId(idmap, r.startColumnId), ...(r.endColumnId ? { endColumnId: destFldId(idmap, r.endColumnId) } : {}) })) };
   return c;
@@ -121,15 +166,35 @@ export function remapViewConfig(config, idmap) {
 
 // Canonical, id-free, name-based string for a convergent diff compare (ids→names; auto-ids/width dropped).
 function viewNameOf(map, id) { return map[id] ?? id; }
-function canonFilterSet(set, fldNames, selNames) {
-  return set.map((f) => f.filterSet
-    ? { c: f.conjunction, n: canonFilterSet(f.filterSet, fldNames, selNames) }
-    : { col: viewNameOf(fldNames, f.columnId), op: f.operator, val: typeof f.value === 'string' ? viewNameOf(selNames, f.value) : f.value });
+// Mirror remapFilterSet: strip record/collaborator-ref leaves and prune emptied groups so a
+// source filter canonicalizes identically to the stripped dest readback. Also UNWRAP singleton
+// groups (collapse-agnostic): Airtable may store a 1-element nested group as a bare leaf on
+// readback — unwrapping on BOTH sides keeps it convergent either way. (Records aren't synced, so
+// rec-ref leaves drop on both sides; once they do sync, this is where name-resolution lands — M3.)
+function canonFilterSet(set, fldNames, selNames, strip) {
+  const out = [];
+  for (const f of set) {
+    if (f.filterSet) {
+      const inner = canonFilterSet(f.filterSet, fldNames, selNames, strip);
+      if (inner.length === 0) continue;
+      if (inner.length === 1) { out.push(inner[0]); continue; }
+      out.push({ c: f.conjunction, n: inner });
+      continue;
+    }
+    if (strip && isRecordRefValue(f.value)) continue;
+    out.push({ col: viewNameOf(fldNames, f.columnId), op: f.operator, val: typeof f.value === 'string' ? viewNameOf(selNames, f.value) : f.value });
+  }
+  return out;
 }
-export function canonicalizeViewConfig(config, fldNames, selNames) {
+// stripRecordRefs: TRUE for the SOURCE side (canonicalize as what apply will WRITE — rec/collab
+// leaves dropped), FALSE for the DEST side (its raw actual filter). Asymmetry is deliberate: it
+// makes a dest that still holds a dangling rec filter (from a prior buggy sync) diverge from the
+// stripped source → one cleanup apply → then both read empty/equal → converges.
+export function canonicalizeViewConfig(config, fldNames, selNames, stripRecordRefs = true) {
   const c = config || {};
+  const fset = (c.filters && Array.isArray(c.filters.filterSet)) ? canonFilterSet(c.filters.filterSet, fldNames, selNames, stripRecordRefs) : [];
   return JSON.stringify({
-    filters: (c.filters && Array.isArray(c.filters.filterSet) && c.filters.filterSet.length) ? { conj: c.filters.conjunction, set: canonFilterSet(c.filters.filterSet, fldNames, selNames) } : null,
+    filters: fset.length ? { conj: c.filters.conjunction, set: fset } : null,
     sorts: (c.sorts || []).map((s) => ({ col: viewNameOf(fldNames, s.columnId), asc: s.ascending })),
     groups: (c.groupLevels || []).map((g) => ({ col: viewNameOf(fldNames, g.columnId), order: g.order })),
     // Compare WHICH columns are visible vs hidden (each as an order-agnostic set), not their
