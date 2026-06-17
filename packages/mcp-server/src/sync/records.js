@@ -14,6 +14,7 @@
 
 import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
 import { withRetry } from './ratelimit.js';
+import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
 
 /**
  * Returns true if the field type is a multiSelect (arrays not accepted by updateRecords).
@@ -451,6 +452,69 @@ export async function applyAttachments({
             });
           }
         }
+      }
+    }
+
+    persist(idmap, journal);
+  }
+}
+
+/**
+ * After records exist, rewrite collaborative view filters whose record refs now resolve.
+ *
+ * For each source table matched in idmap.tables, for each collaborative view (non-personal)
+ * whose config.filters contain a record-ref leaf that resolves in idmap.records:
+ *   - Compute remapViewConfig(view.config, idmap).filters
+ *   - Call client.updateViewFilters(destApp, destViewId, filters) via limiter + withRetry
+ *   - Map source view id -> dest view id via idmap.views[srcViewId]
+ *   - Skip views with no resolvable record refs
+ *   - Continue-on-failure (VIEW_FILTER_REAPPLY_FAILED warning)
+ *   - Bump result.viewFiltersReapplied counter on success
+ *
+ * @param {object} opts
+ * @param {object} opts.client        - AirtableClient instance
+ * @param {object} opts.srcSnapshot   - source base snapshot
+ * @param {object} opts.destSnapshot  - dest base snapshot
+ * @param {object} opts.idmap         - live id-map (.tables, .fields, .records, .views)
+ * @param {object} opts.limiter       - rate limiter from createLimiter()
+ * @param {object} opts.journal       - journal from newJournal()
+ * @param {Function} opts.persist     - persist(idmap, journal) called after each table
+ * @param {object} opts.result        - result accumulator { warnings, viewFiltersReapplied }
+ * @returns {Promise<void>}
+ */
+export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result }) {
+  const destAppId = destSnapshot.baseId || '';
+  const recs = (idmap && idmap.records) || {};
+
+  for (const srcTable of (srcSnapshot.tables || [])) {
+    const destTableId = idmap.tables[srcTable.id];
+    if (!destTableId) continue; // table not matched -> skip
+
+    for (const sv of (srcTable.views || [])) {
+      if (sv.personalForUserId) continue; // skip personal views
+
+      // Check if this view has any record-ref leaves that resolve in idmap.records
+      const refIds = collectFilterRecordRefs(sv.config);
+      if (refIds.length === 0) continue; // no record refs -> skip
+
+      const hasResolvable = refIds.some((id) => recs[id] !== undefined);
+      if (!hasResolvable) continue; // none resolve -> skip
+
+      const destViewId = (idmap.views || {})[sv.id];
+      if (!destViewId) continue; // no dest view mapping -> skip
+
+      // Remap the filters (remapRecRefValue with stripUnresolved=true)
+      const remapped = remapViewConfig(sv.config || {}, idmap);
+      const filters = remapped.filters || { filterSet: [], conjunction: 'and' };
+
+      try {
+        await limiter.run(() => withRetry(() => client.updateViewFilters(destAppId, destViewId, filters)));
+        result.viewFiltersReapplied = (result.viewFiltersReapplied || 0) + 1;
+      } catch (err) {
+        result.warnings.push({
+          code: 'VIEW_FILTER_REAPPLY_FAILED',
+          message: `View ${sv.id} (dest ${destViewId}): reapplyViewFilters threw: ${err.message}`,
+        });
       }
     }
 
