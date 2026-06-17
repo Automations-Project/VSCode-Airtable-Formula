@@ -13,8 +13,11 @@
  */
 
 import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
-import { withRetry } from './ratelimit.js';
+import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
+import { snapshotBase, snapshotTableRecords } from './snapshot.js';
+import { loadIdmap, saveIdmap } from './idmap.js';
+import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
 
 /**
  * Returns true if the field type is a multiSelect (arrays not accepted by updateRecords).
@@ -520,4 +523,185 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
 
     persist(idmap, journal);
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// applyRecords — top-level orchestrator
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Top-level records phase orchestrator.
+ *
+ * 1. Loads the converged schema idmap (written by the schema apply phase).
+ * 2. Snapshots src + dest schema (no records yet).
+ * 3. Attaches records to each table snapshot via snapshotTableRecords.
+ *    Emits RECORD_COUNT warning when exactly 1000 rows are returned (possibly truncated).
+ * 4. Builds a rate limiter and records journal (resumable).
+ * 5. Runs: Pass 1 (scalar/select upsert) → rebuild destDisplayNames → Pass 2 (links)
+ *          → Pass 3 (attachments) → reapplyViewFilters.
+ * 6. Persists idmap + journal after each phase.
+ * 7. Returns a result accumulator.
+ *
+ * @param {object} opts
+ * @param {object} opts.client          - AirtableClient instance
+ * @param {string} opts.sourceBaseId    - source base app ID
+ * @param {string} opts.destBaseId      - dest base app ID
+ * @param {string} opts.planId          - plan ID (used for journal file name)
+ * @param {string} opts.runStartedAt    - ISO timestamp of this run start
+ * @returns {Promise<object>}           - result accumulator
+ */
+export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt }) {
+  // 1. Load the converged idmap (produced by the schema apply phase)
+  const idmap = loadIdmap(sourceBaseId, destBaseId);
+  idmap.records ??= {};
+  idmap.attachments ??= {};
+
+  // 2. Snapshot schemas
+  const [srcSnapshot, destSnapshot] = await Promise.all([
+    snapshotBase(client, sourceBaseId),
+    snapshotBase(client, destBaseId),
+  ]);
+
+  // 3. Attach records to each table in both snapshots
+  for (const table of srcSnapshot.tables) {
+    table.records = await snapshotTableRecords(client, sourceBaseId, table);
+  }
+  for (const table of destSnapshot.tables) {
+    table.records = await snapshotTableRecords(client, destBaseId, table);
+  }
+
+  // 4. Infra: rate limiter + journal + persist + result
+  const limiter = createLimiter({ rps: 5 });
+  const journal = loadRecordsJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
+  const persist = (m, j) => {
+    saveIdmap(sourceBaseId, destBaseId, m);
+    saveRecordsJournal(sourceBaseId, destBaseId, j);
+  };
+  const result = {
+    planId,
+    aborted: false,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    warnings: [],
+    idmap,
+  };
+
+  // Pre-flight: emit RECORD_COUNT warning for tables that returned exactly 1000 rows
+  // (indicates possible truncation — pagination is a follow-up feature).
+  for (const table of srcSnapshot.tables) {
+    const count = (table.records || []).length;
+    if (count === 1000) {
+      result.warnings.push({
+        code: 'RECORD_COUNT',
+        message: `Table "${table.name}" (${table.id}) has ${count} records; record sync pulls up to 1000 per table — results may be truncated (pagination is a follow-up)`,
+      });
+    }
+  }
+
+  // 5a. Pass 1: scalar / select upsert — fills idmap.records
+  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  // 5b. Rebuild destDisplayNames from idmap.records now populated by Pass 1.
+  //     Key = dest record id, value = source primary cell value (string).
+  //     The source primary string is the correct display name because dest content mirrors source.
+  const destDisplayNames = new Map();
+  for (const srcTable of srcSnapshot.tables) {
+    const primaryFieldId = srcTable.primaryFieldId;
+    for (const srcRec of (srcTable.records || [])) {
+      const destRecId = idmap.records[srcRec.id];
+      if (!destRecId) continue;
+      const primaryVal = primaryFieldId ? (srcRec.cellValuesByColumnId || {})[primaryFieldId] : undefined;
+      destDisplayNames.set(destRecId, primaryVal !== undefined ? String(primaryVal) : '');
+    }
+  }
+
+  // 5c. Pass 2: link cells
+  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  // 5d. Pass 3: attachments
+  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  // 5e. Reapply view filters whose record refs now resolve
+  await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  return result;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// reconcile — existence-prune stale idmap.records entries
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Reconcile mode: prune stale idmap.records entries.
+ *
+ * 1. Loads the persisted idmap.
+ * 2. Snapshots the DEST base schema only, then pulls dest records for each matched table.
+ * 3. Builds a Set of all live dest record IDs across all tables.
+ * 4. Drops any idmap.records[src]=dest entry whose dest ID is not present in the snapshot.
+ * 5. naturalKeys re-match is stubbed (emits warning when provided — extend when needed).
+ * 6. Saves the pruned idmap.
+ * 7. Returns a result shaped like { created:0, updated:0, skipped, failed:0, warnings, idmap }.
+ *    `skipped` = number of pruned entries.
+ *
+ * @param {object} opts
+ * @param {object} opts.client          - AirtableClient instance
+ * @param {string} opts.sourceBaseId    - source base app ID
+ * @param {string} opts.destBaseId      - dest base app ID
+ * @param {object} [opts.naturalKeys]   - { [tableName]: fieldName } for re-match (optional)
+ * @returns {Promise<object>}           - { created, updated, skipped, failed, warnings, idmap }
+ */
+export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys = {} }) {
+  const idmap = loadIdmap(sourceBaseId, destBaseId);
+  idmap.records ??= {};
+
+  const result = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    warnings: [],
+    idmap,
+  };
+
+  // Snapshot dest schema + attach records
+  const destSnapshot = await snapshotBase(client, destBaseId);
+  for (const table of destSnapshot.tables) {
+    table.records = await snapshotTableRecords(client, destBaseId, table);
+  }
+
+  // Build set of all live dest record IDs across all tables
+  const allLiveDestIds = new Set();
+  for (const dt of destSnapshot.tables) {
+    for (const r of (dt.records || [])) {
+      allLiveDestIds.add(r.id);
+    }
+  }
+
+  // Existence-prune
+  for (const [srcRecId, destRecId] of Object.entries(idmap.records)) {
+    if (!allLiveDestIds.has(destRecId)) {
+      delete idmap.records[srcRecId];
+      result.skipped++;
+    }
+  }
+
+  // naturalKeys re-match (stub: emit warning for each non-empty key)
+  for (const [tableName, fieldName] of Object.entries(naturalKeys)) {
+    if (fieldName) {
+      result.warnings.push({
+        code: 'RECONCILE_NATURAL_KEY_NOT_IMPLEMENTED',
+        message: `naturalKeys re-match for table "${tableName}" (field "${fieldName}") is not yet implemented`,
+      });
+    }
+  }
+
+  saveIdmap(sourceBaseId, destBaseId, idmap);
+
+  return result;
 }

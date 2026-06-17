@@ -5,6 +5,7 @@ import { computePlan } from './diff.js';
 import { renderPlan, renderApplyResult } from './report.js';
 import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
+import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl } from './records.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -76,8 +77,48 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
     persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
   });
+
+  // Records phase: runs after schema apply, only if not aborted
+  if (!result.aborted) {
+    try {
+      const recResult = await applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt });
+      // Merge records phase counts + warnings into the schema result
+      result.records = {
+        created: recResult.created,
+        updated: recResult.updated,
+        failed: recResult.failed,
+        attachmentsUploaded: recResult.attachmentsUploaded || 0,
+        viewFiltersReapplied: recResult.viewFiltersReapplied || 0,
+      };
+      if (recResult.warnings && recResult.warnings.length) {
+        result.warnings = (result.warnings || []).concat(recResult.warnings);
+      }
+    } catch (err) {
+      // Records phase failure is non-fatal for the schema result
+      result.warnings = (result.warnings || []).concat([{
+        code: 'RECORDS_PHASE_FAILED',
+        message: `Records phase threw: ${err.message}`,
+      }]);
+    }
+  }
+
   saveState(sourceBaseId, destBaseId, { sourceBaseId, destBaseId, engineVersion: ENGINE_VERSION, lastPlanId: planId, lastApplyAt: runStartedAt });
   return renderApplyResult(result);
+}
+
+/**
+ * Reconcile mode: prune stale idmap.records entries after manual deletions in dest.
+ * Delegates to records.js reconcile().
+ *
+ * @param {object} opts
+ * @param {object} opts.client          - AirtableClient instance
+ * @param {string} opts.sourceBaseId
+ * @param {string} opts.destBaseId
+ * @param {object} [opts.naturalKeys]   - { [tableName]: fieldName } for re-match (stub)
+ * @returns {Promise<object>}           - { created, updated, skipped, failed, warnings, idmap }
+ */
+export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys = {} }) {
+  return reconcileImpl({ client, sourceBaseId, destBaseId, naturalKeys });
 }
 
 // On resume, merge the persisted (grown) idmap over the plan's base matches so this-run
