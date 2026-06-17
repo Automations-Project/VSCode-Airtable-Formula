@@ -1578,15 +1578,16 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   // ── Sync Tools ──
   {
     name: 'sync_base',
-    description: 'Base-to-base schema sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), and apply non-destructive field updates. apply requires planId and aborts if the destination drifted since the plan. Type-changing retypes, deletions, records and views are out of scope for this release.',
+    description: 'Base-to-base schema sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), apply non-destructive field updates, and sync records. apply requires planId and aborts if the destination drifted since the plan. mode="reconcile": rebuild/repair the record map — existence-prune dead entries from the idmap, with optional natural-key re-match per table.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
-        mode: { type: 'string', enum: ['plan', 'apply'], description: '"plan" (read-only preview) or "apply" (execute a saved plan).' },
+        mode: { type: 'string', enum: ['plan', 'apply', 'reconcile'], description: '"plan" (read-only preview), "apply" (execute a saved plan, includes records sync), or "reconcile" (rebuild/repair the record map: existence-prune dead entries; optional natural-key re-match).' },
         sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
         destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
         planId: { type: 'string', description: 'Required for mode="apply": the planId returned by a prior mode="plan" run.' },
+        naturalKeys: { type: 'object', description: 'Used only by mode="reconcile": map of tableName → fieldName to use as a natural key for re-matching records (e.g. { "Projects": "Name" }). Omit to run existence-prune only.', additionalProperties: { type: 'string' } },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2388,7 +2389,7 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       const id = 'pln' + client._genRandomId();
@@ -2401,7 +2402,13 @@ const handlers = {
       const out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt });
       return ok({ planId, summary: out.human }, out.machine, debug);
     }
-    return err(`Unsupported mode "${mode}". Use "plan" or "apply".`);
+    if (mode === 'reconcile') {
+      const raw = await sync.reconcile({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, naturalKeys: naturalKeys || {} });
+      const { renderApplyResult } = await import('./sync/report.js');
+      const out = renderApplyResult({ ...raw, planId: 'reconcile' });
+      return ok({ summary: out.human }, out.machine, debug);
+    }
+    return err(`Unsupported mode "${mode}". Use "plan", "apply", or "reconcile".`);
   },
 
   // ── Meta: Tool Management ──

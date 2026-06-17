@@ -35,6 +35,12 @@ export function renderApplyResult(result) {
     `  skipped: ${result.skipped}`,
     `  failed: ${result.failed}`,
   ];
+  if (result.records) {
+    const r = result.records;
+    lines.push(
+      `  records: created ${r.created} / updated ${r.updated} / failed ${r.failed} / attachments ${r.attachmentsUploaded} / viewFilters ${r.viewFiltersReapplied}`
+    );
+  }
   if (result.warnings && result.warnings.length) {
     lines.push('  warnings:');
     for (const w of result.warnings) lines.push(`    - ${w.code}: ${w.message}`);
