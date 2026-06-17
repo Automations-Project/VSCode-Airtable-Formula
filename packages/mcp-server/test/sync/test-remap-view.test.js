@@ -56,3 +56,14 @@ describe('remap.canonicalizeViewConfig', () => {
     assert.notEqual(a, b);
   });
 });
+
+describe('remap.canonicalizeViewConfig columns convergence', () => {
+  const names = { fA: 'A', fB: 'B', fC: 'C', fD: 'D' };
+  it('ignores hidden-column ORDER (apply cannot control it) but keeps visible order', () => {
+    const x = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fB', visibility: true }, { columnId: 'fC', visibility: false }, { columnId: 'fD', visibility: false }] }, names, {});
+    const y = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fB', visibility: true }, { columnId: 'fD', visibility: false }, { columnId: 'fC', visibility: false }] }, names, {});
+    assert.equal(x, y); // hidden order differs → still equal → converges
+    const z = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fB', visibility: true }, { columnId: 'fA', visibility: true }, { columnId: 'fC', visibility: false }, { columnId: 'fD', visibility: false }] }, names, {});
+    assert.notEqual(x, z); // different VISIBLE order → not equal
+  });
+});
