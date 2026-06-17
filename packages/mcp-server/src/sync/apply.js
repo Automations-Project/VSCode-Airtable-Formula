@@ -277,9 +277,11 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
       const tryFacet = async (name, fn) => { try { await fn(); } catch (e) { result.warnings.push({ code: 'VIEW_FACET_FAILED', message: `View ${destViewId} ${name}: ${e.message ?? e}` }); } };
 
       // Grid-safe facets (always; drop unresolved-ref ones).
-      if (cfg.filters) await tryFacet('filters', () => client.updateViewFilters(destAppId, destViewId, cfg.filters));
-      if (cfg.sorts && cfg.sorts.length) { if (cfg.sorts.every((s) => refOk(s.columnId))) await tryFacet('sorts', () => client.applySorts(destAppId, destViewId, cfg.sorts)); else warnRef('sorts'); }
-      if (cfg.groupLevels && cfg.groupLevels.length) { if (cfg.groupLevels.every((g) => refOk(g.columnId))) await tryFacet('groups', () => client.updateGroupLevels(destAppId, destViewId, cfg.groupLevels)); else warnRef('groups'); }
+      // Always push filters/sorts/groups to MATCH source — clearing the dest when source has
+      // none (a stray dest filter/sort/group source lacks would otherwise never converge).
+      await tryFacet('filters', () => client.updateViewFilters(destAppId, destViewId, cfg.filters || { filterSet: [], conjunction: 'and' }));
+      if (!cfg.sorts || cfg.sorts.every((s) => refOk(s.columnId))) await tryFacet('sorts', () => client.applySorts(destAppId, destViewId, cfg.sorts || [])); else warnRef('sorts');
+      if (!cfg.groupLevels || cfg.groupLevels.every((g) => refOk(g.columnId))) await tryFacet('groups', () => client.updateGroupLevels(destAppId, destViewId, cfg.groupLevels || [])); else warnRef('groups');
       if (cfg.columnOrder && cfg.columnOrder.length) {
         const visible = cfg.columnOrder.filter((c) => c.visibility && refOk(c.columnId)).map((c) => c.columnId);
         await tryFacet('columns', () => client.setViewColumns(destAppId, destViewId, { visibleColumnIds: visible, frozenColumnCount: cfg.frozenColumnCount }));

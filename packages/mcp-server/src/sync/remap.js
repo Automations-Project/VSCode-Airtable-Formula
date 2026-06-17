@@ -129,7 +129,7 @@ function canonFilterSet(set, fldNames, selNames) {
 export function canonicalizeViewConfig(config, fldNames, selNames) {
   const c = config || {};
   return JSON.stringify({
-    filters: c.filters ? { conj: c.filters.conjunction, set: canonFilterSet(c.filters.filterSet || [], fldNames, selNames) } : null,
+    filters: (c.filters && Array.isArray(c.filters.filterSet) && c.filters.filterSet.length) ? { conj: c.filters.conjunction, set: canonFilterSet(c.filters.filterSet, fldNames, selNames) } : null,
     sorts: (c.sorts || []).map((s) => ({ col: viewNameOf(fldNames, s.columnId), asc: s.ascending })),
     groups: (c.groupLevels || []).map((g) => ({ col: viewNameOf(fldNames, g.columnId), order: g.order })),
     // Compare WHICH columns are visible vs hidden (each as an order-agnostic set), not their

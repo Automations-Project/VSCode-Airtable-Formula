@@ -55,6 +55,13 @@ describe('remap.canonicalizeViewConfig', () => {
     const b = canonicalizeViewConfig({ sorts: [{ columnId: 'fldB', ascending: true }] }, { fldB: 'Qty' }, {});
     assert.notEqual(a, b);
   });
+  it('an empty filterSet canonicalizes equal to no filters (apply clears stray dest filters → convergence)', () => {
+    const noFilter = canonicalizeViewConfig({ filters: null }, {}, {});
+    const emptyFilter = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [] } }, {}, {});
+    assert.equal(noFilter, emptyFilter);
+    const realFilter = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: 'contains', value: null }] } }, { fldA: 'ID' }, {});
+    assert.notEqual(noFilter, realFilter); // a genuine filter still differs from none
+  });
 });
 
 describe('remap.canonicalizeViewConfig columns convergence', () => {
