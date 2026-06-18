@@ -80,7 +80,8 @@ export class AirtableAuth {
     // Past the threshold, mark the session dead and fail fast with a re-login message.
     this._recoveryStreak = 0;
     this._sessionDead = false;
-    this._sessionDeadAfter = Number(process.env.AIRTABLE_SESSION_DEAD_AFTER) || 6;
+    this._sessionDeadAfter = Number(process.env.AIRTABLE_SESSION_DEAD_AFTER) || 8;
+    this._rlSleep = (ms) => new Promise((r) => setTimeout(r, ms)); // injectable for tests
   }
 
   /** Reset the dead-session circuit-breaker (e.g., after the user re-authenticates). */
@@ -499,8 +500,9 @@ export class AirtableAuth {
 
       const MAX_RETRIES = 3;
       const HARD_TIMEOUT_MS = 30_000;
-      const deadline = Date.now() + HARD_TIMEOUT_MS;
-      let attempt = 0;
+      let deadline = Date.now() + HARD_TIMEOUT_MS; // extended by intentional rate-limit backoff waits
+      let attempt = 0;    // browser-recovery (relaunch) attempts
+      let rlAttempt = 0;  // rate-limit/throttle backoff attempts (same session, no relaunch)
       while (true) {
         if (Date.now() > deadline) {
           // Bail out rather than retry past the caller's patience budget.
@@ -525,17 +527,28 @@ export class AirtableAuth {
           throw evalError;
         }
 
-        // Rate limited — exponential backoff (429 = Too Many Requests, 503 = Service Unavailable)
-        if ((result.status === 429 || result.status === 503) && attempt < MAX_RETRIES) {
-          const delay = 500 * (2 ** attempt);
-          console.error(`[auth] Rate limited (${result.status}), retrying in ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
-          attempt++;
+        // Rate-limit / throttle — 429 (Too Many Requests), 503 (Service Unavailable), and 403:
+        // the internal API shares Airtable's ~5 req/s-per-base limit and answers a burst with 403.
+        // BACK OFF and retry the SAME session — do NOT relaunch the browser. Relaunching on a
+        // throttle 403 only makes it worse: each _recoverSession fires a burst of page-load requests
+        // that re-trips the limit (observed as an endless 403→relaunch→403 storm). Exponential toward
+        // the ~30s official penalty; intentional waits don't count against the work budget; the
+        // dead-session circuit-breaker still bounds a throttle that never clears.
+        if (result.status === 429 || result.status === 503 || result.status === 403) {
+          if (++this._recoveryStreak >= this._sessionDeadAfter) {
+            this._sessionDead = true;
+            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.`);
+          }
+          const delay = Math.min(30_000, 1000 * (2 ** rlAttempt)) + Math.floor(Math.random() * 500);
+          console.error(`[auth] ${result.status} (rate-limit/throttle) — backing off ${delay}ms on the same session, no relaunch (streak ${this._recoveryStreak})...`);
+          await this._rlSleep(delay);
+          deadline += delay; // an intentional backoff wait is not a stall — don't let it trip the budget
+          rlAttempt++;
           continue;
         }
 
-        // Session expired or network failure — attempt one recovery and retry
-        const needsRecovery = result.status === 401 || result.status === 403 || result.error;
+        // Genuine auth loss (401) or network failure — relaunch the session.
+        const needsRecovery = result.status === 401 || result.error;
         if (needsRecovery && !this._recovering && attempt < MAX_RETRIES) {
           if (++this._recoveryStreak >= this._sessionDeadAfter) {
             this._sessionDead = true;
