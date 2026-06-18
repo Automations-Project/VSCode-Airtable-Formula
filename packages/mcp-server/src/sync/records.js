@@ -952,7 +952,11 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   }
 
   // 4. Infra: rate limiter + journal + persist + result
-  const limiter = createLimiter({ rps: 5 });
+  // Phase-local pacing. Default ~5 req/s; lower it (AIRTABLE_SYNC_RPS=2) for an account that's
+  // throttle-sensitized — Airtable also enforces a per-WINDOW cap that per-second pacing can't dodge,
+  // so a recently-abused base may need a slower rate (or a full cooldown) to avoid re-tripping.
+  const rps = Number(process.env.AIRTABLE_SYNC_RPS) || 5;
+  const limiter = createLimiter({ rps });
   const journal = loadRecordsJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
   const persist = (m, j) => {
     saveIdmap(sourceBaseId, destBaseId, m);
