@@ -40,6 +40,29 @@ export function readRecordsJobStatus(sourceBaseId, destBaseId, planId) {
 }
 
 /**
+ * Enable per-request pacing for the records phase, then return a restore fn.
+ *
+ * Every browser-backed call funnels through the auth queue, which spaces dequeued calls by
+ * `auth._rateDelayMs` (default 0 = off). The records phase fires many POSTs (per-row creates +
+ * per-item link appends); without pacing they burst past Airtable's ~5 req/s per-base limit and
+ * trip the 429/403 backoff (reactive). Defaulting the delay ON (200ms ≈ 5/s, override via
+ * AIRTABLE_SYNC_RATE_DELAY_MS) paces the inner POSTs PROACTIVELY so we stay under the limit and
+ * don't provoke the abuse detector. Scoped to the phase: restored afterward so interactive MCP
+ * tool calls stay snappy. No-op when the client has no auth (tests).
+ *
+ * @param {object} client
+ * @returns {() => void} restore — resets the prior delay
+ */
+export function applySyncRateDelay(client) {
+  const auth = client?.auth;
+  if (!auth) return () => {};
+  const prev = auth._rateDelayMs;
+  const ms = Number(process.env.AIRTABLE_SYNC_RATE_DELAY_MS);
+  auth._rateDelayMs = Number.isFinite(ms) && ms > 0 ? ms : 200;
+  return () => { auth._rateDelayMs = prev; };
+}
+
+/**
  * Returns true if the field type is a multiSelect (arrays not accepted by updateRecords).
  * @param {string} type
  * @returns {boolean}
@@ -912,6 +935,10 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   idmap.records ??= {};
   idmap.attachments ??= {};
 
+  // Pace every POST in this phase under ~5 req/s (proactive); restored in finally.
+  const restoreRateDelay = applySyncRateDelay(client);
+  try {
+
   // 2. Snapshot schemas ONLY (no per-view live-config reads — those are a getView/readData
   //    storm: ~1s per view, hundreds of views on a view-heavy base, on BOTH bases. The records
   //    phase needs schema + records, not view configs. reapplyViewFilters reads source view
@@ -990,6 +1017,9 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   persist(idmap, journal);
 
   return result;
+  } finally {
+    restoreRateDelay();
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

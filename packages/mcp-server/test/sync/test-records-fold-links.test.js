@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1, applyRecordsPass2, orderTablesByLinkDeps } from '../../src/sync/records.js';
+import { applyRecordsPass1, applyRecordsPass2, orderTablesByLinkDeps, applySyncRateDelay } from '../../src/sync/records.js';
 import { newJournal } from '../../src/sync/journal.js';
 import { createLimiter } from '../../src/sync/ratelimit.js';
 
@@ -40,6 +40,23 @@ describe('orderTablesByLinkDeps', () => {
     const idmap = { tables: { tblA: 'x', tblB: 'y' }, fields: {} };
     const ordered = orderTablesByLinkDeps(tables, idmap).map((t) => t.id);
     assert.deepEqual(ordered, ['tblA', 'tblB']); // stable original order
+  });
+});
+
+// ── applySyncRateDelay (proactive pacing for the records phase) ──────────────
+describe('applySyncRateDelay', () => {
+  it('enables a >0 inter-call delay and restores the prior value', () => {
+    const auth = { _rateDelayMs: 0 };
+    const restore = applySyncRateDelay({ auth });
+    assert.ok(auth._rateDelayMs >= 200, 'pacing delay enabled during the phase');
+    restore();
+    assert.equal(auth._rateDelayMs, 0, 'prior delay restored after the phase');
+  });
+
+  it('is a safe no-op when the client has no auth (tests/mocks)', () => {
+    const restore = applySyncRateDelay({});
+    assert.equal(typeof restore, 'function');
+    assert.doesNotThrow(() => restore());
   });
 });
 
