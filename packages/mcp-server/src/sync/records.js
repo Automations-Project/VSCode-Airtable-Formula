@@ -40,27 +40,20 @@ export function readRecordsJobStatus(sourceBaseId, destBaseId, planId) {
 }
 
 /**
- * Enable per-request pacing for the records phase, then return a restore fn.
+ * Build a "gate" that wraps each INNER per-row/per-item POST of the records phase so it runs
+ * through the phase-local rate limiter (≈5 req/s) with transient retry. Passed into
+ * client.createRecords/updateRecords/addLinkItems via their `gate` option.
  *
- * Every browser-backed call funnels through the auth queue, which spaces dequeued calls by
- * `auth._rateDelayMs` (default 0 = off). The records phase fires many POSTs (per-row creates +
- * per-item link appends); without pacing they burst past Airtable's ~5 req/s per-base limit and
- * trip the 429/403 backoff (reactive). Defaulting the delay ON (200ms ≈ 5/s, override via
- * AIRTABLE_SYNC_RATE_DELAY_MS) paces the inner POSTs PROACTIVELY so we stay under the limit and
- * don't provoke the abuse detector. Scoped to the phase: restored afterward so interactive MCP
- * tool calls stay snappy. No-op when the client has no auth (tests).
+ * Why a per-POST gate and not the shared auth queue's `_rateDelayMs`: the records phase runs as a
+ * non-awaited BACKGROUND job, and the daemon serves every interactive tool call through the SAME
+ * auth queue — delaying that queue would throttle all interactive traffic for the whole multi-minute
+ * run. This limiter is created per records run, so only THIS phase's POSTs are paced; interactive
+ * calls are untouched.
  *
- * @param {object} client
- * @returns {() => void} restore — resets the prior delay
+ * @param {{run:(fn:()=>Promise<any>)=>Promise<any>}} limiter
+ * @returns {(fn:()=>Promise<any>)=>Promise<any>}
  */
-export function applySyncRateDelay(client) {
-  const auth = client?.auth;
-  if (!auth) return () => {};
-  const prev = auth._rateDelayMs;
-  const ms = Number(process.env.AIRTABLE_SYNC_RATE_DELAY_MS);
-  auth._rateDelayMs = Number.isFinite(ms) && ms > 0 ? ms : 200;
-  return () => { auth._rateDelayMs = prev; };
-}
+const makeGate = (limiter) => (fn) => limiter.run(() => withRetry(fn));
 
 /**
  * Returns true if the field type is a multiSelect (arrays not accepted by updateRecords).
@@ -253,9 +246,10 @@ function mirrorFoldedLinks(destTableById, destTableId, destRowId, linkCells) {
  * but not live-verified — this is the calibration knob).
  */
 async function createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById }) {
+  const gate = makeGate(limiter); // paces each inner per-row create POST under the phase limiter
   let res;
   try {
-    res = await limiter.run(() => withRetry(() => client.createRecords(destAppId, destTableId, chunk, {})));
+    res = await client.createRecords(destAppId, destTableId, chunk, { gate });
   } catch (err) {
     result.failed += chunk.length;
     result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: createRecords threw: ${err.message}` });
@@ -294,7 +288,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   });
   let retryRes;
   try {
-    retryRes = await limiter.run(() => withRetry(() => client.createRecords(destAppId, destTableId, stripped, {})));
+    retryRes = await client.createRecords(destAppId, destTableId, stripped, { gate });
   } catch (err) {
     result.failed += stripped.length;
     result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: retry-without-links threw: ${err.message}` });
@@ -379,9 +373,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     // ── UPDATE batch ──────────────────────────────────────────────────────
     if (updateRows.length > 0) {
       try {
-        const res = await limiter.run(() =>
-          withRetry(() => client.updateRecords(destAppId, destTableId, updateRows)),
-        );
+        const res = await client.updateRecords(destAppId, destTableId, updateRows, { gate: makeGate(limiter) });
         result.updated += (res.updated || []).length;
         for (const failed of (res.failed || [])) {
           result.failed++;
@@ -495,9 +487,7 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
         }));
 
         try {
-          const res = await limiter.run(() =>
-            withRetry(() => client.addLinkItems(destAppId, destRowId, destFldId, items)),
-          );
+          const res = await client.addLinkItems(destAppId, destRowId, destFldId, items, { gate: makeGate(limiter) });
           if (!res.ok) {
             result.warnings.push({
               code: 'RECORD_LINK_FAILED',
@@ -915,11 +905,20 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
  * 2. Snapshots src + dest schema (no records yet).
  * 3. Attaches records to each table snapshot via snapshotTableRecords.
  *    Emits RECORD_COUNT warning when exactly 1000 rows are returned (possibly truncated).
- * 4. Builds a rate limiter and records journal (resumable).
- * 5. Runs: Pass 1 (scalar/select upsert) → rebuild destDisplayNames → Pass 2 (links)
- *          → Pass 3 (attachments) → reapplyViewFilters.
- * 6. Persists idmap + journal after each phase.
+ * 4. Builds a phase-local rate limiter (~5 req/s; gates inner POSTs) and a records journal.
+ * 5. Runs: Pass 1 (scalar/select upsert + fold resolvable links into create) → rebuild
+ *          destDisplayNames → Pass 2 (remaining/forward links) → Pass 3 (attachments)
+ *          → reapplyViewFilters.
+ * 6. Persists idmap (+ journal) after each chunk/phase.
  * 7. Returns a result accumulator.
+ *
+ * RESUME MODEL: resume is driven by the persisted **idmap.records** + a fresh live dest snapshot —
+ * a created row is skipped on re-run because its source id is already mapped, and Pass 2 dedups
+ * links against the live dest. The records journal is persisted but currently advisory (no
+ * per-record done-gating); idmap + live re-snapshot are the source of truth. Known limitation:
+ * a crash between a create's server-ack and the per-chunk idmap persist can re-create up to one
+ * chunk (~50) of rows as duplicates on resume (reconcile only existence-prunes; natural-key
+ * re-match is a stub).
  *
  * @param {object} opts
  * @param {object} opts.client          - AirtableClient instance
@@ -934,10 +933,6 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   const idmap = loadIdmap(sourceBaseId, destBaseId);
   idmap.records ??= {};
   idmap.attachments ??= {};
-
-  // Pace every POST in this phase under ~5 req/s (proactive); restored in finally.
-  const restoreRateDelay = applySyncRateDelay(client);
-  try {
 
   // 2. Snapshot schemas ONLY (no per-view live-config reads — those are a getView/readData
   //    storm: ~1s per view, hundreds of views on a view-heavy base, on BOTH bases. The records
@@ -1017,9 +1012,6 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   persist(idmap, journal);
 
   return result;
-  } finally {
-    restoreRateDelay();
-  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -2581,13 +2581,17 @@ export class AirtableClient {
    * @param {{viewId?: string}} [opts]
    * @returns {Promise<{created: {rowId:string, sourceKey:any}[], failed: {sourceKey:any, error:string}[]}>}
    */
-  async createRecords(appId, tableId, rows, { viewId } = {}) {
+  async createRecords(appId, tableId, rows, { viewId, gate } = {}) {
     assertAirtableId(appId, 'appId');
     assertAirtableId(tableId, 'tableId');
     if (!Array.isArray(rows) || rows.length === 0) {
       throw new Error('rows must be a non-empty array');
     }
     if (viewId) assertAirtableId(viewId, 'viewId');
+    // `gate` wraps each per-row POST so a caller (the records sync) can pace/retry the INNER
+    // requests under a phase-local rate limiter — without throttling the shared auth queue that
+    // also serves interactive tool calls. Defaults to pass-through.
+    const g = gate || ((fn) => fn());
     let activeViewId = viewId;
     if (!activeViewId) {
       const table = await this.resolveTable(appId, tableId);
@@ -2602,7 +2606,7 @@ export class AirtableClient {
       if (activeViewId) payload.activeViewId = activeViewId;
       const url = `https://airtable.com/v0.3/row/${rowId}/create`;
       try {
-        const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+        const res = await g(() => this.auth.postForm(url, this._mutationParams(payload, appId), appId));
         if (!res.ok) {
           const body = await res.text().catch(() => '');
           failed.push({ sourceKey: row.sourceKey ?? null, error: `createRecords row failed (${res.status}): ${body}` });
@@ -2626,12 +2630,13 @@ export class AirtableClient {
    * @param {{rowId:string, cellValuesByColumnId:object}[]} updates
    * @returns {Promise<{updated:{rowId:string}[], failed:{rowId:string, error:string}[]}>}
    */
-  async updateRecords(appId, tableId, updates) {
+  async updateRecords(appId, tableId, updates, { gate } = {}) {
     assertAirtableId(appId, 'appId');
     assertAirtableId(tableId, 'tableId');
     if (!Array.isArray(updates) || updates.length === 0) {
       throw new Error('updates must be a non-empty array');
     }
+    const g = gate || ((fn) => fn()); // see createRecords: paces inner per-cell POSTs when supplied
     const updated = [];
     const failed = [];
     for (const u of updates) {
@@ -2645,7 +2650,7 @@ export class AirtableClient {
         const url = `https://airtable.com/v0.3/row/${u.rowId}/updatePrimitiveCell`;
         let rowFailed = null;
         for (const [columnId, cellValue] of entries) {
-          const res = await this.auth.postForm(url, this._mutationParams({ columnId, cellValue }, appId), appId);
+          const res = await g(() => this.auth.postForm(url, this._mutationParams({ columnId, cellValue }, appId), appId));
           if (!res.ok) {
             const body = await res.text().catch(() => '');
             rowFailed = `updatePrimitiveCell ${columnId} failed (${res.status}): ${body}`;
@@ -2781,12 +2786,13 @@ export class AirtableClient {
    * @param {Array<{foreignRowId:string, foreignRowDisplayName:string}>} items
    * @returns {Promise<{ok:boolean, added:number, error?:string}>}
    */
-  async addLinkItems(appId, rowId, columnId, items) {
+  async addLinkItems(appId, rowId, columnId, items, { gate } = {}) {
     const url = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+    const g = gate || ((fn) => fn()); // see createRecords: paces inner per-item POSTs when supplied
     let added = 0;
     try {
       for (const item of items) {
-        const res = await this.auth.postForm(url, this._mutationParams({ columnId, item }, appId), appId);
+        const res = await g(() => this.auth.postForm(url, this._mutationParams({ columnId, item }, appId), appId));
         if (!res.ok) {
           const body = await res.text().catch(() => '');
           return { ok: false, added, error: `addLinkItem failed (${res.status}): ${body}` };
