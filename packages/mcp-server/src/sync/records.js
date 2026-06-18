@@ -139,13 +139,178 @@ function buildUpdateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
  * @param {object} opts.result        - result accumulator { created, updated, skipped, failed, warnings }
  * @returns {Promise<void>}
  */
+/**
+ * Order source tables so a link target table is created BEFORE the tables that link to it,
+ * maximizing how many link cells can be folded into the create payload (their dest target
+ * already exists in idmap.records). Deterministic: ties / cycles preserve original order.
+ *
+ * An edge T → target exists when T has a MAPPED link field (foreignKey/multipleRecordLinks)
+ * whose `typeOptions.foreignTableId` is another known table. Self-links are ignored (the row's
+ * own dest id isn't known until after its create → handled by Pass 2).
+ *
+ * @param {Array}  tables  - source table descriptors
+ * @param {object} idmap   - id-map (.fields used to skip unmapped link fields)
+ * @returns {Array}        - tables reordered (targets first); cycles broken in original order
+ */
+export function orderTablesByLinkDeps(tables, idmap) {
+  const list = tables || [];
+  const byId = new Set(list.map((t) => t.id));
+  const deps = new Map(); // tableId → Set(targetTableId)
+  for (const t of list) {
+    const set = new Set();
+    for (const f of (t.fields || [])) {
+      if ((f.type === 'foreignKey' || f.type === 'multipleRecordLinks') && idmap.fields?.[f.id]) {
+        const target = f.typeOptions?.foreignTableId;
+        if (target && target !== t.id && byId.has(target)) set.add(target);
+      }
+    }
+    deps.set(t.id, set);
+  }
+  const ordered = [];
+  const emitted = new Set();
+  const remaining = list.slice();
+  while (remaining.length) {
+    // Emit the FIRST (original-order) table whose deps are all already emitted.
+    const idx = remaining.findIndex((t) => [...deps.get(t.id)].every((d) => emitted.has(d)));
+    const pick = idx === -1 ? 0 : idx; // no eligible table → cycle: break by taking the first remaining
+    const [t] = remaining.splice(pick, 1);
+    ordered.push(t);
+    emitted.add(t.id);
+  }
+  return ordered;
+}
+
+/**
+ * Build the resolvable link cells for the CREATE payload: for each mapped link field whose
+ * source value references records already in idmap.records, emit
+ * `{ destFld: [{ foreignRowId: <destRecId>, foreignRowDisplayName: '' }] }`.
+ * Unresolvable targets (forward/circular refs) are left to Pass 2 (it re-adds anything missing).
+ * (Display name is cosmetic — '' is accepted; Airtable recomputes it.)
+ *
+ * @param {Array}  srcFields
+ * @param {object} srcCells
+ * @param {object} idmap
+ * @returns {object} dest cellValuesByColumnId fragment containing only the resolvable link cells
+ */
+function buildResolvableLinkCells(srcFields, srcCells, idmap) {
+  const cells = {};
+  for (const field of (srcFields || [])) {
+    if (field.type !== 'foreignKey' && field.type !== 'multipleRecordLinks') continue;
+    const mapping = idmap.fields[field.id];
+    if (!mapping) continue;
+    const srcVal = srcCells[field.id];
+    if (!srcVal || (Array.isArray(srcVal) && srcVal.length === 0)) continue;
+    const { resolved } = partitionLinkValue(srcVal, idmap);
+    if (resolved.length > 0) {
+      cells[mapping.destFld] = resolved.map((id) => ({ foreignRowId: id, foreignRowDisplayName: '' }));
+    }
+  }
+  return cells;
+}
+
+/**
+ * Mirror links folded into a create into the in-memory dest snapshot, so Pass 2's dedup
+ * (built from destSnapshot) treats them as already-present and does NOT re-add them.
+ * (Created rows are absent from the pre-run dest snapshot; this keeps it consistent.)
+ */
+function mirrorFoldedLinks(destTableById, destTableId, destRowId, linkCells) {
+  if (!linkCells || Object.keys(linkCells).length === 0) return;
+  const dt = destTableById.get(destTableId);
+  if (!dt) return;
+  dt.records ??= [];
+  dt.records.push({ id: destRowId, cellValuesByColumnId: { ...linkCells } });
+}
+
+/**
+ * Create one chunk, with a SAFETY fallback: if folded link cells cause per-row create failures,
+ * retry just those rows WITHOUT the link cells. If stripping links rescues a row, the link cell
+ * is the culprit → disable link-folding for the remainder of the run (runState.foldLinks=false),
+ * so Pass 2 writes those links per-item. This bounds the blast radius if `row/create` ever rejects
+ * a folded link array to ~one chunk of retries (the create-with-links capability is high-confidence
+ * but not live-verified — this is the calibration knob).
+ */
+async function createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById }) {
+  let res;
+  try {
+    res = await limiter.run(() => withRetry(() => client.createRecords(destAppId, destTableId, chunk, {})));
+  } catch (err) {
+    result.failed += chunk.length;
+    result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: createRecords threw: ${err.message}` });
+    return;
+  }
+
+  for (const created of (res.created || [])) {
+    idmap.records[created.sourceKey] = created.rowId;
+    result.created++;
+    const row = chunk.find((r) => r.sourceKey === created.sourceKey);
+    mirrorFoldedLinks(destTableById, destTableId, created.rowId, row?.linkCells);
+  }
+
+  const failed = res.failed || [];
+  if (failed.length === 0) return;
+
+  // Split failures: those whose row carried folded links (retryable) vs genuine failures.
+  const failedKeys = new Set(failed.map((f) => f.sourceKey));
+  const linkFailedRows = chunk.filter(
+    (r) => failedKeys.has(r.sourceKey) && r.linkCells && Object.keys(r.linkCells).length > 0,
+  );
+  const linkFailedKeys = new Set(linkFailedRows.map((r) => r.sourceKey));
+  for (const f of failed) {
+    if (linkFailedKeys.has(f.sourceKey)) continue; // handled by retry below
+    result.failed++;
+    result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: failed to create record (sourceKey=${f.sourceKey}): ${f.error}` });
+  }
+
+  if (linkFailedRows.length === 0) return;
+
+  // Retry the link-bearing failures WITHOUT their link cells.
+  const stripped = linkFailedRows.map((r) => {
+    const cells = { ...r.cellValuesByColumnId };
+    for (const k of Object.keys(r.linkCells)) delete cells[k];
+    return { cellValuesByColumnId: cells, sourceKey: r.sourceKey, linkCells: {} };
+  });
+  let retryRes;
+  try {
+    retryRes = await limiter.run(() => withRetry(() => client.createRecords(destAppId, destTableId, stripped, {})));
+  } catch (err) {
+    result.failed += stripped.length;
+    result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: retry-without-links threw: ${err.message}` });
+    return;
+  }
+  let rescued = 0;
+  for (const created of (retryRes.created || [])) {
+    idmap.records[created.sourceKey] = created.rowId; // links NOT folded → Pass 2 adds them (no mirror)
+    result.created++;
+    rescued++;
+  }
+  for (const f of (retryRes.failed || [])) {
+    result.failed++;
+    result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: failed to create record without links (sourceKey=${f.sourceKey}): ${f.error}` });
+  }
+  if (rescued > 0 && runState.foldLinks) {
+    runState.foldLinks = false;
+    result.warnings.push({
+      code: 'FOLD_LINKS_DISABLED',
+      message: `Table ${destTableId}: create rejected folded link cells — disabled link-fold for the rest of this run (Pass 2 writes links per-item)`,
+    });
+  }
+}
+
 export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result }) {
   if (!idmap.records) idmap.records = {};
 
   // destAppId comes from the snapshot (set by snapshotBase); fall back to '' for tests that omit it.
   const destAppId = destSnapshot.baseId || '';
 
-  for (const srcTable of (srcSnapshot.tables || [])) {
+  // Run-level circuit breaker for fold-into-create (see createChunkWithFallback).
+  const runState = { foldLinks: true };
+  // Dest table lookup for mirroring folded links into the snapshot (so Pass 2 dedups them out).
+  const destTableById = new Map((destSnapshot.tables || []).map((t) => [t.id, t]));
+
+  // Create link TARGET tables before their dependents so cross-table links resolve at create time.
+  const orderedTables = orderTablesByLinkDeps(srcSnapshot.tables || [], idmap);
+
+  for (const srcTable of orderedTables) {
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
 
@@ -161,9 +326,15 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       const destRecId = idmap.records[rec.id];
 
       if (!destRecId) {
-        // CREATE path — multiSelect arrays ARE accepted by createRecords
+        // CREATE path — scalar/select/multiSelect arrays ARE accepted by createRecords.
         const cells = buildCreateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id);
-        createRows.push({ cellValuesByColumnId: cells, sourceKey: rec.id });
+        // Fold resolvable links (remapped) into the create payload (kills most of Pass 2).
+        let linkCells = {};
+        if (runState.foldLinks) {
+          linkCells = buildResolvableLinkCells(srcTable.fields, srcCells, idmap);
+          Object.assign(cells, linkCells);
+        }
+        createRows.push({ cellValuesByColumnId: cells, sourceKey: rec.id, linkCells });
       } else {
         // UPDATE path — multiSelect arrays NOT accepted by updateRecords (deferred with warning)
         const cells = buildUpdateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id);
@@ -178,28 +349,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     const CREATE_CHUNK = 50;
     for (let i = 0; i < createRows.length; i += CREATE_CHUNK) {
       const chunk = createRows.slice(i, i + CREATE_CHUNK);
-      try {
-        const res = await limiter.run(() =>
-          withRetry(() => client.createRecords(destAppId, destTableId, chunk, {})),
-        );
-        for (const created of (res.created || [])) {
-          idmap.records[created.sourceKey] = created.rowId;
-          result.created++;
-        }
-        for (const failed of (res.failed || [])) {
-          result.failed++;
-          result.warnings.push({
-            code: 'RECORD_CREATE_FAILED',
-            message: `Table ${destTableId}: failed to create record (sourceKey=${failed.sourceKey}): ${failed.error}`,
-          });
-        }
-      } catch (err) {
-        result.failed += chunk.length;
-        result.warnings.push({
-          code: 'RECORD_CREATE_FAILED',
-          message: `Table ${destTableId}: createRecords threw: ${err.message}`,
-        });
-      }
+      await createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById });
       persist(idmap, journal);
     }
 

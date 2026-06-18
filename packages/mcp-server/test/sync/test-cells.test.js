@@ -8,6 +8,7 @@ describe('cells.isWritableForRecords', () => {
   it('false for computed + link + attachment, true for scalar/select', () => {
     assert.equal(isWritableForRecords({ type: 'formula' }), false);
     assert.equal(isWritableForRecords({ type: 'multipleRecordLinks' }), false);
+    assert.equal(isWritableForRecords({ type: 'foreignKey' }), false); // internal link type — must be remapped, not written raw
     assert.equal(isWritableForRecords({ type: 'multipleAttachments' }), false);
     assert.equal(isWritableForRecords({ type: 'text' }), true);
     assert.equal(isWritableForRecords({ type: 'select' }), true);

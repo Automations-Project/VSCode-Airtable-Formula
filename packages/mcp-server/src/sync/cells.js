@@ -1,6 +1,11 @@
 import { isComputedType } from './snapshot.js';
 
-const ARRAY_DEFERRED = new Set(['multipleRecordLinks', 'multipleAttachments']);
+// Array-type cells whose raw source value must NOT be written verbatim by buildCreate/UpdateCells:
+// links carry source rec-ids that need src→dest remapping (handled by the link-fold path in Pass 1
+// + Pass 2), attachments need the cross-base transfer (Pass 3). `foreignKey` is the INTERNAL link
+// type (snapshot passes type through verbatim) — omitting it here would write raw source rec-ids at
+// create time (only "worked" against an id-duplicate dest base).
+const ARRAY_DEFERRED = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAttachments']);
 
 /**
  * Extract the record ID from a link-cell element.
