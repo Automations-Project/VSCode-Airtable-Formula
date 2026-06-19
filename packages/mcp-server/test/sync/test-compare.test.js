@@ -1,4 +1,4 @@
-import { classOf, compareFields } from '../../src/sync/compare.js';
+import { classOf, compareFields, compare } from '../../src/sync/compare.js';
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -187,5 +187,141 @@ describe('compareFields', () => {
     // Same formula referencing same-named field → no typeOptions drift
     const { entries } = compareFields(src, dest, idmap);
     assert.ok(!entries.find((e) => e.key === 'typeOptions'), 'id-stable formula should not produce typeOptions drift');
+  });
+});
+
+// ── compare() top-level tests (Task 4) ──────────────────────────────────────
+
+function mkSnap(baseId, tables) {
+  return { baseId, tables };
+}
+
+function mkTable(id, name, fields, views = []) {
+  return { id, name, primaryFieldId: fields[0]?.id ?? null, fields, views, sections: [] };
+}
+
+describe('compare', () => {
+  test('identical snapshots → identical:true, converged:true, summary all zero', () => {
+    const tableA = mkTable('st1', 'Alpha', [fld('sf1', 'Name', 'text'), fld('sf2', 'Value', 'number')]);
+    const destA = mkTable('dt1', 'Alpha', [fld('df1', 'Name', 'text'), fld('df2', 'Value', 'number')]);
+    const srcSnap = mkSnap('srcBase', [tableA]);
+    const destSnap = mkSnap('destBase', [destA]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} }, sf2: { destFld: 'df2', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.sourceBaseId, 'srcBase');
+    assert.equal(result.destBaseId, 'destBase');
+    assert.equal(result.identical, true);
+    assert.equal(result.converged, true);
+    assert.equal(result.summary.drift, 0);
+    assert.equal(result.summary.bestEffort, 0);
+    assert.equal(result.summary.notSynced, 0);
+    assert.equal(result.summary.onlyInSourceTables, 0);
+    assert.equal(result.summary.onlyInDestTables, 0);
+    assert.deepEqual(result.onlyInSourceTables, []);
+    assert.deepEqual(result.onlyInDestTables, []);
+    assert.equal(result.tables.length, 1);
+    assert.equal(result.tables[0].status, 'same');
+  });
+
+  test('one reordered field → identical:false, converged:true, bestEffort===1', () => {
+    // Fields A and B exist in both, but order is reversed in dest.
+    // Both tables must have the same primary field NAME ('A') so primaryFieldName is not a drift source.
+    const srcTable = { ...mkTable('st1', 'Alpha', [fld('sf1', 'A', 'text'), fld('sf2', 'B', 'text')]), primaryFieldId: 'sf1' };
+    const destTable = { ...mkTable('dt1', 'Alpha', [fld('df2', 'B', 'text'), fld('df1', 'A', 'text')]), primaryFieldId: 'df1' };
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} }, sf2: { destFld: 'df2', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.identical, false);
+    assert.equal(result.converged, true);
+    assert.equal(result.summary.bestEffort, 1, 'exactly one best-effort entry for fieldOrder');
+    assert.equal(result.summary.drift, 0);
+  });
+
+  test('one type change → converged:false, drift>=1', () => {
+    const srcTable = mkTable('st1', 'Alpha', [fld('sf1', 'Price', 'number')]);
+    const destTable = mkTable('dt1', 'Alpha', [fld('df1', 'Price', 'text')]);
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.identical, false);
+    assert.equal(result.converged, false);
+    assert.ok(result.summary.drift >= 1, `drift should be >=1 (got ${result.summary.drift})`);
+  });
+
+  test('unmatched src table appears in onlyInSourceTables with count', () => {
+    const srcTable = mkTable('st1', 'Alpha', [fld('sf1', 'Name', 'text')]);
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', []);
+    const idmap = { tables: {}, fields: {}, views: {} };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.deepEqual(result.onlyInSourceTables, ['Alpha']);
+    assert.equal(result.summary.onlyInSourceTables, 1);
+    assert.equal(result.identical, false);
+    assert.equal(result.converged, true, 'no drift entries → still converged');
+  });
+
+  test('unmatched dest table appears in onlyInDestTables with count', () => {
+    const destTable = mkTable('dt1', 'Beta', [fld('df1', 'Name', 'text')]);
+    const srcSnap = mkSnap('srcBase', []);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = { tables: {}, fields: {}, views: {} };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.deepEqual(result.onlyInDestTables, ['Beta']);
+    assert.equal(result.summary.onlyInDestTables, 1);
+    assert.equal(result.identical, false);
+  });
+
+  test('by-name fallback matches table when idmap.tables has no entry', () => {
+    // Tables have same name but no idmap entry → should match by name
+    const srcTable = mkTable('st1', 'MyTable', [fld('sf1', 'X', 'text')]);
+    const destTable = mkTable('dt1', 'MyTable', [fld('df1', 'X', 'text')]);
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = { tables: {}, fields: {}, views: {} };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.deepEqual(result.onlyInSourceTables, []);
+    assert.deepEqual(result.onlyInDestTables, []);
+    assert.equal(result.tables.length, 1);
+    assert.equal(result.identical, true);
+    assert.equal(result.converged, true);
+  });
+
+  test('summary counts aggregate drift and best-effort across multiple tables', () => {
+    // Table1: type drift (drift+1), Table2: field reorder (bestEffort+1).
+    // Both tables must have matching primary field names to isolate the intended diffs.
+    const t1Src = mkTable('st1', 'T1', [fld('sf1', 'A', 'number')]);
+    const t1Dest = mkTable('dt1', 'T1', [fld('df1', 'A', 'text')]);
+    const t2Src = { ...mkTable('st2', 'T2', [fld('sf2', 'X', 'text'), fld('sf3', 'Y', 'text')]), primaryFieldId: 'sf2' };
+    const t2Dest = { ...mkTable('dt2', 'T2', [fld('df3', 'Y', 'text'), fld('df2', 'X', 'text')]), primaryFieldId: 'df2' };
+    const srcSnap = mkSnap('srcBase', [t1Src, t2Src]);
+    const destSnap = mkSnap('destBase', [t1Dest, t2Dest]);
+    const idmap = {
+      tables: { st1: 'dt1', st2: 'dt2' },
+      fields: {
+        sf1: { destFld: 'df1', choices: {} },
+        sf2: { destFld: 'df2', choices: {} },
+        sf3: { destFld: 'df3', choices: {} },
+      },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.summary.drift, 1, 'one type drift in T1');
+    assert.equal(result.summary.bestEffort, 1, 'one fieldOrder in T2');
+    assert.equal(result.identical, false);
+    assert.equal(result.converged, false, 'has drift → not converged');
   });
 });

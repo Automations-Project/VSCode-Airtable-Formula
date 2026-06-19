@@ -395,6 +395,102 @@ export function compareViews(srcTable, destTable, idmap) {
 }
 
 /**
+ * Top-level compare: diff two base snapshots and return the full diff tree.
+ *
+ * Table matching strategy:
+ *  1. For each src table, look up dest table id via idmap.tables[srcTable.id].
+ *  2. If no idmap entry, fall back to matching by table name in dest.
+ *
+ * @param {{ baseId: string, tables: Array<{id:string, name:string, primaryFieldId:string, fields:Array, views:Array, sections?:Array}> }} srcSnap
+ * @param {{ baseId: string, tables: Array<{id:string, name:string, primaryFieldId:string, fields:Array, views:Array, sections?:Array}> }} destSnap
+ * @param {{ tables: Record<string,string>, fields: Record<string,{destFld:string,choices:Record<string,string>}>, views: Record<string,string> }} idmap
+ * @returns {{
+ *   sourceBaseId: string,
+ *   destBaseId: string,
+ *   identical: boolean,
+ *   converged: boolean,
+ *   summary: { drift: number, bestEffort: number, notSynced: number, onlyInSourceTables: number, onlyInDestTables: number },
+ *   tables: Array,
+ *   onlyInSourceTables: string[],
+ *   onlyInDestTables: string[]
+ * }}
+ */
+export function compare(srcSnap, destSnap, idmap) {
+  const onlyInSourceTables = [];
+  const onlyInDestTables = [];
+  const tables = [];
+
+  // Build dest table lookup: by id and by name.
+  const destById = new Map(destSnap.tables.map((t) => [t.id, t]));
+  const destByName = new Map(destSnap.tables.map((t) => [t.name, t]));
+  const matchedDestIds = new Set();
+
+  for (const st of srcSnap.tables) {
+    // Resolve dest table: idmap first, then by-name fallback.
+    let dt = null;
+    const mappedDestId = idmap.tables && idmap.tables[st.id];
+    if (mappedDestId) dt = destById.get(mappedDestId) ?? null;
+    if (!dt) dt = destByName.get(st.name) ?? null;
+
+    if (!dt) {
+      onlyInSourceTables.push(st.name);
+      continue;
+    }
+    matchedDestIds.add(dt.id);
+
+    const tableResult = compareTable(st, dt, idmap);
+    tables.push(tableResult);
+  }
+
+  // Collect dest-only tables.
+  for (const dt of destSnap.tables) {
+    if (!matchedDestIds.has(dt.id)) {
+      onlyInDestTables.push(dt.name);
+    }
+  }
+
+  // Aggregate counts by class across all entries in all matched tables.
+  let drift = 0;
+  let bestEffort = 0;
+  let notSynced = 0;
+
+  for (const tableResult of tables) {
+    for (const entry of tableResult.entries) {
+      if (entry.class === 'drift') drift++;
+      else if (entry.class === 'best-effort') bestEffort++;
+      else if (entry.class === 'not-synced') notSynced++;
+    }
+  }
+
+  // Compute verdicts.
+  const totalEntries = drift + bestEffort + notSynced;
+  const identical =
+    totalEntries === 0 &&
+    onlyInSourceTables.length === 0 &&
+    onlyInDestTables.length === 0 &&
+    tables.every((t) => t.fields.onlyInSource.length === 0 && t.fields.onlyInDest.length === 0 &&
+      t.views.onlyInSource.length === 0 && t.views.onlyInDest.length === 0);
+  const converged = drift === 0;
+
+  return {
+    sourceBaseId: srcSnap.baseId,
+    destBaseId: destSnap.baseId,
+    identical,
+    converged,
+    summary: {
+      drift,
+      bestEffort,
+      notSynced,
+      onlyInSourceTables: onlyInSourceTables.length,
+      onlyInDestTables: onlyInDestTables.length,
+    },
+    tables,
+    onlyInSourceTables,
+    onlyInDestTables,
+  };
+}
+
+/**
  * Compare a source table against a dest table using the provided idmap.
  *
  * Covers:
