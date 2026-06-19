@@ -470,7 +470,14 @@ export function compare(srcSnap, destSnap, idmap) {
     onlyInDestTables.length === 0 &&
     tables.every((t) => t.fields.onlyInSource.length === 0 && t.fields.onlyInDest.length === 0 &&
       t.views.onlyInSource.length === 0 && t.views.onlyInDest.length === 0);
-  const converged = drift === 0;
+  // converged = the sync would produce no remaining changes.
+  // Missing items (onlyInSourceTables, per-table fields.onlyInSource, views.onlyInSource) represent
+  // createTable/createField/createView operations the sync WOULD make, so they break convergence.
+  // onlyInDest* are orphans — the sync reports but never deletes them, so they must NOT affect converged.
+  const converged =
+    drift === 0 &&
+    onlyInSourceTables.length === 0 &&
+    tables.every((t) => t.fields.onlyInSource.length === 0 && t.views.onlyInSource.length === 0);
 
   return {
     sourceBaseId: srcSnap.baseId,

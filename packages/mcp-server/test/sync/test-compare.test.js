@@ -271,7 +271,7 @@ describe('compare', () => {
     assert.deepEqual(result.onlyInSourceTables, ['Alpha']);
     assert.equal(result.summary.onlyInSourceTables, 1);
     assert.equal(result.identical, false);
-    assert.equal(result.converged, true, 'no drift entries → still converged');
+    assert.equal(result.converged, false, 'missing dest table counts as not-converged (I1 fix)');
   });
 
   test('unmatched dest table appears in onlyInDestTables with count', () => {
@@ -298,6 +298,76 @@ describe('compare', () => {
     assert.equal(result.tables.length, 1);
     assert.equal(result.identical, true);
     assert.equal(result.converged, true);
+  });
+
+  // ── I1 (converged fix) tests ─────────────────────────────────────────────
+
+  test('I1: source has a table dest lacks → converged:false, identical:false', () => {
+    // onlyInSourceTables is non-empty; sync would need to createTable → not converged.
+    const srcTable = mkTable('st1', 'MissingInDest', [fld('sf1', 'Name', 'text')]);
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', []);
+    const idmap = { tables: {}, fields: {}, views: {} };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.converged, false, 'missing dest table → converged must be false');
+    assert.equal(result.identical, false);
+    assert.deepEqual(result.onlyInSourceTables, ['MissingInDest']);
+  });
+
+  test('I1: source has a field dest lacks within a matched table → converged:false', () => {
+    // Matched table "Alpha" but src has an extra field "Extra" absent in dest.
+    // Sync would need to createField → not converged.
+    const srcTable = mkTable('st1', 'Alpha', [fld('sf1', 'Name', 'text'), fld('sf2', 'Extra', 'number')]);
+    const destTable = mkTable('dt1', 'Alpha', [fld('df1', 'Name', 'text')]);
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.converged, false, 'missing dest field → converged must be false');
+    assert.equal(result.identical, false);
+    assert.ok(result.tables[0].fields.onlyInSource.includes('Extra'));
+  });
+
+  test('I1: dest has an extra table/field (onlyInDest only) → converged:true, identical:false', () => {
+    // Orphan dest table and orphan dest field — sync never deletes them.
+    // converged must remain true; identical must be false.
+    const srcTable = mkTable('st1', 'Alpha', [fld('sf1', 'Name', 'text')]);
+    const destTable = mkTable('dt1', 'Alpha', [fld('df1', 'Name', 'text'), fld('df2', 'OrphanField', 'text')]);
+    const destExtra = mkTable('dt2', 'OrphanTable', [fld('df3', 'X', 'text')]);
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable, destExtra]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.converged, true, 'orphan dest items must not break convergence');
+    assert.equal(result.identical, false, 'orphan items still break identity');
+    assert.deepEqual(result.onlyInDestTables, ['OrphanTable']);
+    assert.ok(result.tables[0].fields.onlyInDest.includes('OrphanField'));
+  });
+
+  test('I1: best-effort-only diff (field reorder) still yields converged:true', () => {
+    // Confirm the pre-existing best-effort-only case is unaffected by the fix.
+    const srcTable = { ...mkTable('st1', 'Alpha', [fld('sf1', 'A', 'text'), fld('sf2', 'B', 'text')]), primaryFieldId: 'sf1' };
+    const destTable = { ...mkTable('dt1', 'Alpha', [fld('df2', 'B', 'text'), fld('df1', 'A', 'text')]), primaryFieldId: 'df1' };
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} }, sf2: { destFld: 'df2', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    assert.equal(result.converged, true, 'best-effort-only diff must still yield converged:true');
+    assert.equal(result.identical, false);
+    assert.equal(result.summary.bestEffort, 1);
+    assert.equal(result.summary.drift, 0);
   });
 
   test('summary counts aggregate drift and best-effort across multiple tables', () => {
