@@ -1,6 +1,6 @@
 // compare.js — base-schema comparator helpers (pure: no fs, no network, no Date.now/Math.random)
 
-import { stableStringify, choiceNames, scalarTypeOptionsChanged, computedSig } from './field-compare.js';
+import { choiceNames, scalarTypeOptionsChanged, computedSig } from './field-compare.js';
 import { canonicalizeViewConfig } from './remap.js';
 
 const BEST_EFFORT = new Set(['fieldOrder', 'viewOrder', 'columnOrder', 'sortOrder', 'groupOrder']);

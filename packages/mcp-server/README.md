@@ -527,7 +527,7 @@ Saved row scaffolds Airtable surfaces under "+ Add record" and the row-create ex
 
 **Typical diff → curate → apply workflow:**
 1. `mode=diff` — compare bases, review the digest. Verdict `converged` means no drift; `identical` means nothing to do.
-2. `mode=plan` — generate the full changeset. Edit `apply:false` on any `changeId` entries you want to skip, or collect their IDs.
+2. `mode=plan` — generate the full changeset. Edit `apply:false` on any `changeId` entries you want to skip, or collect their IDs. When `direction=to-source`, the plan is persisted under the swapped base pair, so applying it requires calling `mode=apply` with `sourceAppId` and `destAppId` swapped accordingly.
 3. `mode=apply skip=[...]` — execute the plan minus excluded changes.
 
 ---
