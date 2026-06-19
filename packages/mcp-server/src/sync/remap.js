@@ -197,6 +197,18 @@ function viewNameOf(map, id) { return map[id] ?? id; }
 // groups (collapse-agnostic): Airtable may store a 1-element nested group as a bare leaf on
 // readback — unwrapping on BOTH sides keeps it convergent either way. (Records aren't synced, so
 // rec-ref leaves drop on both sides; once they do sync, this is where name-resolution lands — M3.)
+// Airtable's internal API stores the same emptiness predicate two equivalent ways (varies by field
+// type / era): {isNotEmpty, null} ≡ {!=, ""} and {isEmpty, null} ≡ {=, ""}. A source base holds the
+// named-operator form; the dest holds the =/!= form after the sync applied it → false `filters` drift
+// in mode=diff and perpetual applyViewConfig re-emit. Collapse the =/!= forms to the named operator,
+// but ONLY when the value is genuinely empty — real values (incl. 0/false) are left untouched.
+function normEmptyPredicate(op, val) {
+  const empty = val === '' || val === null || val === undefined;
+  if (empty && (op === 'isNotEmpty' || op === '!=')) return { op: 'isNotEmpty', val: null };
+  if (empty && (op === 'isEmpty' || op === '=')) return { op: 'isEmpty', val: null };
+  return { op, val };
+}
+
 function canonFilterSet(set, fldNames, selNames, strip, idmap) {
   const out = [];
   for (const f of set) {
@@ -213,7 +225,9 @@ function canonFilterSet(set, fldNames, selNames, strip, idmap) {
       out.push({ col: viewNameOf(fldNames, f.columnId), op: f.operator, val: typeof v === 'string' ? viewNameOf(selNames, v) : v });
       continue;
     }
-    out.push({ col: viewNameOf(fldNames, f.columnId), op: f.operator, val: typeof f.value === 'string' ? viewNameOf(selNames, f.value) : f.value });
+    const mappedVal = typeof f.value === 'string' ? viewNameOf(selNames, f.value) : f.value;
+    const n = normEmptyPredicate(f.operator, mappedVal);
+    out.push({ col: viewNameOf(fldNames, f.columnId), op: n.op, val: n.val });
   }
   return out;
 }

@@ -62,6 +62,26 @@ describe('remap.canonicalizeViewConfig', () => {
     const realFilter = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: 'contains', value: null }] } }, { fldA: 'ID' }, {});
     assert.notEqual(noFilter, realFilter); // a genuine filter still differs from none
   });
+  it('empty-predicate operator representations are canonical-equal (isNotEmpty/null ≡ !=/"")', () => {
+    // Airtable's internal API stores the same "is not empty" predicate two equivalent ways:
+    // the source base holds {isNotEmpty, null}; the dest holds {!=, ""} after the sync applied it.
+    const src = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: 'isNotEmpty', value: null }] } }, { fldA: 'Sold.id' }, {});
+    const dest = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '!=', value: '' }] } }, { fldA: 'Sold.id' }, {});
+    assert.equal(src, dest);
+  });
+  it('empty-predicate isEmpty/null ≡ =/"" are canonical-equal', () => {
+    const src = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: 'isEmpty', value: null }] } }, { fldA: 'ID' }, {});
+    const dest = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: '' }] } }, { fldA: 'ID' }, {});
+    assert.equal(src, dest);
+  });
+  it('a NON-empty value with = is NOT collapsed to an empty predicate (real values preserved)', () => {
+    const empty = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: '' }] } }, { fldA: 'ID' }, {});
+    const real = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: '2' }] } }, { fldA: 'ID' }, {});
+    assert.notEqual(empty, real);
+    // 0 / false are real values, not "empty"
+    const zero = canonicalizeViewConfig({ filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: 0 }] } }, { fldA: 'ID' }, {});
+    assert.notEqual(empty, zero);
+  });
 });
 
 describe('remap — record-referencing view filters (strip + report + converge)', () => {
