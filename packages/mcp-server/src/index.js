@@ -1578,16 +1578,20 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   // ── Sync Tools ──
   {
     name: 'sync_base',
-    description: 'Base-to-base schema + record sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), apply non-destructive field updates; then start the RECORD sync (two-pass cells + links, attachments, view-filter restore) in the BACKGROUND and return immediately with a jobId. apply requires planId and aborts if the destination drifted since the plan. mode="status": poll the background record job (pass the apply planId as planId) for progress/completion. mode="reconcile": rebuild/repair the record map — existence-prune dead entries from the idmap, with optional natural-key re-match per table.',
+    description: 'Base-to-base schema + record sync. mode="plan" (read-only): compare source/dest schema by name and return an ordered plan of tables/fields to create or update, plus orphans + warnings; does NOT mutate. mode="apply": execute a saved plan against the destination — create tables, reconcile the primary, create scalar/link/computed fields (with source->dest reference remapping + formula validation), apply non-destructive field updates; then start the RECORD sync (two-pass cells + links, attachments, view-filter restore) in the BACKGROUND and return immediately with a jobId. apply requires planId and aborts if the destination drifted since the plan. mode="status": poll the background record job (pass the apply planId as planId) for progress/completion. mode="reconcile": rebuild/repair the record map — existence-prune dead entries from the idmap, with optional natural-key re-match per table. mode="diff": compute a schema digest comparing source and destination WITHOUT saving a plan; returns a diffId and human-readable summary; pass detail=<section> to drill into a specific section of a prior diff.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
-        mode: { type: 'string', enum: ['plan', 'apply', 'reconcile', 'status'], description: '"plan" (read-only preview), "apply" (execute a saved plan; starts the record sync in the background and returns a jobId), "status" (poll the background record job by planId), or "reconcile" (rebuild/repair the record map: existence-prune dead entries; optional natural-key re-match).' },
+        mode: { type: 'string', enum: ['plan', 'apply', 'reconcile', 'status', 'diff'], description: '"plan" (read-only preview), "apply" (execute a saved plan; starts the record sync in the background and returns a jobId), "status" (poll the background record job by planId), "reconcile" (rebuild/repair the record map: existence-prune dead entries; optional natural-key re-match), or "diff" (schema digest comparing source and destination without saving a plan; optionally drill into a section with detail=<section>).' },
         sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
         destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
         planId: { type: 'string', description: 'Required for mode="apply" (the planId from a prior mode="plan" run) and mode="status" (the same planId, which is the background record jobId).' },
         naturalKeys: { type: 'object', description: 'Used only by mode="reconcile": map of tableName → fieldName to use as a natural key for re-matching records (e.g. { "Projects": "Name" }). Omit to run existence-prune only.', additionalProperties: { type: 'string' } },
+        detail: { type: 'string', description: 'Used only by mode="diff": section name to drill into (e.g. a table name or action key). Requires diffId.' },
+        diffId: { type: 'string', description: 'Used by mode="diff": ID of a prior diff to retrieve or drill into. If omitted on the initial call, one is generated automatically.' },
+        offset: { type: 'number', description: 'Used by mode="diff" with detail: skip this many entries before returning results.' },
+        limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2389,7 +2393,7 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       const id = 'pln' + client._genRandomId();
@@ -2420,7 +2424,16 @@ const handlers = {
             : `Records job ${planId}: ${raw.status}${raw.message ? ' — ' + raw.message : ''}`;
       return ok({ planId, status: raw.status, summary }, raw, debug);
     }
-    return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", or "status".`);
+    if (mode === 'diff') {
+      if (detail) {
+        const out = sync.diffDetail({ sourceBaseId: sourceAppId, destBaseId: destAppId, diffId, detail, offset, limit });
+        return ok({ diffId: diffId ?? null, summary: out.human }, out.machine, debug);
+      }
+      const id = diffId || ('dif' + client._genRandomId());
+      const out = await sync.diff({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, diffId: id });
+      return ok({ diffId: id, summary: out.human }, out.machine, debug);
+    }
+    return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", "status", or "diff".`);
   },
 
   // ── Meta: Tool Management ──
