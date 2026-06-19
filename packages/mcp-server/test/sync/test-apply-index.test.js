@@ -62,3 +62,42 @@ describe('index: views', () => {
     assert.ok(views.some((v) => v.name === 'Board'));
   });
 });
+
+describe('index.apply: skip forwarding', () => {
+  it('apply() with skip:[changeId] forwards to applyPlan so the skipped action is not applied', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'apply-skip-'));
+    const client = new MockClient();
+    const dest = await snapshotBase(client, 'appDDDDDDDDDDDDDD');
+    const plan = {
+      planId: 'plnSKIP',
+      engineVersion: '2b',
+      destFingerprint: fingerprintSchema(dest),
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      idmap: { tables: {}, fields: {}, views: {} },
+      actions: [
+        { kind: 'createTable', sourceTableId: 'tA', name: 'TableA', changeId: 'createTable|A|A', apply: true },
+        { kind: 'createTable', sourceTableId: 'tB', name: 'TableB', changeId: 'createTable|B|B', apply: true },
+      ],
+      orphans: [],
+      warnings: [],
+    };
+    savePlan('appSSSSSSSSSSSSSS', 'appDDDDDDDDDDDDDD', plan);
+    // Pass skip: ['createTable|B|B'] — TableB should be skipped
+    const out = await apply({
+      client,
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      planId: 'plnSKIP',
+      runStartedAt: 'ts',
+      skip: ['createTable|B|B'],
+    });
+    // One created (A), one skipped (B)
+    assert.match(out.human, /created: 1/, `expected created:1 in: ${out.human}`);
+    assert.match(out.human, /skipped: 1/, `expected skipped:1 in: ${out.human}`);
+    // Only TableA should be in the dest
+    const tables = (await client.getApplicationData('appDDDDDDDDDDDDDD')).data.tableSchemas;
+    const names = tables.map((t) => t.name).sort();
+    assert.deepEqual(names, ['TableA'], `expected only TableA in dest, got ${JSON.stringify(names)}`);
+  });
+});

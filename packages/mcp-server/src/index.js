@@ -1593,6 +1593,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         offset: { type: 'number', description: 'Used by mode="diff" with detail: skip this many entries before returning results.' },
         limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
         direction: { type: 'string', enum: ['to-dest', 'to-source'], description: 'Used only by mode="plan": direction of the changeset. "to-dest" (default) brings the destination base up to date with the source. "to-source" swaps the roles so the changeset targets the source base (makes the source match the destination).' },
+        skip: { type: 'array', items: { type: 'string' }, description: 'Used only by mode="apply": list of changeIds to skip (actions with a matching changeId are counted as skipped but not applied). Use changeIds from the plan output.' },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2394,7 +2395,7 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       const id = 'pln' + client._genRandomId();
@@ -2404,7 +2405,7 @@ const handlers = {
     if (mode === 'apply') {
       if (!planId) return err('mode="apply" requires planId (from a prior mode="plan" run).');
       const runStartedAt = new Date().toISOString();
-      const out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt });
+      const out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [] });
       return ok({ planId, summary: out.human }, out.machine, debug);
     }
     if (mode === 'reconcile') {

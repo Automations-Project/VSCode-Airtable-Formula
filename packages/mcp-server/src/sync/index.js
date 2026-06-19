@@ -101,7 +101,7 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   return renderDiff(savedDiff, { detail, offset, limit });
 }
 
-export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt }) {
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [] }) {
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
@@ -119,6 +119,7 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   const result = await applyPlan({
     client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
     persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
+    skip,
   });
 
   // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
