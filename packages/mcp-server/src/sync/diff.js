@@ -1,4 +1,5 @@
-import { canonicalizeComputed, canonicalizeViewConfig } from './remap.js';
+import { canonicalizeViewConfig } from './remap.js';
+import { stableStringify, choiceNames, scalarTypeOptionsChanged, computedSig, fieldSignature } from './field-compare.js';
 
 /**
  * Build a flat map of { fieldId → fieldName } across all tables in a snapshot.
@@ -28,128 +29,9 @@ function selNameMap(snap) {
 /** Return only collaborative (non-personal) views from a table. */
 function collabViews(table) { return (table.views || []).filter((v) => !v.personalForUserId); }
 
-/**
- * Build a regex that matches any field ID key in the given map, wrapped in
- * curly braces (the Airtable formula token syntax: `{fldXYZ}`).  Returns null
- * if the map is empty.
- * @param {Record<string, string>} idToName
- * @returns {RegExp|null}
- */
-function buildIdRegex(idToName) {
-  const ids = Object.keys(idToName);
-  if (ids.length === 0) return null;
-  // Escape each ID and sort longest-first to avoid partial matches.
-  const escaped = ids
-    .slice()
-    .sort((a, b) => b.length - a.length)
-    .map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return new RegExp(escaped.join('|'), 'g');
-}
-
-/**
- * Replace every occurrence of a field ID found in `idToName` within `str`
- * with `{{<fieldName>}}`.  Handles both bare IDs (in formulaText) and
- * curly-brace-wrapped tokens (`{fldXYZ}` in formulaTextParsed).
- * @param {string} str
- * @param {Record<string, string>} idToName
- * @returns {string}
- */
-function subAllIds(str, idToName) {
-  if (typeof str !== 'string' || str.length === 0) return str;
-  const re = buildIdRegex(idToName);
-  if (!re) return str;
-  return str.replace(re, (id) => `{{${idToName[id] ?? id}}}`);
-}
-
-/**
- * Stable, key-sorted JSON so equal options compare equal regardless of key insertion order.
- * @param {unknown} obj
- * @returns {string}
- */
-function stableStringify(obj) {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
-  if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(',')}]`;
-  return `{${Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',')}}`;
-}
-
-/**
- * Description-free canonical signature for a computed field's typeOptions.
- * Normalises all field-ID references to their names so cross-base ID churn is
- * invisible.  Used both by `fieldSignature` (which appends description) and by
- * the `updateField` diff to decide whether typeOptions genuinely changed.
- *
- * @param {{ type:string, typeOptions:object|null }} field
- * @param {Record<string, string>} fldNames  fieldId → name for the relevant base
- * @returns {string}
- */
-function computedSig(field, fldNames) {
-  const opts = field.typeOptions || {};
-  const normalizedOpts = {
-    ...opts,
-    formulaTextParsed: subAllIds(opts.formulaTextParsed ?? '', fldNames),
-    formulaText: subAllIds(opts.formulaText ?? '', fldNames),
-    formula: subAllIds(opts.formula ?? '', fldNames),
-    relationColumnId: fldNames[opts.relationColumnId ?? ''] ?? opts.relationColumnId ?? '',
-    recordLinkFieldId: fldNames[opts.recordLinkFieldId ?? ''] ?? opts.recordLinkFieldId ?? '',
-    foreignTableRollupColumnId: fldNames[opts.foreignTableRollupColumnId ?? ''] ?? opts.foreignTableRollupColumnId ?? '',
-    fieldIdInLinkedTable: fldNames[opts.fieldIdInLinkedTable ?? ''] ?? opts.fieldIdInLinkedTable ?? '',
-  };
-  // canonicalizeComputed handles structured extraction; pass empty idToName
-  // since we already resolved all IDs above.
-  return 'C|' + field.type + '|' + canonicalizeComputed(field.type, normalizedOpts, {});
-}
-
-/**
- * Comparable signature for a field.
- * - Computed fields canonicalize field-ID references to field names so
- *   cross-base ID churn is invisible (two formulas that refer to the same-named field
- *   produce identical signatures even if the underlying field IDs differ).
- *   We first run our own ID→name substitution over the formula text (which handles
- *   any ID format, not just `fld`-prefixed ones), then call canonicalizeComputed for
- *   the remaining structured fields (relation, target, result type).
- * - Scalar fields compare type + stable-serialised typeOptions + description.
- *
- * @param {{ type:string, typeOptions:object|null, description:string|null, isComputed:boolean }} field
- * @param {Record<string, string>} fldNames  fieldId → name for the relevant base
- * @returns {string}
- */
-function fieldSignature(field, fldNames) {
-  if (field.isComputed) {
-    return computedSig(field, fldNames) + '|' + (field.description ?? '');
-  }
-  return 'S|' + field.type + '|' + stableStringify(field.typeOptions ?? null) + '|' + (field.description ?? '');
-}
-
 /** Link-type fields must be created after plain scalar fields. Computed last. */
 const LINK_TYPES = new Set(['multipleRecordLinks', 'foreignKey']);
 function fieldOrder(f) { return f.isComputed ? 2 : (LINK_TYPES.has(f.type) ? 1 : 0); }
-
-/** Set of choice names for a select-like field, or null if not a select. */
-function choiceNames(typeOptions) {
-  const ch = typeOptions && typeOptions.choices;
-  return ch ? new Set(Object.values(ch).map((c) => c.name)) : null;
-}
-
-/**
- * Whether a non-computed field's typeOptions genuinely needs an update, aligned with what
- * apply actually does (so plan converges to zero instead of re-emitting phantom updates):
- *  - select/multiSelect: apply MERGES choices additively (never drops, invariant 7), so an
- *    update is needed only when SOURCE has a choice name DEST lacks. dest ⊇ src ⇒ equal.
- *    (Existing-choice colour/order are kept by apply's merge, so they're not flagged here.)
- *  - other types: a real typeOptions diff, but skip when source options are empty — apply
- *    can't clear options non-destructively and sending {} is a no-op that never converges.
- */
-function scalarTypeOptionsChanged(sf, df) {
-  const srcChoices = choiceNames(sf.typeOptions);
-  if (srcChoices) {
-    const destChoices = choiceNames(df.typeOptions) || new Set();
-    for (const n of srcChoices) if (!destChoices.has(n)) return true; // a source choice missing in dest
-    return false; // dest already has every source choice
-  }
-  if (stableStringify(sf.typeOptions ?? null) === stableStringify(df.typeOptions ?? null)) return false;
-  // ponytail: source has no options to push and we don't strip dest options (destructive, M4) → skip
-  return !!(sf.typeOptions && Object.keys(sf.typeOptions).length > 0);
-}
 
 /**
  * Collect all field IDs referenced by a field (formula tokens, link columns, etc.)
