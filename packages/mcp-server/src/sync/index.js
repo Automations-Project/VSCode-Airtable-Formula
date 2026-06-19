@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { snapshotBase, snapshotSchemaOnly } from './snapshot.js';
-import { matchByName, saveIdmap, savePlan, saveState, loadPlan, loadIdmap } from './idmap.js';
+import { matchByName, saveIdmap, savePlan, saveState, loadPlan, loadIdmap, saveDiff, loadDiff, latestDiffId } from './idmap.js';
 import { computePlan } from './diff.js';
-import { renderPlan, renderApplyResult } from './report.js';
+import { compare } from './compare.js';
+import { renderPlan, renderApplyResult, renderDiff } from './report.js';
 import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
 import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
@@ -52,6 +53,42 @@ export async function plan({ client, sourceBaseId, destBaseId, planId }) {
     lastPlanId: planId,
   });
   return renderPlan(fullPlan);
+}
+
+/**
+ * Compute a schema diff between two bases. `diffId` is supplied by the caller so the engine
+ * stays deterministic/testable. Saves the full diff to disk and returns a rendered digest.
+ *
+ * @param {{ client: object, sourceBaseId: string, destBaseId: string, diffId: string }} opts
+ * @returns {Promise<{ human: string, machine: object }>}
+ */
+export async function diff({ client, sourceBaseId, destBaseId, diffId }) {
+  const src = await snapshotBase(client, sourceBaseId);
+  const dest = await snapshotBase(client, destBaseId);
+  const idmap = matchByName(src, dest);
+  const base = compare(src, dest, idmap);
+  const fullDiff = { diffId, ...base };
+  saveDiff(sourceBaseId, destBaseId, fullDiff);
+  return renderDiff(fullDiff);
+}
+
+/**
+ * Load a previously saved schema diff and return a detail view (or digest if no detail given).
+ * If `diffId` is falsy, resolves to the most recently written diff via `latestDiffId`.
+ *
+ * @param {{ sourceBaseId: string, destBaseId: string, diffId?: string, detail?: string, offset?: number, limit?: number }} opts
+ * @returns {{ human: string, machine: object }}
+ */
+export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, limit }) {
+  const resolvedDiffId = diffId || latestDiffId(sourceBaseId, destBaseId);
+  if (!resolvedDiffId) {
+    return { human: 'no diff found', machine: { error: 'no diff found — run mode=diff first' } };
+  }
+  const savedDiff = loadDiff(sourceBaseId, destBaseId, resolvedDiffId);
+  if (!savedDiff) {
+    return { human: 'no diff found', machine: { error: 'no diff found — run mode=diff first' } };
+  }
+  return renderDiff(savedDiff, { detail, offset, limit });
 }
 
 export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt }) {
