@@ -276,5 +276,59 @@ export function computePlan(srcSnap, destSnap, idmap) {
     for (const dv of collabViews(dt)) if (!srcViewNames.has(dv.name)) orphans.push({ kind: 'view', destId: dv.id, name: dv.name, tableName: dt.name });
   }
 
+  // ── Annotate every action with a stable changeId + class + apply ─────────
+  // Build resolution maps from srcSnap once (name-based, stable across bases).
+  const srcTableNameById = new Map(srcSnap.tables.map((t) => [t.id, t.name]));
+  const srcFieldTableName = new Map(); // fieldId → tableName
+  const srcFieldName = new Map();      // fieldId → fieldName
+  const srcViewName = new Map();       // viewId  → viewName
+  for (const t of srcSnap.tables) {
+    for (const f of t.fields) {
+      srcFieldTableName.set(f.id, t.name);
+      srcFieldName.set(f.id, f.name);
+    }
+    for (const v of (t.views || [])) {
+      srcViewName.set(v.id, v.name);
+    }
+  }
+
+  for (const a of actions) {
+    let tableName, targetName;
+    switch (a.kind) {
+      case 'createTable':
+        tableName = a.name;
+        targetName = a.name;
+        break;
+      case 'reconcilePrimary':
+        tableName = srcTableNameById.get(a.sourceTableId) ?? a.sourceTableId;
+        targetName = tableName;
+        break;
+      case 'createField':
+        tableName = srcTableNameById.get(a.sourceTableId) ?? a.sourceTableId;
+        targetName = a.name;
+        break;
+      case 'updateField':
+        // No sourceTableId — resolve via srcFieldId→tableName map.
+        tableName = srcFieldTableName.get(a.sourceFieldId) ?? a.sourceFieldId;
+        targetName = srcFieldName.get(a.sourceFieldId) ?? a.sourceFieldId;
+        break;
+      case 'createView':
+        tableName = srcTableNameById.get(a.sourceTableId) ?? a.sourceTableId;
+        targetName = a.name;
+        break;
+      case 'applyViewConfig':
+        // No name field — resolve view name from sourceViewId.
+        tableName = srcTableNameById.get(a.sourceTableId) ?? a.sourceTableId;
+        targetName = srcViewName.get(a.sourceViewId) ?? a.sourceViewId;
+        break;
+      default:
+        tableName = a.sourceTableId ?? '';
+        targetName = a.name ?? '';
+    }
+    a.changeId = `${a.kind}|${tableName}|${targetName}`;
+    a.class = 'drift';
+    a.apply = true;
+  }
+
   return { sourceBaseId: srcSnap.baseId, destBaseId: destSnap.baseId, idmap, actions, orphans, warnings };
 }
