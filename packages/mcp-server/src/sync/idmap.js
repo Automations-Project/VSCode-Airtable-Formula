@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { getHomeDir } from '../paths.js';
 import { safeAtomicWriteFileSync } from '../safe-write.js';
 
@@ -158,4 +158,53 @@ export function loadPlan(sourceBaseId, destBaseId, planId) {
   const p = join(syncDir(sourceBaseId, destBaseId), `plan-${planId}.json`);
   if (!existsSync(p)) return null;
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Persist a schema diff for a source→dest base pair.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @param {{ diffId: string }} diff
+ */
+export function saveDiff(sourceBaseId, destBaseId, diff) {
+  writeJson(syncDir(sourceBaseId, destBaseId), `diff-${diff.diffId}.json`, diff);
+}
+
+/**
+ * Load a previously saved schema diff.  Returns `null` when the file is absent
+ * or unparseable.
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @param {string} diffId
+ * @returns {object|null}
+ */
+export function loadDiff(sourceBaseId, destBaseId, diffId) {
+  const p = join(syncDir(sourceBaseId, destBaseId), `diff-${diffId}.json`);
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Return the diffId of the most recently written diff file for a base pair,
+ * or `null` if no diff files exist (or the sync dir does not exist yet).
+ * @param {string} sourceBaseId
+ * @param {string} destBaseId
+ * @returns {string|null}
+ */
+export function latestDiffId(sourceBaseId, destBaseId) {
+  const dir = syncDir(sourceBaseId, destBaseId);
+  if (!existsSync(dir)) return null;
+  const DIFF_RE = /^diff-(.+)\.json$/;
+  let best = null;
+  let bestMtime = -Infinity;
+  for (const name of readdirSync(dir)) {
+    const m = DIFF_RE.exec(name);
+    if (!m) continue;
+    const mtime = statSync(join(dir, name)).mtimeMs;
+    if (mtime > bestMtime) {
+      bestMtime = mtime;
+      best = m[1];
+    }
+  }
+  return best;
 }
