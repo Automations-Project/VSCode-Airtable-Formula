@@ -419,3 +419,47 @@ describe('apply: applyViewConfig', () => {
     assert.ok(res.warnings.some((w) => w.code === 'VIEW_ANCHOR_FALLBACK' || w.code === 'VIEW_UNRESOLVABLE_REF'));
   });
 });
+
+describe('apply: createField (autoNumber — strip read-only maxUsedAutoNumber)', () => {
+  it('creates an autoNumber field without passing maxUsedAutoNumber to the client', async () => {
+    const client = new MockClient();
+    const { tableId } = await client.createTable('appD', 'T');
+    const destSnapshot = await snapshotBase(client, 'appD');
+    // Track typeOptions actually passed to createField
+    const capturedTypeOptions = [];
+    const origCreate = client.createField.bind(client);
+    client.createField = async (appId, tblId, cfg) => {
+      capturedTypeOptions.push({ name: cfg.name, typeOptions: cfg.typeOptions });
+      return origCreate(appId, tblId, cfg);
+    };
+    const plan = {
+      planId: 'plnAN', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: { tS: tableId }, fields: {} },
+      actions: [
+        {
+          kind: 'createField', sourceTableId: 'tS', sourceFieldId: 'fldAN',
+          name: 'ID', type: 'autoNumber',
+          typeOptions: { maxUsedAutoNumber: 5 },
+          description: null, computed: false, dependsOn: [], dependsOnTables: [],
+        },
+      ],
+      orphans: [], warnings: [],
+    };
+    const res = await applyPlan({
+      client, plan, destAppId: 'appD', destSnapshot,
+      idmap: JSON.parse(JSON.stringify(plan.idmap)),
+      journal: newJournal('plnAN', 'ts'),
+      persist: () => {},
+    });
+    assert.equal(res.created, 1, 'autoNumber field must be created');
+    assert.equal(res.failed, 0, 'must not fail');
+    assert.ok(res.idmap.fields.fldAN, 'field must be mapped');
+    const captured = capturedTypeOptions.find((c) => c.name === 'ID');
+    assert.ok(captured, 'createField must have been called for ID');
+    assert.equal(
+      captured.typeOptions && 'maxUsedAutoNumber' in captured.typeOptions,
+      false,
+      'maxUsedAutoNumber must be stripped from typeOptions before createField',
+    );
+  });
+});

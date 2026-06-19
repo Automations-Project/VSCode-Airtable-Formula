@@ -209,6 +209,12 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
           if (!v.valid) throw new Error(`formula invalid: ${v.message ?? v.error ?? 'rejected'}`);
         }
       }
+      if (a.type === 'autoNumber') {
+        // maxUsedAutoNumber is a read-only runtime counter — the internal API rejects it on create.
+        // The dest base starts its own auto-numbering; strip it so the field creates cleanly.
+        const { maxUsedAutoNumber, ...rest } = typeOptions || {};
+        typeOptions = rest;
+      }
       const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
       idmap.fields[a.sourceFieldId] = { destFld: columnId, choices: {} };
       if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
