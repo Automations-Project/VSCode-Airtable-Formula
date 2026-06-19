@@ -30,12 +30,22 @@ export function fingerprintSchema(snap) {
  * Compute a schema plan. `planId` is supplied by the caller (tool handler) so
  * the engine stays deterministic/testable.
  *
- * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string }} opts
+ * `direction` controls which base is treated as the source of truth:
+ * - `'to-dest'` (default) — changeset targets the DEST base (dest is brought up to date with src).
+ * - `'to-source'` — swap src/dest before snapshotting so the changeset targets the SOURCE base
+ *   (source is brought up to date with dest). Persisted state uses swapped IDs so load/apply
+ *   work correctly on the swapped pair.
+ *
+ * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string, direction?: 'to-dest'|'to-source' }} opts
  * @returns {Promise<{ human: string, machine: object }>}
  */
-export async function plan({ client, sourceBaseId, destBaseId, planId }) {
-  const src = await snapshotBase(client, sourceBaseId);
-  const dest = await snapshotBase(client, destBaseId);
+export async function plan({ client, sourceBaseId, destBaseId, planId, direction = 'to-dest' }) {
+  // When direction='to-source', swap so the changeset targets the original SOURCE base.
+  const effectiveSrcId = direction === 'to-source' ? destBaseId : sourceBaseId;
+  const effectiveDestId = direction === 'to-source' ? sourceBaseId : destBaseId;
+
+  const src = await snapshotBase(client, effectiveSrcId);
+  const dest = await snapshotBase(client, effectiveDestId);
   const idmap = matchByName(src, dest);
   const base = computePlan(src, dest, idmap);
   const fullPlan = {
@@ -44,11 +54,11 @@ export async function plan({ client, sourceBaseId, destBaseId, planId }) {
     destFingerprint: fingerprintSchema(dest),
     ...base,
   };
-  saveIdmap(sourceBaseId, destBaseId, idmap);
-  savePlan(sourceBaseId, destBaseId, fullPlan);
-  saveState(sourceBaseId, destBaseId, {
-    sourceBaseId,
-    destBaseId,
+  saveIdmap(effectiveSrcId, effectiveDestId, idmap);
+  savePlan(effectiveSrcId, effectiveDestId, fullPlan);
+  saveState(effectiveSrcId, effectiveDestId, {
+    sourceBaseId: effectiveSrcId,
+    destBaseId: effectiveDestId,
     engineVersion: ENGINE_VERSION,
     lastPlanId: planId,
   });

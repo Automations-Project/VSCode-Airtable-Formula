@@ -21,3 +21,52 @@ describe('sync index.plan', () => {
     assert.equal(fingerprintSchema(a), fingerprintSchema(b));
   });
 });
+
+describe('sync index.plan — direction param (Task 10)', () => {
+  // When direction='to-source', the src/dest roles are SWAPPED: dest is snapshotted as
+  // "source" and source is snapshotted as "dest". So the changeset targets the SOURCE base.
+  // We verify this by checking which base the mock client was asked about for each role:
+  // With direction='to-source', appDDDDDDDDDDDDDD (the original dest) should be the "source"
+  // that has the table, and appSSSSSSSSSSSSSS (the original source) should be the empty "dest".
+  it('direction="to-dest" (default) — createTable targets destBase', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-dir-'));
+    const mk = (tableName) => ({ data: { tableSchemas: [{ id: 'tbl1', name: tableName, primaryColumnId: 'fld1', columns: [{ id: 'fld1', name: 'Name', type: 'text' }] }] } });
+    // Source (appSSSS) has a table; dest (appDDDD) is empty.
+    const client = { getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? mk('TableInSrc') : { data: { tableSchemas: [] } }) };
+    const out = await computeSyncPlan({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnDirDest', direction: 'to-dest' });
+    // Plan should create the table (because src has it, dest doesn't)
+    assert.match(out.human, /createTable: 1/, 'direction=to-dest: createTable should appear for dest');
+    // The sample entry should name the table from source
+    const sample = out.machine.sample || [];
+    const ct = sample.find((e) => e.op === 'createTable');
+    assert.ok(ct, 'sample should have a createTable entry');
+    assert.equal(ct.table, 'TableInSrc', 'sample entry should reference the source table name');
+  });
+
+  it('direction="to-source" — swaps src/dest: createTable targets sourceBase', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-dir-src-'));
+    const mk = (tableName) => ({ data: { tableSchemas: [{ id: 'tbl1', name: tableName, primaryColumnId: 'fld1', columns: [{ id: 'fld1', name: 'Name', type: 'text' }] }] } });
+    // Dest (appDDDD) has a table; source (appSSSS) is empty.
+    // With direction='to-source', roles swap: dest becomes "source", source becomes "dest".
+    // So the plan should create the table in appSSSSSSSSSSSSSS (the original source = swapped dest).
+    const client = { getApplicationData: async (appId) => (appId === 'appDDDDDDDDDDDDDD' ? mk('TableInDest') : { data: { tableSchemas: [] } }) };
+    const out = await computeSyncPlan({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnDirSrc', direction: 'to-source' });
+    // With the swap: dest (which has the table) is treated as source → plan creates it in original source.
+    assert.match(out.human, /createTable: 1/, 'direction=to-source: createTable should appear');
+    // The sample entry should name the table from dest (swapped to be source)
+    const sample = out.machine.sample || [];
+    const ct = sample.find((e) => e.op === 'createTable');
+    assert.ok(ct, 'sample should have a createTable entry');
+    assert.equal(ct.table, 'TableInDest', 'sample entry should reference the table from swapped source (original dest)');
+    // The plan file should be saved with swapped IDs (dest as src, src as dest)
+    assert.ok(existsSync(join(syncDir('appDDDDDDDDDDDDDD', 'appSSSSSSSSSSSSSS'), 'plan-plnDirSrc.json')), 'plan saved under swapped dir');
+  });
+
+  it('direction defaults to "to-dest" when omitted', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-dir-def-'));
+    const mk = (tableName) => ({ data: { tableSchemas: [{ id: 'tbl1', name: tableName, primaryColumnId: 'fld1', columns: [{ id: 'fld1', name: 'Name', type: 'text' }] }] } });
+    const client = { getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? mk('DefaultTable') : { data: { tableSchemas: [] } }) };
+    const out = await computeSyncPlan({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnDefault' });
+    assert.match(out.human, /createTable: 1/);
+  });
+});

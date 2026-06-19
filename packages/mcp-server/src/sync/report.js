@@ -5,8 +5,17 @@
 /** Maximum number of drift entries to include in a digest driftSample. */
 export const DRIFT_SAMPLE_CAP = 25;
 
+/** Maximum number of changeset entries to include in the plan sample digest. */
+export const CHANGESET_SAMPLE_CAP = DRIFT_SAMPLE_CAP; // reuse the same 25 limit
+
 /**
  * Render a plan into a human-readable summary and a machine-readable copy.
+ *
+ * When actions carry annotated `changeId` fields (added by Task 9), the returned
+ * `machine` object gains a `sample` array (capped at CHANGESET_SAMPLE_CAP) where
+ * each entry is `{ changeId, op, table, target }` derived by splitting the changeId
+ * on `"|"`. The `human` string also includes an `editHint` telling the caller how to
+ * selectively skip actions via `apply:false` or the `skip:[changeId]` param.
  *
  * @param {{ actions: object[], orphans: object[], warnings: object[] }} plan
  * @returns {{ human: string, machine: object }}
@@ -23,6 +32,27 @@ export function renderPlan(plan) {
     lines.push('  warnings:');
     for (const w of plan.warnings) lines.push(`    - ${w.code}: ${w.message}`);
   }
+
+  // Build changeset sample from annotated actions (Task 10).
+  // Only include actions that carry a changeId (added by Task 9's computePlan annotation).
+  const sample = [];
+  for (const a of plan.actions) {
+    if (!a.changeId) continue;
+    if (sample.length >= CHANGESET_SAMPLE_CAP) break;
+    const [op = '', table = '', target = ''] = a.changeId.split('|');
+    sample.push({ changeId: a.changeId, op, table, target });
+  }
+
+  // Attach sample to plan in-place so machine === plan still holds.
+  plan.sample = sample;
+
+  // editHint: only emit when there are annotated actions.
+  const editHint = sample.length > 0
+    ? `To skip individual changes, set apply:false on entries or pass skip:[changeId,...] to mode=apply.`
+    : null;
+
+  if (editHint) lines.push(editHint);
+
   return { human: lines.join('\n'), machine: plan };
 }
 

@@ -1592,6 +1592,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         diffId: { type: 'string', description: 'Used by mode="diff": ID of a prior diff to retrieve or drill into. If omitted on the initial call, one is generated automatically.' },
         offset: { type: 'number', description: 'Used by mode="diff" with detail: skip this many entries before returning results.' },
         limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
+        direction: { type: 'string', enum: ['to-dest', 'to-source'], description: 'Used only by mode="plan": direction of the changeset. "to-dest" (default) brings the destination base up to date with the source. "to-source" swaps the roles so the changeset targets the source base (makes the source match the destination).' },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2393,11 +2394,11 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       const id = 'pln' + client._genRandomId();
-      const out = await sync.plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id });
+      const out = await sync.plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction });
       return ok({ planId: id, summary: out.human }, out.machine, debug);
     }
     if (mode === 'apply') {

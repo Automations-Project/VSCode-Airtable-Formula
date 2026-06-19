@@ -276,3 +276,100 @@ describe('renderDiff — detail mode', () => {
     assert.equal(machine.entries.length, 18);
   });
 });
+
+// ── renderPlan — changeset digest (Task 10) ──────────────────────────────────
+
+/**
+ * Build a plan with annotated actions (changeId/class/apply — from Task 9).
+ * Uses more than 25 actions so we can verify the cap.
+ */
+function buildAnnotatedPlan(actionCount = 30) {
+  const actions = Array.from({ length: actionCount }, (_, i) => ({
+    kind: 'createField',
+    sourceTableId: 'tSrc',
+    name: `Field${i}`,
+    changeId: `createField|MyTable|Field${i}`,
+    class: 'drift',
+    apply: true,
+  }));
+  return {
+    planId: 'plnTEST',
+    actions,
+    orphans: [],
+    warnings: [],
+  };
+}
+
+describe('renderPlan — changeset digest sample (Task 10)', () => {
+  it('machine has a sample array when actions carry changeId', () => {
+    const plan = buildAnnotatedPlan(10);
+    const { machine } = renderPlan(plan);
+    assert.ok(Array.isArray(machine.sample), 'machine.sample should be an array');
+  });
+
+  it('sample length is capped at DRIFT_SAMPLE_CAP (25)', () => {
+    const plan = buildAnnotatedPlan(30);
+    const { machine } = renderPlan(plan);
+    assert.ok(machine.sample.length <= DRIFT_SAMPLE_CAP, `sample.length (${machine.sample.length}) must be <= 25`);
+    assert.equal(machine.sample.length, 25);
+  });
+
+  it('sample length equals action count when actions < cap', () => {
+    const plan = buildAnnotatedPlan(10);
+    const { machine } = renderPlan(plan);
+    assert.equal(machine.sample.length, 10);
+  });
+
+  it('each sample entry has changeId, op, table, target', () => {
+    const plan = buildAnnotatedPlan(5);
+    const { machine } = renderPlan(plan);
+    for (const entry of machine.sample) {
+      assert.ok('changeId' in entry, 'entry must have changeId');
+      assert.ok('op' in entry, 'entry must have op');
+      assert.ok('table' in entry, 'entry must have table');
+      assert.ok('target' in entry, 'entry must have target');
+    }
+  });
+
+  it('sample entries derive op/table/target from changeId', () => {
+    const plan = buildAnnotatedPlan(1);
+    const { machine } = renderPlan(plan);
+    const entry = machine.sample[0];
+    assert.equal(entry.changeId, 'createField|MyTable|Field0');
+    assert.equal(entry.op, 'createField');
+    assert.equal(entry.table, 'MyTable');
+    assert.equal(entry.target, 'Field0');
+  });
+
+  it('human mentions skip or apply-flag hint', () => {
+    const plan = buildAnnotatedPlan(5);
+    const { human } = renderPlan(plan);
+    const mentionsSkip = /skip/i.test(human);
+    const mentionsApply = /apply.*false|apply:false/i.test(human);
+    assert.ok(mentionsSkip || mentionsApply, 'human should mention skip or apply:false hint');
+  });
+
+  it('machine.sample is an empty array when no actions carry changeId', () => {
+    const plan = {
+      actions: [{ kind: 'createTable', name: 'T' }],
+      orphans: [],
+      warnings: [],
+    };
+    const { machine } = renderPlan(plan);
+    assert.ok(Array.isArray(machine.sample), 'machine.sample should be an array even when empty');
+    assert.equal(machine.sample.length, 0);
+  });
+
+  it('existing renderPlan machine reference stays intact', () => {
+    // The original test: machine === plan (same object reference).
+    // After Task 10, machine IS the plan object (mutated with .sample).
+    const plan = {
+      actions: [{ kind: 'createTable', name: 'T' }],
+      orphans: [],
+      warnings: [],
+    };
+    const { machine } = renderPlan(plan);
+    // machine must be === plan (we add .sample in-place, not wrap)
+    assert.equal(machine, plan, 'machine should still be === plan');
+  });
+});
