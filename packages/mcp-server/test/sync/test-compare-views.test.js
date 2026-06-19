@@ -370,21 +370,23 @@ describe('compareTable — view order', () => {
 // ── compareTable — view-level facets: colorConfig, frozenColumnCount, rowHeight ──
 
 describe('compareViews — other facets', () => {
-  test('frozenColumnCount differs → drift entry', () => {
+  test('frozenColumnCount differs → drift entry with key=frozenColumnCount', () => {
     const srcConfig = { frozenColumnCount: 2 };
     const destConfig = { frozenColumnCount: 1 };
     const src = tbl('tS', 'T', 'p', [], [view('vS', 'Grid', 'grid', srcConfig)]);
     const dest = tbl('tD', 'T', 'p', [], [view('vD', 'Grid', 'grid', destConfig)]);
     const im = idmap({ tables: { tS: 'tD' }, views: { vS: 'vD' } });
     const r = compareTable(src, dest, im);
-    // frozenColumnCount is captured inside the canonicalized config under 'frozen'
-    // It should appear as a drift in the overall 'config' comparison or a dedicated key.
-    // The canonicalizeViewConfig bundles all of these — so if overall config differs, we
-    // flag per-facet. Check that the status is differs (some entry was produced).
     assert.equal(r.status, 'differs');
+    // compareViews emits key 'frozenColumnCount' with class 'drift' for this facet
+    const e = r.entries.find((e) => e.scope === 'view:Grid' && e.key === 'frozenColumnCount');
+    assert.ok(e, 'frozenColumnCount DiffEntry missing');
+    assert.equal(e.class, 'drift');
+    assert.equal(e.source, 2);
+    assert.equal(e.dest, 1);
   });
 
-  test('rowHeight differs → drift entry', () => {
+  test('rowHeight differs → drift entry with key=rowHeight', () => {
     const srcConfig = { rowHeight: 'short' };
     const destConfig = { rowHeight: 'tall' };
     const src = tbl('tS', 'T', 'p', [], [view('vS', 'Grid', 'grid', srcConfig)]);
@@ -392,6 +394,12 @@ describe('compareViews — other facets', () => {
     const im = idmap({ tables: { tS: 'tD' }, views: { vS: 'vD' } });
     const r = compareTable(src, dest, im);
     assert.equal(r.status, 'differs');
+    // compareViews emits key 'rowHeight' with class 'drift' for this facet
+    const e = r.entries.find((e) => e.scope === 'view:Grid' && e.key === 'rowHeight');
+    assert.ok(e, 'rowHeight DiffEntry missing');
+    assert.equal(e.class, 'drift');
+    assert.equal(e.source, 'short');
+    assert.equal(e.dest, 'tall');
   });
 });
 

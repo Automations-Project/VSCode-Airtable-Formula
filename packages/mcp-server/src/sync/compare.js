@@ -364,6 +364,8 @@ export function compareViews(srcTable, destTable, idmap) {
     }
 
     // sort clause ORDER (best-effort) — only when sort content matches.
+    // Relies on the canonical {columnId, ascending} shape for sorts and {columnId, order} for groups;
+    // extra properties on sort/group objects are intentionally ignored by both sortOrderKeys and groupOrderKeys.
     if (sortsSrcContent === sortsDestContent) {
       const srcSortOrder = sortOrderKeys(srcConfig, srcFldNames);
       const destSortOrder = sortOrderKeys(destConfig, destFldNames);
