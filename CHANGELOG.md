@@ -6,6 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP server — sync_base compare, curatable changeset, selective apply (2026-06-19)
+
+#### Added
+- `sync_base mode=diff` (read-only): comprehensive schema comparison of two bases via a new pure `src/sync/compare.js`. Every difference is classified as **drift** (sync enforces it — table/field/view existence, field type/options/choices, view filters/sorts/groups content, column visibility, colors/cover/frozen/rowHeight, primary, form), **best-effort** (sync applies but doesn't guarantee — field/view/column order, sort/group clause order), or **not-synced** (view sections, now captured by the snapshot). Two verdicts: `identical` (zero diffs) and `converged` (zero drift; best-effort/not-synced may remain). The full diff is persisted to `~/.airtable-user-mcp/sync/<src>__<dest>/diff-<id>.json`; the tool returns a token-budgeted DIGEST (verdicts + class counts + per-table count rollup + a capped driftSample, ≤25). Drill into one table via `mode=diff detail="<table>"` (params: `detail`, `diffId`, `offset`, `limit`).
+- `sync_base mode=plan` now emits a curatable **changeset**: each action carries a stable name-based `changeId` (`<op>|<table>|<target>`), a `class`, and an `apply:true` flag; the digest includes a `sample` + an `editHint`. New `direction` param (`to-dest` default | `to-source`) targets either base as the destination.
+- `sync_base mode=apply` accepts a `skip:[changeId]` list (and honors `apply:false` on changeset entries) → applies everything except the removed changes. Journal-safe; skipped dependencies degrade gracefully to UNRESOLVABLE_REF.
+
 ### MCP server — sync_base record sync (2026-06-17)
 
 #### Added
