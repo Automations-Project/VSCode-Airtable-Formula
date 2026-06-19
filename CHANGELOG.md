@@ -13,6 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - `sync_base mode=plan` now emits a curatable **changeset**: each action carries a stable name-based `changeId` (`<op>|<table>|<target>`), a `class`, and an `apply:true` flag; the digest includes a `sample` + an `editHint`. New `direction` param (`to-dest` default | `to-source`) targets either base as the destination.
 - `sync_base mode=apply` accepts a `skip:[changeId]` list (and honors `apply:false` on changeset entries) → applies everything except the removed changes. Journal-safe; skipped dependencies degrade gracefully to UNRESOLVABLE_REF.
 
+#### Fixed
+- `sync_base mode=apply` field creation — **autoNumber** fields now create. The read-only runtime counter `maxUsedAutoNumber` is stripped from `typeOptions` before `createField` (the internal API rejected it with 422 "options not valid").
+- `sync_base mode=apply` field creation — **count** fields now create. `toWritableComputedOptions` emitted the public-REST key `recordLinkFieldId`, but internal-API snapshots store a count's link under `relationColumnId` (like rollup) and the count create path passes `typeOptions` through untranslated — so every count field 422'd "options not valid". It now reads/emits the internal `relationColumnId`. (Both fixes validated live by converging a full base copy: 5 autoNumber + 3 count fields that previously failed now create cleanly.)
+
 ### MCP server — sync_base record sync (2026-06-17)
 
 #### Added
