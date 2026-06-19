@@ -34,6 +34,31 @@ function tableFieldNameMap(table) {
 }
 
 /**
+ * Build a flat map of { fieldId → fieldName } across ALL tables in a snapshot.
+ * Mirrors diff.js's fldNameMap so computed sigs for cross-table refs (e.g. rollup's
+ * foreignTableRollupColumnId) resolve correctly.
+ * @param {{ tables: Array<{fields: Array<{id:string, name:string}>}> }} snap
+ * @returns {Record<string, string>}
+ */
+function snapFldNames(snap) {
+  const m = {};
+  for (const t of snap.tables) for (const f of t.fields) m[f.id] = f.name;
+  return m;
+}
+
+/**
+ * Build a flat map of { tableId → tableName } across all tables in a snapshot.
+ * Used to canonicalize link field foreignTableId references for cross-base comparison.
+ * @param {{ tables: Array<{id:string, name:string}> }} snap
+ * @returns {Record<string, string>}
+ */
+function snapTblNames(snap) {
+  const m = {};
+  for (const t of snap.tables) m[t.id] = t.name;
+  return m;
+}
+
+/**
  * Compare fields between a source table and a destination table using the provided idmap.
  *
  * Matching strategy:
@@ -54,7 +79,7 @@ function tableFieldNameMap(table) {
  * @param {{ fields: Record<string, {destFld:string, choices:Record<string,string>}> }} idmap
  * @returns {{ entries: Array<{scope:string, key:string, source:unknown, dest:unknown, class:string}>, onlyInSource: string[], onlyInDest: string[] }}
  */
-export function compareFields(srcTable, destTable, idmap) {
+export function compareFields(srcTable, destTable, idmap, srcGlobalFldNames, destGlobalFldNames, srcGlobalTblNames, destGlobalTblNames) {
   const entries = [];
   const onlyInSource = [];
   const onlyInDest = [];
@@ -66,9 +91,13 @@ export function compareFields(srcTable, destTable, idmap) {
   // if two src fields share the same name in an edge case).
   const matchedDestIds = new Set();
 
-  // Build id→name maps for each side so computed sigs can normalise references.
-  const srcFldNames = tableFieldNameMap(srcTable);
-  const destFldNames = tableFieldNameMap(destTable);
+  // Build id→name maps for computed sig resolution.
+  // Use snapshot-global maps (passed in from compare()/compareTable()) so that
+  // cross-table refs (e.g. rollup's foreignTableRollupColumnId targeting a field in
+  // another table) resolve to a name instead of remaining as a raw id.
+  // Fall back to table-local if not provided (e.g. direct compareFields() calls in tests).
+  const srcFldNames = srcGlobalFldNames ?? tableFieldNameMap(srcTable);
+  const destFldNames = destGlobalFldNames ?? tableFieldNameMap(destTable);
 
   // srcMatchedOrder: matched field names in src iteration order (for fieldOrder check).
   const srcMatchedOrder = [];
@@ -107,6 +136,24 @@ export function compareFields(srcTable, destTable, idmap) {
       if (sf.isComputed) {
         // Computed: use canonical, ID-stable sig for typeOptions.
         if (computedSig(sf, srcFldNames) !== computedSig(df, destFldNames)) {
+          entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
+        }
+      } else if (sf.type === 'foreignKey' || sf.type === 'multipleRecordLinks') {
+        // Link fields: canonicalize before comparing.
+        // foreignTableId is base-scoped (always differs cross-base) → resolve to table NAME.
+        // symmetricColumnId is a base-scoped reciprocal field id → drop it entirely (no semantic
+        // content that sync controls; it's auto-created by Airtable when the link is made).
+        const canonLink = (opts, tblNames) => {
+          if (!opts) return null;
+          const { symmetricColumnId: _dropped, foreignTableId, ...rest } = opts; // eslint-disable-line no-unused-vars
+          return JSON.stringify({
+            ...rest,
+            foreignTableName: (tblNames && tblNames[foreignTableId]) ?? foreignTableId ?? null,
+          });
+        };
+        const srcTblNames = srcGlobalTblNames ?? {};
+        const destTblNames = destGlobalTblNames ?? {};
+        if (canonLink(sf.typeOptions, srcTblNames) !== canonLink(df.typeOptions, destTblNames)) {
           entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
         }
       } else {
@@ -425,6 +472,13 @@ export function compare(srcSnap, destSnap, idmap) {
   const destByName = new Map(destSnap.tables.map((t) => [t.name, t]));
   const matchedDestIds = new Set();
 
+  // Build global field-id→name maps for computed sig resolution across all tables.
+  const srcGlobalFldNames = snapFldNames(srcSnap);
+  const destGlobalFldNames = snapFldNames(destSnap);
+  // Build global table-id→name maps for link field foreignTableId canonicalization.
+  const srcGlobalTblNames = snapTblNames(srcSnap);
+  const destGlobalTblNames = snapTblNames(destSnap);
+
   for (const st of srcSnap.tables) {
     // Resolve dest table: idmap first, then by-name fallback.
     let dt = null;
@@ -438,7 +492,7 @@ export function compare(srcSnap, destSnap, idmap) {
     }
     matchedDestIds.add(dt.id);
 
-    const tableResult = compareTable(st, dt, idmap);
+    const tableResult = compareTable(st, dt, idmap, srcGlobalFldNames, destGlobalFldNames, srcGlobalTblNames, destGlobalTblNames);
     tables.push(tableResult);
   }
 
@@ -512,7 +566,7 @@ export function compare(srcSnap, destSnap, idmap) {
  * @param {{ tables:Record<string,string>, fields:Record<string,{destFld:string,choices:Record<string,string>}>, views:Record<string,string> }} idmap
  * @returns {{ name:string, status:'same'|'differs', entries:Array, fields:{onlyInSource:string[],onlyInDest:string[]}, views:{onlyInSource:string[],onlyInDest:string[]} }}
  */
-export function compareTable(srcTable, destTable, idmap) {
+export function compareTable(srcTable, destTable, idmap, srcGlobalFldNames, destGlobalFldNames, srcGlobalTblNames, destGlobalTblNames) {
   const entries = [];
 
   // 1. Description drift.
@@ -530,7 +584,7 @@ export function compareTable(srcTable, destTable, idmap) {
   }
 
   // 3. Field-level comparison.
-  const fieldResult = compareFields(srcTable, destTable, idmap);
+  const fieldResult = compareFields(srcTable, destTable, idmap, srcGlobalFldNames, destGlobalFldNames, srcGlobalTblNames, destGlobalTblNames);
   entries.push(...fieldResult.entries);
 
   // 4. View-level comparison.

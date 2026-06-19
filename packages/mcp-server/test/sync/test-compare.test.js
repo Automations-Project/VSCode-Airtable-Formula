@@ -395,3 +395,307 @@ describe('compare', () => {
     assert.equal(result.converged, false, 'has drift → not converged');
   });
 });
+
+// ── Bug fix tests: cross-base computed/link ref canonicalization ──────────────
+
+describe('compareFields — cross-base ref canonicalization', () => {
+  // Bug 1: rollup with foreignTableRollupColumnId in ANOTHER table
+  test('Bug1: rollup referencing field in another table — different raw ids, same name → no typeOptions drift', () => {
+    // "Revenue" table has a rollup field "Total" that rolls up "Amount" from "Orders" table.
+    // Src: foreignTableRollupColumnId = 'fldSrcAmount' (field in Orders table, not Revenue)
+    // Dest: foreignTableRollupColumnId = 'fldDestAmount' (same logical field, different id)
+    // Both map to the name 'Amount'. With a global fldNames map, computedSig resolves both
+    // to '{{Amount}}' → sigs match → no drift.
+    const srcSnap = {
+      baseId: 'srcBase',
+      tables: [
+        {
+          id: 'tSrcOrders', name: 'Orders', primaryFieldId: 'fSrcOrderName',
+          fields: [
+            { id: 'fSrcOrderName', name: 'Order Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+            { id: 'fSrcAmount', name: 'Amount', type: 'number', typeOptions: { precision: 2 }, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tSrcRevenue', name: 'Revenue', primaryFieldId: 'fSrcRevName',
+          fields: [
+            { id: 'fSrcRevName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+            { id: 'fSrcLink', name: 'Orders Link', type: 'foreignKey', typeOptions: { foreignTableId: 'tSrcOrders', symmetricColumnId: 'fSrcSym', relationship: 'many', unreversed: true }, description: null, isComputed: false },
+            {
+              id: 'fSrcTotal', name: 'Total', type: 'rollup',
+              typeOptions: {
+                relationColumnId: 'fSrcLink',
+                foreignTableRollupColumnId: 'fSrcAmount', // field in ANOTHER table
+                formulaTextParsed: 'SUM(values)',
+              },
+              description: null, isComputed: true,
+            },
+          ],
+          views: [], sections: [],
+        },
+      ],
+    };
+    const destSnap = {
+      baseId: 'destBase',
+      tables: [
+        {
+          id: 'tDestOrders', name: 'Orders', primaryFieldId: 'fDestOrderName',
+          fields: [
+            { id: 'fDestOrderName', name: 'Order Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+            { id: 'fDestAmount', name: 'Amount', type: 'number', typeOptions: { precision: 2 }, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tDestRevenue', name: 'Revenue', primaryFieldId: 'fDestRevName',
+          fields: [
+            { id: 'fDestRevName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+            { id: 'fDestLink', name: 'Orders Link', type: 'foreignKey', typeOptions: { foreignTableId: 'tDestOrders', symmetricColumnId: 'fDestSym', relationship: 'many', unreversed: true }, description: null, isComputed: false },
+            {
+              id: 'fDestTotal', name: 'Total', type: 'rollup',
+              typeOptions: {
+                relationColumnId: 'fDestLink',
+                foreignTableRollupColumnId: 'fDestAmount', // different raw id, same name
+                formulaTextParsed: 'SUM(values)',
+              },
+              description: null, isComputed: true,
+            },
+          ],
+          views: [], sections: [],
+        },
+      ],
+    };
+    const idmap = {
+      tables: { tSrcOrders: 'tDestOrders', tSrcRevenue: 'tDestRevenue' },
+      fields: {
+        fSrcOrderName: { destFld: 'fDestOrderName', choices: {} },
+        fSrcAmount: { destFld: 'fDestAmount', choices: {} },
+        fSrcRevName: { destFld: 'fDestRevName', choices: {} },
+        fSrcLink: { destFld: 'fDestLink', choices: {} },
+        fSrcTotal: { destFld: 'fDestTotal', choices: {} },
+      },
+      views: {},
+    };
+    // compare() is the top-level entry point that threads snapshots to compareFields
+    const result = compare(srcSnap, destSnap, idmap);
+    const typeOptsDrift = result.tables
+      .flatMap((t) => t.entries)
+      .filter((e) => e.key === 'typeOptions' && e.scope === 'field:Total');
+    assert.deepEqual(typeOptsDrift, [], 'rollup with cross-table foreignTableRollupColumnId must not produce typeOptions drift when target field name is the same');
+  });
+
+  // Bug 2a: link field — same target table name, different raw ids → NO drift
+  test('Bug2a: link field — same target table name, different foreignTableId → no typeOptions drift', () => {
+    const srcSnap = {
+      baseId: 'srcBase',
+      tables: [
+        {
+          id: 'tSrcProjects', name: 'Projects', primaryFieldId: 'fSrcProjName',
+          fields: [
+            { id: 'fSrcProjName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tSrcTasks', name: 'Tasks', primaryFieldId: 'fSrcTaskName',
+          fields: [
+            { id: 'fSrcTaskName', name: 'Task', type: 'text', typeOptions: null, description: null, isComputed: false },
+            {
+              id: 'fSrcLink', name: 'Project', type: 'foreignKey',
+              typeOptions: {
+                foreignTableId: 'tSrcProjects',   // raw src table id
+                symmetricColumnId: 'fSrcSymLink',  // raw src field id (reciprocal)
+                relationship: 'many',
+                unreversed: true,
+              },
+              description: null, isComputed: false,
+            },
+          ],
+          views: [], sections: [],
+        },
+      ],
+    };
+    const destSnap = {
+      baseId: 'destBase',
+      tables: [
+        {
+          id: 'tDestProjects', name: 'Projects', primaryFieldId: 'fDestProjName',
+          fields: [
+            { id: 'fDestProjName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tDestTasks', name: 'Tasks', primaryFieldId: 'fDestTaskName',
+          fields: [
+            { id: 'fDestTaskName', name: 'Task', type: 'text', typeOptions: null, description: null, isComputed: false },
+            {
+              id: 'fDestLink', name: 'Project', type: 'foreignKey',
+              typeOptions: {
+                foreignTableId: 'tDestProjects',   // different raw id but same TABLE NAME
+                symmetricColumnId: 'fDestSymLink',  // different raw id (but irrelevant — dropped)
+                relationship: 'many',
+                unreversed: true,
+              },
+              description: null, isComputed: false,
+            },
+          ],
+          views: [], sections: [],
+        },
+      ],
+    };
+    const idmap = {
+      tables: { tSrcProjects: 'tDestProjects', tSrcTasks: 'tDestTasks' },
+      fields: {
+        fSrcProjName: { destFld: 'fDestProjName', choices: {} },
+        fSrcTaskName: { destFld: 'fDestTaskName', choices: {} },
+        fSrcLink: { destFld: 'fDestLink', choices: {} },
+      },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    const typeOptsDrift = result.tables
+      .flatMap((t) => t.entries)
+      .filter((e) => e.key === 'typeOptions' && e.scope === 'field:Project');
+    assert.deepEqual(typeOptsDrift, [], 'link field pointing to same-named table must not produce typeOptions drift');
+    assert.equal(result.converged, true, 'synced link field should be converged');
+  });
+
+  // Bug 2b: link field — genuinely different target table → MUST drift
+  test('Bug2b: link field — different target table name → typeOptions drift IS emitted', () => {
+    const srcSnap = {
+      baseId: 'srcBase',
+      tables: [
+        {
+          id: 'tSrcProjects', name: 'Projects', primaryFieldId: 'fSrcProjName',
+          fields: [
+            { id: 'fSrcProjName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tSrcClients', name: 'Clients', primaryFieldId: 'fSrcClientName',
+          fields: [
+            { id: 'fSrcClientName', name: 'Client', type: 'text', typeOptions: null, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tSrcTasks', name: 'Tasks', primaryFieldId: 'fSrcTaskName',
+          fields: [
+            { id: 'fSrcTaskName', name: 'Task', type: 'text', typeOptions: null, description: null, isComputed: false },
+            {
+              id: 'fSrcLink', name: 'Related', type: 'foreignKey',
+              typeOptions: {
+                foreignTableId: 'tSrcProjects',   // links to Projects
+                symmetricColumnId: 'fSrcSym',
+                relationship: 'many',
+                unreversed: true,
+              },
+              description: null, isComputed: false,
+            },
+          ],
+          views: [], sections: [],
+        },
+      ],
+    };
+    const destSnap = {
+      baseId: 'destBase',
+      tables: [
+        {
+          id: 'tDestProjects', name: 'Projects', primaryFieldId: 'fDestProjName',
+          fields: [
+            { id: 'fDestProjName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tDestClients', name: 'Clients', primaryFieldId: 'fDestClientName',
+          fields: [
+            { id: 'fDestClientName', name: 'Client', type: 'text', typeOptions: null, description: null, isComputed: false },
+          ],
+          views: [], sections: [],
+        },
+        {
+          id: 'tDestTasks', name: 'Tasks', primaryFieldId: 'fDestTaskName',
+          fields: [
+            { id: 'fDestTaskName', name: 'Task', type: 'text', typeOptions: null, description: null, isComputed: false },
+            {
+              id: 'fDestLink', name: 'Related', type: 'foreignKey',
+              typeOptions: {
+                foreignTableId: 'tDestClients',   // links to Clients — DIFFERENT table!
+                symmetricColumnId: 'fDestSym',
+                relationship: 'many',
+                unreversed: true,
+              },
+              description: null, isComputed: false,
+            },
+          ],
+          views: [], sections: [],
+        },
+      ],
+    };
+    const idmap = {
+      tables: { tSrcProjects: 'tDestProjects', tSrcClients: 'tDestClients', tSrcTasks: 'tDestTasks' },
+      fields: {
+        fSrcProjName: { destFld: 'fDestProjName', choices: {} },
+        fSrcClientName: { destFld: 'fDestClientName', choices: {} },
+        fSrcTaskName: { destFld: 'fDestTaskName', choices: {} },
+        fSrcLink: { destFld: 'fDestLink', choices: {} },
+      },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    const typeOptsDrift = result.tables
+      .flatMap((t) => t.entries)
+      .filter((e) => e.key === 'typeOptions' && e.scope === 'field:Related');
+    assert.equal(typeOptsDrift.length, 1, 'link to genuinely different-named table MUST produce typeOptions drift');
+    assert.equal(typeOptsDrift[0].class, 'drift');
+  });
+
+  // Regression: existing computed field test still works (table-local refs remain resolved)
+  test('Regression: intra-table computed field (formula referencing own-table field) still no drift', () => {
+    const srcSnap = {
+      baseId: 'srcBase',
+      tables: [{
+        id: 'tSrc', name: 'T', primaryFieldId: 'fSrcName',
+        fields: [
+          { id: 'fSrcName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+          {
+            id: 'fSrcFormula', name: 'ShortName', type: 'formula',
+            typeOptions: { formulaTextParsed: '{fSrcName}' },
+            description: null, isComputed: true,
+          },
+        ],
+        views: [], sections: [],
+      }],
+    };
+    const destSnap = {
+      baseId: 'destBase',
+      tables: [{
+        id: 'tDest', name: 'T', primaryFieldId: 'fDestName',
+        fields: [
+          { id: 'fDestName', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false },
+          {
+            id: 'fDestFormula', name: 'ShortName', type: 'formula',
+            typeOptions: { formulaTextParsed: '{fDestName}' },
+            description: null, isComputed: true,
+          },
+        ],
+        views: [], sections: [],
+      }],
+    };
+    const idmap = {
+      tables: { tSrc: 'tDest' },
+      fields: {
+        fSrcName: { destFld: 'fDestName', choices: {} },
+        fSrcFormula: { destFld: 'fDestFormula', choices: {} },
+      },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    const typeOptsDrift = result.tables.flatMap((t) => t.entries).filter((e) => e.key === 'typeOptions');
+    assert.deepEqual(typeOptsDrift, [], 'intra-table formula must still produce no drift');
+  });
+});
