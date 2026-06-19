@@ -28,6 +28,17 @@ export function normalizeSchema(rawData) {
   return {
     tables: tables.map((t) => {
       const cols = t.columns ?? t.fields ?? [];
+      const views = (t.views || []).map((v) => ({
+        id: v.id, name: v.name, type: v.type,
+        description: v.description ?? null,
+        personalForUserId: v.personalForUserId ?? null,
+      }));
+      const viewNameById = new Map(views.map(v => [v.id, v.name]));
+      const sectionsObj = t.viewSectionsById || t.viewSections || {};
+      const sections = Object.values(sectionsObj).map(s => ({
+        name: s.name,
+        viewNames: (s.viewOrder || []).map(id => viewNameById.get(id)).filter(Boolean),
+      }));
       return {
         id: t.id,
         name: t.name,
@@ -42,11 +53,8 @@ export function normalizeSchema(rawData) {
           description: c.description ?? null,
           isComputed: isComputedType(c.type),
         })),
-        views: (t.views || []).map((v) => ({
-          id: v.id, name: v.name, type: v.type,
-          description: v.description ?? null,
-          personalForUserId: v.personalForUserId ?? null,
-        })),
+        views,
+        sections,
       };
     }),
   };

@@ -39,6 +39,23 @@ describe('snapshot.normalizeSchema', () => {
   });
 });
 
+describe('snapshot sections', () => {
+  it('normalizeSchema attaches sections as {name, viewNames}', () => {
+    const raw = { data: { tableSchemas: [{
+      id: 'tblA', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'Name', type: 'text' }],
+      views: [{ id: 'viwX', name: 'Grid', type: 'grid' }, { id: 'viwY', name: 'Kanban', type: 'kanban' }],
+      viewSectionsById: { vsc1: { id: 'vsc1', name: 'Sales Views', viewOrder: ['viwY', 'viwX'] } },
+    }] } };
+    const snap = normalizeSchema(raw);
+    assert.deepEqual(snap.tables[0].sections, [{ name: 'Sales Views', viewNames: ['Kanban', 'Grid'] }]);
+  });
+  it('normalizeSchema sections defaults to [] when absent', () => {
+    const raw = { data: { tableSchemas: [{ id: 'tblA', name: 'T', columns: [], views: [] }] } };
+    assert.deepEqual(normalizeSchema(raw).tables[0].sections, []);
+  });
+});
+
 describe('snapshot views', () => {
   it('normalizeSchema attaches static views with personal flag', () => {
     const raw = { data: { tableSchemas: [{ id: 'tbl1', name: 'T', primaryColumnId: 'f1', columns: [{ id: 'f1', name: 'Name', type: 'text' }],
