@@ -85,7 +85,10 @@ export function toWritableComputedOptions(type, opts) {
     case 'multipleLookupValues':
       return { relationColumnId: o.relationColumnId, foreignTableRollupColumnId: o.foreignTableRollupColumnId };
     case 'count':
-      return { recordLinkFieldId: o.recordLinkFieldId };
+      // Internal API stores/expects the link under relationColumnId (like rollup); the public
+      // REST name recordLinkFieldId is never present in snapshot data and createField passes
+      // count typeOptions through untranslated → emit the internal key or it 422s "options not valid".
+      return { relationColumnId: o.relationColumnId ?? o.recordLinkFieldId };
     default:
       return o;
   }

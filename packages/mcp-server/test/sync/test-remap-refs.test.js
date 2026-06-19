@@ -67,10 +67,19 @@ describe('remap.toWritableComputedOptions', () => {
     assert.equal(w.formulaText, 'SUM(values)');
     assert.equal(w.resultType, undefined);
   });
-  it('count: emits recordLinkFieldId only', () => {
-    const remapped = remapRefs({ recordLinkFieldId: 'fldA', resultType: 'number' }, idmap);
+  it('count: emits internal relationColumnId (remapped) — internal-API key that createField passes through untranslated', () => {
+    // Real internal-API count fields store the link under relationColumnId (like rollup),
+    // NOT the public-REST name recordLinkFieldId. Emitting the public name made the internal
+    // API reject every count field with "options not valid".
+    const remapped = remapRefs({ relationColumnId: 'fldA', resultType: 'number' }, idmap);
     const w = toWritableComputedOptions('count', remapped);
-    assert.equal(w.recordLinkFieldId, 'fldX');
+    assert.equal(w.relationColumnId, 'fldX');
+    assert.equal(w.recordLinkFieldId, undefined);
     assert.equal(w.resultType, undefined);
+  });
+  it('count: also accepts the public recordLinkFieldId key but still emits relationColumnId', () => {
+    const remapped = remapRefs({ recordLinkFieldId: 'fldA' }, idmap);
+    const w = toWritableComputedOptions('count', remapped);
+    assert.equal(w.relationColumnId, 'fldX');
   });
 });
