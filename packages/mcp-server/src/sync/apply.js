@@ -96,15 +96,17 @@ function mergeChoices(destField, srcTypeOptions) {
   return { ...srcTypeOptions, choices: merged };
 }
 
-export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist }) {
+export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist, skip = [] }) {
   const index = buildIndex(destSnapshot);
   const state = { createdLinks: new Map(), adoptedReverse: new Set() };
   if (!idmap.views) idmap.views = {};
   const result = { planId: plan.planId, aborted: false, created: 0, updated: 0, skipped: 0, failed: 0, warnings: [], idmap };
+  const skipSet = new Set(skip);
 
   for (let idx = 0; idx < plan.actions.length; idx++) {
     const a = plan.actions[idx];
     if (isDone(journal, idx)) { result.skipped++; continue; }
+    if (a.apply === false || skipSet.has(a.changeId)) { result.skipped++; continue; }
     try {
       await applyAction({ client, destAppId, a, idmap, index, state, result });
       recordDone(journal, idx, a.kind, idmap.tables[a.sourceTableId] ?? (a.sourceFieldId && idmap.fields[a.sourceFieldId]?.destFld));
