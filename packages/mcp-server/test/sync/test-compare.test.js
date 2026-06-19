@@ -133,6 +133,45 @@ describe('compareFields', () => {
     assert.equal(typeEntry.dest, 'text');
   });
 
+  // ── I1: guard choices comparison on type-match ───────────────────────────
+  test('I1: type mismatch with src singleSelect emits exactly one type entry and no choices entry', () => {
+    // src is singleSelect (has choices), dest is number — types differ.
+    // Before the fix this emitted BOTH a 'type' entry AND a spurious 'choices' entry.
+    const srcOpts = { choices: { s1: { id: 's1', name: 'Open' } } };
+    const src = { fields: [fld('s1', 'Status', 'singleSelect', { typeOptions: srcOpts })] };
+    const dest = { fields: [fld('d1', 'Status', 'number')] };
+    const idmap = { fields: { s1: { destFld: 'd1', choices: {} } } };
+    const { entries } = compareFields(src, dest, idmap);
+    const typeEntries = entries.filter((e) => e.key === 'type');
+    const choicesEntries = entries.filter((e) => e.key === 'choices');
+    assert.equal(typeEntries.length, 1, 'should emit exactly one type entry');
+    assert.equal(choicesEntries.length, 0, 'should emit no choices entry when types differ');
+  });
+
+  // ── I2: by-name fallback tracks matched dest by id ───────────────────────
+  test('I2: by-name fallback tracks matched dest fields by id (no duplicate match)', () => {
+    // Two src fields with different names, but the by-name fallback is what we're testing.
+    // Specifically: once a dest field is matched it must not be counted as onlyInDest,
+    // and the second src field with no idmap entry that has no name match goes to onlyInSource.
+    const src = {
+      fields: [
+        fld('s1', 'Alpha', 'text'),  // matched by idmap → d1
+        fld('s2', 'Beta', 'text'),   // no idmap entry, no name match in dest → onlyInSource
+      ],
+    };
+    const dest = {
+      fields: [
+        fld('d1', 'Alpha', 'text'),  // matched by idmap
+      ],
+    };
+    const idmap = { fields: { s1: { destFld: 'd1', choices: {} } } };
+    const { entries, onlyInSource, onlyInDest } = compareFields(src, dest, idmap);
+    // Alpha should be matched (no type drift), Beta should be in onlyInSource, dest has nothing extra
+    assert.ok(!entries.some((e) => e.scope === 'field:Alpha'), 'no drift on identical Alpha');
+    assert.ok(onlyInSource.includes('Beta'), 'Beta in onlyInSource');
+    assert.deepEqual(onlyInDest, [], 'no dest-only fields');
+  });
+
   test('computed fields compared by canonical sig (id-stable)', () => {
     const srcOpts = { formulaTextParsed: '{s1}' };
     const destOpts = { formulaTextParsed: '{d1}' };

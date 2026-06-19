@@ -60,8 +60,10 @@ export function compareFields(srcTable, destTable, idmap) {
 
   // Build name→field map for dest for by-name fallback and unmatched detection.
   const destByName = new Map(destTable.fields.map((f) => [f.name, f]));
-  // Track which dest field names were matched so we can find dest-only fields.
-  const matchedDestNames = new Set();
+  // Track which dest field ids were matched so we can find dest-only fields
+  // (using id rather than name prevents a single dest field from being claimed twice
+  // if two src fields share the same name in an edge case).
+  const matchedDestIds = new Set();
 
   // Build id→name maps for each side so computed sigs can normalise references.
   const srcFldNames = tableFieldNameMap(srcTable);
@@ -86,7 +88,7 @@ export function compareFields(srcTable, destTable, idmap) {
       continue;
     }
 
-    matchedDestNames.add(df.name);
+    matchedDestIds.add(df.id);
     srcMatchedOrder.push(sf.name);
 
     const scope = `field:${sf.name}`;
@@ -96,22 +98,27 @@ export function compareFields(srcTable, destTable, idmap) {
       entries.push({ scope, key: 'type', source: sf.type, dest: df.type, class: classOf('type') });
     }
 
-    // Compare typeOptions / choices.
-    if (sf.isComputed) {
-      // Computed: use canonical, ID-stable sig for typeOptions.
-      if (computedSig(sf, srcFldNames) !== computedSig(df, destFldNames)) {
-        entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
-      }
-    } else {
-      // Scalar: check choices separately (set-membership) and other typeOptions.
-      const srcChoices = choiceNames(sf.typeOptions);
-      if (srcChoices !== null) {
-        // It's a select-type — check via scalarTypeOptionsChanged (choice set membership).
-        if (scalarTypeOptionsChanged(sf, df)) {
-          entries.push({ scope, key: 'choices', source: sf.typeOptions, dest: df.typeOptions, class: classOf('choices') });
+    // Compare typeOptions / choices — only when types match.
+    // When types differ we already emitted a 'type' entry; comparing typeOptions across
+    // incompatible types would produce a spurious second entry (e.g. singleSelect choices
+    // vs a number field that has no choices at all).
+    if (sf.type === df.type) {
+      if (sf.isComputed) {
+        // Computed: use canonical, ID-stable sig for typeOptions.
+        if (computedSig(sf, srcFldNames) !== computedSig(df, destFldNames)) {
+          entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
         }
-      } else if (scalarTypeOptionsChanged(sf, df)) {
-        entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
+      } else {
+        // Scalar: check choices separately (set-membership) and other typeOptions.
+        const srcChoices = choiceNames(sf.typeOptions);
+        if (srcChoices !== null) {
+          // It's a select-type — check via scalarTypeOptionsChanged (choice set membership).
+          if (scalarTypeOptionsChanged(sf, df)) {
+            entries.push({ scope, key: 'choices', source: sf.typeOptions, dest: df.typeOptions, class: classOf('choices') });
+          }
+        } else if (scalarTypeOptionsChanged(sf, df)) {
+          entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
+        }
       }
     }
 
@@ -125,7 +132,7 @@ export function compareFields(srcTable, destTable, idmap) {
 
   // Collect dest-only fields.
   for (const df of destTable.fields) {
-    if (!matchedDestNames.has(df.name)) {
+    if (!matchedDestIds.has(df.id)) {
       onlyInDest.push(df.name);
     }
   }
