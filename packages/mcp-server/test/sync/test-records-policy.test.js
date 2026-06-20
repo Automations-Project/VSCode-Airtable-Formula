@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1 } from '../../src/sync/records.js';
+import { applyRecordsPass1, pruneRecords } from '../../src/sync/records.js';
 
 export function fakeClient() {
   const calls = { create: [], update: [] };
@@ -104,5 +104,44 @@ describe('Pass1 conflict policy', () => {
       policy: 'overlay',
     });
     assert.equal(client.calls.update.length, 1, 'one update under overlay');
+  });
+});
+
+// ── Task 6: pruneRecords (extras axis) ───────────────────────────────────────
+
+function pruneClient(rowsByTable) {
+  const calls = { deleted: [] };
+  return {
+    calls,
+    async queryRecords(appId, tableId) { return { summary: { rows: (rowsByTable[tableId] || []).map((id) => ({ id, fields: {} })) } }; },
+    async deleteRecords(appId, tableId, rowIds) { calls.deleted.push({ tableId, rowIds }); return { deleted: rowIds.length }; },
+  };
+}
+const destSnap2 = () => ({ baseId: 'appD', tables: [{ id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [] }] });
+
+describe('pruneRecords (extras axis)', () => {
+  it('mirror + confirmDeletions deletes orphan dest rows (not in idmap.records)', async () => {
+    const client = pruneClient({ tD: ['recKeep', 'recOrphan'] });
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    assert.deepEqual(client.calls.deleted, [{ tableId: 'tD', rowIds: ['recOrphan'] }]);
+    assert.equal(result.deleted, 1);
+  });
+  it('mirror WITHOUT confirmDeletions deletes nothing + warns DELETION_GATED', async () => {
+    const client = pruneClient({ tD: ['recKeep', 'recOrphan'] });
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'mirror', confirmDeletions: false, limiter: { run: (fn) => fn() }, result });
+    assert.equal(client.calls.deleted.length, 0);
+    const w = result.warnings.find((x) => x.code === 'DELETION_GATED');
+    assert.ok(w && /1/.test(w.message), 'gated warning with count 1');
+  });
+  it('keep/preserve table is never pruned', async () => {
+    const client = pruneClient({ tD: ['recKeep', 'recOrphan'] });
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'overlay', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    assert.equal(client.calls.deleted.length, 0);
   });
 });

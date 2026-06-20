@@ -1045,6 +1045,48 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// pruneRecords — extras axis: delete dest-only orphan records under mirror (gated)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extras axis: delete dest rows no source record maps to, for tables whose policy removes extras.
+ * Gated by confirmDeletions — without it, nothing is deleted and a DELETION_GATED warning carries
+ * the would-delete count. result.deleted accumulates actual deletions.
+ *
+ * @param {object} opts
+ * @param {object}   opts.client           - AirtableClient instance
+ * @param {object}   opts.destSnapshot     - dest base snapshot (tables with views)
+ * @param {object}   opts.idmap            - live id-map (.records map srcId → destId)
+ * @param {string}   opts.policy           - global preset name ('mirror' | 'overlay' | 'preserve')
+ * @param {object}   [opts.policyOverrides]- per-table preset overrides { [tableName]: preset }
+ * @param {boolean}  opts.confirmDeletions - if false, gate deletions (push DELETION_GATED warning)
+ * @param {object}   opts.limiter          - rate limiter { run: (fn) => fn() }
+ * @param {object}   opts.result           - result accumulator (mutated: result.deleted, result.warnings)
+ * @returns {Promise<void>}
+ */
+export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result }) {
+  if (result.deleted == null) result.deleted = 0;
+  const mappedDestIds = new Set(Object.values(idmap.records || {}));
+  for (const t of (destSnapshot.tables || [])) {
+    const { extras } = resolvePolicy(policy, policyOverrides, t.name);
+    if (extras !== 'remove') continue;
+    const viewId = (t.views || [])[0]?.id;
+    if (!viewId) continue;
+    let rows;
+    try { rows = (await limiter.run(() => client.queryRecords(destSnapshot.baseId, t.id, viewId))).summary?.rows || []; }
+    catch (e) { result.warnings.push({ code: 'PRUNE_QUERY_FAILED', message: `Table "${t.name}": ${e.message ?? e}` }); continue; }
+    const orphans = rows.map((r) => r.id).filter((id) => !mappedDestIds.has(id));
+    if (orphans.length === 0) continue;
+    if (!confirmDeletions) {
+      result.warnings.push({ code: 'DELETION_GATED', message: `Table "${t.name}": ${orphans.length} dest-only record(s) would be deleted under mirror — re-run with confirmDeletions:true` });
+      continue;
+    }
+    try { await limiter.run(() => client.deleteRecords(destSnapshot.baseId, t.id, orphans, { viewId })); result.deleted += orphans.length; }
+    catch (e) { result.failed += orphans.length; result.warnings.push({ code: 'RECORD_DELETE_FAILED', message: `Table "${t.name}": ${e.message ?? e}` }); }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // reconcile — existence-prune stale idmap.records entries
 // ──────────────────────────────────────────────────────────────────────────────
 
