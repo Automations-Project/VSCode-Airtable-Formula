@@ -572,8 +572,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
 
     if (msg.type === 'daemon:stop') {
+      // Clear any in-flight (possibly stuck) start so the UI doesn't keep
+      // showing "Starting…/running" after a Stop — that's what makes Stop look
+      // like it did nothing / acted like a restart.
+      this._daemonStarting = false;
       try {
-        const result = await this._daemonManager?.stopDaemon();
+        // forceStop: graceful stop + sweep of orphaned daemons / stray profile
+        // browsers the lockfile can't see (otherwise "Stop" is a no-op when the
+        // lock is missing and a browser keeps holding the profile).
+        const result = await this._daemonManager?.forceStop();
         await this.pushState();
         if (result && !result.stopped) {
           const reason = result.reason ?? 'Daemon did not exit.';
@@ -1039,7 +1046,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         if (this._daemonStarting) {
           return { running: false, healthy: false, port: null, port_lsp: null, tunnelUrl: null, uptime: null, starting: true };
         }
-        return undefined;
+        // Explicit "stopped" object, NOT undefined: undefined is dropped during
+        // webview message serialization, so the store's spread keeps the stale
+        // "Running" card. A concrete value overwrites it → the UI shows Stopped.
+        return { running: false, healthy: false, port: null, port_lsp: null, tunnelUrl: null, uptime: null, starting: false };
       }
       return {
         running:   status.running,

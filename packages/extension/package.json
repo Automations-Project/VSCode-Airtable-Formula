@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.94",
+  "version": "2.1.6",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
   "description": "Airtable formula, script & automation editor with MCP server (70 tools), language server, and AI skills for VS Code.",

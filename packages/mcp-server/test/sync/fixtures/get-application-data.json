@@ -1,0 +1,5308 @@
+{
+  "msg": "SUCCESS",
+  "data": {
+    "appBlanket": {
+      "workspaceSyncSources": [
+        "airtableSharedView"
+      ],
+      "packageConstructionInfo": null,
+      "sandboxInfo": null,
+      "userInfoById": {
+        "usrKu6HNqQKma2iWV": {
+          "id": "usrKu6HNqQKma2iWV",
+          "firstName": "Karek",
+          "lastName": "Rami",
+          "email": "airtable@admins.8shield.net",
+          "profilePicUrl": "https://dl.airtable.com/.directUploadProfilePics/d302807f0f3bde809cf5ef5c1434c2ee/ed082c02/071014.png",
+          "permissionLevel": "owner",
+          "pageBundlePermissionLevelByPageBundleId": {},
+          "appBlanketUserState": "active"
+        }
+      },
+      "userGroupInfoById": {},
+      "externalAccountInfoById": {},
+      "activeUserIdByAcceptedInviteId": {},
+      "isWorkspaceLinkedToEnterpriseAccount": false,
+      "isGridRootEnterpriseAccount": false,
+      "enterpriseAccountId": null,
+      "enterpriseAttachmentRestrictions": {
+        "restrictionType": "unrestricted",
+        "attachmentTypeAllowlist": []
+      },
+      "enterpriseBillingPlanInfo": null,
+      "topEnterpriseCustomerNameForErrorReporting": null,
+      "peopleTableMetadataForEnterpriseAssociatedWithApplication": null,
+      "adminCustomizedHelpMessage": null,
+      "isAiAllowed": true,
+      "isInternetAccessEnabledForAiForEnterpriseAccount": false,
+      "isAiImageGenerationEnabled": true,
+      "isAiImageAnalysisEnabled": true,
+      "isAiVideoGenerationEnabled": true,
+      "isAiWebContentGenerationEnabled": true,
+      "aiPermissionsState": "enabled",
+      "aiAssistantPermissionsState": "enabled",
+      "allowedAiModelProviders": [
+        "openAi",
+        "anthropic",
+        "amazon",
+        "selfHosted",
+        "google"
+      ],
+      "allowedAiModelCreatorsByAiModelProvider": {
+        "openAi": [
+          "openAi"
+        ],
+        "amazonBedrock": [
+          "anthropic",
+          "meta"
+        ],
+        "selfHosted": [
+          "sentenceTransformers"
+        ],
+        "google": [
+          "google"
+        ]
+      }
+    },
+    "name": "Untitled Base",
+    "color": "greenDusty",
+    "enterpriseColorId": null,
+    "shouldColorBeUsedAsPageBackground": false,
+    "icon": null,
+    "description": null,
+    "isRevisionHistoryEnabled": true,
+    "sortTiebreakerKey": null,
+    "defaultViewMutability": null,
+    "maintenanceModeSettings": null,
+    "sharesById": {},
+    "workflowSectionsById": {
+      "wscTuPsT8BfEOTXCy": {
+        "id": "wscTuPsT8BfEOTXCy",
+        "name": "More",
+        "createdByUserId": "usrKu6HNqQKma2iWV",
+        "isDefaultSection": true,
+        "workflowOrder": [],
+        "applicationId": "apphwgei0ETb2zCXz",
+        "fractionalIndex": null
+      }
+    },
+    "workflowTriggerConnectionsById": {},
+    "applicationTransactionNumber": 80,
+    "tableSchemas": [
+      {
+        "id": "tblooKJLpdRd2SI3I",
+        "name": "Table 1",
+        "primaryColumnId": "fld6ISd4khYuH27l6",
+        "columns": [
+          {
+            "id": "fld6ISd4khYuH27l6",
+            "name": "Name",
+            "type": "text",
+            "initialCreatedTime": "2026-04-17T15:22:57.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-04-17T15:22:57.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fld0REIF5QK5sdRW8",
+            "name": "Notes",
+            "type": "multilineText",
+            "initialCreatedTime": "2026-04-17T15:22:57.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:23:43.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldzYJncU1NAXKuOg",
+            "name": "Assignee",
+            "type": "multilineText",
+            "initialCreatedTime": "2026-04-17T15:22:57.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:23:43.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "flduztL3p6LJ1r3GR",
+            "name": "Status",
+            "type": "select",
+            "typeOptions": {
+              "choices": {
+                "selSOmr7hxDdQOF1X": {
+                  "id": "selSOmr7hxDdQOF1X",
+                  "name": "Todo",
+                  "color": "red"
+                },
+                "selI1uROgLXkHga5l": {
+                  "id": "selI1uROgLXkHga5l",
+                  "name": "In progress",
+                  "color": "yellow"
+                },
+                "selGFbfPNLBugiEN5": {
+                  "id": "selGFbfPNLBugiEN5",
+                  "name": "Done",
+                  "color": "green"
+                },
+                "seltLTY0BfBXhCQ8J": {
+                  "id": "seltLTY0BfBXhCQ8J",
+                  "name": "2test",
+                  "color": "blue"
+                }
+              },
+              "choiceOrder": [
+                "selSOmr7hxDdQOF1X",
+                "selI1uROgLXkHga5l",
+                "selGFbfPNLBugiEN5",
+                "seltLTY0BfBXhCQ8J"
+              ]
+            },
+            "initialCreatedTime": "2026-04-17T15:22:57.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:23:43.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldCEPy54raOrxFoL",
+            "name": "Attachments",
+            "type": "multilineText",
+            "initialCreatedTime": "2026-04-17T15:22:57.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:23:43.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fld2iy0JmkuemZZAf",
+            "name": "Attachment Summary",
+            "type": "asyncText",
+            "description": "An AI generated summary of the Attachments field. Upload files to Attachments to generate a summary.",
+            "typeOptions": {
+              "sourceType": "ai",
+              "sourceParams": {
+                "prompt": [
+                  "You are a professional document analyst specializing in summarizing content from various file types. Your task is to extract key points and provide a concise summary of the content found in the attached files. Ensure that the summary captures the main ideas and any important details without including unnecessary information.\n\nAnalyze the content of the attached files to identify the main themes and significant details. Summarize these points clearly and concisely, ensuring that the summary is informative and relevant to the document's purpose.\n\nFormat your response as plain text, keeping it concise and to the point. If you cannot summarize the content, output \"Unable to summarize the content.\" Example: \"The document discusses the impact of climate change on polar bears, highlighting the loss of habitat and food sources.\" (Real examples should be longer and more detailed.)\n\nFiles:\n",
+                  {
+                    "field": {
+                      "columnId": "fldCEPy54raOrxFoL"
+                    }
+                  }
+                ],
+                "columnIdDependencies": [
+                  "fldCEPy54raOrxFoL"
+                ],
+                "optionalColumnIdDependencies": [],
+                "model": "default",
+                "temperature": 0,
+                "generationMode": "onDemand",
+                "availableTools": [],
+                "userConfigurationForPrompt": {
+                  "type": "fullyUserManaged"
+                },
+                "attachmentProcessingStrategy": {
+                  "type": "documentAgent"
+                },
+                "integrationSettings": {}
+              }
+            },
+            "initialCreatedTime": "2026-04-17T15:22:57.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-04-17T15:22:57.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldlMHqqi4O6gqPqv",
+            "name": "This is test url field",
+            "type": "text",
+            "description": "This is desc of url field",
+            "typeOptions": {
+              "validatorName": "url"
+            },
+            "initialCreatedTime": "2026-04-17T15:23:21.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-04-17T15:23:21.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldBhukTKsuf9QzBO",
+            "name": "Date -updated",
+            "type": "date",
+            "description": "this is desc updated",
+            "default": {
+              "specialValue": "dynamicCurrentDateValue"
+            },
+            "typeOptions": {
+              "isDateTime": true,
+              "dateFormat": "Local",
+              "timeFormat": "24hour",
+              "timeZone": "UTC",
+              "shouldDisplayTimeZone": true
+            },
+            "initialCreatedTime": "2026-04-17T15:24:20.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-04-17T15:24:43.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldC82CKp6sAOaRP7",
+            "name": "test single select",
+            "type": "select",
+            "description": "test desc",
+            "default": "selZqwkHj1rglLWVj",
+            "typeOptions": {
+              "choiceOrder": [
+                "selZqwkHj1rglLWVj",
+                "selueCkiWd8Oo3e4K",
+                "sellGBnVyysTkEP6B",
+                "selGlRSVPeujNSFO4",
+                "selmQQMHVpbOkArE0",
+                "selwl7vx8a6d68saY",
+                "selcncTjjv8OR9QTf",
+                "selvApCpOn5g4zrSH"
+              ],
+              "choices": {
+                "selZqwkHj1rglLWVj": {
+                  "id": "selZqwkHj1rglLWVj",
+                  "color": "blue",
+                  "name": "test 1"
+                },
+                "selueCkiWd8Oo3e4K": {
+                  "id": "selueCkiWd8Oo3e4K",
+                  "color": "cyan",
+                  "name": "test 2"
+                },
+                "sellGBnVyysTkEP6B": {
+                  "id": "sellGBnVyysTkEP6B",
+                  "color": "teal",
+                  "name": "test 3"
+                },
+                "selGlRSVPeujNSFO4": {
+                  "id": "selGlRSVPeujNSFO4",
+                  "color": "green",
+                  "name": "test 4"
+                },
+                "selmQQMHVpbOkArE0": {
+                  "id": "selmQQMHVpbOkArE0",
+                  "color": "orange",
+                  "name": "test 6"
+                },
+                "selwl7vx8a6d68saY": {
+                  "id": "selwl7vx8a6d68saY",
+                  "color": "red",
+                  "name": "test 7"
+                },
+                "selcncTjjv8OR9QTf": {
+                  "id": "selcncTjjv8OR9QTf",
+                  "color": "pink",
+                  "name": "test 8"
+                },
+                "selvApCpOn5g4zrSH": {
+                  "id": "selvApCpOn5g4zrSH",
+                  "color": "purple",
+                  "name": "test 9"
+                }
+              },
+              "disableColors": false
+            },
+            "initialCreatedTime": "2026-05-28T14:59:37.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-05-28T15:00:05.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldR2CCi7SbLg6CcZ",
+            "name": "Tags",
+            "type": "multiSelect",
+            "default": [
+              "selv3IDdBfe4N7Axy"
+            ],
+            "typeOptions": {
+              "choiceOrder": [
+                "selbMhuvR7Au5Y2nd",
+                "selv3IDdBfe4N7Axy",
+                "selaHOcAIJljou72O",
+                "selZho3sXgQ8S3ry9"
+              ],
+              "choices": {
+                "selbMhuvR7Au5Y2nd": {
+                  "id": "selbMhuvR7Au5Y2nd",
+                  "color": "blue",
+                  "name": "test 1"
+                },
+                "selv3IDdBfe4N7Axy": {
+                  "id": "selv3IDdBfe4N7Axy",
+                  "color": "teal",
+                  "name": "test 3"
+                },
+                "selaHOcAIJljou72O": {
+                  "id": "selaHOcAIJljou72O",
+                  "color": "green",
+                  "name": "test 4"
+                },
+                "selZho3sXgQ8S3ry9": {
+                  "id": "selZho3sXgQ8S3ry9",
+                  "color": "yellow",
+                  "name": "test 5"
+                }
+              },
+              "disableColors": false
+            },
+            "initialCreatedTime": "2026-05-28T15:00:21.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-05-28T15:00:41.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldlIM9UIZ297nyJl",
+            "name": "Table 2",
+            "type": "foreignKey",
+            "typeOptions": {
+              "foreignTableId": "tblq7se6YHVutB7xW",
+              "symmetricColumnId": "fldnH8Hutzd9BT4tj",
+              "relationship": "many",
+              "unreversed": true
+            },
+            "initialCreatedTime": "2026-06-15T19:22:27.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:27.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          }
+        ],
+        "meaningfulColumnOrder": [
+          {
+            "columnId": "fld6ISd4khYuH27l6",
+            "visibility": true
+          },
+          {
+            "columnId": "fld0REIF5QK5sdRW8",
+            "visibility": true
+          },
+          {
+            "columnId": "fldzYJncU1NAXKuOg",
+            "visibility": true
+          },
+          {
+            "columnId": "flduztL3p6LJ1r3GR",
+            "visibility": true
+          },
+          {
+            "columnId": "fldCEPy54raOrxFoL",
+            "visibility": true
+          },
+          {
+            "columnId": "fld2iy0JmkuemZZAf",
+            "visibility": true
+          },
+          {
+            "columnId": "fldlMHqqi4O6gqPqv",
+            "visibility": true
+          },
+          {
+            "columnId": "fldBhukTKsuf9QzBO",
+            "visibility": true
+          },
+          {
+            "columnId": "fldC82CKp6sAOaRP7",
+            "visibility": true
+          },
+          {
+            "columnId": "fldR2CCi7SbLg6CcZ",
+            "visibility": true
+          },
+          {
+            "columnId": "fldlIM9UIZ297nyJl",
+            "visibility": true
+          }
+        ],
+        "views": [
+          {
+            "id": "viwCR7VNVVDrFhj5k",
+            "name": "test 3",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "viwDwGrkhMGoVUQyX",
+            "name": "Grid view",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "viw7qK5EyOo3RJW6g",
+            "name": "test 45",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          }
+        ],
+        "viewOrder": [
+          "viwCR7VNVVDrFhj5k",
+          "viwDwGrkhMGoVUQyX",
+          "viw7qK5EyOo3RJW6g"
+        ],
+        "viewsById": {
+          "viwCR7VNVVDrFhj5k": {
+            "id": "viwCR7VNVVDrFhj5k",
+            "name": "test 3",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          },
+          "viwDwGrkhMGoVUQyX": {
+            "id": "viwDwGrkhMGoVUQyX",
+            "name": "Grid view",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          },
+          "viw7qK5EyOo3RJW6g": {
+            "id": "viw7qK5EyOo3RJW6g",
+            "name": "test 45",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          }
+        },
+        "viewSectionsById": {},
+        "rowTemplatesById": {},
+        "dateDependencySettings": null,
+        "rowUnit": null,
+        "isHiddenFromSwitcher": false,
+        "columnSetById": {}
+      },
+      {
+        "id": "tblq7se6YHVutB7xW",
+        "name": "Table 2",
+        "primaryColumnId": "fldstX6p99IPfCbYC",
+        "columns": [
+          {
+            "id": "fldstX6p99IPfCbYC",
+            "name": "Name",
+            "type": "text",
+            "initialCreatedTime": "2026-06-15T19:22:03.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:03.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldlwRUgPHGrt7SdU",
+            "name": "Notes",
+            "type": "multilineText",
+            "initialCreatedTime": "2026-06-15T19:22:03.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:03.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldbJpvyt3G4b2WvW",
+            "name": "Assignee",
+            "type": "collaborator",
+            "typeOptions": {
+              "shouldNotify": true,
+              "canAddNonBaseCollaborators": true
+            },
+            "initialCreatedTime": "2026-06-15T19:22:03.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:03.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldbGGSTSDoujij9H",
+            "name": "Status",
+            "type": "select",
+            "typeOptions": {
+              "choices": {
+                "selMia1ayapOSISP7": {
+                  "id": "selMia1ayapOSISP7",
+                  "name": "Todo",
+                  "color": "red"
+                },
+                "selRXq2RWWr6H540f": {
+                  "id": "selRXq2RWWr6H540f",
+                  "name": "In progress",
+                  "color": "yellow"
+                },
+                "selInjcoXK6SveIko": {
+                  "id": "selInjcoXK6SveIko",
+                  "name": "Done",
+                  "color": "green"
+                }
+              },
+              "choiceOrder": [
+                "selMia1ayapOSISP7",
+                "selRXq2RWWr6H540f",
+                "selInjcoXK6SveIko"
+              ]
+            },
+            "initialCreatedTime": "2026-06-15T19:22:03.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:03.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldeFc1iO0WM9TsuH",
+            "name": "Attachments",
+            "type": "multipleAttachment",
+            "typeOptions": {
+              "unreversed": true
+            },
+            "initialCreatedTime": "2026-06-15T19:22:03.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:03.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldVFDbhgHlazczgJ",
+            "name": "Attachment Summary",
+            "type": "asyncText",
+            "description": "An AI generated summary of the Attachments field. Upload files to Attachments to generate a summary.",
+            "typeOptions": {
+              "sourceType": "ai",
+              "sourceParams": {
+                "prompt": [
+                  "You are a professional document analyst specializing in summarizing content from various file types. Your task is to extract key points and provide a concise summary of the content found in the attached files. Ensure that the summary captures the main ideas and any important details without including unnecessary information.\n\nAnalyze the content of the attached files to identify the main themes and significant details. Summarize these points clearly and concisely, ensuring that the summary is informative and relevant to the document's purpose.\n\nFormat your response as plain text, keeping it concise and to the point. If you cannot summarize the content, output \"Unable to summarize the content.\" Example: \"The document discusses the impact of climate change on polar bears, highlighting the loss of habitat and food sources.\" (Real examples should be longer and more detailed.)\n\nFiles:\n",
+                  {
+                    "field": {
+                      "columnId": "fldeFc1iO0WM9TsuH"
+                    }
+                  }
+                ],
+                "columnIdDependencies": [
+                  "fldeFc1iO0WM9TsuH"
+                ],
+                "optionalColumnIdDependencies": [],
+                "model": "default",
+                "temperature": 0,
+                "generationMode": "onDemand",
+                "availableTools": [],
+                "userConfigurationForPrompt": {
+                  "type": "fullyUserManaged"
+                },
+                "attachmentProcessingStrategy": {
+                  "type": "documentAgent"
+                },
+                "integrationSettings": {}
+              }
+            },
+            "initialCreatedTime": "2026-06-15T19:22:03.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:03.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldnH8Hutzd9BT4tj",
+            "name": "test linked field",
+            "type": "foreignKey",
+            "description": "test desc",
+            "typeOptions": {
+              "foreignTableId": "tblooKJLpdRd2SI3I",
+              "relationship": "many",
+              "unreversed": true,
+              "symmetricColumnId": "fldlIM9UIZ297nyJl"
+            },
+            "initialCreatedTime": "2026-06-15T19:22:27.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:27.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldyEl33qtpaVToBH",
+            "name": "Status (from test linked field)",
+            "type": "lookup",
+            "typeOptions": {
+              "relationColumnId": "fldnH8Hutzd9BT4tj",
+              "foreignTableRollupColumnId": "flduztL3p6LJ1r3GR",
+              "canUseSelectResultType": true,
+              "foreignTableRollupColumnType": "select",
+              "choices": {
+                "selSOmr7hxDdQOF1X": {
+                  "id": "selSOmr7hxDdQOF1X",
+                  "name": "Todo",
+                  "color": "red"
+                },
+                "selI1uROgLXkHga5l": {
+                  "id": "selI1uROgLXkHga5l",
+                  "name": "In progress",
+                  "color": "yellow"
+                },
+                "selGFbfPNLBugiEN5": {
+                  "id": "selGFbfPNLBugiEN5",
+                  "name": "Done",
+                  "color": "green"
+                },
+                "seltLTY0BfBXhCQ8J": {
+                  "id": "seltLTY0BfBXhCQ8J",
+                  "name": "2test",
+                  "color": "blue"
+                }
+              },
+              "choiceOrder": [
+                "selSOmr7hxDdQOF1X",
+                "selI1uROgLXkHga5l",
+                "selGFbfPNLBugiEN5",
+                "seltLTY0BfBXhCQ8J"
+              ],
+              "dependencies": {
+                "referencedColumnIdsForValue": [
+                  "fldnH8Hutzd9BT4tj",
+                  "flduztL3p6LJ1r3GR"
+                ]
+              },
+              "resultType": "select",
+              "resultIsArray": true
+            },
+            "initialCreatedTime": "2026-06-15T19:22:32.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:32.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldXmK9Z88Rz01ByE",
+            "name": "Tags (from test linked field)",
+            "type": "lookup",
+            "typeOptions": {
+              "relationColumnId": "fldnH8Hutzd9BT4tj",
+              "foreignTableRollupColumnId": "fldR2CCi7SbLg6CcZ",
+              "canUseSelectResultType": true,
+              "foreignTableRollupColumnType": "multiSelect",
+              "choices": {
+                "selbMhuvR7Au5Y2nd": {
+                  "id": "selbMhuvR7Au5Y2nd",
+                  "color": "blue",
+                  "name": "test 1"
+                },
+                "selv3IDdBfe4N7Axy": {
+                  "id": "selv3IDdBfe4N7Axy",
+                  "color": "teal",
+                  "name": "test 3"
+                },
+                "selaHOcAIJljou72O": {
+                  "id": "selaHOcAIJljou72O",
+                  "color": "green",
+                  "name": "test 4"
+                },
+                "selZho3sXgQ8S3ry9": {
+                  "id": "selZho3sXgQ8S3ry9",
+                  "color": "yellow",
+                  "name": "test 5"
+                }
+              },
+              "choiceOrder": [
+                "selbMhuvR7Au5Y2nd",
+                "selv3IDdBfe4N7Axy",
+                "selaHOcAIJljou72O",
+                "selZho3sXgQ8S3ry9"
+              ],
+              "disableColors": false,
+              "dependencies": {
+                "referencedColumnIdsForValue": [
+                  "fldnH8Hutzd9BT4tj",
+                  "fldR2CCi7SbLg6CcZ"
+                ]
+              },
+              "resultType": "multiSelect",
+              "resultIsArray": true
+            },
+            "initialCreatedTime": "2026-06-15T19:22:52.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:22:52.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldYxuKRLugoaUDxR",
+            "name": "test32 edit",
+            "type": "formula",
+            "typeOptions": {
+              "formulaTextParsed": "'2test'",
+              "dependencies": {
+                "referencedColumnIdsForValue": []
+              },
+              "resultType": "text",
+              "resultIsArray": false
+            },
+            "initialCreatedTime": "2026-06-15T19:23:20.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:23:26.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          },
+          {
+            "id": "fldkV40yf91ZNmrHa",
+            "name": "Attachments 2",
+            "type": "multipleAttachment",
+            "typeOptions": {
+              "unreversed": true
+            },
+            "initialCreatedTime": "2026-06-15T19:24:33.000Z",
+            "initialCreatedByUserId": "usrKu6HNqQKma2iWV",
+            "lastModifiedTime": "2026-06-15T19:24:33.000Z",
+            "lastModifiedByUserId": "usrKu6HNqQKma2iWV"
+          }
+        ],
+        "meaningfulColumnOrder": [
+          {
+            "columnId": "fldstX6p99IPfCbYC",
+            "visibility": true
+          },
+          {
+            "columnId": "fldlwRUgPHGrt7SdU",
+            "visibility": true
+          },
+          {
+            "columnId": "fldbJpvyt3G4b2WvW",
+            "visibility": true
+          },
+          {
+            "columnId": "fldbGGSTSDoujij9H",
+            "visibility": true
+          },
+          {
+            "columnId": "fldeFc1iO0WM9TsuH",
+            "visibility": true
+          },
+          {
+            "columnId": "fldVFDbhgHlazczgJ",
+            "visibility": true
+          },
+          {
+            "columnId": "fldnH8Hutzd9BT4tj",
+            "visibility": true
+          },
+          {
+            "columnId": "fldXmK9Z88Rz01ByE",
+            "visibility": true
+          },
+          {
+            "columnId": "fldyEl33qtpaVToBH",
+            "visibility": true
+          },
+          {
+            "columnId": "fldYxuKRLugoaUDxR",
+            "visibility": true
+          },
+          {
+            "columnId": "fldkV40yf91ZNmrHa",
+            "visibility": true
+          }
+        ],
+        "views": [
+          {
+            "id": "viw6SdJ50gtx4ujY4",
+            "name": "Grid view",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          }
+        ],
+        "viewOrder": [
+          "viw6SdJ50gtx4ujY4"
+        ],
+        "viewsById": {
+          "viw6SdJ50gtx4ujY4": {
+            "id": "viw6SdJ50gtx4ujY4",
+            "name": "Grid view",
+            "type": "grid",
+            "personalForUserId": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV"
+          }
+        },
+        "viewSectionsById": {},
+        "rowTemplatesById": {},
+        "dateDependencySettings": null,
+        "rowUnit": null,
+        "isHiddenFromSwitcher": false,
+        "columnSetById": {}
+      }
+    ],
+    "tableDatas": [
+      {
+        "id": "tblq7se6YHVutB7xW",
+        "rows": [
+          {
+            "id": "recI5lXwz2wvEoR0W",
+            "createdTime": "2026-06-15T19:22:03.000Z",
+            "cellValuesByColumnId": {
+              "fldVFDbhgHlazczgJ": {
+                "state": "error",
+                "errorType": "emptyDependency",
+                "value": null,
+                "erroredColumnIds": [
+                  "fldeFc1iO0WM9TsuH"
+                ],
+                "doesNeedRegeneration": false
+              },
+              "fldYxuKRLugoaUDxR": "2test"
+            }
+          },
+          {
+            "id": "recuIhArOOZsrtSgi",
+            "createdTime": "2026-06-15T19:22:03.000Z",
+            "cellValuesByColumnId": {
+              "fldVFDbhgHlazczgJ": {
+                "state": "error",
+                "errorType": "emptyDependency",
+                "value": null,
+                "erroredColumnIds": [
+                  "fldeFc1iO0WM9TsuH"
+                ],
+                "doesNeedRegeneration": false
+              },
+              "fldkV40yf91ZNmrHa": [
+                {
+                  "id": "attROb0RNhJ8CJO0B",
+                  "url": "https://dl.airtable.com/.directUploadAttachment/9d2fdb053de09ae14bb17698bc6e8865/eedf094e/test.txt",
+                  "filename": "test.txt",
+                  "type": "text/plain",
+                  "size": 48
+                }
+              ],
+              "fldYxuKRLugoaUDxR": "2test"
+            }
+          },
+          {
+            "id": "rec1JpEpJIfgv5nAL",
+            "createdTime": "2026-06-15T19:22:03.000Z",
+            "cellValuesByColumnId": {
+              "fldVFDbhgHlazczgJ": {
+                "state": "error",
+                "errorType": "emptyDependency",
+                "value": null,
+                "erroredColumnIds": [
+                  "fldeFc1iO0WM9TsuH"
+                ],
+                "doesNeedRegeneration": false
+              },
+              "fldYxuKRLugoaUDxR": "2test"
+            }
+          }
+        ],
+        "viewDatas": [
+          {
+            "id": "viw6SdJ50gtx4ujY4",
+            "frozenColumnCount": 1,
+            "columnOrder": [
+              {
+                "columnId": "fldstX6p99IPfCbYC",
+                "visibility": true
+              },
+              {
+                "columnId": "fldlwRUgPHGrt7SdU",
+                "visibility": true
+              },
+              {
+                "columnId": "fldbJpvyt3G4b2WvW",
+                "visibility": true
+              },
+              {
+                "columnId": "fldbGGSTSDoujij9H",
+                "visibility": true
+              },
+              {
+                "columnId": "fldeFc1iO0WM9TsuH",
+                "visibility": true
+              },
+              {
+                "columnId": "fldVFDbhgHlazczgJ",
+                "visibility": true
+              },
+              {
+                "columnId": "fldnH8Hutzd9BT4tj",
+                "visibility": true
+              },
+              {
+                "columnId": "fldXmK9Z88Rz01ByE",
+                "visibility": true
+              },
+              {
+                "columnId": "fldyEl33qtpaVToBH",
+                "visibility": true
+              },
+              {
+                "columnId": "fldYxuKRLugoaUDxR",
+                "visibility": true
+              },
+              {
+                "columnId": "fldkV40yf91ZNmrHa",
+                "visibility": true
+              }
+            ],
+            "filters": null,
+            "lastSortsApplied": null,
+            "groupLevels": null,
+            "colorConfig": null,
+            "description": null,
+            "createdByUserId": "usrKu6HNqQKma2iWV",
+            "type": "grid",
+            "applicationTransactionNumber": 80,
+            "rowOrder": [
+              {
+                "rowId": "recI5lXwz2wvEoR0W",
+                "visibility": true
+              },
+              {
+                "rowId": "recuIhArOOZsrtSgi",
+                "visibility": true
+              },
+              {
+                "rowId": "rec1JpEpJIfgv5nAL",
+                "visibility": true
+              }
+            ],
+            "signedUserContentUrls": {}
+          }
+        ],
+        "signedUserContentUrls": {
+          "https://dl.airtable.com/.directUploadAttachment/9d2fdb053de09ae14bb17698bc6e8865/eedf094e/test.txt": "https://v5.airtableusercontent.com/v3/u/54/54/1781604000000/m_A7xQlE3NiXcZUcmcLH0Q/yBqlPhXVka1SMUkPLn7ExVx0qwRW43Cw6XjWAi2dYhrrKt6ucxBBa48REj9nC3nK0cid479V7e4FD6paTnPOU-A_jwvHC05YVxUCmapeX_cCMPvbVwblYkfeSde0w3eZ5TzdH2Ujj5luvdDXMMVlQQ/u5KIqVWFEZ5Gc7ohm51_D5B4Xo-mDjZrGP07f7710FU"
+        },
+        "hasOnlyIncludedRowAndCellDataForIncludedViews": false
+      }
+    ],
+    "hasBlockInstallations": false,
+    "packageInstallationsById": {},
+    "featureKitInstallationById": {},
+    "applicationAdminFlags": {
+      "UPDATE_PRIMITIVE_CELL_THROTTLE_MS": null,
+      "UPDATE_RICH_TEXT_CELL_THROTTLE_MS": null,
+      "MAX_WORKFLOWS_PER_APPLICATION": null,
+      "MAX_SYNC_SOURCES_PER_APPLICATION": null,
+      "MAX_SYNC_SOURCES_PER_TABLE": null,
+      "MAX_SYNCED_TABLES_PER_APPLICATION": null,
+      "CUSTOM_MAX_NUM_COLUMNS_PER_TABLE": null,
+      "CUSTOM_MAX_NUM_ROWS_PER_TABLE": null,
+      "DENYLISTED_PAGE_BUNDLES_FOR_PAGE_BUNDLE_COLLABORATORS": null,
+      "MAX_ROW_TEMPLATES_PER_APPLICATION": null,
+      "APPLICATION_AI_BULK_GENERATION_RECORD_COUNT_LIMIT": null,
+      "WORKFLOW_FIND_RECORDS_MAX_LIMIT": null,
+      "WORKFLOW_EXECUTION_READ_WORKFLOW_ACTION_EXECUTION_BATCH_SIZE": null,
+      "WORKFLOW_MAX_SUBSCRIBERS_PER_WORKFLOW": null,
+      "APPLICATION_AI_QA_IFRAME_URL": null,
+      "AUTO_REFRESH_TIMEOUT_MS": null,
+      "ENABLE_PRODUCT_CENTRAL": null,
+      "APPLICATION_DEPENDENCY_GRAPH_THROTTLE_MS": null,
+      "SEQUENTIAL_CRUD_REQUEST_CLIENT_SIDE_TIMEOUT_MS": null
+    },
+    "pageLayoutSchemaVersion": 26,
+    "pageSections": [],
+    "pageBundles": [],
+    "unparentedPageMetadata": [],
+    "canUserModifyAllUnparentedPages": true,
+    "portal": null,
+    "isCurrentUserPortalPageBundleCollaborator": false,
+    "uploadedUserContentCdnSetting": {
+      "applicationScopedAuthMode": "private"
+    },
+    "applicationV2TargetedFeatureFlagClientConfiguration": {
+      "dateSparklineDisplay": {
+        "trafficLevel": 0
+      },
+      "blockModelBridgeLongWaitUntilReadyBeforeWriteTimeout": {
+        "trafficLevel": 0
+      },
+      "aiFieldMatching": {
+        "trafficLevel": 100
+      },
+      "aiAutomaticFieldMatching": {
+        "trafficLevel": 0
+      },
+      "applicationChangeHookCreateSyncHooksWithSpecificationPayloadEnabled": {
+        "trafficLevel": 100
+      },
+      "externalTableSyncSkipRealTimeSyncForSyncWithFieldTypeCustomizationToLinkedRecord": {
+        "trafficLevel": 100
+      },
+      "syncLinkedRecordsCellUpdateOptimization": {
+        "trafficLevel": 100
+      },
+      "canCreateRelationFieldsSourcedByCollaboratorField": {
+        "trafficLevel": 0
+      },
+      "enableExternalTableSyncInfoManagerForAuthoritativeSourceWrites": {
+        "trafficLevel": 0
+      },
+      "externalTableSyncThreadedEnqueue": {
+        "trafficLevel": 100
+      },
+      "attachmentsAuthV3ShouldUseSignedAuthV5Urls": {
+        "trafficLevel": 0
+      },
+      "attachmentsAuthV3": {
+        "trafficLevel": 0
+      },
+      "eudrAttachmentBoundaryCrossings": {
+        "trafficLevel": 0
+      },
+      "externalTableSyncPingSourceBasesFromTarget": {
+        "trafficLevel": 100
+      },
+      "changeHooksOnUelLogActions": {
+        "trafficLevel": 0
+      },
+      "performChangeHookProcessingOnUelPath": {
+        "trafficLevel": 100
+      },
+      "applicationSearchMultiTokenBooleanSearch": {
+        "trafficLevel": 100
+      },
+      "applicationSearchMultiTokenBooleanSearchAllowFuzziness": {
+        "trafficLevel": 0
+      },
+      "twoWaySyncServerSideTransparentEditingNonBlocking": {
+        "trafficLevel": 100
+      },
+      "twoWaySyncPricingGating": {
+        "trafficLevel": 100
+      },
+      "externalTableSyncQuerySchemaInIncrementalSync": {
+        "trafficLevel": 100
+      },
+      "revisionHistoryErrorLogging": {
+        "trafficLevel": 0
+      },
+      "workflowsSlackShowPermalinkInExpressionBuilder": {
+        "trafficLevel": 0
+      },
+      "dateDependenciesRevisionHistory": {
+        "trafficLevel": 100
+      },
+      "disableUsageInsightsOneYearOption": {
+        "precalculatedVariant": {
+          "variant": "control",
+          "reason": "disabled"
+        }
+      },
+      "tableDeleteOrphanCascadeForApplication": {
+        "trafficLevel": 0
+      },
+      "disabledWorkflowOnSchemaChangeSuggestion": {
+        "trafficLevel": 100
+      },
+      "syncFailureSuggestion": {
+        "trafficLevel": 100
+      },
+      "unusedViewsSuggestion": {
+        "trafficLevel": 100
+      },
+      "unusedSelectChoicesSuggestion": {
+        "trafficLevel": 0
+      },
+      "unifiedEventLog": {
+        "trafficLevel": 100
+      },
+      "unifiedEventLogPublishingBlockDbCommits": {
+        "trafficLevel": 100
+      },
+      "projectReadDataForRowCards": {
+        "trafficLevel": 0
+      },
+      "threadSafeStoreUseLargerMapSize": {
+        "trafficLevel": 0
+      },
+      "clientSideProfilingForApplication": {
+        "trafficLevel": 0
+      }
+    },
+    "applicationV2FeatureFlagClientContext": {
+      "applicationId": "apphwgei0ETb2zCXz",
+      "flagNameToPrecalculatedVariant": {
+        "dateSparklineDisplay": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "blockModelBridgeLongWaitUntilReadyBeforeWriteTimeout": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiFieldMatching": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAutomaticFieldMatching": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "applicationChangeHookCreateSyncHooksWithSpecificationPayloadEnabled": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncSkipRealTimeSyncForSyncWithFieldTypeCustomizationToLinkedRecord": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "syncLinkedRecordsCellUpdateOptimization": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "canCreateRelationFieldsSourcedByCollaboratorField": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableExternalTableSyncInfoManagerForAuthoritativeSourceWrites": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "externalTableSyncThreadedEnqueue": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "attachmentsAuthV3ShouldUseSignedAuthV5Urls": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "attachmentsAuthV3": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "eudrAttachmentBoundaryCrossings": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "externalTableSyncPingSourceBasesFromTarget": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "changeHooksOnUelLogActions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "performChangeHookProcessingOnUelPath": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "applicationSearchMultiTokenBooleanSearch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "applicationSearchMultiTokenBooleanSearchAllowFuzziness": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "twoWaySyncServerSideTransparentEditingNonBlocking": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "twoWaySyncPricingGating": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncQuerySchemaInIncrementalSync": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "revisionHistoryErrorLogging": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowsSlackShowPermalinkInExpressionBuilder": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "dateDependenciesRevisionHistory": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "disableUsageInsightsOneYearOption": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "tableDeleteOrphanCascadeForApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "disabledWorkflowOnSchemaChangeSuggestion": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "syncFailureSuggestion": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "unusedViewsSuggestion": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "unusedSelectChoicesSuggestion": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "unifiedEventLog": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "unifiedEventLogPublishingBlockDbCommits": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "projectReadDataForRowCards": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "threadSafeStoreUseLargerMapSize": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "clientSideProfilingForApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationV2",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        }
+      }
+    },
+    "applicationV2EnabledFeatureNames": [
+      "aiFieldMatching",
+      "applicationChangeHookCreateSyncHooksWithSpecificationPayloadEnabled",
+      "externalTableSyncSkipRealTimeSyncForSyncWithFieldTypeCustomizationToLinkedRecord",
+      "syncLinkedRecordsCellUpdateOptimization",
+      "externalTableSyncThreadedEnqueue",
+      "externalTableSyncPingSourceBasesFromTarget",
+      "performChangeHookProcessingOnUelPath",
+      "applicationSearchMultiTokenBooleanSearch",
+      "twoWaySyncServerSideTransparentEditingNonBlocking",
+      "twoWaySyncPricingGating",
+      "externalTableSyncQuerySchemaInIncrementalSync",
+      "dateDependenciesRevisionHistory",
+      "disabledWorkflowOnSchemaChangeSuggestion",
+      "syncFailureSuggestion",
+      "unusedViewsSuggestion",
+      "unifiedEventLog",
+      "unifiedEventLogPublishingBlockDbCommits"
+    ],
+    "applicationUnifiedFeatureFlagClientContext": {
+      "applicationId": "apphwgei0ETb2zCXz",
+      "flagNameToPrecalculatedVariant": {
+        "iCalSharedViewBestEffortAllDayColumn": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "restrictPagesDataToAllEntryPagesAndReachableRowPagesInPageBundleForMobileClient": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "disableFilterSourceHintInCellEditorElement": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "logUnexpectedQueryAuthorizationPageError": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "shouldCheckRowUpdatedLeasesSecond": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "groupHeadingScreenReaderLabels": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "timelineShowExactStartTimeWithoutEndColumn": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "timelineViewGanttCriticalPath": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "timelineGanttNesting": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "interfaceDesignerCustomFormFieldValidation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerLinkedRecordReordering": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceChartMultipleSeries": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceChartDualYAxes": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerIncreaseNumberOfLegendItemsForTopBottom": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "interfaceDesignerSupersizeRecordDetailPage": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "standaloneFormSection": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "allowHighContrastForms": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "standaloneFormReordering": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerStagedUpdateForms": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerStagedUpdateFormsBetaBadge": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "shouldUseExistingCellValuesForVisibleColumnsDuringPermissionsCheck": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "escaPrefilledLinkedRecordSymmetricColumnFallback": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerGalleryExpandTruncatedProperties": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "viewsTopControlsMenuComponentsUpdate": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "iosOmniApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "androidOmniApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "productCentralApplicationOverride": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "forceSolutionThemeForBase": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "allowRenamingSolution": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableClaudeOpus4p8ForOmni": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "dashboardQueryContainerSearch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "useLevelsMultiSelectComponentInBaseDetailView": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerDisableRuntimeOutputLiveMemo": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "dashboardGridContainer": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiEnableStreamingForCobuilder": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiOmniAppCreationEnableParallelBuilderAgents": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiPlayInterfaceLaunch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAppBuildingDocExtractionInBaseCreationModal": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiGenerateStructuredOutputNoRelevantInputDataStatus": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "customElementsAllowAiGenerationInPageCreationWizard": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "customElementCodeGenStreaming": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiCoverImageGenerationForStandaloneFormsApplicationScoped": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "cobuilderCustomizationAnthropicByDefault": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "cobuilderCustomizationGetOrderedModelListForCustomizationPromptOverridesVariant": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "cobuilderCustomizationWorkflowIteration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiFieldLogToBaseKillSwitch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "omniUnifiedAgent": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "aiServerQaAgent": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniV2InternalDogfoodingApplicationScoped": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantCreateTableWithAi": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantAttachmentsForPBC": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantMakeSingleGetContextForAgentRequest": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantGridArtifactStreaming": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantAdvisors": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiSpikeOmniAppDescriptions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiSpikeAlwaysShowTableTemplates": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "omniReportGeneration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "omniReportGenerationAdvancedFeatures": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniReportGenerationFeatureAwarenessCard": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniUseVercelForOpenAi": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniUseVercelForAnthropicBedrock": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniUseVercelForGemini": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantMessagePdfExport": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantGridArtifactLiveBaseData": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantShouldFallBackThroughDynamicModels": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableAiChatsManagementKillSwitch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "aiAssistantWebDataRetrieval": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiServerWebChatOwnershipCheck": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiServerAgentPersistEventsToDynamo": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniInterfaceLongTextEditor": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniRecordScopedContext": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniCellContextMenuAskOmni": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniRecordScopedContextRollout": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniContextualSearchEntryPoint": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniRecordAgentMarkdownSupport": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableAiAssistantMarkdownCobuilderTokens": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "omniRecordAgentFineGrainedToolStreaming": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "disableEditingOfEditableSharedViews": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "linkedRecordPickerMultiSelectInRecordDetail": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "cascadingEndUserFilters": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "computedFieldDynamicFiltersInForms": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "blocksUseSeparateTwoWaySyncedRichTextCellAction": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "packagePlatformVerboseLogging": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "packagesPlatformSendRealtimeLikePayloadAfterReleaseCreated": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "packagesPlatformDisableCustomizingLevelsPageElement": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "packagesPlatformDisableCustomizingQueryContainerFilters": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "packagesPlatformAllowCustomizingQueryContainerEndUserActions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "packagesPlatformAllowCustomizingQueryContainerEndUserFilters": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "packagesPlatformAllowCustomizingQueryContainerCallToActionButton": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "packagesPlatformAllowCustomizingInboxPageElement": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "connectSingleApplicationRealtimeWebSocketToAppAirtableCom": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "interfaceExtensionsAllowOnPubliclySharedInterfacePages": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceExtensionsHideTopBarOnPubliclySharedInterfacePages": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "interfaceExtensionsAllowBlockInstallationInQueryContainerPageElement": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceExtensionsEnableMultiTable": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceExtensionsSkipPreloadingQueries": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "interfaceExtensionsEnableAiGeneration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "interfaceExtensionsEnableAiGenerationRolloutExcludingEnterprise": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceExtensionsEnableImagesAsContext": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "interfaceExtensionsPrependPromptWhenMenuItemSelected": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxEligibleApplications": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxPreventUndestroy": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxCopyTestOuputToSandbox": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxSkipPageDestroyIfMissing": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "sandboxCommitSchemaValidationOnRead": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "sandboxCompactColumnOrder": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxSelectivePublishing": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxSelectivePublishingFormulaChaining": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxAttemptToAutoResolveColumnDependencyCycles": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxPackages": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxV1DataExtensions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxV1InterfaceCustomExtensions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxGenerateActionSequenceApiWithDisplayInfo": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxOnlyAllowApplicationMetadataUpdatesFromProductionApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxAllowDestroyingMainApplicationsWithoutDestroyingSandboxFirst": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxGenerateSignedActionSequence": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxGenerateStepsDueToSyncSourceChanges": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxRequireSignedActionSequence": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxPublishHistory": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "sandboxSkipActionSequenceStalenessCheckForApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "sandboxPreviewAsInactiveCollaborators": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "openAio1ModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "openAiChatGpt5P2ModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "openAiChatGpt5P4ModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "anthropicClaudeOpus4p6ModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "anthropicClaudeSonnet4p6ModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "anthropicClaudeOpus4p7ModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "anthropicClaudeOpus4p8ModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "gemini3ProModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "gemini3p1ProPreviewModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "gemini3FlashModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "geminiDocExtractionImageVision": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "anthropicDocExtractionImageVision": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "mistralAiModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "openAiImageGenerationModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "openAiGptImage1P5ModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "openAiGptImage1MiniModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "openAiGptImage2ModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "gemini2P5FlashImageModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "gemini3ProImageModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "gemini3P1FlashImageModelAvailabilityUnified": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "gemini3ProImageResolution": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "imageFieldAgentFeedbackLinkForAiLabs": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiImageGenerationAutomation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiImageGenerationAutomationBusinessEnterprise": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiImageGenerationFieldAgent": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiImageGenerationFieldAgentBusinessEnterprise": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "googleVeo3VideoGenerationModelAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiWebContentGenerationFieldAgent": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiFieldAgentConfigV2": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiLinkedRecordFieldAgent": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiEnableLinkedRecordAiFieldForEkmBases": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiLinkedRecordFieldAllowStaleEmbeddings": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiLinkedRecordFieldKeywordSearch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiCreateLinkedRecordAiFieldsFromOmni": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiFieldAgentsLogToBraintrust": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiComposioFieldAgentsLogToBraintrust": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiFieldAgentGenerationTriggers": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiFieldAgentPerApplicationCapacityAdmissionControl": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiFieldAgentBlockAutomaticGenerationOnTodayDependency": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiPromptEditorAtAnchor": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiReduceTaskQueueEmbeddingCrudRequestPriority": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiFieldMatchingUseLlmForAutomaticMatching": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiFieldMatchingAdvancedConfiguration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAdoptionSuggestionsInFieldContextMenu": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiFieldAgentTokenMaxiExperimentProactiveSuggestionsOverride": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAutomationsLibrary": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantCreateFieldAgentCommand": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "displayChartArtifactInAiAssistant": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "saveChartToPage": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiEnableSemanticSearch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiDisablePbcSemanticSearchEmbeddingConfigCreation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiGenerateWorkflowActionOutputSchema": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiAssistantForBillingPlansThatIncludeAiSku": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantSuggestionGenerationV2": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "aiAssistantSupportHandoffLlmQuery": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantAllowBlankPageQueries": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantEnableCreditCharges": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "commandKRecordSearch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiVectorSearchFilteringHeuristics": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "enableGoogleDriveToolsInFieldAgents": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableGoogleDriveFolderScopingInFieldAgents": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableOneDriveToolsInFieldAgents": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableJiraToolsInFieldAgents": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "enableComposioToolsInFieldAgents": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "enableComposioToolsInFieldAgentsBusinessEnterprise": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableFieldAgentIntegrationRestrictions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "useLargeDocExtractionPipeline": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "useLargeDocExtractionPipelineInAutomation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "letAiFieldReadExcelFiles": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "letAiFieldReadWebpImageFiles": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "letAiFieldReadImagesWithVisionModels": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "letAiFieldReadImagesWithVisionModelsBusinessEnterprise": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "showOmniStopButton": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          }
+        },
+        "allowEkmMilvusEmbeddingForInternalOnly": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "doubleWriteToMilvusAndLance": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "writeNewEmbeddingConfigsToMilvus": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "readEmbeddingsFromMilvus": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "forceMilvusMigration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiFinnhubAssistantAvailability": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantAirtableHelp": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantGenerateArtifactsForNonBaseData": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantVirtualTable": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiBedrockEmbeddings": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiEmbeddingsModelAutomaticCutover": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiEmbeddingConfigs": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAssistantRouterPlanning": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantRouterUserClarification": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "aiAssistantRouterUseAnthropic": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "aiAssistantWithSyncInfo": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiAdoptionAiFieldCatalog": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiFreeGeneration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableCustomElementPregeneration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowsExecuteActionsInThread": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowsStructuredValueInsertion": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowsEmailTrigger": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowsEmailTriggerAttachments": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowsEmailTriggerSkipTextToHtmlParsing": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowsRowCommentCreatedTrigger": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "isAutomationPerformanceStatsEnabled": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowTriggerConnectionAvoidBaseMetadataApiCall": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowsCustomScriptsSetNodeMaxOldSpaceSize": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowExecutionCheckAvailableLeasesBeforeScheduling": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowCronTriggerWeeklyNewComputeFirstTriggerTimeImplementation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableExternalTableSyncWebhookRegistration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "syncedLinkedRecordsSupportSelfLinkedRecords": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "levelsConfigAllowSyncedLinkedRecordColumns": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncSyncLinkedRecordsColumnEditableForSourceWithSelectionCondition": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "reconnectSyncedLinkedRecordsColumnsWhenPossibleWhenRemovingSyncs": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "externalTableSyncFixMissingAuthoritativeColumn": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxPublishMergeSyncTargetConfig": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncBatchOnNonEmptyCellsInCreatedRows": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncBatchOnNumberOfComparedCells": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncSkipDuplicateCreatedRows": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "externalTableSyncTimeOutUsingLastBatchStartTime": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "addExternalApiRequestBodyToDebugObj": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "relationshipMapOverrideComplexityGating": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "disableSendToMsTeamsWorkflowActionOneOnOneMessaging": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "syncSetUmappedColumnsToDestroyedInFixers": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "processExternalTableSyncsGetEnqueueContext": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "externalTableSyncFullTableDiffInThreadedEnqueue": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "omniCollaboratorInfoExtraction": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "attachmentProcessingTaskUseBatchedProcessingForExperimentalUploadTypes": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "fileUploaderModalContainFocus": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "attachmentVideoHackilyTryToPlayAlways": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "numberBadgeOnAllAnnotations": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "attachmentAltText": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "attachmentAltTextEditor": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "singleSelectApprovalsVisualVariant": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "atlassianJiraTrimFieldMetadata": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "jiraV3IssueSearchValidation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "optimizeGetIssueMetadataForJiraCloud": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "applyJiraV3IssueSearchAPIForJiraCloud": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableIntegrationsPlatformJiraServerTwoWaySync": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "azureDevOpsTwoWaySync": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "twoWaySyncIgnoreNoopArrayOperationsToSource": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "commentsNotificationRoutingForAttachments": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "revisionHistoryHideAttachmentPreviews": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowsSlackEnableThreadedMessageSupport": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowsSlackChannelsDistributedCache": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowsOutlookEventUseHtmlForDescriptionField": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowSubscribers": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "dateDependenciesDisplayDateDependencyMetadataOutsideTimelineArrows": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "dateDependenciesAutoScheduleOnAddPredecessor": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "dateDependenciesDefaultLinkMetadata": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "dateDependenciesForwardOnly": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableSharedApplicationOrBlockAppBlanketRedaction": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "unloadApplicationDataAndUnsubcribeFromRealtimeOnSetInactive": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "portalsShareTabApplicationScoped": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "coreDbInterfacesDemo": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "coreDbShadowValidatePrivilegesPolicyConstruction": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "coreDbPrivilegesPolicyConstruction": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "coreDbShadowValidateQueryAuthorization": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "shouldEnforcePrivilegesPolicyQueryAuthorizationTimingThreshold": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "dedupeTextResultTypeLookupFilterValues": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "shouldUseNewExpandedForeignRowPolicyModel": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "delayLastPageRuntimeDestroy": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "skipPreloadingQueriesDuringPageNavigation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "useImportRowsShadowboxOpForPaste": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "skipPublishingUnparentedPagesWithNoChanges": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "adminPanelSyncFtcForeignKeyResolveByPrimaryColumn": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "interfaceDesignerIncreasedMaxNumPagesPerPageBundle": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "interfaceDesignerEndUserHideEmptyParentsMultipleLevels": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "disableNewWorkflowTemplateInstalls": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "hideWorkflowTemplateSettings": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "truncateLongForeignKeyCellEditors": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "commentAttachments": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "proofingCommentAttachments": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "proofingCommentAttachmentsDragAndDrop": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "proofingCommentResolution": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "commentsQA": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "commentResolution": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "dlpCommentAttachments": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "updateRowsFromExternalTableSyncUnifiedEventLogBlockDbCommits": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "redactSyncCellHistory": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "disableSyncCellHistoryWrites": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enforcePublicAPIBillingLimit": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "pageBundleInviteReminders": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "pageBundleInviteEmailRevamp2025": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "asyncInviteEmails": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "shareDialogSimplificationInterfaceEnterpriseRollout": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableCollaboratorCellTagNotificationsOnInterfaceForms": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "implicitSorts": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "sendResponseDataWithOtRevisionForRowUpdateRichTextCellByApplyingOperation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "singleApplicationRealtimeServerVerboseLogging": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "singleApplicationRealtimeValidateMultiThreadSubscriptionBuffer": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "singleApplicationRealtimePromoteFromMultiThreadSubscriptionBuffer": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sarCoreDbShadowValidation": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "memAppRecalculatorRecordedDependencyChangesMeasurements": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "replicatedApplicationHandoff": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "replicatedApplicationHandoffFallbackToCoordinatedHandoff": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "replicatedCoreDbLoadingSidecar": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableReadQueriesMsgpackExperiment": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableRealtimeUpdatesPausingForReadQueries": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "coreDbSecondaryModeShadowValidationExperiment": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "coreDbSecondaryModeShadowValidationExperimentDisableTimeouts": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "useDispatchArchitecture": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "dispatchArchitectureServing": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "logAllShadowboxOperationsPerformedInCrudRequestLogLine": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "ineligibleFromRule",
+            "ruleType": "enterpriseAccountIds"
+          }
+        },
+        "shouldEnablePreviewModeForViewsInApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "shouldEnablePreviewModeForExperimentalViewTypesInApplication": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "backendSearchForPreviewMode": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableSearchHighlighting": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "previewModeThreshold": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "fiveThousand",
+            "reason": "winningVariant"
+          }
+        },
+        "previewModeRowLimit": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "oneThousand",
+            "reason": "winningVariant"
+          }
+        },
+        "foreignRowCustomDisplayNames": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "twoWaySyncCollaboratorField": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "featureKitsEkmEncryptionForS3Data": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "searchAllVisibleColumnsInTableListRowsQuery": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "realTimeSyncTwoWaySyncPermissions": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "loadCellsByColumnInsteadOfByTable": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "realTimeSyncSourceTableLock": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "feedbackSentimentChart": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "solutionsPromptAdditionalContext": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "realTimeSyncConvertSourceDiffToTargetDiffWithNewSchema": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "ftcSelectColorReuseOnSync": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "googleCalendarSyncEnableEventTypeField": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowExpressionBuilderUseCache": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowFanoutDecisionSkipLookupCellConversion": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowCustomScriptRetryOnUserScriptTimeout": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowExecutionLoadPayloadInBatch": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workflowExecutionJobLockingDuringScheduling": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workflowExpressionEvaluationOnlyLoadBranchData": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "selfLinkedRecordBackLink": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "nestedSubtasksInLevelsView": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableCustomGridHeaderHeight": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "shouldShowDatasetsInLinkedRecordPicker": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "includeColumnIsSyncedInPublicApi": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "coreDbFirstLoading": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "coreDbFirstLoadingSidecar": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "coreDbFirstParallelLoading": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableCoreDbSearchIndexing": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableCoreDbShadowboxMigrationWrapper": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "lazyLoadRowTemplateUserAccessStatusClient": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "lazyLoadRowTemplateUserAccessStatusServer": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "atlassianJiraAlwaysConstructSchemaFromGetFieldsEndpoint": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "editIndividualFieldPropertiesInManagedCurrencyField": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "snowflakeGetSqlQueryResultsAsStream": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enablePublicApiRevertAction": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "useRecordCardsForSmallerArtifacts": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "allowGiantGroupsApplicationScoped": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "allowGiantGroupsHydrateUserGroupMemberProfiles": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableOmniToDeleteWorkflows": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "hideOmniMoleInInterfaces": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "detailViewFocusScopeContain": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "enableCoreDbIsoTableDataCache": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableOmniAppCreationSharePromptPopover": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "winningVariant"
+          }
+        },
+        "packagesPlatformEnableBlocks": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableListInterfaceReestructure": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "enableHiveCsamModeration": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiBaseAgent": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "useLargeCsvImporter": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "onlyTriggerAutomationOnInitialAttachmentUpload": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableExternalTableSyncSnowflakeClientRefresher": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "hydrateGroupMembersFromRelatedEnterpriseAccounts": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "useFullReplacementForLargeRichTextDiffs": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableExternalTableSyncSnowflakeDataFetcherChunkedConcurrency": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "assignNumberedSubdomainForCdn": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sqlSyncAwarenessTooltip": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workerGroupTagOnWorkerLookupError": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "shipAiCapabilityPolicyToClient": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "includeWorkflowMetadataInMailgunUserVariables": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "publicInterfacePagesAttachmentDownloads": {
+          "targetedEntityId": "apphwgei0ETb2zCXz",
+          "targetedEntityType": "applicationUnified",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        }
+      }
+    },
+    "rootBillingEntityFeatureFlagClientContext": {
+      "flagNameToPrecalculatedVariant": {
+        "enableEffectiveAiPolicyShadowEnforcement": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableAiCapabilityEngineEnforcement": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "gridAccessibilityImprovements4": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "tabDropdownImprovements": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "timelineSummaryConfigPreservedWhenInvalid": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "interfaceDesignerOmniButtonAction": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "aiFilterAssistance": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "aiInterfaceFilterAssistance": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "omniUnifiedAgentForAppCreationRootBillingEntityScoped": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "omniConsultativeBuildingRootBillingEntityScoped": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "overrideFromRule",
+            "ruleType": "objectTags",
+            "matchContext": {
+              "objectTags": [
+                "aiAlpha"
+              ]
+            }
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "omniCellGridViewLongText": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "omniCellGridViewContextMenuAskOmniForMultipleRows": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "packagesPlatformSkipExternalTableSyncValidityChecksOnResetAndUpdate": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableAiPolicyJournal": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "allowSubThreeYearDataRetention": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "allowApplicationMoveFromNonDataResidentToDataResidentRegion": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "showEstimatedTaxInCheckout": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "adminPanelSyncConvertToForeignKeyColumns": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "aiCreditsForPortalAddOnCustomers": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "linkMandateConfirmationOnSubscriptionCreation": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "trackSubscriptionStatus": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableCreditExpiration": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableOneTimeCreditNotification": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableSecondBatchCreditExpirationNotification": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableShadowCreditExpiration": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableCreditExpirationMondayCadence": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "dataTableShouldEnableDataResidencyForS3Data": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "sendOrbBillingEvents": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableOrbCustomerCreation": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableOrbCreditLimitEnforcement": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableOrbSyncInStripeTasks": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "allowGiantGroups": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "enableExternalShareCollaboratorInviteRestriction": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "addRecordDialogFocusManagement": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "interfaceLayoutAccessibilityImprovements": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "checkoutPromoCode": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        },
+        "requireAiWorkspaceAllowlistToEnableAi": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "rootBillingEntity",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          },
+          "decisionCacheKey": "wsp1QdxLoq6W33Qpq"
+        }
+      }
+    },
+    "workspaceFeatureFlagClientContext": {
+      "workspaceId": "wsp1QdxLoq6W33Qpq",
+      "flagNameToPrecalculatedVariant": {
+        "enableExternalAgentOnboardingXP": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "omniChatSidebarResizing": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "sandboxAllowMoveMainAndSandboxApplicationsOutOfWorkspace": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "aiModerationParallelizationForOpenAiEnabled": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "aiFieldAgentTokenMaxiExperiment": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "displayTaxIdComponents": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "billingRefactoredBusinessUpgradePaths": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "snapshotRestoreUnifiedEventLogEvents": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "snapshotRestoreUnifiedEventLogBlockDbCommits": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "automaticUserContextInferenceFromEmailExperiment": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "enableHardRecordEnforcementServerSide": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableAttachmentLimitEnforcement": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "enableUpdatedOverLimitBadge": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "workspaceSettingsGracefullyHandleMissingApplicationOrPageBundle": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "workspaceSettingsShow300kAnd400kAiCreditPacks": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "unpaidTeamTrialEmailExperiment": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "random"
+          }
+        },
+        "workspaceInviteEmailRevamp2025": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "shareDialogInlineInviteLink": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "churnPreventionTeamPlanBillingCoupon2025Q4": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "freeUserHighActivityDiscount": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "winningVariant"
+          }
+        },
+        "highActivityOverL56dFreeWorkspaceBillingCoupon2025Q1": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "random"
+          }
+        },
+        "highActivityOverL56DFreeWorkspaceBillingCouponGa": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "nearOrAtLimitsFreeWorkspaceBillingCoupon2025Q1": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "random"
+          }
+        },
+        "checkoutAnnualFreeMonths": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "disabled"
+          }
+        },
+        "checkoutModalStepperExperiment2026": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "deprecateHasMigratedToStripeDynamoDbCheck": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        },
+        "templateMatchingFastStart": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "enableDecember2025TeamStarterPackPromotion": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "control",
+            "reason": "trafficLevel"
+          }
+        },
+        "trialConversionAnnualDefault": {
+          "targetedEntityId": "wsp1QdxLoq6W33Qpq",
+          "targetedEntityType": "workspace",
+          "precalculatedVariant": {
+            "variant": "treatment",
+            "reason": "random"
+          }
+        }
+      }
+    },
+    "hasApplicationEverInstalledSolutionsPackage": false,
+    "isUserLimitsHardEnforcementEnabledForParentWorkspace": false,
+    "ekmEnablementMetadata": {
+      "isEkmAttachmentUploadEnabled": false,
+      "isEkmEnabled": false,
+      "isFilestackFullyDisabled": true
+    },
+    "syncedViewLimitMetadata": {
+      "maxSyncableSharedViews": 100,
+      "currentSyncableSharedViews": 0
+    },
+    "aiConsumptionInfo": null,
+    "dataResidentRegion": null,
+    "assistantsById": {},
+    "hasUserSeenAntiPhishingWarningModalForApplication": false,
+    "areImplicitSortsEnabled": false,
+    "rowLimitPerViewOrPage": 1000,
+    "previewModeThreshold": 5000,
+    "customLoginPageProps": {
+      "loginCoverImageUrl": null,
+      "loginLogoImageUrl": null,
+      "signedLoginUserContentUrls": {}
+    },
+    "emailWorkflowTriggerDomain": "automations.airtableemail.com",
+    "appAgentsById": {},
+    "isDispatchArchitectureEnabled": false,
+    "isConstantPooledData": false
+  }
+}

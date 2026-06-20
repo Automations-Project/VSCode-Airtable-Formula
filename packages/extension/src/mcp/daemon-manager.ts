@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync, rmSync } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 
 export interface DaemonStatus {
   running: boolean;
@@ -242,6 +242,71 @@ export class DaemonManager implements vscode.Disposable {
   }
 
   /**
+   * Stop the daemon AND kill anything the lockfile can't see: orphaned daemon
+   * processes (whose lock was lost/deleted while the process lived) and stray
+   * Chrome instances still holding the persistent profile. This is what the
+   * "Stop" button calls — graceful stop alone is a no-op when the lock is gone,
+   * which leaves a browser holding the profile (Chrome exit code 21 for
+   * everything after).
+   */
+  async forceStop(): Promise<StopResult> {
+    const result = await this.stopDaemon();
+    const killed = this._sweepOrphans();
+    this._reclaimLockfile();
+    if (killed > 0) {
+      return {
+        stopped: true,
+        forced: true,
+        reason: `${result.reason ? result.reason + ' ' : ''}Force-killed ${killed} stray process(es).`,
+      };
+    }
+    return result;
+  }
+
+  /**
+   * Kill orphaned airtable-mcp daemons and stray profile-holding Chromes by
+   * scanning command lines — independent of the lockfile. Best-effort.
+   *
+   * ponytail: matches by `.chrome-profile` / `index.mjs … daemon start` across
+   * the whole user session, so it also nukes daemons from other installs that
+   * share ~/.airtable-user-mcp. That's the intent of a "force stop".
+   */
+  private _sweepOrphans(): number {
+    const pids = new Set<number>();
+    try {
+      if (process.platform === 'win32') {
+        for (const filter of ["CommandLine like '%.chrome-profile%'", "CommandLine like '%index.mjs%daemon%start%'"]) {
+          try {
+            const out = execFileSync('wmic', ['process', 'where', filter, 'get', 'ProcessId', '/format:list'], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+            for (const pid of this._parsePids(out)) if (pid !== process.pid) pids.add(pid);
+          } catch { /* no matches → wmic exits non-zero */ }
+        }
+        for (const pid of pids) {
+          try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 5000 }); } catch { /* already gone */ }
+        }
+        return pids.size;
+      }
+      // POSIX: pkill kills directly; we can't easily count, so report 0.
+      for (const pat of ['\\.chrome-profile', 'index\\.mjs.*daemon.*start']) {
+        try { execFileSync('pkill', ['-9', '-f', pat], { stdio: 'ignore', timeout: 5000 }); } catch { /* none matched */ }
+      }
+      return 0;
+    } catch {
+      return pids.size;
+    }
+  }
+
+  /** Extract unique positive PIDs from `wmic … get ProcessId /format:list` output. */
+  private _parsePids(wmicOutput: string): number[] {
+    const out: number[] = [];
+    for (const m of wmicOutput.matchAll(/ProcessId=(\d+)/g)) {
+      const n = Number(m[1]);
+      if (Number.isInteger(n) && n > 0 && !out.includes(n)) out.push(n);
+    }
+    return out;
+  }
+
+  /**
    * Proof of identity for kill escalation: /daemon/health, authenticated with
    * the lockfile's bearer token, must echo the lockfile's uuid.
    */
@@ -311,6 +376,12 @@ export class DaemonManager implements vscode.Disposable {
       AIRTABLE_USER_MCP_HOME: this.configDir,
       AIRTABLE_HEADLESS_ONLY: '1',
       NODE_PATH: path.join(this.extensionPath, 'dist', 'node_modules'),
+      // We spawn `process.execPath` which, in the extension host, is the editor's
+      // Electron binary — not Node. Without this it would launch the editor (or
+      // do nothing useful) instead of running the daemon script, so the lockfile
+      // never appears and ensureDaemon() times out. Harmless when execPath is
+      // already real Node (the flag is ignored).
+      ELECTRON_RUN_AS_NODE: '1',
     };
     if (credEnv) Object.assign(env, credEnv);
     return env;

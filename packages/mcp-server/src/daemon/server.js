@@ -349,6 +349,40 @@ export async function startDaemonServer(options = {}) {
     res.json({ ok: true, clientId });
   });
 
+  // Session health — verified through the daemon's SINGLE shared browser.
+  // The extension calls this instead of forking its own health-check Chrome;
+  // two Chromes on one persistent profile collide (Chrome exit code 21), which
+  // is the root cause of the "session dead / network error" failure mode.
+  app.get('/daemon/session-health', requireBearer, async (_req, res) => {
+    try {
+      if (options.getSessionHealth) {
+        res.json(await options.getSessionHealth());
+        return;
+      }
+      await getClient();              // ensure the shared browser is initialized
+      res.json(await auth.checkSessionHealth());
+    } catch (error) {
+      // init/verify threw (e.g. session expired → login redirect) — report it
+      // as an invalid session rather than a 500 so the dashboard shows the
+      // right state and offers re-login.
+      res.json({ valid: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Release the shared browser so an interactive (headful) login can open the
+  // persistent profile exclusively. The next getClient()/session-health call
+  // re-initializes it, picking up the freshly-written session cookies.
+  app.post('/daemon/release-browser', requireBearer, async (_req, res) => {
+    try {
+      if (auth) await auth.close().catch(() => {});
+    } finally {
+      auth = undefined;
+      client = undefined;
+      clientInitPromise = null;
+    }
+    res.json({ ok: true });
+  });
+
   app.post('/daemon/rotate-token', requireBearer, async (_req, res, next) => {
     try {
       currentToken = rotateToken({ tokenPath });

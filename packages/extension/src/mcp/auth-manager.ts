@@ -282,7 +282,15 @@ export class AuthManager implements vscode.Disposable {
   // ─── Health Check ────────────────────────────────────────────
 
   async checkSession(): Promise<AuthState> {
-    // Preflight — no point spawning the child process if no browser exists
+    // Prefer the daemon's SINGLE shared browser. This avoids forking a local
+    // Chrome that would collide with the daemon over the persistent profile
+    // (Chrome exit code 21 → the "session dead / network error" failure), and
+    // it works even when no local browser is installed.
+    const viaDaemon = await this._checkViaDaemon();
+    if (viaDaemon) return viaDaemon;
+
+    // No daemon (stdio mode) or a daemon that predates the endpoint — fall back
+    // to forking our own health-check. Preflight: no browser, no point spawning.
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -333,6 +341,102 @@ export class AuthManager implements vscode.Disposable {
     return this._state;
   }
 
+  /**
+   * Verify the session through the daemon's already-open browser.
+   *
+   * Returns the resulting AuthState when the daemon handled the check, or
+   * `null` to signal the caller to fall back to forking a local health-check
+   * (no daemon, daemon disabled, daemon unreachable, or a daemon too old to
+   * expose /daemon/session-health).
+   */
+  private async _checkViaDaemon(): Promise<AuthState | null> {
+    const dm = this._daemonManager;
+    if (!dm || !getSettings().mcp.useDaemon) return null;
+
+    let status: Awaited<ReturnType<DaemonManager['getDaemonStatus']>>;
+    try {
+      status = await dm.getDaemonStatus();
+    } catch {
+      return null;
+    }
+    if (!status.running || !status.healthy || status.port == null || !status.bearerToken) {
+      return null;
+    }
+
+    this._updateState({ status: 'checking' });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const resp = await fetch(`http://127.0.0.1:${status.port}/daemon/session-health`, {
+        headers: { Authorization: `Bearer ${status.bearerToken}` },
+        signal: controller.signal,
+      });
+
+      // Old daemon without the endpoint — fall back to the fork path.
+      if (resp.status === 404) return null;
+
+      const now = new Date().toISOString();
+      if (!resp.ok) {
+        this._updateState({ status: 'expired', lastChecked: now, error: `HTTP ${resp.status}` });
+        return this._state;
+      }
+
+      const result = await resp.json().catch(() => null) as
+        { valid?: boolean; userId?: string | null; status?: number; error?: string } | null;
+
+      if (result?.valid) {
+        this._updateState({ status: 'valid', userId: result.userId ?? undefined, lastChecked: now, error: undefined });
+      } else {
+        this._updateState({
+          status: 'expired',
+          lastChecked: now,
+          error: result?.error || (result?.status ? `HTTP ${result.status}` : 'Session invalid'),
+        });
+      }
+      return this._state;
+    } catch {
+      // Daemon became unreachable mid-check — fall back rather than show an error.
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Ask the daemon to close its shared browser so an interactive (headful)
+   * login can open the persistent profile exclusively. Best-effort: if it
+   * fails, the login runner's own exit-21 retry still covers the common case.
+   * The daemon re-opens the browser on its next session check / tool call,
+   * picking up the freshly-written session cookies.
+   */
+  private async _releaseDaemonBrowser(): Promise<void> {
+    const dm = this._daemonManager;
+    if (!dm || !getSettings().mcp.useDaemon) return;
+
+    let status: Awaited<ReturnType<DaemonManager['getDaemonStatus']>>;
+    try {
+      status = await dm.getDaemonStatus();
+    } catch {
+      return;
+    }
+    if (!status.running || !status.healthy || status.port == null || !status.bearerToken) return;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      await fetch(`http://127.0.0.1:${status.port}/daemon/release-browser`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${status.bearerToken}` },
+        signal: controller.signal,
+      });
+    } catch {
+      // best-effort
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   // ─── Login ───────────────────────────────────────────────────
 
   async login(): Promise<AuthState> {
@@ -354,6 +458,9 @@ export class AuthManager implements vscode.Disposable {
         return this._state;
       }
       this._updateState({ status: 'logging-in' });
+      // Free the profile: the daemon's shared browser must let go before the
+      // login runner can open the same persistent profile.
+      await this._releaseDaemonBrowser();
       try {
         // Credentials go over the IPC channel, never the child environment.
         const result = await this._spawnScript('login-runner.mjs', {
@@ -387,6 +494,9 @@ export class AuthManager implements vscode.Disposable {
     }
 
     this._updateState({ status: 'logging-in' });
+    // Free the profile: the daemon's shared browser must let go before the
+    // login runner can open the same persistent profile.
+    await this._releaseDaemonBrowser();
 
     try {
       const result = await this._spawnScript(

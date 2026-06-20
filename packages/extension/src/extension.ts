@@ -562,7 +562,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await toolProfileManager.openConfigFile();
         }),
         vscode.commands.registerCommand('airtable-formula.stopDaemon', async () => {
-            const result = await daemonManager.stopDaemon();
+            const result = await daemonManager.forceStop();
             if (result.stopped) {
                 vscode.window.showInformationMessage(`Airtable Formula: Daemon stopped.${result.reason ? ` (${result.reason})` : ''}`);
             } else {

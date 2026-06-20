@@ -55,6 +55,59 @@ describe('GET /daemon/health', () => {
   });
 });
 
+describe('GET /daemon/session-health', () => {
+  let s2;
+  let tmp2;
+
+  before(async () => {
+    tmp2 = join(tmpdir(), 'test-airtable-session-health-' + process.pid);
+    mkdirSync(tmp2, { recursive: true });
+    // Inject the session check so the endpoint never launches a real browser.
+    s2 = await startDaemonServer({
+      port: 0,
+      configDir: tmp2,
+      getSessionHealth: async () => ({ valid: true, userId: 'usr123' }),
+    });
+  });
+
+  after(async () => {
+    if (s2) await s2.stop().catch(() => {});
+    rmSync(tmp2, { recursive: true, force: true });
+  });
+
+  it('returns 401 when Authorization header is missing', async () => {
+    const response = await fetch(`http://127.0.0.1:${s2.port}/daemon/session-health`);
+    assert.strictEqual(response.status, 401);
+  });
+
+  it('reuses the shared browser and returns the injected session health', async () => {
+    const response = await fetch(`http://127.0.0.1:${s2.port}/daemon/session-health`, {
+      headers: { 'Authorization': `Bearer ${s2.bearerToken}` },
+    });
+    assert.strictEqual(response.status, 200);
+    const body = await response.json();
+    assert.strictEqual(body.valid, true);
+    assert.strictEqual(body.userId, 'usr123');
+  });
+});
+
+describe('POST /daemon/release-browser', () => {
+  it('returns 401 when Authorization header is missing', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/daemon/release-browser`, { method: 'POST' });
+    assert.strictEqual(response.status, 401);
+  });
+
+  it('returns ok:true with a valid bearer token (idempotent when no browser is open)', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/daemon/release-browser`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${server.bearerToken}` },
+    });
+    assert.strictEqual(response.status, 200);
+    const body = await response.json();
+    assert.strictEqual(body.ok, true);
+  });
+});
+
 describe('GET /daemon/events', () => {
   it('returns 401 when bearer token is wrong', async () => {
     const controller = new AbortController();

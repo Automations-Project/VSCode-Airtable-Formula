@@ -38,6 +38,14 @@ describe('DaemonManager.buildDaemonEnv', () => {
     expect(result.AIRTABLE_HEADLESS_ONLY).toBe('1');
   });
 
+  it('sets ELECTRON_RUN_AS_NODE=1 so the Electron host binary runs the daemon as Node', () => {
+    // process.execPath in the extension host is the editor's Electron binary;
+    // without this flag the spawned child launches the editor instead of the
+    // daemon → no lockfile → "Timed out waiting for daemon startup".
+    const result = dm.buildDaemonEnv();
+    expect(result.ELECTRON_RUN_AS_NODE).toBe('1');
+  });
+
   it('merges credEnv keys on top of base env', () => {
     const credEnv = { AIRTABLE_EMAIL: 'test@test.com' };
     const result = dm.buildDaemonEnv(credEnv);
@@ -241,6 +249,44 @@ describe('DaemonManager.stopDaemon', () => {
     expect(result.stopped).toBe(true);
     expect(result.reason).toBeTruthy();
     expect(lockExists()).toBe(false);
+  });
+});
+
+describe('DaemonManager.forceStop', () => {
+  it('sweeps orphaned processes after the lock-based stop and reports the count', async () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    (dm as any).stopDaemon = vi.fn(async () => ({ stopped: true, forced: false }));
+    (dm as any)._sweepOrphans = vi.fn(() => 3);
+    (dm as any)._reclaimLockfile = vi.fn();
+
+    const r = await dm.forceStop();
+    expect((dm as any)._sweepOrphans).toHaveBeenCalled();
+    expect(r.stopped).toBe(true);
+    expect(r.forced).toBe(true);
+    expect(r.reason).toMatch(/3/);
+  });
+
+  it('returns the lock-based result unchanged when nothing stray is found', async () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    (dm as any).stopDaemon = vi.fn(async () => ({ stopped: true, forced: false }));
+    (dm as any)._sweepOrphans = vi.fn(() => 0);
+    (dm as any)._reclaimLockfile = vi.fn();
+
+    const r = await dm.forceStop();
+    expect(r.forced).toBe(false);
+  });
+});
+
+describe('DaemonManager._parsePids', () => {
+  it('extracts unique positive pids from wmic /format:list output', () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    const out = 'ProcessId=1234\r\n\r\nProcessId=5678\r\n\r\nProcessId=1234\r\n';
+    expect((dm as any)._parsePids(out)).toEqual([1234, 5678]);
+  });
+
+  it('returns empty array when there are no matches', () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    expect((dm as any)._parsePids('No Instance(s) Available.')).toEqual([]);
   });
 });
 
