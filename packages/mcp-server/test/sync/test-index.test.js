@@ -1,6 +1,6 @@
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { plan as computeSyncPlan, fingerprintSchema } from '../../src/sync/index.js';
+import { plan as computeSyncPlan, diff as computeSyncDiff, fingerprintSchema } from '../../src/sync/index.js';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -68,5 +68,135 @@ describe('sync index.plan — direction param (Task 10)', () => {
     const client = { getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? mk('DefaultTable') : { data: { tableSchemas: [] } }) };
     const out = await computeSyncPlan({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnDefault' });
     assert.match(out.human, /createTable: 1/);
+  });
+});
+
+describe('sync index.plan — fieldMappings validation (Task 8)', () => {
+  // Both src and dest have the same table/fields. We inject a mapping with a COMPUTED
+  // dest target (formula field) — validateFieldMappings must return FIELD_MAP_TARGET_COMPUTED.
+  // plan() must attach fieldMappingErrors to the returned result and make NO client writes.
+  it('mode=plan with invalid fieldMappings (computed dest) returns fieldMappingErrors, no mutation', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-fmap-'));
+
+    // src: table T with text field "Name"
+    const srcSchema = { data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [
+        { id: 'fld1', name: 'Name', type: 'text' },
+      ],
+    }] } };
+    // dest: table T with text field "Name" and a formula field "Computed"
+    const destSchema = { data: { tableSchemas: [{
+      id: 'tblD1', name: 'T', primaryColumnId: 'fldD1',
+      columns: [
+        { id: 'fldD1', name: 'Name', type: 'text' },
+        { id: 'fldD2', name: 'Computed', type: 'formula' },
+      ],
+    }] } };
+
+    let writeCallCount = 0;
+    const client = {
+      getApplicationData: async (appId) => {
+        if (appId === 'appSSSSSSSSSSSSSS') return srcSchema;
+        return destSchema;
+      },
+      // Track any mutating calls — there should be none
+      createTable: async () => { writeCallCount++; return {}; },
+      createField: async () => { writeCallCount++; return {}; },
+    };
+
+    const fieldMappings = { T: { Name: 'Computed' } }; // invalid: Computed is formula (computed)
+
+    const out = await computeSyncPlan({
+      client,
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      planId: 'plnFmapTest',
+      fieldMappings,
+    });
+
+    // Must include fieldMappingErrors
+    assert.ok(out.machine.fieldMappingErrors, 'fieldMappingErrors must be present in machine output');
+    assert.equal(out.machine.fieldMappingErrors.length, 1, 'should have exactly one error');
+    assert.equal(out.machine.fieldMappingErrors[0].code, 'FIELD_MAP_TARGET_COMPUTED', 'error code should be FIELD_MAP_TARGET_COMPUTED');
+    assert.equal(out.machine.fieldMappingErrors[0].table, 'T', 'error should reference table T');
+    assert.equal(out.machine.fieldMappingErrors[0].target, 'Computed', 'error should reference target field Computed');
+
+    // No mutations must have occurred
+    assert.equal(writeCallCount, 0, 'no client write calls should have been made');
+  });
+
+  it('mode=diff with invalid fieldMappings returns fieldMappingErrors', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-fmap-diff-'));
+
+    const srcSchema = { data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'Name', type: 'text' }],
+    }] } };
+    const destSchema = { data: { tableSchemas: [{
+      id: 'tblD1', name: 'T', primaryColumnId: 'fldD1',
+      columns: [
+        { id: 'fldD1', name: 'Name', type: 'text' },
+        { id: 'fldD2', name: 'Computed', type: 'formula' },
+      ],
+    }] } };
+
+    const client = { getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? srcSchema : destSchema) };
+    const fieldMappings = { T: { Name: 'Computed' } };
+
+    const out = await computeSyncDiff({
+      client,
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      diffId: 'difFmapTest',
+      fieldMappings,
+    });
+
+    assert.ok(out.machine.fieldMappingErrors, 'fieldMappingErrors must be present in diff machine output');
+    assert.equal(out.machine.fieldMappingErrors[0].code, 'FIELD_MAP_TARGET_COMPUTED');
+  });
+
+  it('mode=plan with valid fieldMappings returns no fieldMappingErrors', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-fmap-valid-'));
+
+    const srcSchema = { data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'Name', type: 'text' }],
+    }] } };
+    const destSchema = { data: { tableSchemas: [{
+      id: 'tblD1', name: 'T', primaryColumnId: 'fldD1',
+      columns: [
+        { id: 'fldD1', name: 'Name', type: 'text' },
+        { id: 'fldD2', name: 'Notes', type: 'text' },
+      ],
+    }] } };
+
+    const client = { getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? srcSchema : destSchema) };
+    const fieldMappings = { T: { Name: 'Notes' } }; // valid: both text fields
+
+    const out = await computeSyncPlan({
+      client,
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      planId: 'plnFmapValid',
+      fieldMappings,
+    });
+
+    assert.ok(Array.isArray(out.machine.fieldMappingErrors), 'fieldMappingErrors should be an array');
+    assert.equal(out.machine.fieldMappingErrors.length, 0, 'should have no errors for a valid mapping');
+  });
+
+  it('mode=plan without fieldMappings does not include fieldMappingErrors', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-fmap-none-'));
+    const mk = () => ({ data: { tableSchemas: [{ id: 'tbl1', name: 'T', primaryColumnId: 'fld1', columns: [{ id: 'fld1', name: 'Name', type: 'text' }] }] } });
+    const client = { getApplicationData: async () => mk() };
+    const out = await computeSyncPlan({
+      client,
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      planId: 'plnNoFmap',
+    });
+    // Without fieldMappings, fieldMappingErrors should not appear
+    assert.equal(out.machine.fieldMappingErrors, undefined, 'fieldMappingErrors should be absent when no fieldMappings given');
   });
 });

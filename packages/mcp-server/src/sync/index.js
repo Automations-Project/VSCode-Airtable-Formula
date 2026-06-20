@@ -7,6 +7,7 @@ import { renderPlan, renderApplyResult, renderDiff } from './report.js';
 import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
 import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
+import { validateFieldMappings } from './policy.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -36,10 +37,10 @@ export function fingerprintSchema(snap) {
  *   (source is brought up to date with dest). Persisted state uses swapped IDs so load/apply
  *   work correctly on the swapped pair.
  *
- * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string, direction?: 'to-dest'|'to-source' }} opts
+ * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string, direction?: 'to-dest'|'to-source', fieldMappings?: object }} opts
  * @returns {Promise<{ human: string, machine: object }>}
  */
-export async function plan({ client, sourceBaseId, destBaseId, planId, direction = 'to-dest' }) {
+export async function plan({ client, sourceBaseId, destBaseId, planId, direction = 'to-dest', fieldMappings }) {
   // When direction='to-source', swap so the changeset targets the original SOURCE base.
   const effectiveSrcId = direction === 'to-source' ? destBaseId : sourceBaseId;
   const effectiveDestId = direction === 'to-source' ? sourceBaseId : destBaseId;
@@ -62,24 +63,36 @@ export async function plan({ client, sourceBaseId, destBaseId, planId, direction
     engineVersion: ENGINE_VERSION,
     lastPlanId: planId,
   });
-  return renderPlan(fullPlan);
+  const rendered = renderPlan(fullPlan);
+  // Dry-run field-mapping validation: attach errors to machine output (no mutation).
+  if (fieldMappings) {
+    const { errors } = validateFieldMappings(src, dest, fieldMappings);
+    rendered.machine = { ...rendered.machine, fieldMappingErrors: errors };
+  }
+  return rendered;
 }
 
 /**
  * Compute a schema diff between two bases. `diffId` is supplied by the caller so the engine
  * stays deterministic/testable. Saves the full diff to disk and returns a rendered digest.
  *
- * @param {{ client: object, sourceBaseId: string, destBaseId: string, diffId: string }} opts
+ * @param {{ client: object, sourceBaseId: string, destBaseId: string, diffId: string, fieldMappings?: object }} opts
  * @returns {Promise<{ human: string, machine: object }>}
  */
-export async function diff({ client, sourceBaseId, destBaseId, diffId }) {
+export async function diff({ client, sourceBaseId, destBaseId, diffId, fieldMappings }) {
   const src = await snapshotBase(client, sourceBaseId);
   const dest = await snapshotBase(client, destBaseId);
   const idmap = matchByName(src, dest);
   const base = compare(src, dest, idmap);
   const fullDiff = { diffId, ...base };
   saveDiff(sourceBaseId, destBaseId, fullDiff);
-  return renderDiff(fullDiff);
+  const rendered = renderDiff(fullDiff);
+  // Dry-run field-mapping validation: attach errors to machine output (no mutation).
+  if (fieldMappings) {
+    const { errors } = validateFieldMappings(src, dest, fieldMappings);
+    rendered.machine = { ...rendered.machine, fieldMappingErrors: errors };
+  }
+  return rendered;
 }
 
 /**

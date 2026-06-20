@@ -1594,6 +1594,10 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
         direction: { type: 'string', enum: ['to-dest', 'to-source'], description: 'Used only by mode="plan": direction of the changeset. "to-dest" (default) brings the destination base up to date with the source. "to-source" swaps the roles so the changeset targets the source base (makes the source match the destination).' },
         skip: { type: 'array', items: { type: 'string' }, description: 'Used only by mode="apply": list of changeIds to skip (actions with a matching changeId are counted as skipped but not applied). Use changeIds from the plan output.' },
+        policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = make dest identical to source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode.' },
+        policyOverrides: { type: 'object', description: 'Used by mode="apply": per-table reconciliation preset overrides. Maps table name → preset (e.g. { "Games": "preserve" }). Overrides the global policy for the named tables.', additionalProperties: { type: 'string', enum: ['mirror', 'overlay', 'preserve'] } },
+        confirmDeletions: { type: 'boolean', description: 'Used by mode="apply" with policy="mirror": must be set to true to actually delete dest-only records. Without it, mirror mode reports a DELETION_GATED count and deletes nothing.' },
+        fieldMappings: { type: 'object', description: 'Field mapping overrides: maps table name → { sourceField: destField } to inject a source field\'s value into a different (writable scalar) dest field during record sync. Example: { "Games": { "Title": "Name" } }. In mode="plan" and mode="diff", fieldMappings are validated against the two schemas (dry-run, no mutation) and errors are returned in fieldMappingErrors.', additionalProperties: { type: 'object', additionalProperties: { type: 'string' } } },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2395,18 +2399,31 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, fieldMappings, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       const id = 'pln' + client._genRandomId();
-      const out = await sync.plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction });
+      const out = await sync.plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings });
       return ok({ planId: id, summary: out.human }, out.machine, debug);
     }
     if (mode === 'apply') {
       if (!planId) return err('mode="apply" requires planId (from a prior mode="plan" run).');
       const runStartedAt = new Date().toISOString();
-      const out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [] });
-      return ok({ planId, summary: out.human }, out.machine, debug);
+      let out;
+      try {
+        out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, fieldMappings });
+      } catch (e) {
+        if (e && e.code === 'FIELD_MAP_INVALID') {
+          return err(`Field mapping validation failed:\n${(e.mappingErrors || []).map((me) => `  [${me.code}] table=${me.table || '?'}${me.source ? ' source=' + me.source : ''}${me.target ? ' target=' + me.target : ''}`).join('\n')}`);
+        }
+        throw e;
+      }
+      // Surface DELETION_GATED warnings in the summary
+      const gatedWarnings = (out.machine && out.machine.warnings || []).filter((w) => w && w.code === 'DELETION_GATED');
+      const gatedSuffix = gatedWarnings.length > 0
+        ? `\n⚠ DELETION_GATED: ${gatedWarnings.map((w) => w.message || JSON.stringify(w)).join('; ')} — set confirmDeletions=true to delete.`
+        : '';
+      return ok({ planId, summary: out.human + gatedSuffix }, out.machine, debug);
     }
     if (mode === 'reconcile') {
       const raw = await sync.reconcile({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, naturalKeys: naturalKeys || {} });
@@ -2432,7 +2449,7 @@ const handlers = {
         return ok({ diffId: diffId ?? null, summary: out.human }, out.machine, debug);
       }
       const id = diffId || ('dif' + client._genRandomId());
-      const out = await sync.diff({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, diffId: id });
+      const out = await sync.diff({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, diffId: id, fieldMappings });
       return ok({ diffId: id, summary: out.human }, out.machine, debug);
     }
     return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", "status", or "diff".`);
