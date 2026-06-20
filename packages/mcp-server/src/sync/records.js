@@ -15,6 +15,7 @@
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
+import { resolvePolicy } from './policy.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
 import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords } from './snapshot.js';
@@ -313,7 +314,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   }
 }
 
-export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result }) {
+export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides }) {
   if (!idmap.records) idmap.records = {};
 
   // destAppId comes from the snapshot (set by snapshotBase); fall back to '' for tests that omit it.
@@ -330,6 +331,8 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
   for (const srcTable of orderedTables) {
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
+
+    const { conflicts } = resolvePolicy(policy, policyOverrides, srcTable.name);
 
     const records = srcTable.records || [];
     if (records.length === 0) continue;
@@ -354,6 +357,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
         createRows.push({ cellValuesByColumnId: cells, sourceKey: rec.id, linkCells });
       } else {
         // UPDATE path — multiSelect arrays NOT accepted by updateRecords (deferred with warning)
+        if (conflicts === 'dest-wins') continue; // preserve dest edits: skip the overwrite
         const cells = buildUpdateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id);
         updateRows.push({ rowId: destRecId, cellValuesByColumnId: cells });
       }
