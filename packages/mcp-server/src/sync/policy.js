@@ -20,7 +20,7 @@ export function isDeleting(globalPreset, overrides) {
 }
 
 // Array-shaped source values can't be injected into a scalar dest field.
-const ARRAY_SOURCE_TYPES = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAttachments', 'multiSelect', 'multipleLookupValues']);
+const ARRAY_SOURCE_TYPES = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAttachments', 'multiSelect', 'multipleSelects', 'multipleLookupValues']);
 
 export function validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings) {
   const errors = [];

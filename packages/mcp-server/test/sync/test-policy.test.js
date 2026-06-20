@@ -66,6 +66,14 @@ describe('policy.validateFieldMappings', () => {
     const { errors } = validateFieldMappings(src, dst, { Offers: { Links: 'InjectID' } });
     assert.equal(errors[0].code, 'FIELD_MAP_TYPE_INCOMPATIBLE');
   });
+  it('FIELD_MAP_TYPE_INCOMPATIBLE when source is multipleSelects', () => {
+    const srcMulti = { tables: [{ id: 'tS', name: 'Offers', fields: [
+      { id: 'fCode', name: 'Code', type: 'autoNumber' },
+      { id: 'fMulti', name: 'Tags', type: 'multipleSelects' },
+    ] }] };
+    const { errors } = validateFieldMappings(srcMulti, dst, { Offers: { Tags: 'InjectID' } });
+    assert.equal(errors[0].code, 'FIELD_MAP_TYPE_INCOMPATIBLE');
+  });
   it('FIELD_MAP_COLLISION when two sources target the same dest field', () => {
     const src2 = { tables: [{ id: 'tS', name: 'Offers', fields: [
       { id: 'fa', name: 'A', type: 'text' }, { id: 'fb', name: 'B', type: 'text' },
