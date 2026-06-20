@@ -7,7 +7,7 @@ import { renderPlan, renderApplyResult, renderDiff } from './report.js';
 import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
 import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
-import { validateFieldMappings } from './policy.js';
+import { validateFieldMappings, isDeleting } from './policy.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -125,6 +125,20 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
   }
 
+  // Pre-flight: validate fieldMappings synchronously before launching the background job.
+  // This makes the FIELD_MAP_INVALID catch in the tool handler reachable (the background job
+  // re-validates as a safety net, but by then the caller has already returned).
+  if (fieldMappings && Object.keys(fieldMappings).length > 0) {
+    const srcSnapshot = await snapshotSchemaOnly(client, sourceBaseId);
+    const { errors } = validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings);
+    if (errors.length > 0) {
+      const err = new Error('Field mapping validation failed');
+      err.code = 'FIELD_MAP_INVALID';
+      err.mappingErrors = errors;
+      throw err;
+    }
+  }
+
   const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
   // C1: preserve the persisted records/attachments identity map across applies (see buildRunIdmap).
   const idmap = buildRunIdmap(sourceBaseId, destBaseId, fullPlan, journal);
@@ -148,7 +162,8 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
           created: r.created, updated: r.updated, failed: r.failed,
           attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
           deleted: r.deleted || 0,
-          warnings: (r.warnings || []).length,
+          warningCount: (r.warnings || []).length,
+          warnings: r.warnings || [],
         },
       }))
       .catch((err) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {

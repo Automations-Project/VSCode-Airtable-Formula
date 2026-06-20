@@ -1,6 +1,6 @@
-import { describe, it, mock } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { plan as computeSyncPlan, diff as computeSyncDiff, fingerprintSchema } from '../../src/sync/index.js';
+import { plan as computeSyncPlan, diff as computeSyncDiff, fingerprintSchema, apply as syncApply } from '../../src/sync/index.js';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -198,5 +198,85 @@ describe('sync index.plan — fieldMappings validation (Task 8)', () => {
     });
     // Without fieldMappings, fieldMappingErrors should not appear
     assert.equal(out.machine.fieldMappingErrors, undefined, 'fieldMappingErrors should be absent when no fieldMappings given');
+  });
+});
+
+describe('sync index.apply — synchronous fieldMappings pre-flight (Task 8 Fix)', () => {
+  // apply() must throw FIELD_MAP_INVALID synchronously (before launching the background records
+  // job) when fieldMappings references a computed (formula) dest field.
+  // Verified by: (a) rejection with the correct code, (b) no schema mutations occurred.
+  it('apply() with invalid fieldMappings (computed dest) rejects synchronously with FIELD_MAP_INVALID, no mutations', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-apply-fmap-'));
+
+    // src: table T with a single text field "Name"
+    const srcSchema = { data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'Name', type: 'text' }],
+    }] } };
+    // dest: table T with text "Name" + formula "Computed"
+    const destSchema = { data: { tableSchemas: [{
+      id: 'tblD1', name: 'T', primaryColumnId: 'fldD1',
+      columns: [
+        { id: 'fldD1', name: 'Name', type: 'text' },
+        { id: 'fldD2', name: 'Computed', type: 'formula' },
+      ],
+    }] } };
+
+    let schemaMutationCount = 0;
+    let backgroundJobLaunched = false;
+
+    const client = {
+      getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? srcSchema : destSchema),
+      // Detect any schema mutations (should NOT be called)
+      createTable: async () => { schemaMutationCount++; return {}; },
+      createField: async () => { schemaMutationCount++; return {}; },
+      updateField: async () => { schemaMutationCount++; return {}; },
+    };
+
+    // Step 1: Run plan() so apply() can find a saved plan.
+    const planOut = await computeSyncPlan({
+      client,
+      sourceBaseId: 'appSSSSSSSSSSSSSS',
+      destBaseId: 'appDDDDDDDDDDDDDD',
+      planId: 'plnApplyFmapTest',
+    });
+    assert.ok(planOut, 'plan must succeed before apply');
+
+    // Reset mutation counter (plan itself may have no mutations, but be safe)
+    schemaMutationCount = 0;
+
+    // Step 2: Call apply() with an invalid fieldMappings (Computed is a formula field).
+    // It should reject BEFORE any mutation or background job launch.
+    const fieldMappings = { T: { Name: 'Computed' } };
+
+    let thrown = null;
+    try {
+      await syncApply({
+        client,
+        sourceBaseId: 'appSSSSSSSSSSSSSS',
+        destBaseId: 'appDDDDDDDDDDDDDD',
+        planId: 'plnApplyFmapTest',
+        runStartedAt: new Date().toISOString(),
+        fieldMappings,
+      });
+    } catch (e) {
+      thrown = e;
+    }
+
+    // Must have thrown
+    assert.ok(thrown, 'apply() must throw for invalid fieldMappings');
+    assert.equal(thrown.code, 'FIELD_MAP_INVALID', 'error code must be FIELD_MAP_INVALID');
+    assert.ok(Array.isArray(thrown.mappingErrors), 'mappingErrors must be an array');
+    assert.equal(thrown.mappingErrors.length, 1, 'should have exactly one mapping error');
+    assert.equal(thrown.mappingErrors[0].code, 'FIELD_MAP_TARGET_COMPUTED', 'error code must be FIELD_MAP_TARGET_COMPUTED');
+
+    // No schema mutations must have occurred
+    assert.equal(schemaMutationCount, 0, 'no schema mutations should have occurred before validation fails');
+
+    // No background job should have been launched (verified indirectly: apply threw before the
+    // fire-and-forget block, so no records job status file was written)
+    const { syncDir: getSyncDir } = await import('../../src/sync/idmap.js');
+    const jobFile = join(getSyncDir('appSSSSSSSSSSSSSS', 'appDDDDDDDDDDDDDD'), 'records-job-plnApplyFmapTest.json');
+    assert.ok(!existsSync(jobFile), 'records job status file must NOT exist (background job was not launched)');
   });
 });

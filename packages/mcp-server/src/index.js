@@ -2418,12 +2418,16 @@ const handlers = {
         }
         throw e;
       }
-      // Surface DELETION_GATED warnings in the summary
-      const gatedWarnings = (out.machine && out.machine.warnings || []).filter((w) => w && w.code === 'DELETION_GATED');
-      const gatedSuffix = gatedWarnings.length > 0
-        ? `\n⚠ DELETION_GATED: ${gatedWarnings.map((w) => w.message || JSON.stringify(w)).join('; ')} — set confirmDeletions=true to delete.`
+      // Forward-looking note: DELETION_GATED warnings are only emitted by the background records
+      // job (after apply returns), so they cannot appear in out.machine.warnings here. Instead,
+      // we emit a synchronous advisory when the effective policy would delete dest-only records
+      // but confirmDeletions was not set. The actual DELETION_GATED warnings + deleted count are
+      // surfaced by mode=status once the background job completes.
+      const { isDeleting: isDeletingPolicy } = await import('./sync/policy.js');
+      const deletingSuffix = isDeletingPolicy(policy, policyOverrides) && !confirmDeletions
+        ? '\nMirror/remove policy set — dest-only records will be reported as DELETION_GATED (deleted nothing). Poll mode=status for counts, then re-run with confirmDeletions:true to apply deletions.'
         : '';
-      return ok({ planId, summary: out.human + gatedSuffix }, out.machine, debug);
+      return ok({ planId, summary: out.human + deletingSuffix }, out.machine, debug);
     }
     if (mode === 'reconcile') {
       const raw = await sync.reconcile({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, naturalKeys: naturalKeys || {} });
