@@ -44,6 +44,23 @@ export function srcSnap() {
   };
 }
 
+describe('Pass1 field mapping (injection)', () => {
+  it('writes a computed source value into a scalar dest field on CREATE', async () => {
+    const client = fakeClient();
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'Offers', primaryFieldId: 'sN',
+      fields: [{ id: 'sN', name: 'Name', type: 'text' }, { id: 'sCode', name: 'Code', type: 'autoNumber' }],
+      records: [{ id: 'recS1', cellValuesByColumnId: { sN: 'A', sCode: 1042 } }] }] };
+    const dst = { baseId: 'appD', tables: [{ id: 'tD', name: 'Offers',
+      fields: [{ id: 'dN', name: 'Name', type: 'text' }, { id: 'dInject', name: 'InjectID', type: 'number' }] }] };
+    const idmap = { tables: { tS: 'tD' }, fields: { sN: { destFld: 'dN', choices: {} } }, records: {} };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    const fieldMappings = [{ table: 'Offers', srcFieldId: 'sCode', destFieldId: 'dInject', destType: 'number' }];
+    await applyRecordsPass1({ client, srcSnapshot: src, destSnapshot: dst, idmap, limiter: noLimiter, journal: {}, persist: () => {}, result, fieldMappings });
+    const created = client.calls.create[0].rows[0].cellValuesByColumnId;
+    assert.equal(created.dInject, 1042, 'source Code value injected into dest InjectID');
+  });
+});
+
 describe('Pass1 conflict policy', () => {
   it('dest-wins (preserve) skips updating an already-mapped record', async () => {
     const client = fakeClient();

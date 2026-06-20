@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { coercePass1Cell, partitionLinkValue, linkRecId } from './cells.js';
+import { coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue } from './cells.js';
 import { resolvePolicy } from './policy.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
@@ -22,6 +22,25 @@ import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords } from './snaps
 import { loadIdmap, saveIdmap, syncDir } from './idmap.js';
 import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
 import { safeAtomicWriteFileSync } from '../safe-write.js';
+
+/**
+ * Inject resolved field mappings for one record into a cells payload (mutates + returns it).
+ *
+ * For each mapping whose destType coercion returns write:true, sets cells[destFieldId] = value.
+ * Skips mappings whose coerced result is write:false (e.g. object/array src values).
+ *
+ * @param {object} cells         - dest cellValuesByColumnId being built (mutated)
+ * @param {Array}  tableMappings - resolved mappings filtered to the current table
+ * @param {object} srcCells      - source record cellValuesByColumnId
+ * @returns {object}             - same `cells` reference (mutated)
+ */
+function injectFieldMappings(cells, tableMappings, srcCells) {
+  for (const m of tableMappings) {
+    const r = coerceMappedValue(srcCells[m.srcFieldId], m.destType);
+    if (r.write) cells[m.destFieldId] = r.value;
+  }
+  return cells;
+}
 
 // ── Records-job status file (records-job-<planId>.json) ──
 // The records phase is minutes-long for large bases, so apply() launches it in the BACKGROUND
@@ -314,7 +333,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   }
 }
 
-export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides }) {
+export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings = [] }) {
   if (!idmap.records) idmap.records = {};
 
   // destAppId comes from the snapshot (set by snapshotBase); fall back to '' for tests that omit it.
@@ -333,6 +352,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     if (!destTableId) continue; // table not matched → skip
 
     const { conflicts } = resolvePolicy(policy, policyOverrides, srcTable.name);
+    const tableMappings = fieldMappings.filter((m) => m.table === srcTable.name);
 
     const records = srcTable.records || [];
     if (records.length === 0) continue;
@@ -348,6 +368,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       if (!destRecId) {
         // CREATE path — scalar/select/multiSelect arrays ARE accepted by createRecords.
         const cells = buildCreateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id);
+        injectFieldMappings(cells, tableMappings, srcCells);
         // Fold resolvable links (remapped) into the create payload (kills most of Pass 2).
         let linkCells = {};
         if (runState.foldLinks) {
@@ -359,6 +380,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
         // UPDATE path — multiSelect arrays NOT accepted by updateRecords (deferred with warning)
         if (conflicts === 'dest-wins') continue; // preserve dest edits: skip the overwrite
         const cells = buildUpdateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id);
+        injectFieldMappings(cells, tableMappings, srcCells);
         updateRows.push({ rowId: destRecId, cellValuesByColumnId: cells });
       }
     }
