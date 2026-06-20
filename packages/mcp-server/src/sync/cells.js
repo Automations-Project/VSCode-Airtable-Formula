@@ -54,3 +54,12 @@ export function partitionLinkValue(srcValue, idmap) {
   }
   return { resolved, unresolved };
 }
+
+const TEXT_DEST_TYPES = new Set(['text', 'multilineText', 'richText', 'phone', 'email', 'url', 'singleLineText']);
+
+export function coerceMappedValue(srcValue, destType) {
+  if (srcValue == null) return { write: true, value: srcValue };
+  if (Array.isArray(srcValue) || typeof srcValue === 'object') return { write: false };
+  if (TEXT_DEST_TYPES.has(destType)) return { write: true, value: String(srcValue) };
+  return { write: true, value: srcValue }; // number/currency/percent/date/checkbox/duration/rating/...
+}

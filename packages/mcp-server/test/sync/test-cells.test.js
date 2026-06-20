@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isWritableForRecords, coercePass1Cell, partitionLinkValue, linkRecId } from '../../src/sync/cells.js';
+import { isWritableForRecords, coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue } from '../../src/sync/cells.js';
 
 const idmap = { fields: { fldSel: { destFld: 'fldSelD', choices: { selA: 'selAD', selB: 'selBD' } } } };
 
@@ -68,5 +68,20 @@ describe('cells.partitionLinkValue', () => {
   });
   it('null/empty → empty partition', () => {
     assert.deepEqual(partitionLinkValue(null, m), { resolved: [], unresolved: [] });
+  });
+});
+
+describe('cells.coerceMappedValue', () => {
+  it('passes a number through to a number target', () => {
+    assert.deepEqual(coerceMappedValue(1042, 'number'), { write: true, value: 1042 });
+  });
+  it('stringifies for a text target', () => {
+    assert.deepEqual(coerceMappedValue(1042, 'text'), { write: true, value: '1042' });
+  });
+  it('passes null through (clears the cell)', () => {
+    assert.deepEqual(coerceMappedValue(null, 'number'), { write: true, value: null });
+  });
+  it('refuses an array source value (defensive)', () => {
+    assert.deepEqual(coerceMappedValue(['x'], 'text'), { write: false });
   });
 });
