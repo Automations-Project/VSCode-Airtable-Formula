@@ -921,39 +921,9 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// applyRecords — top-level orchestrator
+// runRecords — core records orchestrator
 // ──────────────────────────────────────────────────────────────────────────────
 
-/**
- * Top-level records phase orchestrator.
- *
- * 1. Loads the converged schema idmap (written by the schema apply phase).
- * 2. Snapshots src + dest schema (no records yet).
- * 3. Attaches records to each table snapshot via snapshotTableRecords.
- *    Emits RECORD_COUNT warning when exactly 1000 rows are returned (possibly truncated).
- * 4. Builds a phase-local rate limiter (~5 req/s; gates inner POSTs) and a records journal.
- * 5. Runs: Pass 1 (scalar/select upsert + fold resolvable links into create) → rebuild
- *          destDisplayNames → Pass 2 (remaining/forward links) → Pass 3 (attachments)
- *          → reapplyViewFilters.
- * 6. Persists idmap (+ journal) after each chunk/phase.
- * 7. Returns a result accumulator.
- *
- * RESUME MODEL: resume is driven by the persisted **idmap.records** + a fresh live dest snapshot —
- * a created row is skipped on re-run because its source id is already mapped, and Pass 2 dedups
- * links against the live dest. The records journal is persisted but currently advisory (no
- * per-record done-gating); idmap + live re-snapshot are the source of truth. Known limitation:
- * a crash between a create's server-ack and the per-chunk idmap persist can re-create up to one
- * chunk (~50) of rows as duplicates on resume (reconcile only existence-prunes; natural-key
- * re-match is a stub).
- *
- * @param {object} opts
- * @param {object} opts.client          - AirtableClient instance
- * @param {string} opts.sourceBaseId    - source base app ID
- * @param {string} opts.destBaseId      - dest base app ID
- * @param {string} opts.planId          - plan ID (used for journal file name)
- * @param {string} opts.runStartedAt    - ISO timestamp of this run start
- * @returns {Promise<object>}           - result accumulator
- */
 /**
  * Core records orchestrator — drives Pass1 → destDisplayNames → Pass2 → attachments
  * → reapplyViewFilters → pruneRecords. All I/O infrastructure (limiter, journal, persist,
@@ -1023,6 +993,36 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   return result;
 }
 
+/**
+ * Top-level records phase orchestrator.
+ *
+ * 1. Loads the converged schema idmap (written by the schema apply phase).
+ * 2. Snapshots src + dest schema (no records yet).
+ * 3. Attaches records to each table snapshot via snapshotTableRecords.
+ *    Emits RECORD_COUNT warning when exactly 1000 rows are returned (possibly truncated).
+ * 4. Builds a phase-local rate limiter (~5 req/s; gates inner POSTs) and a records journal.
+ * 5. Runs: Pass 1 (scalar/select upsert + fold resolvable links into create) → rebuild
+ *          destDisplayNames → Pass 2 (remaining/forward links) → Pass 3 (attachments)
+ *          → reapplyViewFilters.
+ * 6. Persists idmap (+ journal) after each chunk/phase.
+ * 7. Returns a result accumulator.
+ *
+ * RESUME MODEL: resume is driven by the persisted **idmap.records** + a fresh live dest snapshot —
+ * a created row is skipped on re-run because its source id is already mapped, and Pass 2 dedups
+ * links against the live dest. The records journal is persisted but currently advisory (no
+ * per-record done-gating); idmap + live re-snapshot are the source of truth. Known limitation:
+ * a crash between a create's server-ack and the per-chunk idmap persist can re-create up to one
+ * chunk (~50) of rows as duplicates on resume (reconcile only existence-prunes; natural-key
+ * re-match is a stub).
+ *
+ * @param {object} opts
+ * @param {object} opts.client          - AirtableClient instance
+ * @param {string} opts.sourceBaseId    - source base app ID
+ * @param {string} opts.destBaseId      - dest base app ID
+ * @param {string} opts.planId          - plan ID (used for journal file name)
+ * @param {string} opts.runStartedAt    - ISO timestamp of this run start
+ * @returns {Promise<object>}           - result accumulator
+ */
 export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings }) {
   // 1. Load the converged idmap (produced by the schema apply phase)
   const idmap = loadIdmap(sourceBaseId, destBaseId);

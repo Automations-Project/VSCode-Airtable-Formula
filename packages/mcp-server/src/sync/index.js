@@ -134,6 +134,7 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
         result: {
           created: r.created, updated: r.updated, failed: r.failed,
           attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
+          deleted: r.deleted || 0,
           warnings: (r.warnings || []).length,
         },
       }))
