@@ -144,4 +144,27 @@ describe('pruneRecords (extras axis)', () => {
     await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'overlay', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
     assert.equal(client.calls.deleted.length, 0);
   });
+  it('deletion failure with missing result.failed/warnings guards against NaN and throw', async () => {
+    const failingClient = {
+      calls: { deleted: [] },
+      async queryRecords(appId, tableId) { return { summary: { rows: [{ id: 'recOrphan', fields: {} }] } }; },
+      async deleteRecords() { throw new Error('delete failed'); },
+    };
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} }; // empty records → orphan exists
+    const result = { deleted: 0 }; // omit failed and warnings
+    await pruneRecords({
+      client: failingClient,
+      destSnapshot: destSnap2(),
+      idmap,
+      policy: 'mirror',
+      confirmDeletions: true,
+      limiter: { run: (fn) => fn() },
+      result,
+    });
+    assert.equal(typeof result.failed, 'number', 'result.failed is a number');
+    assert.ok(!Number.isNaN(result.failed), 'result.failed is not NaN');
+    assert.ok(Array.isArray(result.warnings), 'result.warnings is an array');
+    const deleteFailedWarning = result.warnings.find((w) => w.code === 'RECORD_DELETE_FAILED');
+    assert.ok(deleteFailedWarning, 'RECORD_DELETE_FAILED warning present');
+  });
 });

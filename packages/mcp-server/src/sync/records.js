@@ -1066,6 +1066,8 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
  */
 export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result }) {
   if (result.deleted == null) result.deleted = 0;
+  if (result.failed == null) result.failed = 0;
+  if (!result.warnings) result.warnings = [];
   const mappedDestIds = new Set(Object.values(idmap.records || {}));
   for (const t of (destSnapshot.tables || [])) {
     const { extras } = resolvePolicy(policy, policyOverrides, t.name);
