@@ -1094,10 +1094,16 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
  * Gated by confirmDeletions — without it, nothing is deleted and a DELETION_GATED warning carries
  * the would-delete count. result.deleted accumulates actual deletions.
  *
+ * Orphan detection uses the already-attached snapshot records (`.records` populated by
+ * applyRecords → snapshotTableRecords at limit 1000) instead of re-querying. This avoids
+ * the silent 100-row cap from queryRecords and the potential for a personal/filtered view.
+ * NOTE: tables with >1000 rows are still bounded by the snapshot's limit — consistent with
+ * the engine's existing RECORD_COUNT behaviour (pagination is a follow-up).
+ *
  * @param {object} opts
  * @param {object}   opts.client           - AirtableClient instance
- * @param {object}   opts.destSnapshot     - dest base snapshot (tables with views)
- * @param {object}   opts.idmap            - live id-map (.records map srcId → destId)
+ * @param {object}   opts.destSnapshot     - dest base snapshot (tables with .records + views)
+ * @param {object}   opts.idmap            - live id-map (.tables src→dest, .records srcId→destId)
  * @param {string}   opts.policy           - global preset name ('mirror' | 'overlay' | 'preserve')
  * @param {object}   [opts.policyOverrides]- per-table preset overrides { [tableName]: preset }
  * @param {boolean}  opts.confirmDeletions - if false, gate deletions (push DELETION_GATED warning)
@@ -1109,23 +1115,50 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
   if (result.deleted == null) result.deleted = 0;
   if (result.failed == null) result.failed = 0;
   if (!result.warnings) result.warnings = [];
+
   const mappedDestIds = new Set(Object.values(idmap.records || {}));
+
+  // M3 guard: only prune tables that are the dest-side of a matched pair.
+  // A dest table whose id is NOT a value in idmap.tables is a dest-only (schema-orphan) table —
+  // deleting its rows while keeping the table shell is an inconsistent half-state; skip it.
+  const matchedDestTableIds = new Set(Object.values(idmap.tables || {}));
+
+  const DELETE_CHUNK = 50;
+
   for (const t of (destSnapshot.tables || [])) {
+    // M3: skip dest-only tables (not matched to any source table)
+    if (!matchedDestTableIds.has(t.id)) continue;
+
     const { extras } = resolvePolicy(policy, policyOverrides, t.name);
     if (extras !== 'remove') continue;
-    const viewId = (t.views || [])[0]?.id;
-    if (!viewId) continue;
-    let rows;
-    try { rows = (await limiter.run(() => client.queryRecords(destSnapshot.baseId, t.id, viewId))).summary?.rows || []; }
-    catch (e) { result.warnings.push({ code: 'PRUNE_QUERY_FAILED', message: `Table "${t.name}": ${e.message ?? e}` }); continue; }
+
+    // Prefer the first collaborative (non-personal) view; fall back to first view of any type.
+    const views = t.views || [];
+    const viewId = views.find((v) => !v.personalForUserId)?.id ?? views[0]?.id;
+
+    // Derive orphans from the already-attached snapshot rows (fetched at limit 1000 by applyRecords).
+    // Newly-created records are in idmap.records so they are NOT orphans.
+    const rows = t.records || [];
     const orphans = rows.map((r) => r.id).filter((id) => !mappedDestIds.has(id));
     if (orphans.length === 0) continue;
+
     if (!confirmDeletions) {
       result.warnings.push({ code: 'DELETION_GATED', message: `Table "${t.name}": ${orphans.length} dest-only record(s) would be deleted under mirror — re-run with confirmDeletions:true` });
       continue;
     }
-    try { await limiter.run(() => client.deleteRecords(destSnapshot.baseId, t.id, orphans, { viewId })); result.deleted += orphans.length; }
-    catch (e) { result.failed += orphans.length; result.warnings.push({ code: 'RECORD_DELETE_FAILED', message: `Table "${t.name}": ${e.message ?? e}` }); }
+
+    // Chunk deletions (~50 ids per call) — now that the 100-row cap is lifted, orphan counts
+    // can be large; deleteRecords sends all ids in one destroyMultipleRows so we batch here.
+    for (let i = 0; i < orphans.length; i += DELETE_CHUNK) {
+      const chunk = orphans.slice(i, i + DELETE_CHUNK);
+      try {
+        await limiter.run(() => client.deleteRecords(destSnapshot.baseId, t.id, chunk, { viewId }));
+        result.deleted += chunk.length;
+      } catch (e) {
+        result.failed += chunk.length;
+        result.warnings.push({ code: 'RECORD_DELETE_FAILED', message: `Table "${t.name}": ${e.message ?? e}` });
+      }
+    }
   }
 }
 

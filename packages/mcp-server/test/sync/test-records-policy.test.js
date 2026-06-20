@@ -109,19 +109,31 @@ describe('Pass1 conflict policy', () => {
 
 // ── Task 6: pruneRecords (extras axis) ───────────────────────────────────────
 
-function pruneClient(rowsByTable) {
+// pruneClient: rows are now supplied on destSnapshot.tables[].records, NOT via queryRecords.
+// deleteRecords is still mocked; queryRecords is omitted (pruneRecords no longer calls it).
+function pruneClient() {
   const calls = { deleted: [] };
   return {
     calls,
-    async queryRecords(appId, tableId) { return { summary: { rows: (rowsByTable[tableId] || []).map((id) => ({ id, fields: {} })) } }; },
     async deleteRecords(appId, tableId, rowIds) { calls.deleted.push({ tableId, rowIds }); return { deleted: rowIds.length }; },
   };
 }
-const destSnap2 = () => ({ baseId: 'appD', tables: [{ id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [] }] });
+
+// destSnap2: table carries .records so pruneRecords can derive orphans without re-querying.
+const destSnap2 = () => ({
+  baseId: 'appD',
+  tables: [{
+    id: 'tD',
+    name: 'Games',
+    views: [{ id: 'viwD' }],
+    fields: [],
+    records: [{ id: 'recKeep', cellValuesByColumnId: {} }, { id: 'recOrphan', cellValuesByColumnId: {} }],
+  }],
+});
 
 describe('pruneRecords (extras axis)', () => {
   it('mirror + confirmDeletions deletes orphan dest rows (not in idmap.records)', async () => {
-    const client = pruneClient({ tD: ['recKeep', 'recOrphan'] });
+    const client = pruneClient();
     const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
     const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
     await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
@@ -129,7 +141,7 @@ describe('pruneRecords (extras axis)', () => {
     assert.equal(result.deleted, 1);
   });
   it('mirror WITHOUT confirmDeletions deletes nothing + warns DELETION_GATED', async () => {
-    const client = pruneClient({ tD: ['recKeep', 'recOrphan'] });
+    const client = pruneClient();
     const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
     const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
     await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'mirror', confirmDeletions: false, limiter: { run: (fn) => fn() }, result });
@@ -138,23 +150,33 @@ describe('pruneRecords (extras axis)', () => {
     assert.ok(w && /1/.test(w.message), 'gated warning with count 1');
   });
   it('keep/preserve table is never pruned', async () => {
-    const client = pruneClient({ tD: ['recKeep', 'recOrphan'] });
+    const client = pruneClient();
     const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
     const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
     await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'overlay', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
     assert.equal(client.calls.deleted.length, 0);
   });
   it('deletion failure with missing result.failed/warnings guards against NaN and throw', async () => {
+    // Table has one orphan row in .records (not in idmap.records → orphan); deleteRecords throws.
+    const destSnapWithOrphan = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD',
+        name: 'Games',
+        views: [{ id: 'viwD' }],
+        fields: [],
+        records: [{ id: 'recOrphan', cellValuesByColumnId: {} }],
+      }],
+    };
     const failingClient = {
       calls: { deleted: [] },
-      async queryRecords(appId, tableId) { return { summary: { rows: [{ id: 'recOrphan', fields: {} }] } }; },
       async deleteRecords() { throw new Error('delete failed'); },
     };
     const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} }; // empty records → orphan exists
-    const result = { deleted: 0 }; // omit failed and warnings
+    const result = { deleted: 0 }; // omit failed and warnings — guards against NaN/throw
     await pruneRecords({
       client: failingClient,
-      destSnapshot: destSnap2(),
+      destSnapshot: destSnapWithOrphan,
       idmap,
       policy: 'mirror',
       confirmDeletions: true,
@@ -166,5 +188,52 @@ describe('pruneRecords (extras axis)', () => {
     assert.ok(Array.isArray(result.warnings), 'result.warnings is an array');
     const deleteFailedWarning = result.warnings.find((w) => w.code === 'RECORD_DELETE_FAILED');
     assert.ok(deleteFailedWarning, 'RECORD_DELETE_FAILED warning present');
+  });
+
+  // M3: a dest table whose id is NOT a value in idmap.tables is NOT pruned, even under mirror+confirmDeletions.
+  it('M3: dest-only table (not matched to any source table) is never pruned', async () => {
+    // tD2 is a dest-only table — its id does not appear in idmap.tables values.
+    const destSnapDestOnly = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD2',
+        name: 'DestOnly',
+        views: [{ id: 'viwD2' }],
+        fields: [],
+        records: [{ id: 'recX', cellValuesByColumnId: {} }],
+      }],
+    };
+    const client = pruneClient();
+    // idmap.tables maps tS → tD (a different table), so tD2 is not matched.
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot: destSnapDestOnly, idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    assert.equal(client.calls.deleted.length, 0, 'no deleteRecords call for a dest-only table');
+    assert.equal(result.deleted, 0);
+  });
+
+  // Delete chunking: >50 orphans should produce multiple deleteRecords calls of ≤50 each.
+  it('>50 orphans produce multiple delete chunks of ≤50 ids each', async () => {
+    // 75 dest records; none in idmap.records → all are orphans.
+    const allRecords = Array.from({ length: 75 }, (_, i) => ({ id: `recOrphan${i}`, cellValuesByColumnId: {} }));
+    const destSnapLarge = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD',
+        name: 'Games',
+        views: [{ id: 'viwD' }],
+        fields: [],
+        records: allRecords,
+      }],
+    };
+    const client = pruneClient();
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot: destSnapLarge, idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    // 75 orphans → 2 chunks (50 + 25)
+    assert.equal(client.calls.deleted.length, 2, 'two deleteRecords chunks for 75 orphans');
+    assert.equal(client.calls.deleted[0].rowIds.length, 50, 'first chunk has 50 ids');
+    assert.equal(client.calls.deleted[1].rowIds.length, 25, 'second chunk has 25 ids');
+    assert.equal(result.deleted, 75, 'all 75 orphans counted as deleted');
   });
 });
