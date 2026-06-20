@@ -137,6 +137,18 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
         if (c.id === primaryId) continue;
         await client.deleteField(destAppId, c.id, c.name);
       }
+      // D1b: delete the auto-created blank scaffolding ROWS (Airtable seeds ~3 on create) — the table
+      // holds only scaffolding at this point (records sync runs later), so a full clear is safe and
+      // keeps the mirror clean. Best-effort: a failure here must not abort the table create.
+      try {
+        const viewId = (views || [])[0]?.id;
+        if (viewId) {
+          const rowIds = ((await client.queryRecords(destAppId, tableId, viewId)).summary?.rows || []).map((r) => r.id);
+          if (rowIds.length) await client.deleteRecords(destAppId, tableId, rowIds, { viewId });
+        }
+      } catch (e) {
+        result.warnings.push({ code: 'SCAFFOLDING_ROWS_KEPT', message: `Table "${a.name}": could not remove default scaffolding rows: ${e.message ?? e}` });
+      }
       const entry = {
         id: tableId, name: a.name, primaryFieldId: primaryId,
         fieldsByName: new Map([[primary.name, { id: primaryId, name: primary.name, type: primary.type, typeOptions: primary.typeOptions ?? null }]]),

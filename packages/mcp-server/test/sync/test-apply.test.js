@@ -38,6 +38,22 @@ describe('apply: createTable + scaffolding-delete + reconcilePrimary', () => {
     assert.equal(res.idmap.fields.fS1.destFld, t.columns[0].id);
   });
 
+  it('removes the auto-created scaffolding rows for a clean mirror', async () => {
+    const client = new MockClient();
+    const destSnapshot = await snapshotBase(client, 'appD');
+    const plan = {
+      planId: 'plnRows', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: {}, fields: {} },
+      actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'Clean' }],
+      orphans: [], warnings: [],
+    };
+    const res = await run(client, plan, destSnapshot);
+    assert.equal(res.failed, 0);
+    const t = client.tables.find((x) => x.name === 'Clean');
+    assert.equal(t.rows.length, 0, 'scaffolding rows removed');
+    assert.ok(client.calls.some((c) => c.startsWith('deleteRecords:' + t.id)), 'deleteRecords called for the new table');
+  });
+
   it('warns PRIMARY_TYPE_INCOMPATIBLE on rejected retype, keeps placeholder (still renamed)', async () => {
     const client = new MockClient();
     const destSnapshot = await snapshotBase(client, 'appD');

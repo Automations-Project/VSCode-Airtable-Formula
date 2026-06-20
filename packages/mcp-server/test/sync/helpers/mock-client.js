@@ -23,9 +23,24 @@ export class MockClient {
     const tableId = this._id('tbl');
     const columns = DEFAULT_FIELDS.map((f) => ({ id: this._id('fld'), name: f.name, type: f.type, typeOptions: f.typeOptions ?? null, description: null }));
     this.tables.push({ id: tableId, name, primaryColumnId: columns[0].id, columns,
-      views: [{ id: this._id('viw'), name: 'Grid view', type: 'grid', personalForUserId: null, config: {} }] });
+      views: [{ id: this._id('viw'), name: 'Grid view', type: 'grid', personalForUserId: null, config: {} }],
+      // live createTable also seeds ~3 blank scaffolding rows — model them so apply's row-cleanup is testable
+      rows: [{ id: this._id('rec'), fields: {} }, { id: this._id('rec'), fields: {} }, { id: this._id('rec'), fields: {} }] });
     this.calls.push(`createTable:${name}`);
     return { tableId };
+  }
+  async queryRecords(appId, tableId) {
+    this.calls.push(`queryRecords:${tableId}`);
+    // mirror the real client's return shape: { summary: { rows: [{id, fields}] }, raw }
+    const rows = (this._table(tableId).rows || []).map((r) => ({ id: r.id, fields: r.fields }));
+    return { summary: { tableId, count: rows.length, rows }, raw: null };
+  }
+  async deleteRecords(appId, tableId, rowIds) {
+    const t = this._table(tableId);
+    const before = (t.rows || []).length;
+    t.rows = (t.rows || []).filter((r) => !rowIds.includes(r.id));
+    this.calls.push(`deleteRecords:${tableId}:${before - t.rows.length}`);
+    return { deleted: before - t.rows.length };
   }
   _table(id) { const t = this.tables.find((x) => x.id === id); if (!t) throw new Error('no table ' + id); return t; }
   _field(colId) { for (const t of this.tables) { const f = t.columns.find((c) => c.id === colId); if (f) return f; } throw new Error('no field ' + colId); }
