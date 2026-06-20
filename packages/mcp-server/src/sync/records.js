@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue } from './cells.js';
-import { resolvePolicy } from './policy.js';
+import { resolvePolicy, validateFieldMappings } from './policy.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
 import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords } from './snapshot.js';
@@ -954,7 +954,76 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
  * @param {string} opts.runStartedAt    - ISO timestamp of this run start
  * @returns {Promise<object>}           - result accumulator
  */
-export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt }) {
+/**
+ * Core records orchestrator — drives Pass1 → destDisplayNames → Pass2 → attachments
+ * → reapplyViewFilters → pruneRecords. All I/O infrastructure (limiter, journal, persist,
+ * result) is supplied by the caller so this function is fully testable without filesystem.
+ *
+ * Pre-flight: runs validateFieldMappings BEFORE any write. If there are mapping errors,
+ * throws an Error with .code = 'FIELD_MAP_INVALID' and .mappingErrors = errors[].
+ *
+ * @param {object} opts
+ * @param {object}   opts.client           - AirtableClient instance
+ * @param {object}   opts.srcSnapshot      - source base snapshot (with records attached)
+ * @param {object}   opts.destSnapshot     - dest base snapshot (with records attached)
+ * @param {object}   opts.idmap            - live id-map (.tables, .fields, .records)
+ * @param {string}   [opts.policy]         - global preset ('mirror'|'overlay'|'preserve')
+ * @param {object}   [opts.policyOverrides]- per-table preset overrides
+ * @param {boolean}  [opts.confirmDeletions] - gate for pruneRecords deletions
+ * @param {object}   [opts.fieldMappings]  - raw field mapping config { [table]: { srcName: destName } }
+ * @param {object}   opts.limiter          - rate limiter { run: (fn) => fn() }
+ * @param {object}   opts.journal          - records journal object
+ * @param {Function} opts.persist          - (idmap, journal) => void — called after each phase
+ * @param {object}   opts.result           - result accumulator (mutated in place, returned)
+ * @returns {Promise<object>}              - the result accumulator
+ */
+export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, fieldMappings, limiter, journal, persist, result }) {
+  // Pre-flight: validate field mappings BEFORE any write. Abort on error.
+  const { errors, resolved } = validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings || {});
+  if (errors.length) {
+    const err = new Error(`Invalid field mappings: ${errors.map((e) => e.code).join(', ')}`);
+    err.code = 'FIELD_MAP_INVALID';
+    err.mappingErrors = errors;
+    throw err;
+  }
+
+  // Pass 1: scalar / select upsert — fills idmap.records
+  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings: resolved });
+  persist(idmap, journal);
+
+  // Rebuild destDisplayNames from idmap.records now populated by Pass 1.
+  // Key = dest record id, value = source primary cell value (string).
+  const destDisplayNames = new Map();
+  for (const srcTable of srcSnapshot.tables) {
+    const primaryFieldId = srcTable.primaryFieldId;
+    for (const srcRec of (srcTable.records || [])) {
+      const destRecId = idmap.records[srcRec.id];
+      if (!destRecId) continue;
+      const primaryVal = primaryFieldId ? (srcRec.cellValuesByColumnId || {})[primaryFieldId] : undefined;
+      destDisplayNames.set(destRecId, primaryVal !== undefined ? String(primaryVal) : '');
+    }
+  }
+
+  // Pass 2: link cells
+  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  // Pass 3: attachments
+  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  // Reapply view filters whose record refs now resolve
+  await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  persist(idmap, journal);
+
+  // Extras axis: prune dest-only orphan records under mirror policy
+  await pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result });
+  persist(idmap, journal);
+
+  return result;
+}
+
+export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings }) {
   // 1. Load the converged idmap (produced by the schema apply phase)
   const idmap = loadIdmap(sourceBaseId, destBaseId);
   idmap.records ??= {};
@@ -995,6 +1064,7 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
     updated: 0,
     skipped: 0,
     failed: 0,
+    deleted: 0,
     warnings: [],
     idmap,
   };
@@ -1011,37 +1081,8 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
     }
   }
 
-  // 5a. Pass 1: scalar / select upsert — fills idmap.records
-  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
-  persist(idmap, journal);
-
-  // 5b. Rebuild destDisplayNames from idmap.records now populated by Pass 1.
-  //     Key = dest record id, value = source primary cell value (string).
-  //     The source primary string is the correct display name because dest content mirrors source.
-  const destDisplayNames = new Map();
-  for (const srcTable of srcSnapshot.tables) {
-    const primaryFieldId = srcTable.primaryFieldId;
-    for (const srcRec of (srcTable.records || [])) {
-      const destRecId = idmap.records[srcRec.id];
-      if (!destRecId) continue;
-      const primaryVal = primaryFieldId ? (srcRec.cellValuesByColumnId || {})[primaryFieldId] : undefined;
-      destDisplayNames.set(destRecId, primaryVal !== undefined ? String(primaryVal) : '');
-    }
-  }
-
-  // 5c. Pass 2: link cells
-  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result });
-  persist(idmap, journal);
-
-  // 5d. Pass 3: attachments
-  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
-  persist(idmap, journal);
-
-  // 5e. Reapply view filters whose record refs now resolve
-  await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
-  persist(idmap, journal);
-
-  return result;
+  // Delegate the core phases to runRecords
+  return runRecords({ client, srcSnapshot, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, fieldMappings, limiter, journal, persist, result });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

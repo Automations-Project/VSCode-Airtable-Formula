@@ -101,7 +101,7 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   return renderDiff(savedDiff, { detail, offset, limit });
 }
 
-export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [] }) {
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, fieldMappings }) {
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
@@ -128,7 +128,7 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   // journal) and writes a status file; poll via `sync_base mode=status`.
   if (!result.aborted) {
     writeRecordsJobStatus(sourceBaseId, destBaseId, planId, { status: 'running', startedAt: runStartedAt });
-    applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt })
+    applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings })
       .then((r) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
         status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
         result: {
