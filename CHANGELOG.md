@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP server — sync_base natural-key record matching (2026-06-21)
+
+#### Added
+- `sync_base` — **natural-key record matching** (`naturalKeys: { [tableName]: fieldName }`): matches dest↔source records by a shared key field's value (resolved by name per base) and grows `idmap.records` without any write to either base. Add-only + ambiguity-safe: existing mappings are never overwritten, already-mapped dest records are never re-claimed, and ambiguous/duplicate key values are skipped with a `NATURAL_KEY_AMBIGUOUS` warning; a missing key field emits `NATURAL_KEY_FIELD_MISSING`. Runs in two places: (1) **`mode=reconcile`** — after the existence-prune, snapshots source records and calls the matcher, then saves the updated idmap; (2) **`mode=apply` auto pre-pass** — runs before Pass 1 and before `pruneRecords`, so records `mirror` no longer treats real-but-unmapped dest records as orphans and re-syncs no longer duplicate them. The key field must be stable across bases (autoNumber renumbers → bad key; name/email/injected `InjectID` → good key). Single-field keys only; composite keys and value normalization are deferred. A `matched` count is returned in the result.
+
 ### MCP server — sync_base reconciliation policy + custom field mappings (2026-06-20)
 
 #### Added
