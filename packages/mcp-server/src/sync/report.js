@@ -71,6 +71,9 @@ export function renderApplyResult(result) {
   if (result.matched != null && result.matched > 0) {
     lines.push(`  matched: ${result.matched} (natural-key pre-pass)`);
   }
+  if (result.retyped != null && result.retyped > 0) {
+    lines.push(`  retyped: ${result.retyped} (scalar field type changes applied)`);
+  }
   if (result.schemaDeleted != null && result.schemaDeleted > 0) {
     lines.push(`  schemaDeleted: ${result.schemaDeleted} (dest-only fields/views removed)`);
   }

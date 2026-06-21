@@ -54,6 +54,24 @@ describe('report.renderApplyResult', () => {
     assert.match(out.human, /Apply aborted/);
     assert.doesNotMatch(out.human, /records:/);
   });
+
+  it('renders retyped line when retyped > 0', () => {
+    const result = { ...baseResult, retyped: 2 };
+    const out = renderApplyResult(result);
+    assert.match(out.human, /retyped: 2/);
+    assert.match(out.human, /scalar field type changes applied/);
+  });
+
+  it('omits retyped line when retyped is 0', () => {
+    const result = { ...baseResult, retyped: 0 };
+    const out = renderApplyResult(result);
+    assert.doesNotMatch(out.human, /retyped/);
+  });
+
+  it('omits retyped line when retyped is absent', () => {
+    const out = renderApplyResult(baseResult);
+    assert.doesNotMatch(out.human, /retyped/);
+  });
 });
 
 // ── renderDiff tests (Task 6) ────────────────────────────────────────────────

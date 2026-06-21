@@ -115,7 +115,7 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   return renderDiff(savedDiff, { detail, offset, limit });
 }
 
-export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, fieldMappings, naturalKeys }) {
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys }) {
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
@@ -147,7 +147,7 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   const result = await applyPlan({
     client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
     persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
-    skip,
+    skip, confirmRetypes,
   });
 
   // Schema extras phase: delete dest-only fields/views/tables under mirror, gated. Runs after
