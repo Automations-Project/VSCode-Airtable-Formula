@@ -9,6 +9,7 @@ const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyn
 const VIEW_GROUP_ANCHOR = new Set(['select', 'singleSelect', 'multiSelect', 'multipleSelects', 'collaborator']);
 const COMPUTED_TYPES = new Set(['formula', 'rollup', 'lookup', 'multipleLookupValues', 'count']);
 const LINK_TYPES = new Set(['foreignKey', 'multipleRecordLinks']);
+const SCALAR_RETYPE_TYPES = new Set(['text', 'multilineText', 'richText', 'number', 'currency', 'percent', 'rating', 'duration', 'checkbox', 'date', 'dateTime', 'phone', 'email', 'url', 'select', 'singleSelect', 'multiSelect', 'multipleSelects']);
 
 // Types Airtable refuses as a primary field — keep a placeholder + warn instead of
 // retyping. The try/catch around the retype is the ultimate guard (set is an optimization).
@@ -96,11 +97,11 @@ function mergeChoices(destField, srcTypeOptions) {
   return { ...srcTypeOptions, choices: merged };
 }
 
-export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist, skip = [] }) {
+export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist, skip = [], confirmRetypes = false }) {
   const index = buildIndex(destSnapshot);
   const state = { createdLinks: new Map(), adoptedReverse: new Set() };
   if (!idmap.views) idmap.views = {};
-  const result = { planId: plan.planId, aborted: false, created: 0, updated: 0, skipped: 0, failed: 0, warnings: [], idmap };
+  const result = { planId: plan.planId, aborted: false, created: 0, updated: 0, skipped: 0, failed: 0, retyped: 0, warnings: [], idmap };
   const skipSet = new Set(skip);
 
   for (let idx = 0; idx < plan.actions.length; idx++) {
@@ -108,7 +109,7 @@ export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, 
     if (isDone(journal, idx)) { result.skipped++; continue; }
     if (a.apply === false || skipSet.has(a.changeId)) { result.skipped++; continue; }
     try {
-      await applyAction({ client, destAppId, a, idmap, index, state, result });
+      await applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes });
       recordDone(journal, idx, a.kind, idmap.tables[a.sourceTableId] ?? (a.sourceFieldId && idmap.fields[a.sourceFieldId]?.destFld));
       persist(idmap, journal);
     } catch (e) {
@@ -124,7 +125,7 @@ export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, 
   return result;
 }
 
-async function applyAction({ client, destAppId, a, idmap, index, state, result }) {
+async function applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes }) {
   switch (a.kind) {
     case 'createTable': {
       const existing = index.tablesByName.get(a.name);
@@ -238,8 +239,28 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result }
     case 'updateField': {
       const changes = a.changes || {};
       if (changes.type !== undefined) {
-        result.warnings.push({ code: 'RETYPE_DEFERRED', message: `Field ${a.destFld}: type change to "${changes.type}" deferred (M4)` });
-        return; // never retype an existing field in M2b
+        const destType = findDestFieldType(index, a.destFld);
+        const fname = findDestField(index, a.destFld)?.name ?? a.destFld;
+        if (!SCALAR_RETYPE_TYPES.has(changes.type) || !SCALAR_RETYPE_TYPES.has(destType)) {
+          result.warnings.push({ code: 'RETYPE_DEFERRED', message: `Field "${fname}": retype ${destType}→${changes.type} deferred (non-scalar)` });
+          return;
+        }
+        if (!confirmRetypes) {
+          result.warnings.push({ code: 'RETYPE_GATED', message: `Field "${fname}": scalar retype ${destType}→${changes.type} gated — set confirmRetypes:true` });
+          return;
+        }
+        const newOpts = changes.typeOptions ? mergeChoices(findDestField(index, a.destFld), remapRefs(changes.typeOptions, idmap)) : undefined;
+        try {
+          await client.updateFieldConfig(destAppId, a.destFld, { type: changes.type, typeOptions: newOpts });
+          const f = findDestField(index, a.destFld); if (f) { f.type = changes.type; if (newOpts) f.typeOptions = newOpts; }
+          result.retyped++;
+        } catch (e) {
+          result.warnings.push({ code: 'RETYPE_FAILED', message: `Field "${fname}": retype to ${changes.type} rejected: ${e.message ?? e}` });
+          return;
+        }
+        if (changes.name !== undefined) { await client.renameField(destAppId, a.destFld, changes.name); const f2 = findDestField(index, a.destFld); if (f2) f2.name = changes.name; }
+        if (changes.description !== undefined) { await client.updateFieldDescription(destAppId, a.destFld, changes.description); }
+        return;
       }
       let mutated = false;
       if (changes.name !== undefined) { await client.renameField(destAppId, a.destFld, changes.name); mutated = true; }

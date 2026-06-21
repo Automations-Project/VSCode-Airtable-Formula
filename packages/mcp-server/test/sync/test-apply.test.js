@@ -222,12 +222,12 @@ describe('apply: updateField', () => {
     assert.equal(client._field(columnId).description, 'new');
   });
 
-  it('skips + reports a type change (RETYPE_DEFERRED), making no client mutation', async () => {
+  it('skips + reports a scalar type change (RETYPE_GATED when no confirmRetypes), making no client mutation', async () => {
     const { client, columnId, destSnapshot } = await destWith('text', null);
     const before = client.calls.length;
     const res = await run(client, planUpdate(columnId, { type: 'number', typeOptions: { precision: 0 } }), destSnapshot);
     assert.equal(res.updated, 0);
-    assert.ok(res.warnings.some((w) => w.code === 'RETYPE_DEFERRED'));
+    assert.ok(res.warnings.some((w) => w.code === 'RETYPE_GATED'), 'scalar retype without confirmRetypes → RETYPE_GATED');
     assert.equal(client.calls.length, before); // no updateFieldConfig issued
   });
 
@@ -477,5 +477,80 @@ describe('apply: createField (autoNumber — strip read-only maxUsedAutoNumber)'
       false,
       'maxUsedAutoNumber must be stripped from typeOptions before createField',
     );
+  });
+});
+
+// Build a dest base with table 'T' + one field of `fieldType`; return { destSnapshot, fId }.
+async function destWithField(client, fieldType, typeOptions = null) {
+  const { tableId } = await client.createTable('appD', 'T');
+  const { columnId: fId } = await client.createField('appD', tableId, { name: 'F', type: fieldType, typeOptions });
+  const destSnapshot = await snapshotBase(client, 'appD');
+  return { destSnapshot, fId };
+}
+function retypePlan(fId, changes) {
+  return { planId: 'pRT', sourceBaseId: 'appS', destBaseId: 'appD', idmap: { tables: {}, fields: {} },
+    actions: [{ kind: 'updateField', sourceFieldId: 'sF', destFld: fId, changes }], orphans: [], warnings: [] };
+}
+function runRT(client, plan, destSnapshot, confirmRetypes) {
+  return applyPlan({ client, plan, destAppId: 'appD', destSnapshot, idmap: { tables: {}, fields: {} },
+    journal: newJournal(plan.planId, 'ts'), persist: () => {}, confirmRetypes });
+}
+
+describe('apply: field retypes (M4)', () => {
+  it('scalar retype + confirmRetypes → updateFieldConfig called with new type, retyped=1', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'text');
+    const res = await runRT(client, retypePlan(fId, { type: 'number' }), destSnapshot, true);
+    assert.equal(res.retyped, 1);
+    assert.ok(client.calls.includes(`updateFieldConfig:${fId}:number`));
+  });
+  it('scalar retype WITHOUT confirmRetypes → not applied, RETYPE_GATED', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'text');
+    const res = await runRT(client, retypePlan(fId, { type: 'number' }), destSnapshot, false);
+    assert.equal(res.retyped ?? 0, 0);
+    assert.ok(!client.calls.some((c) => c.startsWith(`updateFieldConfig:${fId}`)));
+    assert.ok(res.warnings.some((w) => w.code === 'RETYPE_GATED'));
+  });
+  it('out-of-scope retype (dest text → source formula) → RETYPE_DEFERRED, not applied', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'text');
+    const res = await runRT(client, retypePlan(fId, { type: 'formula' }), destSnapshot, true);
+    assert.equal(res.retyped ?? 0, 0);
+    assert.ok(res.warnings.some((w) => w.code === 'RETYPE_DEFERRED'));
+  });
+  it('rejected retype → RETYPE_FAILED, field kept, no throw', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'text');
+    client.updateFieldConfig = async () => { throw new Error('incompatible existing data'); };
+    const res = await runRT(client, retypePlan(fId, { type: 'number' }), destSnapshot, true);
+    assert.equal(res.retyped ?? 0, 0);
+    assert.ok(res.warnings.some((w) => w.code === 'RETYPE_FAILED'));
+    assert.equal(res.failed, 0, 'continue-on-failure: not a hard failure');
+  });
+  it('retype + rename in one action → both applied', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'text');
+    const res = await runRT(client, retypePlan(fId, { type: 'number', name: 'Renamed' }), destSnapshot, true);
+    assert.equal(res.retyped, 1);
+    assert.ok(client.calls.includes(`updateFieldConfig:${fId}:number`));
+    assert.ok(client.calls.some((c) => c.startsWith(`renameField:${fId}:Renamed`)));
+  });
+  it('text → select retype → updateFieldConfig with select + choices (mergeChoices)', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'text');
+    const changes = { type: 'select', typeOptions: { choices: { sel1: { id: 'sel1', name: 'Open', color: 'blue' } } } };
+    const res = await runRT(client, retypePlan(fId, changes), destSnapshot, true);
+    assert.equal(res.retyped, 1);
+    assert.ok(client.calls.includes(`updateFieldConfig:${fId}:select`));
+    const f = client.tables[0].columns.find((c) => c.id === fId);
+    assert.ok(f.typeOptions && f.typeOptions.choices, 'choices applied via mergeChoices');
+  });
+  it('non-type updateField (typeOptions only) is unchanged by the retype path', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'number');
+    const res = await runRT(client, retypePlan(fId, { typeOptions: { precision: 2 } }), destSnapshot, false);
+    assert.ok(client.calls.includes(`updateFieldConfig:${fId}:number`), 'still applies typeOptions update');
+    assert.ok(!res.warnings.some((w) => w.code === 'RETYPE_GATED'));
   });
 });
