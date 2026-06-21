@@ -1266,6 +1266,7 @@ export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys 
     updated: 0,
     skipped: 0,
     failed: 0,
+    matched: 0,
     warnings: [],
     idmap,
   };
@@ -1293,14 +1294,13 @@ export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys 
     }
   }
 
-  // naturalKeys re-match (stub: emit warning for each non-empty key)
-  for (const [tableName, fieldName] of Object.entries(naturalKeys)) {
-    if (fieldName) {
-      result.warnings.push({
-        code: 'RECONCILE_NATURAL_KEY_NOT_IMPLEMENTED',
-        message: `naturalKeys re-match for table "${tableName}" (field "${fieldName}") is not yet implemented`,
-      });
+  // Natural-key re-match: snapshot source schema + records, then call matcher.
+  if (Object.keys(naturalKeys).length > 0) {
+    const srcSnapshot = await snapshotSchemaOnly(client, sourceBaseId);
+    for (const table of srcSnapshot.tables) {
+      table.records = await snapshotTableRecords(client, sourceBaseId, table);
     }
+    matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idmap, result });
   }
 
   saveIdmap(sourceBaseId, destBaseId, idmap);
