@@ -1,7 +1,8 @@
 // packages/mcp-server/src/sync/prune-schema.js
-// Schema extras axis: delete dest-only fields/views/tables under mirror, tiered-gated, dependency-safe.
-// Fields use deleteFields WITHOUT force (so a matched field is never cascade-deleted); orphan->orphan
-// deps resolve by retry-until-stable; a field still blocked after no progress is kept + warned.
+// Schema extras axis: delete dest-only sections/views/fields/tables under mirror, tiered-gated, dependency-safe.
+// Order: sections (auto-promote contained views) → views → fields → tables. Fields use deleteFields WITHOUT
+// force (so a matched field is never cascade-deleted); orphan->orphan deps resolve by retry-until-stable;
+// a field still blocked after no progress is kept + warned.
 import { resolvePolicy } from './policy.js';
 
 export async function pruneSchema({ client, destAppId, plan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result }) {
