@@ -68,6 +68,9 @@ export function renderApplyResult(result) {
     `  skipped: ${result.skipped}`,
     `  failed: ${result.failed}`,
   ];
+  if (result.matched != null && result.matched > 0) {
+    lines.push(`  matched: ${result.matched} (natural-key pre-pass)`);
+  }
   if (result.records) {
     const r = result.records;
     if (r.status === 'running') {

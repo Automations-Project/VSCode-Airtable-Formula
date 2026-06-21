@@ -1587,7 +1587,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
         destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
         planId: { type: 'string', description: 'Required for mode="apply" (the planId from a prior mode="plan" run) and mode="status" (the same planId, which is the background record jobId).' },
-        naturalKeys: { type: 'object', description: 'Used only by mode="reconcile": map of tableName → fieldName to use as a natural key for re-matching records (e.g. { "Projects": "Name" }). Omit to run existence-prune only.', additionalProperties: { type: 'string' } },
+        naturalKeys: { type: 'object', description: 'Map of tableName → fieldName to use as a natural key for record identity matching (e.g. { "Projects": "Name" }). Applies to mode="reconcile" (repairs the record map via natural-key re-match after manual edits) AND mode="apply" (auto pre-pass before Pass 1: matches existing dest records by key so they are updated rather than duplicated; also protects real-but-unmapped dest records from mirror-policy deletion). Omit for existence-prune only (reconcile) or pure ID-based sync (apply). The key field MUST be stable across bases: autoNumber renumbers on creation (bad key); name/email/injected InjectID are good keys.', additionalProperties: { type: 'string' } },
         detail: { type: 'string', description: 'Used only by mode="diff": section name to drill into (e.g. a table name or action key). Requires diffId.' },
         diffId: { type: 'string', description: 'Used by mode="diff": ID of a prior diff to retrieve or drill into. If omitted on the initial call, one is generated automatically.' },
         offset: { type: 'number', description: 'Used by mode="diff" with detail: skip this many entries before returning results.' },
@@ -2411,7 +2411,7 @@ const handlers = {
       const runStartedAt = new Date().toISOString();
       let out;
       try {
-        out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, fieldMappings });
+        out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys });
       } catch (e) {
         if (e && e.code === 'FIELD_MAP_INVALID') {
           return err(`Field mapping validation failed:\n${(e.mappingErrors || []).map((me) => `  [${me.code}] table=${me.table || '?'}${me.source ? ' source=' + me.source : ''}${me.target ? ' target=' + me.target : ''}`).join('\n')}`);

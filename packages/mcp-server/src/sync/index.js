@@ -160,6 +160,7 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
         status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
         result: {
           created: r.created, updated: r.updated, failed: r.failed,
+          matched: r.matched || 0,
           attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
           deleted: r.deleted || 0,
           warningCount: (r.warnings || []).length,
