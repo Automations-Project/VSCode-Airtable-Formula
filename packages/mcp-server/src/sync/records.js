@@ -1124,7 +1124,7 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
  * @param {object}   opts.result           - result accumulator (mutated: result.deleted, result.warnings)
  * @returns {Promise<void>}
  */
-export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result }) {
+export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables = new Set() }) {
   if (result.deleted == null) result.deleted = 0;
   if (result.failed == null) result.failed = 0;
   if (!result.warnings) result.warnings = [];
@@ -1144,6 +1144,20 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
 
     const { extras } = resolvePolicy(policy, policyOverrides, t.name);
     if (extras !== 'remove') continue;
+
+    // Truncation safety: a table whose snapshot hit the 1000-row cap cannot be safely pruned —
+    // unmapped rows may be legitimate records whose source/dest counterpart fell beyond the window.
+    // Skip deletion entirely (the >1000-row read is a capture-gated follow-up).
+    const isTruncated = truncatedTables.has(t.name) || (t.records || []).length >= 1000;
+    if (isTruncated) {
+      result.warnings.push({
+        code: 'RECORDS_TRUNCATED_PRUNE_SKIPPED',
+        message: `Table "${t.name}": snapshot capped at 1000 rows — cannot safely distinguish ` +
+          `dest-only orphans from records beyond the limit; skipping mirror deletion to avoid data loss ` +
+          `(>1000-row pagination is a follow-up).`,
+      });
+      continue;
+    }
 
     // Prefer the first collaborative (non-personal) view; fall back to first view of any type.
     const views = t.views || [];

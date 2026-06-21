@@ -212,6 +212,53 @@ describe('pruneRecords (extras axis)', () => {
     assert.equal(result.deleted, 0);
   });
 
+  // ── Task 1: truncation guard ─────────────────────────────────────────────────
+
+  // (1) THE FIX — mirror + confirmDeletions + DEST table at 1000 rows → no delete + skip warning
+  it('mirror skips a DEST-truncated table (1000 rows) instead of deleting orphans', async () => {
+    const client = pruneClient();
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ id: `recD${i}`, cellValuesByColumnId: {} }));
+    const destSnapshot = { baseId: 'appD', tables: [{ id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [], records: rows }] };
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} }; // 0 mapped → all 1000 would be orphans
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot, idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    assert.equal(client.calls.deleted.length, 0, 'deleteRecords never called');
+    assert.equal(result.deleted, 0);
+    assert.ok(result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'));
+  });
+
+  // (2) source-side truncation supplied via the truncatedTables set (dest rows < 1000)
+  it('mirror skips a table named in truncatedTables even when dest rows < 1000', async () => {
+    const client = pruneClient();
+    const destSnapshot = { baseId: 'appD', tables: [{ id: 'tD', name: 'SrcBig', views: [{ id: 'viwD' }], fields: [], records: [{ id: 'recD0', cellValuesByColumnId: {} }] }] };
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot, idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result, truncatedTables: new Set(['SrcBig']) });
+    assert.equal(client.calls.deleted.length, 0);
+    assert.ok(result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'));
+  });
+
+  // (3) regression — NON-truncated table still prunes its orphan (use destSnap2(): recKeep mapped, recOrphan not)
+  it('mirror still deletes orphans on a NON-truncated table', async () => {
+    const client = pruneClient();
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep' } };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot: destSnap2(), idmap, policy: 'mirror', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    assert.deepEqual(client.calls.deleted, [{ tableId: 'tD', rowIds: ['recOrphan'] }]);
+    assert.ok(!result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'));
+  });
+
+  // (4) overlay + truncated table → no truncation-skip warning (guard sits AFTER the extras check)
+  it('overlay + truncated table emits NO truncation-skip warning', async () => {
+    const client = pruneClient();
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ id: `recD${i}`, cellValuesByColumnId: {} }));
+    const destSnapshot = { baseId: 'appD', tables: [{ id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [], records: rows }] };
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: {} };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({ client, destSnapshot, idmap, policy: 'overlay', confirmDeletions: true, limiter: { run: (fn) => fn() }, result });
+    assert.ok(!result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'));
+  });
+
   // Delete chunking: >50 orphans should produce multiple deleteRecords calls of ≤50 each.
   it('>50 orphans produce multiple delete chunks of ≤50 ids each', async () => {
     // 75 dest records; none in idmap.records → all are orphans.
