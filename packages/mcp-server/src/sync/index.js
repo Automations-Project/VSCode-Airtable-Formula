@@ -153,13 +153,13 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   // Schema extras phase: delete dest-only fields/views/tables under mirror, gated. Runs after
   // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
   // the schema is clean before record sync begins. Mutates `result` in-place.
-  await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
-
-  // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
-  // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single
-  // blocking apply call would look hung / time out. The phase persists progress (idmap + records
-  // journal) and writes a status file; poll via `sync_base mode=status`.
   if (!result.aborted) {
+    await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
+
+    // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
+    // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single
+    // blocking apply call would look hung / time out. The phase persists progress (idmap + records
+    // journal) and writes a status file; poll via `sync_base mode=status`.
     writeRecordsJobStatus(sourceBaseId, destBaseId, planId, { status: 'running', startedAt: runStartedAt });
     applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys })
       .then((r) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
