@@ -1020,8 +1020,8 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
  * links against the live dest. The records journal is persisted but currently advisory (no
  * per-record done-gating); idmap + live re-snapshot are the source of truth. Known limitation:
  * a crash between a create's server-ack and the per-chunk idmap persist can re-create up to one
- * chunk (~50) of rows as duplicates on resume (reconcile only existence-prunes; natural-key
- * re-match is a stub).
+ * chunk (~50) of rows as duplicates on resume (reconcile existence-prunes + natural-key
+ * re-matches by value).
  *
  * @param {object} opts
  * @param {object} opts.client          - AirtableClient instance
