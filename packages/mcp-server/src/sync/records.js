@@ -947,7 +947,7 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
  * @param {object}   opts.result           - result accumulator (mutated in place, returned)
  * @returns {Promise<object>}              - the result accumulator
  */
-export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, fieldMappings, limiter, journal, persist, result }) {
+export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys, limiter, journal, persist, result }) {
   // Pre-flight: validate field mappings BEFORE any write. Abort on error.
   const { errors, resolved } = validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings || {});
   if (errors.length) {
@@ -955,6 +955,13 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
     err.code = 'FIELD_MAP_INVALID';
     err.mappingErrors = errors;
     throw err;
+  }
+
+  // Natural-key pre-pass: match real-but-unmapped dest records BEFORE Pass 1 + prune,
+  // so Pass 1 updates (not duplicates) them and pruneRecords does not treat them as orphans.
+  if (naturalKeys && Object.keys(naturalKeys).length) {
+    matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idmap, result });
+    persist(idmap, journal);
   }
 
   // Pass 1: scalar / select upsert — fills idmap.records
@@ -1023,7 +1030,7 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
  * @param {string} opts.runStartedAt    - ISO timestamp of this run start
  * @returns {Promise<object>}           - result accumulator
  */
-export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings }) {
+export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys }) {
   // 1. Load the converged idmap (produced by the schema apply phase)
   const idmap = loadIdmap(sourceBaseId, destBaseId);
   idmap.records ??= {};
@@ -1082,7 +1089,7 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
   }
 
   // Delegate the core phases to runRecords
-  return runRecords({ client, srcSnapshot, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, fieldMappings, limiter, journal, persist, result });
+  return runRecords({ client, srcSnapshot, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys, limiter, journal, persist, result });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

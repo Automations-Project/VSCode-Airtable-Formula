@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { matchByNaturalKeys, reconcile } from '../../src/sync/records.js';
+import { matchByNaturalKeys, reconcile, runRecords } from '../../src/sync/records.js';
 import { saveIdmap } from '../../src/sync/idmap.js';
 
 // helper builders
@@ -207,5 +207,71 @@ describe('reconcile naturalKeys integration', () => {
 
     assert.equal(result.matched, 0, 'no naturalKeys → matched stays 0');
     assert.equal(result.warnings.filter((w) => w.code === 'RECONCILE_NATURAL_KEY_NOT_IMPLEMENTED').length, 0);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// runRecords natural-key pre-pass integration test
+// ──────────────────────────────────────────────────────────────────────────────
+
+function recClient() {
+  const calls = { create: [], update: [], deleted: [] };
+  return {
+    calls,
+    async createRecords(appId, tableId, rows) {
+      calls.create.push({ tableId, rows });
+      return { records: rows.map((r, i) => ({ id: 'new' + i })), created: rows.map((r, i) => ({ id: 'new' + i, sourceKey: r.sourceKey, rowId: 'new' + i })) };
+    },
+    async updateRecords(appId, tableId, rows) { calls.update.push({ tableId, rows }); return { updated: rows, failed: [] }; },
+    async queryRecords(appId, tableId) { return { summary: { rows: [] } }; }, // not used (prune reads snapshot .records)
+    async deleteRecords(appId, tableId, rowIds) { calls.deleted.push({ tableId, rowIds }); return { deleted: rowIds.length }; },
+    async addLinkItems() { return { ok: true }; },
+    async createDataTransferPolicy() { return {}; },
+    async pasteAttachmentsCrossBase() { return { pastedRowIds: [] }; },
+  };
+}
+
+describe('runRecords natural-key pre-pass (mirror safety)', () => {
+  it('a real-but-unmapped dest record is matched, NOT deleted by mirror, NOT duplicated', async () => {
+    const client = recClient();
+    const src = {
+      baseId: 'appS',
+      tables: [{
+        id: 'tS', name: 'Customers', primaryFieldId: 'sEmail',
+        fields: [{ id: 'sEmail', name: 'Email', type: 'text' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { sEmail: 'a@x.com' } }],
+      }],
+    };
+    const dst = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD', name: 'Customers', views: [{ id: 'vD' }],
+        fields: [{ id: 'dEmail', name: 'Email', type: 'text' }],
+        records: [{ id: 'recD1', cellValuesByColumnId: { dEmail: 'a@x.com' } }],
+      }],
+    };
+    const idmap = {
+      tables: { tS: 'tD' },
+      fields: { sEmail: { destFld: 'dEmail', choices: {} } },
+      records: {},
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await runRecords({
+      client,
+      srcSnapshot: src,
+      destSnapshot: dst,
+      idmap,
+      policy: 'mirror',
+      confirmDeletions: true,
+      naturalKeys: { Customers: 'Email' },
+      limiter: { run: (f) => f() },
+      journal: {},
+      persist: () => {},
+      result,
+    });
+
+    assert.equal(idmap.records.recS1, 'recD1', 'pre-pass matched the record');
+    assert.equal(client.calls.create.length, 0, 'no duplicate create (went update path)');
+    assert.deepEqual(client.calls.deleted, [], 'mirror did NOT delete the matched dest record');
   });
 });
