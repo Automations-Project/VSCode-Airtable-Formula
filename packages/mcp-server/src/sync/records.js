@@ -941,6 +941,7 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
  * @param {object}   [opts.policyOverrides]- per-table preset overrides
  * @param {boolean}  [opts.confirmDeletions] - gate for pruneRecords deletions
  * @param {object}   [opts.fieldMappings]  - raw field mapping config { [table]: { srcName: destName } }
+ * @param {object}   [opts.naturalKeys]    - { [tableName]: fieldName } for natural-key matching (optional)
  * @param {object}   opts.limiter          - rate limiter { run: (fn) => fn() }
  * @param {object}   opts.journal          - records journal object
  * @param {Function} opts.persist          - (idmap, journal) => void — called after each phase
@@ -1028,6 +1029,11 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
  * @param {string} opts.destBaseId      - dest base app ID
  * @param {string} opts.planId          - plan ID (used for journal file name)
  * @param {string} opts.runStartedAt    - ISO timestamp of this run start
+ * @param {string} [opts.policy]        - global preset ('mirror'|'overlay'|'preserve')
+ * @param {object} [opts.policyOverrides] - per-table preset overrides
+ * @param {boolean} [opts.confirmDeletions] - gate for pruneRecords deletions
+ * @param {object} [opts.fieldMappings] - raw field mapping config { [table]: { srcName: destName } }
+ * @param {object} [opts.naturalKeys]   - { [tableName]: fieldName } for natural-key matching (optional)
  * @returns {Promise<object>}           - result accumulator
  */
 export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys }) {
@@ -1252,10 +1258,10 @@ export function matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idm
  * 2. Snapshots the DEST base schema only, then pulls dest records for each matched table.
  * 3. Builds a Set of all live dest record IDs across all tables.
  * 4. Drops any idmap.records[src]=dest entry whose dest ID is not present in the snapshot.
- * 5. naturalKeys re-match is stubbed (emits warning when provided — extend when needed).
+ * 5. Natural-key re-match: snapshots source records and calls matcher to add idmap.records entries by key value.
  * 6. Saves the pruned idmap.
- * 7. Returns a result shaped like { created:0, updated:0, skipped, failed:0, warnings, idmap }.
- *    `skipped` = number of pruned entries.
+ * 7. Returns a result shaped like { created:0, updated:0, skipped, failed:0, matched, warnings, idmap }.
+ *    `skipped` = number of pruned entries. `matched` = number of records matched by natural key.
  *
  * @param {object} opts
  * @param {object} opts.client          - AirtableClient instance
