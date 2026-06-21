@@ -48,7 +48,7 @@ describe('snapshot sections', () => {
       viewSectionsById: { vsc1: { id: 'vsc1', name: 'Sales Views', viewOrder: ['viwY', 'viwX'] } },
     }] } };
     const snap = normalizeSchema(raw);
-    assert.deepEqual(snap.tables[0].sections, [{ name: 'Sales Views', viewNames: ['Kanban', 'Grid'] }]);
+    assert.deepEqual(snap.tables[0].sections, [{ id: 'vsc1', name: 'Sales Views', viewNames: ['Kanban', 'Grid'] }]);
   });
   it('normalizeSchema sections defaults to [] when absent', () => {
     const raw = { data: { tableSchemas: [{ id: 'tblA', name: 'T', columns: [], views: [] }] } };

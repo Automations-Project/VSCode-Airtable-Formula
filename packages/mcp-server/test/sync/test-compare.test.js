@@ -396,6 +396,60 @@ describe('compare', () => {
   });
 });
 
+// ── Section id-strip tests (Task 1) ─────────────────────────────────────────────
+
+describe('compare — sections id-strip', () => {
+  test('same name+viewNames but different vsc ids → NO sections entry (id stripped from comparison)', () => {
+    // src section has id 'vscSRC', dest section has id 'vscDEST', but name+viewNames identical.
+    // compare() must NOT emit a key:'sections' entry.
+    const srcTable = {
+      ...mkTable('st1', 'Alpha', [fld('sf1', 'Name', 'text')]),
+      sections: [{ id: 'vscSRC', name: 'Group A', viewNames: ['Grid'] }],
+    };
+    const destTable = {
+      ...mkTable('dt1', 'Alpha', [fld('df1', 'Name', 'text')]),
+      sections: [{ id: 'vscDEST', name: 'Group A', viewNames: ['Grid'] }],
+    };
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    const sectionsEntry = result.tables.flatMap((t) => t.entries).find((e) => e.key === 'sections');
+    assert.ok(!sectionsEntry, 'same name+viewNames with different ids must NOT produce a sections entry');
+    assert.equal(result.converged, true);
+    assert.equal(result.identical, true);
+  });
+
+  test('different section names → sections entry IS emitted (not-synced)', () => {
+    const srcTable = {
+      ...mkTable('st1', 'Alpha', [fld('sf1', 'Name', 'text')]),
+      sections: [{ id: 'vscSRC', name: 'Group A', viewNames: ['Grid'] }],
+    };
+    const destTable = {
+      ...mkTable('dt1', 'Alpha', [fld('df1', 'Name', 'text')]),
+      sections: [{ id: 'vscDEST', name: 'Group B', viewNames: ['Grid'] }],
+    };
+    const srcSnap = mkSnap('srcBase', [srcTable]);
+    const destSnap = mkSnap('destBase', [destTable]);
+    const idmap = {
+      tables: { st1: 'dt1' },
+      fields: { sf1: { destFld: 'df1', choices: {} } },
+      views: {},
+    };
+    const result = compare(srcSnap, destSnap, idmap);
+    const sectionsEntry = result.tables.flatMap((t) => t.entries).find((e) => e.key === 'sections');
+    assert.ok(sectionsEntry, 'different section names must produce a sections entry');
+    assert.equal(sectionsEntry.class, 'not-synced');
+    // source/dest should be the FULL sections (with id)
+    assert.deepEqual(sectionsEntry.source, srcTable.sections);
+    assert.deepEqual(sectionsEntry.dest, destTable.sections);
+  });
+});
+
 // ── Bug fix tests: cross-base computed/link ref canonicalization ──────────────
 
 describe('compareFields — cross-base ref canonicalization', () => {

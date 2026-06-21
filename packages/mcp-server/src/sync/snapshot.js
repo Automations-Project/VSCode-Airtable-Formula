@@ -35,9 +35,10 @@ export function normalizeSchema(rawData) {
       }));
       const viewNameById = new Map(views.map(v => [v.id, v.name]));
       const sectionsObj = t.viewSectionsById || t.viewSections || {};
-      const sections = Object.values(sectionsObj).map(s => ({
+      const sections = Object.entries(sectionsObj).map(([id, s]) => ({
+        id: s.id || id,
         name: s.name,
-        viewNames: (s.viewOrder || []).map(id => viewNameById.get(id)).filter(Boolean),
+        viewNames: (s.viewOrder || []).map((vid) => viewNameById.get(vid)).filter(Boolean),
       }));
       return {
         id: t.id,

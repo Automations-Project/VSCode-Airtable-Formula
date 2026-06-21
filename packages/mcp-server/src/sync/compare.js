@@ -614,10 +614,11 @@ export function compareTable(srcTable, destTable, idmap, srcGlobalFldNames, dest
     });
   }
 
-  // 6. Sections comparison (not-synced).
+  // 6. Sections comparison (not-synced) — compare by name+viewNames; ignore the vsc… id.
+  const stripId = (arr) => (arr || []).map(({ name, viewNames }) => ({ name, viewNames }));
   const srcSections = srcTable.sections || [];
   const destSections = destTable.sections || [];
-  if (JSON.stringify(srcSections) !== JSON.stringify(destSections)) {
+  if (JSON.stringify(stripId(srcSections)) !== JSON.stringify(stripId(destSections))) {
     entries.push({
       scope: 'table',
       key: 'sections',
