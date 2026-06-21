@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### MCP server — sync_base schema-orphan deletion under mirror (2026-06-21)
+
+#### Added
+- `sync_base mode=apply` — **schema-orphan deletion** (`pruneSchema`): under `policy=mirror`, dest-only fields/views/tables that have no counterpart in the source are deleted from the destination after `applyPlan` completes. Two independent gates: `confirmDeletions:true` is required to delete dest-only **fields and views** (same flag as `pruneRecords`); the new `confirmTableDeletions:true` is required to drop dest-only **tables** — `confirmDeletions` alone never deletes an entire table. Without each gate the operation is a dry-count only (`DELETION_GATED` for fields/views, `TABLE_DELETION_GATED` for tables). Deletion is dependency-safe: fields are deleted without `force` (so no matched field is ever cascade-deleted), orphan→orphan formula dependencies are resolved by retry-until-stable, and a field blocked by a matched-field dependency is kept and reported as `SCHEMA_DELETE_BLOCKED`. Deletion order: views first (no dependents), then fields, then tables (after their content). Applied counts are surfaced in the result as `schemaDeleted` (fields + views) and `tablesDeleted`; failures are continue-on-failure warnings (`SCHEMA_DELETE_FAILED`). Per-table `policyOverrides` are respected — `overlay`/`preserve` tables are never pruned. Module: `src/sync/prune-schema.js`. Retypes and view-section orphan deletion remain deferred (M4).
+
 ### MCP server — sync_base natural-key record matching (2026-06-21)
 
 #### Added
