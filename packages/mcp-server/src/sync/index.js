@@ -8,6 +8,7 @@ import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
 import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
 import { validateFieldMappings, isDeleting } from './policy.js';
+import { pruneSchema } from './prune-schema.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -114,7 +115,7 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   return renderDiff(savedDiff, { detail, offset, limit });
 }
 
-export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys }) {
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, fieldMappings, naturalKeys }) {
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
@@ -148,6 +149,11 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
     skip,
   });
+
+  // Schema extras phase: delete dest-only fields/views/tables under mirror, gated. Runs after
+  // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
+  // the schema is clean before record sync begins. Mutates `result` in-place.
+  await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
 
   // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
   // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single

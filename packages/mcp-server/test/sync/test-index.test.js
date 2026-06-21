@@ -201,6 +201,100 @@ describe('sync index.plan — fieldMappings validation (Task 8)', () => {
   });
 });
 
+describe('sync index.apply — pruneSchema integration (Task 2)', () => {
+  // apply() with policy=mirror + plan carrying orphans (one field orphan + one table orphan),
+  // confirmDeletions=true, confirmTableDeletions=false:
+  //   - deleteFields should be called for the orphan field
+  //   - deleteTable should NOT be called (table gated by confirmTableDeletions=false)
+  //   - result.machine.schemaDeleted > 0
+  //   - result.machine.warnings includes a TABLE_DELETION_GATED entry
+  //
+  // Because apply() does substantial I/O (plan/idmap/journal), we drive the full flow:
+  // save a minimal plan whose orphans include the target field + table, then call syncApply().
+  // The applyPlan itself is a no-op (no actions) so only pruneSchema has observable side-effects.
+  it('apply() with mirror+confirmDeletions calls deleteFields for orphan field, gates orphan table, warns TABLE_DELETION_GATED', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-prune-'));
+
+    const srcAppId = 'appSRCPRUNE00000';
+    const destAppId = 'appDESTPRUNE0000';
+
+    // Both bases share an identical table so fingerprints match and plan has zero actions.
+    // The orphans (field + table) are injected manually into the plan file after saving.
+    const schema = { data: { tableSchemas: [{
+      id: 'tblA', name: 'Shared', primaryColumnId: 'fldA1',
+      columns: [{ id: 'fldA1', name: 'Name', type: 'text' }],
+    }] } };
+
+    const deleteFieldsCalls = [];
+    const deleteTableCalls = [];
+
+    const client = {
+      getApplicationData: async () => schema,
+      // applyPlan may call createTable/createField for new items, but our plan is empty.
+      createTable: async () => ({ data: { id: 'tblNEW' } }),
+      createField: async () => ({ data: { id: 'fldNEW' } }),
+      deleteFields: async (appId, fields, opts) => {
+        deleteFieldsCalls.push({ appId, fields, opts });
+        // Return as if all succeeded
+        return { succeeded: fields.map((f) => ({ fieldId: f.fieldId })), failed: [] };
+      },
+      deleteTable: async (appId, tableId, tableName) => {
+        deleteTableCalls.push({ appId, tableId, tableName });
+      },
+    };
+
+    // Step 1: Run plan() to persist a valid plan.
+    await computeSyncPlan({
+      client,
+      sourceBaseId: srcAppId,
+      destBaseId: destAppId,
+      planId: 'plnPruneTest',
+    });
+
+    // Step 2: Patch the saved plan to inject orphans.
+    // We load the plan file, add orphans, and re-save it.
+    const { syncDir: getSyncDir } = await import('../../src/sync/idmap.js');
+    const { readFileSync: rfSync, writeFileSync } = await import('node:fs');
+    const planPath = join(getSyncDir(srcAppId, destAppId), 'plan-plnPruneTest.json');
+    const savedPlan = JSON.parse(rfSync(planPath, 'utf8'));
+    // Inject: one field orphan (dest table "Shared" has an extra field "OldField"),
+    //         one table orphan (dest has extra table "Orphaned")
+    savedPlan.orphans = [
+      { kind: 'field', tableName: 'Shared', destId: 'fldORPHAN1', name: 'OldField' },
+      { kind: 'table', name: 'Orphaned', destId: 'tblORPHAN1' },
+    ];
+    writeFileSync(planPath, JSON.stringify(savedPlan));
+
+    // Step 3: Call apply() with policy=mirror, confirmDeletions=true, confirmTableDeletions=false.
+    const out = await syncApply({
+      client,
+      sourceBaseId: srcAppId,
+      destBaseId: destAppId,
+      planId: 'plnPruneTest',
+      runStartedAt: new Date().toISOString(),
+      policy: 'mirror',
+      confirmDeletions: true,
+      confirmTableDeletions: false,
+    });
+
+    // Assert: deleteFields was called once for the orphan field
+    assert.equal(deleteFieldsCalls.length, 1, 'deleteFields must be called exactly once');
+    assert.equal(deleteFieldsCalls[0].fields[0].fieldId, 'fldORPHAN1', 'deleteFields called with correct orphan fieldId');
+
+    // Assert: deleteTable was NOT called (gated by confirmTableDeletions=false)
+    assert.equal(deleteTableCalls.length, 0, 'deleteTable must NOT be called (confirmTableDeletions=false)');
+
+    // Assert: result.machine.schemaDeleted reflects the deleted field
+    assert.ok(out.machine.schemaDeleted > 0, 'result.machine.schemaDeleted must be > 0');
+
+    // Assert: TABLE_DELETION_GATED warning in result
+    const warnings = out.machine.warnings || [];
+    const gatedWarn = warnings.find((w) => w.code === 'TABLE_DELETION_GATED');
+    assert.ok(gatedWarn, 'result must carry a TABLE_DELETION_GATED warning');
+    assert.match(gatedWarn.message, /confirmTableDeletions/, 'TABLE_DELETION_GATED message must mention confirmTableDeletions');
+  });
+});
+
 describe('sync index.apply — synchronous fieldMappings pre-flight (Task 8 Fix)', () => {
   // apply() must throw FIELD_MAP_INVALID synchronously (before launching the background records
   // job) when fieldMappings references a computed (formula) dest field.
