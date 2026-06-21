@@ -71,6 +71,12 @@ export function renderApplyResult(result) {
   if (result.matched != null && result.matched > 0) {
     lines.push(`  matched: ${result.matched} (natural-key pre-pass)`);
   }
+  if (result.schemaDeleted != null && result.schemaDeleted > 0) {
+    lines.push(`  schemaDeleted: ${result.schemaDeleted} (dest-only fields/views removed)`);
+  }
+  if (result.tablesDeleted != null && result.tablesDeleted > 0) {
+    lines.push(`  tablesDeleted: ${result.tablesDeleted} (dest-only tables removed)`);
+  }
   if (result.records) {
     const r = result.records;
     if (r.status === 'running') {

@@ -1596,7 +1596,8 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         skip: { type: 'array', items: { type: 'string' }, description: 'Used only by mode="apply": list of changeIds to skip (actions with a matching changeId are counted as skipped but not applied). Use changeIds from the plan output.' },
         policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = make dest identical to source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode.' },
         policyOverrides: { type: 'object', description: 'Used by mode="apply": per-table reconciliation preset overrides. Maps table name → preset (e.g. { "Games": "preserve" }). Overrides the global policy for the named tables.', additionalProperties: { type: 'string', enum: ['mirror', 'overlay', 'preserve'] } },
-        confirmDeletions: { type: 'boolean', description: 'Used by mode="apply" with policy="mirror": must be set to true to actually delete dest-only records. Without it, mirror mode reports a DELETION_GATED count and deletes nothing.' },
+        confirmDeletions: { type: 'boolean', description: 'Used by mode="apply" with policy="mirror": must be set to true to actually delete dest-only RECORDS and dest-only FIELDS/VIEWS. Without it, mirror mode reports a DELETION_GATED count and deletes nothing for records; orphan fields/views are reported and kept.' },
+        confirmTableDeletions: { type: 'boolean', description: 'Used by mode=apply with policy=mirror: required to delete whole dest-only TABLES. confirmDeletions alone never drops a table; without confirmTableDeletions, orphan tables report TABLE_DELETION_GATED and are kept.' },
         fieldMappings: { type: 'object', description: 'Field mapping overrides: maps table name → { sourceField: destField } to inject a source field\'s value into a different (writable scalar) dest field during record sync. Example: { "Games": { "Title": "Name" } }. In mode="plan" and mode="diff", fieldMappings are validated against the two schemas (dry-run, no mutation) and errors are returned in fieldMappingErrors.', additionalProperties: { type: 'object', additionalProperties: { type: 'string' } } },
         debug: debugProp,
       },
@@ -2399,7 +2400,7 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, fieldMappings, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, fieldMappings, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       const id = 'pln' + client._genRandomId();
@@ -2411,7 +2412,7 @@ const handlers = {
       const runStartedAt = new Date().toISOString();
       let out;
       try {
-        out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys });
+        out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, fieldMappings, naturalKeys });
       } catch (e) {
         if (e && e.code === 'FIELD_MAP_INVALID') {
           return err(`Field mapping validation failed:\n${(e.mappingErrors || []).map((me) => `  [${me.code}] table=${me.table || '?'}${me.source ? ' source=' + me.source : ''}${me.target ? ' target=' + me.target : ''}`).join('\n')}`);

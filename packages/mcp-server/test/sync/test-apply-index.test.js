@@ -14,6 +14,17 @@ describe('report.renderApplyResult', () => {
     assert.match(renderApplyResult({ planId: 'p', aborted: false, created: 2, updated: 1, skipped: 3, failed: 0, warnings: [] }).human, /created: 2/);
     assert.match(renderApplyResult({ planId: 'p', aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: 'm' }] }).human, /DRIFT/);
   });
+  it('surfaces schemaDeleted and tablesDeleted when > 0', () => {
+    const base = { planId: 'p', aborted: false, created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    // zero → not rendered
+    const zeroOut = renderApplyResult({ ...base, schemaDeleted: 0, tablesDeleted: 0 }).human;
+    assert.ok(!zeroOut.includes('schemaDeleted'), 'schemaDeleted:0 should not appear');
+    assert.ok(!zeroOut.includes('tablesDeleted'), 'tablesDeleted:0 should not appear');
+    // > 0 → rendered
+    const out = renderApplyResult({ ...base, schemaDeleted: 3, tablesDeleted: 1 }).human;
+    assert.match(out, /schemaDeleted: 3/);
+    assert.match(out, /tablesDeleted: 1/);
+  });
 });
 
 describe('index.apply', () => {
