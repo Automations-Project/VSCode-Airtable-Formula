@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1, pruneRecords } from '../../src/sync/records.js';
+import { applyRecordsPass1, pruneRecords, collectTruncatedTableNames } from '../../src/sync/records.js';
 
 export function fakeClient() {
   const calls = { create: [], update: [] };
@@ -282,5 +282,18 @@ describe('pruneRecords (extras axis)', () => {
     assert.equal(client.calls.deleted[0].rowIds.length, 50, 'first chunk has 50 ids');
     assert.equal(client.calls.deleted[1].rowIds.length, 25, 'second chunk has 25 ids');
     assert.equal(result.deleted, 75, 'all 75 orphans counted as deleted');
+  });
+});
+
+// ── Task 2: collectTruncatedTableNames helper ────────────────────────────────
+
+describe('collectTruncatedTableNames', () => {
+  it('names any table at the 1000 cap on either side', () => {
+    const big = (name) => ({ id: 'tbl' + name, name, records: Array.from({ length: 1000 }, (_, i) => ({ id: 'r' + i })) });
+    const small = (name) => ({ id: 'tbl' + name, name, records: [{ id: 'r0' }] });
+    const src = { tables: [big('A'), small('B')] };
+    const dest = { tables: [small('A'), big('C')] };
+    const set = collectTruncatedTableNames(src, dest);
+    assert.deepEqual([...set].sort(), ['A', 'C']);
   });
 });

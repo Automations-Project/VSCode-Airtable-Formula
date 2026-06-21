@@ -995,7 +995,15 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   persist(idmap, journal);
 
   // Extras axis: prune dest-only orphan records under mirror policy
-  await pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result });
+  const truncatedTables = collectTruncatedTableNames(srcSnapshot, destSnapshot);
+  for (const name of truncatedTables) {
+    result.warnings.push({
+      code: 'RECORDS_TRUNCATED',
+      message: `Table "${name}": snapshot capped at 1000 rows — records beyond the limit are not synced ` +
+        `and mirror deletion is skipped for this table (>1000-row pagination is a follow-up).`,
+    });
+  }
+  await pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables });
   persist(idmap, journal);
 
   return result;
@@ -1099,6 +1107,19 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// collectTruncatedTableNames — set-builder for pruneRecords truncation guard
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** Table names whose snapshot hit the 1000-row read cap on EITHER side (possibly truncated). */
+export function collectTruncatedTableNames(srcSnapshot, destSnapshot) {
+  const names = new Set();
+  for (const t of [...(srcSnapshot?.tables || []), ...(destSnapshot?.tables || [])]) {
+    if ((t.records || []).length >= 1000) names.add(t.name);
+  }
+  return names;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // pruneRecords — extras axis: delete dest-only orphan records under mirror (gated)
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1122,6 +1143,7 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
  * @param {boolean}  opts.confirmDeletions - if false, gate deletions (push DELETION_GATED warning)
  * @param {object}   opts.limiter          - rate limiter { run: (fn) => fn() }
  * @param {object}   opts.result           - result accumulator (mutated: result.deleted, result.warnings)
+ * @param {Set<string>} [opts.truncatedTables] - table names whose snapshot hit the 1000-row cap (skipped to avoid false-orphan deletion)
  * @returns {Promise<void>}
  */
 export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables = new Set() }) {
