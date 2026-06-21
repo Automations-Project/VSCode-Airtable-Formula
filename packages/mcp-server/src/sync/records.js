@@ -1163,6 +1163,78 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// matchByNaturalKeys — pure natural-key record matching
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Natural-key record matching: add idmap.records entries by matching source→dest records on a
+ * key field's VALUE (field id resolved per-base by name). ADD-ONLY + ambiguity-safe — never
+ * removes/overwrites a mapping, never claims an already-mapped dest, never guesses → can only
+ * protect records (prevent false-orphan deletes / duplicates), never mis-map.
+ */
+export function matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idmap, result }) {
+  if (result.matched == null) result.matched = 0;
+  if (!result.warnings) result.warnings = [];
+  idmap.records ??= {};
+  const srcTables = new Map((srcSnapshot.tables || []).map((t) => [t.name, t]));
+  const dstTables = new Map((destSnapshot.tables || []).map((t) => [t.name, t]));
+
+  for (const [tableName, keyFieldName] of Object.entries(naturalKeys || {})) {
+    if (!keyFieldName) continue;
+    const st = srcTables.get(tableName);
+    const dt = dstTables.get(tableName);
+    const srcKeyId = st?.fields.find((f) => f.name === keyFieldName)?.id;
+    const dstKeyId = dt?.fields.find((f) => f.name === keyFieldName)?.id;
+    if (!st || !dt || !srcKeyId || !dstKeyId) {
+      result.warnings.push({ code: 'NATURAL_KEY_FIELD_MISSING', message: `Table "${tableName}": key field "${keyFieldName}" not found on ${(!st || !srcKeyId) ? 'source' : 'dest'}` });
+      continue;
+    }
+
+    // dest records grouped by key value (skip empty)
+    const destByKey = new Map();
+    for (const r of (dt.records || [])) {
+      const v = (r.cellValuesByColumnId || {})[dstKeyId];
+      if (v == null || v === '') continue;
+      const k = String(v);
+      if (!destByKey.has(k)) destByKey.set(k, []);
+      destByKey.get(k).push(r.id);
+    }
+
+    // count unmapped source key values (a value on >1 unmapped source = ambiguous)
+    const srcKeyCount = new Map();
+    for (const r of (st.records || [])) {
+      if (idmap.records[r.id]) continue;
+      const v = (r.cellValuesByColumnId || {})[srcKeyId];
+      if (v == null || v === '') continue;
+      const k = String(v);
+      srcKeyCount.set(k, (srcKeyCount.get(k) || 0) + 1);
+    }
+
+    const claimed = new Set(Object.values(idmap.records)); // updated as we add
+    for (const r of (st.records || [])) {
+      if (idmap.records[r.id]) continue;                  // existing mapping wins
+      const v = (r.cellValuesByColumnId || {})[srcKeyId];
+      if (v == null || v === '') continue;                 // empty key → skip
+      const k = String(v);
+      if (srcKeyCount.get(k) > 1) {
+        result.warnings.push({ code: 'NATURAL_KEY_AMBIGUOUS', message: `Table "${tableName}": key "${k}" on multiple source records — skipped` });
+        continue;
+      }
+      const dests = destByKey.get(k) || [];
+      if (dests.length === 0) continue;                    // no dest match → new record (Pass 1 creates)
+      if (dests.length > 1) {
+        result.warnings.push({ code: 'NATURAL_KEY_AMBIGUOUS', message: `Table "${tableName}": key "${k}" matches multiple dest records — skipped` });
+        continue;
+      }
+      if (claimed.has(dests[0])) continue;                 // single dest already mapped → don't steal
+      idmap.records[r.id] = dests[0];
+      claimed.add(dests[0]);
+      result.matched++;
+    }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // reconcile — existence-prune stale idmap.records entries
 // ──────────────────────────────────────────────────────────────────────────────
 
