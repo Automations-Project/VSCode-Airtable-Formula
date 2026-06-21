@@ -5,13 +5,14 @@ import { pruneSchema } from '../../src/sync/prune-schema.js';
 // Mock client. deleteFields succeeds for a field UNLESS some still-present field depends on it
 // (modelled by `deps`: dependentFieldId -> [fieldIds it depends on]). force is asserted false.
 function mockClient({ deps = {} } = {}) {
-  const calls = { views: [], tables: [], fieldBatches: [] };
+  const calls = { views: [], tables: [], fieldBatches: [], sections: [] };
   const present = new Set(); // fields still alive (seeded per test via opts)
   const api = {
     calls,
     _seed(ids) { ids.forEach((i) => present.add(i)); },
     async deleteView(appId, viewId) { calls.views.push(viewId); },
     async deleteTable(appId, tableId, expectedName) { calls.tables.push({ tableId, expectedName }); },
+    async deleteViewSection(appId, sectionId) { calls.sections.push({ appId, sectionId }); },
     async deleteFields(appId, fields, opts) {
       assert.equal(opts.force, false, 'must never force-delete fields');
       calls.fieldBatches.push(fields.map((f) => f.fieldId));
@@ -117,5 +118,57 @@ describe('pruneSchema', () => {
     ]), policy: 'mirror', confirmDeletions: true, confirmTableDeletions: false, result });
     assert.equal(result.schemaDeleted, 0);
     assert.ok(result.warnings.some((x) => x.code === 'SCHEMA_DELETE_BLOCKED'));
+  });
+
+  // ── Section orphan tests ──────────────────────────────────────────────────
+
+  it('mirror + confirmDeletions deletes orphan section (step 0)', async () => {
+    const client = mockClient();
+    const result = baseResult();
+    await pruneSchema({ client, destAppId: 'appDest', plan: plan([
+      { kind: 'section', destId: 'vscX', name: 'Ghost', tableName: 'T' },
+    ]), policy: 'mirror', confirmDeletions: true, confirmTableDeletions: false, result });
+    assert.deepEqual(client.calls.sections, [{ appId: 'appDest', sectionId: 'vscX' }]);
+    assert.equal(result.schemaDeleted, 1);
+  });
+
+  it('mirror WITHOUT confirmDeletions: section not deleted + DELETION_GATED', async () => {
+    const client = mockClient();
+    const result = baseResult();
+    await pruneSchema({ client, destAppId: 'appDest', plan: plan([
+      { kind: 'section', destId: 'vscX', name: 'Ghost', tableName: 'T' },
+    ]), policy: 'mirror', confirmDeletions: false, confirmTableDeletions: false, result });
+    assert.equal(client.calls.sections.length, 0, 'deleteViewSection must not be called');
+    assert.equal(result.schemaDeleted, 0);
+    const w = result.warnings.find((x) => x.code === 'DELETION_GATED');
+    assert.ok(w, 'DELETION_GATED warning should be present');
+  });
+
+  it('overlay policy: section orphan never deleted', async () => {
+    const client = mockClient();
+    const result = baseResult();
+    await pruneSchema({ client, destAppId: 'appDest', plan: plan([
+      { kind: 'section', destId: 'vscX', name: 'Ghost', tableName: 'T' },
+    ]), policy: 'overlay', confirmDeletions: true, confirmTableDeletions: false, result });
+    assert.equal(client.calls.sections.length, 0, 'deleteViewSection must not be called under overlay');
+    assert.equal(result.schemaDeleted, 0);
+  });
+
+  it('deleteViewSection throws → SCHEMA_DELETE_FAILED + loop continues for second section', async () => {
+    let callCount = 0;
+    const client = mockClient();
+    client.deleteViewSection = async (appId, sectionId) => {
+      callCount++;
+      if (sectionId === 'vscBad') throw new Error('API error');
+      client.calls.sections.push({ appId, sectionId });
+    };
+    const result = baseResult();
+    await pruneSchema({ client, destAppId: 'appDest', plan: plan([
+      { kind: 'section', destId: 'vscBad', name: 'Fails', tableName: 'T' },
+      { kind: 'section', destId: 'vscGood', name: 'Succeeds', tableName: 'T' },
+    ]), policy: 'mirror', confirmDeletions: true, confirmTableDeletions: false, result });
+    assert.equal(callCount, 2, 'both deleteViewSection calls were attempted');
+    assert.equal(result.schemaDeleted, 1, 'only the successful one incremented schemaDeleted');
+    assert.ok(result.warnings.some((x) => x.code === 'SCHEMA_DELETE_FAILED' && x.message.includes('Fails')));
   });
 });

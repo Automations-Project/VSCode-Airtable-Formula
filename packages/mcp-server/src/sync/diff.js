@@ -276,6 +276,19 @@ export function computePlan(srcSnap, destSnap, idmap) {
     for (const dv of collabViews(dt)) if (!srcViewNames.has(dv.name)) orphans.push({ kind: 'view', destId: dv.id, name: dv.name, tableName: dt.name });
   }
 
+  // Section orphans: dest-only sidebar sections in a matched table (by name).
+  for (const dt of destSnap.tables) {
+    const srcTableId = srcTableByDestId.get(dt.id);
+    if (!srcTableId) continue; // whole table is already a table orphan
+    const srcTable = srcTablesById.get(srcTableId);
+    const srcSectionNames = new Set((srcTable.sections || []).map((s) => s.name));
+    for (const ds of (dt.sections || [])) {
+      if (ds.id && !srcSectionNames.has(ds.name)) {
+        orphans.push({ kind: 'section', destId: ds.id, name: ds.name, tableName: dt.name });
+      }
+    }
+  }
+
   // ── Annotate every action with a stable changeId + class + apply ─────────
   // Build resolution maps from srcSnap once (name-based, stable across bases).
   const srcTableNameById = new Map(srcSnap.tables.map((t) => [t.id, t.name]));

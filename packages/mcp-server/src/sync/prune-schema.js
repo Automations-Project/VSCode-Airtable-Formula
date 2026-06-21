@@ -14,6 +14,13 @@ export async function pruneSchema({ client, destAppId, plan, policy, policyOverr
   let gatedFieldsViews = 0;
   let gatedTables = 0;
 
+  // 0. Sections (delete first — Airtable auto-promotes contained views to top-level; matched-table orphans)
+  for (const s of orphans.filter((o) => o.kind === 'section' && removes(o.tableName))) {
+    if (!confirmDeletions) { gatedFieldsViews++; continue; }
+    try { await client.deleteViewSection(destAppId, s.destId); result.schemaDeleted++; }
+    catch (e) { result.warnings.push({ code: 'SCHEMA_DELETE_FAILED', message: `section "${s.name}" (${s.tableName}): ${e.message ?? e}` }); }
+  }
+
   // 1. Views (no dependents) — matched-table orphans
   for (const v of orphans.filter((o) => o.kind === 'view' && removes(o.tableName))) {
     if (!confirmDeletions) { gatedFieldsViews++; continue; }
@@ -47,6 +54,6 @@ export async function pruneSchema({ client, destAppId, plan, policy, policyOverr
     catch (e) { result.warnings.push({ code: 'SCHEMA_DELETE_FAILED', message: `table "${t.name}": ${e.message ?? e}` }); }
   }
 
-  if (gatedFieldsViews > 0) result.warnings.push({ code: 'DELETION_GATED', message: `${gatedFieldsViews} dest-only field(s)/view(s) would be deleted under mirror — set confirmDeletions:true` });
+  if (gatedFieldsViews > 0) result.warnings.push({ code: 'DELETION_GATED', message: `${gatedFieldsViews} dest-only field(s)/view(s)/section(s) would be deleted under mirror — set confirmDeletions:true` });
   if (gatedTables > 0) result.warnings.push({ code: 'TABLE_DELETION_GATED', message: `${gatedTables} dest-only table(s) would be deleted under mirror — set confirmTableDeletions:true` });
 }

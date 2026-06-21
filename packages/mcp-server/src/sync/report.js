@@ -75,7 +75,7 @@ export function renderApplyResult(result) {
     lines.push(`  retyped: ${result.retyped} (scalar field type changes applied)`);
   }
   if (result.schemaDeleted != null && result.schemaDeleted > 0) {
-    lines.push(`  schemaDeleted: ${result.schemaDeleted} (dest-only fields/views removed)`);
+    lines.push(`  schemaDeleted: ${result.schemaDeleted} (dest-only fields/views/sections removed)`);
   }
   if (result.tablesDeleted != null && result.tablesDeleted > 0) {
     lines.push(`  tablesDeleted: ${result.tablesDeleted} (dest-only tables removed)`);

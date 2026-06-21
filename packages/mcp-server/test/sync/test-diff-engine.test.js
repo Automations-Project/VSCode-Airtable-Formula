@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 
 import { diff, diffDetail } from '../../src/sync/index.js';
 import { syncDir } from '../../src/sync/idmap.js';
+import { computePlan } from '../../src/sync/diff.js';
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -117,5 +118,80 @@ describe('sync index.diff / diffDetail', () => {
     assert.ok(typeof result.human === 'string', 'human should be a string');
     assert.ok(Array.isArray(result.machine.entries), 'machine.entries should be an array');
     assert.ok(result.machine.entries.length >= 1, 'should resolve to the latest diff and return entries');
+  });
+});
+
+// ── Section-orphan diff tests ─────────────────────────────────────────────────
+
+describe('computePlan section orphans', () => {
+  // Minimal idmap: src table tblS1 ↔ dest table tblD1
+  const idmap = { tables: { tblS1: 'tblD1' }, fields: {} };
+
+  const srcSnap = {
+    baseId: 'appSrc',
+    tables: [{
+      id: 'tblS1', name: 'T', primaryFieldId: 'fldS1',
+      fields: [{ id: 'fldS1', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false }],
+      views: [],
+      sections: [{ id: 'vscSrc1', name: 'Active', viewNames: [] }],
+    }],
+  };
+
+  it('dest section absent from source by name → plan.orphans includes kind:section entry', () => {
+    const destSnap = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD1', name: 'T', primaryFieldId: 'fldD1',
+        fields: [{ id: 'fldD1', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false }],
+        views: [],
+        // Ghost section exists in dest but NOT in source
+        sections: [
+          { id: 'vscX', name: 'Ghost', viewNames: [] },
+          { id: 'vscSrc1Dest', name: 'Active', viewNames: [] }, // present in source by name
+        ],
+      }],
+    };
+
+    const result = computePlan(srcSnap, destSnap, idmap);
+    const sectionOrphans = result.orphans.filter((o) => o.kind === 'section');
+    assert.equal(sectionOrphans.length, 1, 'exactly one section orphan (Ghost)');
+    assert.deepEqual(sectionOrphans[0], { kind: 'section', destId: 'vscX', name: 'Ghost', tableName: 'T' });
+  });
+
+  it('dest section present in source by name → no section orphan emitted', () => {
+    const destSnap = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD1', name: 'T', primaryFieldId: 'fldD1',
+        fields: [{ id: 'fldD1', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false }],
+        views: [],
+        // Both sections present in source by name → no orphan
+        sections: [
+          { id: 'vscSrc1Dest', name: 'Active', viewNames: [] },
+        ],
+      }],
+    };
+
+    const result = computePlan(srcSnap, destSnap, idmap);
+    const sectionOrphans = result.orphans.filter((o) => o.kind === 'section');
+    assert.equal(sectionOrphans.length, 0, 'no section orphans when all dest sections exist in source by name');
+  });
+
+  it('section without an id is not emitted as orphan', () => {
+    const destSnap = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblD1', name: 'T', primaryFieldId: 'fldD1',
+        fields: [{ id: 'fldD1', name: 'Name', type: 'text', typeOptions: null, description: null, isComputed: false }],
+        views: [],
+        sections: [
+          { name: 'NoId', viewNames: [] }, // id missing → should be skipped
+        ],
+      }],
+    };
+
+    const result = computePlan(srcSnap, destSnap, idmap);
+    const sectionOrphans = result.orphans.filter((o) => o.kind === 'section');
+    assert.equal(sectionOrphans.length, 0, 'section without id should not be emitted as orphan');
   });
 });
