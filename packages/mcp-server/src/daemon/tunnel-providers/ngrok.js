@@ -186,8 +186,9 @@ export const ngrokProvider = {
         addr: options.port,
         authtoken,
         ...(options.domain ? { domain: options.domain } : {}),
-        // Human-readable label in the ngrok dashboard.
-        forwards_to: `airtable-mcp (port ${options.port})`,
+        // Human-readable label in the ngrok dashboard. No port — it adds no routing
+        // value and would leak the local daemon port to anyone with dashboard access.
+        forwards_to: 'airtable-mcp',
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);

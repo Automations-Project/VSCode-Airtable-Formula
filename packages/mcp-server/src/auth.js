@@ -305,7 +305,8 @@ export class AirtableAuth {
     });
 
     if (this.csrfToken) {
-      console.error('[auth] CSRF token found:', this.csrfToken.substring(0, 15) + '...');
+      // Never log any portion of the CSRF token — even a prefix is a secret leak to stderr/logs.
+      console.error('[auth] CSRF token found');
     } else {
       console.error('[auth] WARNING: CSRF token not found. Mutations may fail.');
     }
