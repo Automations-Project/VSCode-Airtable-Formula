@@ -90,6 +90,25 @@ function findDestFieldType(index, destFieldId) {
   const f = findDestField(index, destFieldId);
   return f ? f.type : undefined;
 }
+const SELECT_TYPES = new Set(['select', 'singleSelect', 'multiSelect', 'multipleSelects']);
+
+// Source-choice-id → dest-choice-id map, matched by NAME (same contract as idmap.js
+// matchChoices). Registered at field create/adopt time: the records phase of the SAME run
+// reads idmap.fields[..].choices to map select cells — an empty map made every select cell
+// skip (RECORD_CELL_SKIPPED) on first sync, and multiSelect columns never converged after.
+function matchChoicesByName(srcTypeOptions, destTypeOptions) {
+  const sc = srcTypeOptions && srcTypeOptions.choices;
+  const dc = destTypeOptions && destTypeOptions.choices;
+  if (!sc || !dc) return {};
+  const destByName = new Map(Object.entries(dc).map(([id, c]) => [c.name, c.id || id]));
+  const out = {};
+  for (const [id, c] of Object.entries(sc)) {
+    const destId = destByName.get(c.name);
+    if (destId) out[c.id || id] = destId;
+  }
+  return out;
+}
+
 // Merge source choices into dest choices by NAME (never drop a dest choice). Dest choices
 // keep their ids; new source choices are added without ids (Airtable assigns).
 function mergeChoices(destField, srcTypeOptions) {
@@ -271,7 +290,9 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
       }
       const existing = entry && entry.fieldsByName.get(a.name);
       if (existing) {
-        idmap.fields[a.sourceFieldId] = { destFld: existing.id, choices: {} };
+        // Adoption: the dest field already exists with its own choice ids — register the real
+        // name-matched map so the same-run records phase can write select cells.
+        idmap.fields[a.sourceFieldId] = { destFld: existing.id, choices: matchChoicesByName(a.typeOptions, existing.typeOptions) };
         result.skipped++;
         return;
       }
@@ -311,8 +332,25 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         typeOptions = rest;
       }
       const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
-      idmap.fields[a.sourceFieldId] = { destFld: columnId, choices: {} };
-      if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
+      let createdTypeOptions = typeOptions;
+      let choices = {};
+      if (SELECT_TYPES.has(a.type)) {
+        // The server may re-key the choices it was sent (createField's response does not
+        // reliably echo the column), so re-read the AUTHORITATIVE dest schema and name-match.
+        // Without this the idmap carried choices:{} and the same-run records phase skipped
+        // every select/multiSelect cell of the new field. Best-effort: a failed re-read must
+        // not fail the create — the next plan's matchByName repopulates the map.
+        try {
+          const { cols } = await readTable(client, destAppId, destTableId);
+          const createdCol = cols.find((c) => c.id === columnId);
+          if (createdCol) createdTypeOptions = createdCol.typeOptions ?? createdTypeOptions;
+          choices = matchChoicesByName(a.typeOptions, createdCol && createdCol.typeOptions);
+        } catch (e) {
+          result.warnings.push({ code: 'CHOICE_MAP_UNRESOLVED', message: `Field "${a.name}": could not read back created choices (${e.message ?? e}) — select cells may be skipped this run` });
+        }
+      }
+      idmap.fields[a.sourceFieldId] = { destFld: columnId, choices };
+      if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions: createdTypeOptions });
       result.created++;
       return;
     }
