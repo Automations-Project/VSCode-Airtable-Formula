@@ -9,6 +9,7 @@ import { newJournal, loadJournal, saveJournal } from './journal.js';
 import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
 import { validateFieldMappings, isDeleting } from './policy.js';
 import { pruneSchema } from './prune-schema.js';
+import { acquireApplyLock } from './apply-lock.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -133,69 +134,84 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
-  // Schema-only: fingerprintSchema + buildIndex use table/field/view METADATA only, not per-view
-  // live config — so skip the getView/readData storm (one ~1s read per view) on the dest here.
-  const destSnapshot = await snapshotSchemaOnly(client, destBaseId);
-  if (fingerprintSchema(destSnapshot) !== fullPlan.destFingerprint) {
-    return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
-  }
-
-  // Pre-flight: validate fieldMappings synchronously before launching the background job.
-  // This makes the FIELD_MAP_INVALID catch in the tool handler reachable (the background job
-  // re-validates as a safety net, but by then the caller has already returned).
-  if (fieldMappings && Object.keys(fieldMappings).length > 0) {
-    const srcSnapshot = await snapshotSchemaOnly(client, sourceBaseId);
-    const { errors } = validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings);
-    if (errors.length > 0) {
-      const err = new Error('Field mapping validation failed');
-      err.code = 'FIELD_MAP_INVALID';
-      err.mappingErrors = errors;
-      throw err;
+  // Concurrency guard: two applies on the same pair would run concurrent background records
+  // jobs (record duplication + idmap.json last-writer-wins clobber). Throws APPLY_LOCKED when
+  // a live holder exists; stale locks (dead pid) are replaced. NOTE: the background records
+  // job outlives this function — on the success path the lock is released in the job's
+  // completion path (the .finally below), not when apply() returns.
+  const releaseLock = acquireApplyLock(sourceBaseId, destBaseId, planId);
+  let lockHeldByRecordsJob = false;
+  try {
+    // Schema-only: fingerprintSchema + buildIndex use table/field/view METADATA only, not per-view
+    // live config — so skip the getView/readData storm (one ~1s read per view) on the dest here.
+    const destSnapshot = await snapshotSchemaOnly(client, destBaseId);
+    if (fingerprintSchema(destSnapshot) !== fullPlan.destFingerprint) {
+      return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
     }
+
+    // Pre-flight: validate fieldMappings synchronously before launching the background job.
+    // This makes the FIELD_MAP_INVALID catch in the tool handler reachable (the background job
+    // re-validates as a safety net, but by then the caller has already returned).
+    if (fieldMappings && Object.keys(fieldMappings).length > 0) {
+      const srcSnapshot = await snapshotSchemaOnly(client, sourceBaseId);
+      const { errors } = validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings);
+      if (errors.length > 0) {
+        const err = new Error('Field mapping validation failed');
+        err.code = 'FIELD_MAP_INVALID';
+        err.mappingErrors = errors;
+        throw err;
+      }
+    }
+
+    const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
+    // C1: preserve the persisted records/attachments identity map across applies (see buildRunIdmap).
+    const idmap = buildRunIdmap(sourceBaseId, destBaseId, fullPlan, journal);
+
+    const result = await applyPlan({
+      client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
+      persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
+      skip, confirmRetypes,
+    });
+
+    // Schema extras phase: delete dest-only fields/views/tables under mirror, gated. Runs after
+    // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
+    // the schema is clean before record sync begins. Mutates `result` in-place.
+    if (!result.aborted) {
+      await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
+
+      // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
+      // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single
+      // blocking apply call would look hung / time out. The phase persists progress (idmap + records
+      // journal) and writes a status file; poll via `sync_base mode=status`.
+      writeRecordsJobStatus(sourceBaseId, destBaseId, planId, { status: 'running', startedAt: runStartedAt });
+      lockHeldByRecordsJob = true; // the job's .finally below owns the release from here on
+      applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys })
+        .then((r) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
+          status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
+          result: {
+            created: r.created, updated: r.updated, failed: r.failed,
+            matched: r.matched || 0,
+            attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
+            deleted: r.deleted || 0,
+            warningCount: (r.warnings || []).length,
+            warnings: r.warnings || [],
+          },
+        }))
+        .catch((err) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
+          status: 'failed', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
+          error: String(err && err.message ? err.message : err),
+        }))
+        .finally(releaseLock);
+      result.records = { status: 'running', jobId: planId };
+    }
+
+    saveState(sourceBaseId, destBaseId, { sourceBaseId, destBaseId, engineVersion: ENGINE_VERSION, lastPlanId: planId, lastApplyAt: runStartedAt });
+    return renderApplyResult(result);
+  } finally {
+    // Synchronous exits (DRIFT abort, FIELD_MAP_INVALID, applyPlan throw) never launched the
+    // records job — release here. When the job launched, it owns the release.
+    if (!lockHeldByRecordsJob) releaseLock();
   }
-
-  const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
-  // C1: preserve the persisted records/attachments identity map across applies (see buildRunIdmap).
-  const idmap = buildRunIdmap(sourceBaseId, destBaseId, fullPlan, journal);
-
-  const result = await applyPlan({
-    client, plan: fullPlan, destAppId: destBaseId, destSnapshot, idmap, journal,
-    persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
-    skip, confirmRetypes,
-  });
-
-  // Schema extras phase: delete dest-only fields/views/tables under mirror, gated. Runs after
-  // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
-  // the schema is clean before record sync begins. Mutates `result` in-place.
-  if (!result.aborted) {
-    await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
-
-    // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
-    // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single
-    // blocking apply call would look hung / time out. The phase persists progress (idmap + records
-    // journal) and writes a status file; poll via `sync_base mode=status`.
-    writeRecordsJobStatus(sourceBaseId, destBaseId, planId, { status: 'running', startedAt: runStartedAt });
-    applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys })
-      .then((r) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
-        status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
-        result: {
-          created: r.created, updated: r.updated, failed: r.failed,
-          matched: r.matched || 0,
-          attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
-          deleted: r.deleted || 0,
-          warningCount: (r.warnings || []).length,
-          warnings: r.warnings || [],
-        },
-      }))
-      .catch((err) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
-        status: 'failed', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
-        error: String(err && err.message ? err.message : err),
-      }));
-    result.records = { status: 'running', jobId: planId };
-  }
-
-  saveState(sourceBaseId, destBaseId, { sourceBaseId, destBaseId, engineVersion: ENGINE_VERSION, lastPlanId: planId, lastApplyAt: runStartedAt });
-  return renderApplyResult(result);
 }
 
 /**
