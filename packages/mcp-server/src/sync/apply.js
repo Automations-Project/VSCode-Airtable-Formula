@@ -45,17 +45,22 @@ async function readTable(client, appId, tableId) {
   return { primaryId, primary: cols.find((c) => c.id === primaryId), cols, views: t.views ?? [] };
 }
 
-function rememberLink(state, forwardFieldId, destTableId) {
-  state.createdLinks.set(forwardFieldId, { destTableId });
-}
-
+// Adopt the auto-created reverse of a link whose FORWARD side is already mapped in the idmap
+// (created earlier this run, or matched/adopted in a prior run). The reverse-side createField
+// action carries the source FORWARD field id in typeOptions.symmetricColumnId; the dest column
+// whose symmetricColumnId equals that forward's dest id IS this link's reverse — adopt exactly
+// that one. (First-unadopted matching cross-wired multi-link table pairs, and run-local
+// createdLinks state made cross-run retries create duplicate link pairs.)
 async function adoptReverseLink({ client, destAppId, a, idmap, index, state, result }) {
+  const srcForwardId = a.typeOptions && a.typeOptions.symmetricColumnId;
+  const wantSym = srcForwardId && idmap.fields[srcForwardId] && idmap.fields[srcForwardId].destFld;
+  if (!wantSym) return false; // forward unknown → nothing to adopt (create a fresh pair)
   const destTableId = idmap.tables[a.sourceTableId];
   const { cols } = await readTable(client, destAppId, destTableId);
   for (const c of cols) {
     if (!LINK_TYPES.has(c.type)) continue;
     const sym = c.typeOptions && c.typeOptions.symmetricColumnId;
-    if (sym && state.createdLinks.has(sym) && !state.adoptedReverse.has(c.id)) {
+    if (sym === wantSym && !state.adoptedReverse.has(c.id)) {
       if (c.name !== a.name) await client.renameField(destAppId, c.id, a.name);
       idmap.fields[a.sourceFieldId] = { destFld: c.id, choices: {} };
       const entry = index.tablesById.get(destTableId);
@@ -99,19 +104,26 @@ function mergeChoices(destField, srcTypeOptions) {
 
 export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, journal, persist, skip = [], confirmRetypes = false }) {
   const index = buildIndex(destSnapshot);
-  const state = { createdLinks: new Map(), adoptedReverse: new Set() };
+  const state = { adoptedReverse: new Set(), createdTables: new Set() };
   if (!idmap.views) idmap.views = {};
   const result = { planId: plan.planId, aborted: false, created: 0, updated: 0, skipped: 0, failed: 0, retyped: 0, warnings: [], idmap };
   const skipSet = new Set(skip);
 
-  for (let idx = 0; idx < plan.actions.length; idx++) {
-    const a = plan.actions[idx];
-    if (isDone(journal, idx)) { result.skipped++; continue; }
-    if (a.apply === false || skipSet.has(a.changeId)) { result.skipped++; continue; }
+  // Attempt one action. Dispositions (applyAction return value):
+  //  undefined  → applied (or a terminal intentional skip) — journaled done.
+  //  'gated'    → declined by a confirm gate / accepted deferral — NOT journaled done, so a
+  //               re-run of the SAME plan (e.g. with confirmRetypes:true) actually retries it.
+  //  'deferred' → blocked on a dependency that may be created later THIS run — retried below;
+  //               its warnings are held back and only surfaced if it never resolves.
+  const attempt = async (idx, a) => {
+    const warnStart = result.warnings.length;
     try {
-      await applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes });
+      const disposition = await applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes });
+      if (disposition === 'deferred') return { status: 'deferred', warns: result.warnings.splice(warnStart) };
+      if (disposition === 'gated') { result.skipped++; persist(idmap, journal); return { status: 'gated' }; }
       recordDone(journal, idx, a.kind, idmap.tables[a.sourceTableId] ?? (a.sourceFieldId && idmap.fields[a.sourceFieldId]?.destFld));
       persist(idmap, journal);
+      return { status: 'done' };
     } catch (e) {
       recordFailed(journal, idx, a.kind, String(e && e.message ? e.message : e));
       result.failed++;
@@ -120,8 +132,40 @@ export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, 
       // ponytail: continue, don't halt. A failed create's dependents are guarded by the
       // UNRESOLVABLE_REF check; re-run retries non-done actions. Halting on one bad field
       // blocked the entire sync (494 creates never ran behind one failing update).
+      return { status: 'failed' };
+    }
+  };
+
+  const deferred = [];
+  for (let idx = 0; idx < plan.actions.length; idx++) {
+    const a = plan.actions[idx];
+    if (isDone(journal, idx)) { result.skipped++; continue; }
+    if (a.apply === false || skipSet.has(a.changeId)) { result.skipped++; continue; }
+    const r = await attempt(idx, a);
+    if (r.status === 'deferred') deferred.push({ idx, a, warns: r.warns });
+  }
+
+  // Deferred-dependency retry: an action blocked on a not-yet-created table/field (link to a
+  // later table, computed field referencing a later field, computed primary referencing its
+  // siblings) is retried after the rest of the plan ran — loop until a pass makes no progress.
+  let progress = true;
+  while (progress && deferred.length) {
+    progress = false;
+    for (let i = 0; i < deferred.length; ) {
+      const d = deferred[i];
+      const r = await attempt(d.idx, d.a);
+      if (r.status === 'deferred') { d.warns = r.warns; i++; continue; }
+      deferred.splice(i, 1);
+      progress = true;
     }
   }
+  // Never resolved this run: surface the held-back warnings and count skipped. NOT journaled
+  // done — a re-run (or re-plan) retries once the dependency becomes resolvable.
+  for (const d of deferred) {
+    result.warnings.push(...d.warns);
+    result.skipped++;
+  }
+  if (deferred.length) persist(idmap, journal);
   return result;
 }
 
@@ -132,6 +176,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
       if (existing) { idmap.tables[a.sourceTableId] = existing.id; result.skipped++; return; }
       const { tableId } = await client.createTable(destAppId, a.name);
       idmap.tables[a.sourceTableId] = tableId;
+      state.createdTables.add(tableId); // its primary is an empty placeholder → retype ungated
       // D1: delete the auto-created non-primary scaffolding fields for a clean mirror.
       const { primaryId, primary, cols, views } = await readTable(client, destAppId, tableId);
       for (const c of cols) {
@@ -169,14 +214,41 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
       const primaryId = entry.primaryFieldId;
       let primary = null;
       for (const f of entry.fieldsByName.values()) if (f.id === primaryId) primary = f;
-      let renamed = false, retyped = false;
+      let renamed = false, retyped = false, disposition;
       if (primary && primary.name !== a.toName) { await client.renameField(destAppId, primaryId, a.toName); renamed = true; }
       if (a.toType && primary && primary.type !== a.toType) {
         if (ILLEGAL_PRIMARY_TYPES.has(a.toType)) {
           result.warnings.push({ code: 'PRIMARY_TYPE_INCOMPATIBLE', message: `Primary "${a.toName}" wants ${a.toType}; kept ${primary.type} placeholder` });
+        } else if (!confirmRetypes && !state.createdTables.has(destTableId)) {
+          // Retyping a PRE-EXISTING table's primary is a lossy conversion of real data — honor
+          // the same confirmRetypes gate as non-primary scalar retypes. (A table created this
+          // run has an empty placeholder primary, so its retype is safe and stays ungated.)
+          result.warnings.push({ code: 'RETYPE_GATED', message: `Primary "${a.toName}": retype ${primary.type}→${a.toType} gated — set confirmRetypes:true` });
+          disposition = 'gated';
         } else {
-          try { await client.updateFieldConfig(destAppId, primaryId, { type: a.toType, typeOptions: remapRefs(a.toTypeOptions, idmap) }); retyped = true; }
-          catch (e) { result.warnings.push({ code: 'PRIMARY_TYPE_INCOMPATIBLE', message: `Primary "${a.toName}" retype to ${a.toType} rejected: ${e.message ?? e}` }); }
+          let toOpts = remapRefs(a.toTypeOptions, idmap);
+          if (COMPUTED_TYPES.has(a.toType)) {
+            // Same contract as createField/updateField: computed configs must be written in the
+            // WRITABLE shape (raw snapshot options carry read-only formulaTextParsed/dependencies/
+            // resultType the API 422s on). reconcilePrimary runs right after createTable — before
+            // sibling fields exist — so defer until the refs are created later this run.
+            const refs = (a.toTypeOptions && a.toTypeOptions.dependencies && a.toTypeOptions.dependencies.referencedColumnIdsForValue) || [];
+            const unresolved = refs.filter((d) => !(idmap.fields[d] && idmap.fields[d].destFld));
+            if (unresolved.length) {
+              result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Primary "${a.toName}" retype to ${a.toType} deferred — refs [${unresolved.join(', ')}] not yet created` });
+              disposition = 'deferred';
+            } else {
+              toOpts = toWritableComputedOptions(a.toType, toOpts);
+            }
+          } else if (a.toType === 'autoNumber') {
+            // maxUsedAutoNumber is a read-only runtime counter (same strip as createField).
+            const { maxUsedAutoNumber, ...rest } = toOpts || {};
+            toOpts = rest;
+          }
+          if (!disposition) {
+            try { await client.updateFieldConfig(destAppId, primaryId, { type: a.toType, typeOptions: toOpts }); retyped = true; }
+            catch (e) { result.warnings.push({ code: 'PRIMARY_TYPE_INCOMPATIBLE', message: `Primary "${a.toName}" retype to ${a.toType} rejected: ${e.message ?? e}` }); }
+          }
         }
       }
       idmap.fields[a.sourcePrimaryFieldId] = { destFld: primaryId, choices: {} };
@@ -184,6 +256,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         if (renamed) { entry.fieldsByName.delete(primary.name); primary.name = a.toName; entry.fieldsByName.set(a.toName, primary); }
         if (retyped) primary.type = a.toType;
       }
+      if (disposition) return disposition; // gated/deferred retype: NOT journaled done → retryable
       if (renamed || retyped) result.updated++; else result.skipped++;
       return;
     }
@@ -202,8 +275,18 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         result.skipped++;
         return;
       }
-      // Reciprocal-once: adopt the auto-created reverse of a link made earlier this run.
-      if (LINK_TYPES.has(a.type) && await adoptReverseLink({ client, destAppId, a, idmap, index, state, result })) return;
+      if (LINK_TYPES.has(a.type)) {
+        // A link whose target table has no dest counterpart yet (created later in this plan, or
+        // skipped) must not be sent — the payload would carry the SOURCE base's tbl id. Defer:
+        // retried after the remaining createTable actions this run; else surfaced + retryable.
+        const foreignSrc = a.typeOptions && a.typeOptions.foreignTableId;
+        if (foreignSrc && !idmap.tables[foreignSrc]) {
+          result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Link field "${a.name}" targets table ${foreignSrc} with no dest counterpart (not yet created or skipped) — not created` });
+          return 'deferred';
+        }
+        // Reciprocal-once: adopt the auto-created reverse of this link's already-created forward.
+        if (await adoptReverseLink({ client, destAppId, a, idmap, index, state, result })) return;
+      }
 
       const remapped = remapRefs(a.typeOptions, idmap);
       let typeOptions = remapped;
@@ -213,8 +296,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         const unresolved = (a.dependsOn || []).filter((d) => !(idmap.fields[d] && idmap.fields[d].destFld));
         if (unresolved.length) {
           result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Field "${a.name}" references unresolved field(s) [${unresolved.join(', ')}] (skipped or unmapped) — not created` });
-          result.skipped++;
-          return;
+          return 'deferred'; // retried this run once the refs are created; else retryable next run
         }
         typeOptions = toWritableComputedOptions(a.type, remapped);
         if (a.type === 'formula') {
@@ -231,7 +313,6 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
       const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
       idmap.fields[a.sourceFieldId] = { destFld: columnId, choices: {} };
       if (entry) entry.fieldsByName.set(a.name, { id: columnId, name: a.name, type: a.type, typeOptions });
-      if (LINK_TYPES.has(a.type)) rememberLink(state, columnId, destTableId);
       result.created++;
       return;
     }
@@ -241,13 +322,18 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
       if (changes.type !== undefined) {
         const destType = findDestFieldType(index, a.destFld);
         const fname = findDestField(index, a.destFld)?.name ?? a.destFld;
+        // A gated/deferred retype still applies the non-destructive parts of the action
+        // (description) and returns 'gated' so it is NOT journaled done — a re-run of the
+        // same plan (e.g. with confirmRetypes:true) retries it.
         if (!SCALAR_RETYPE_TYPES.has(changes.type) || !SCALAR_RETYPE_TYPES.has(destType)) {
           result.warnings.push({ code: 'RETYPE_DEFERRED', message: `Field "${fname}": retype ${destType}→${changes.type} deferred (non-scalar)` });
-          return;
+          if (changes.description !== undefined) await client.updateFieldDescription(destAppId, a.destFld, changes.description);
+          return 'gated';
         }
         if (!confirmRetypes) {
           result.warnings.push({ code: 'RETYPE_GATED', message: `Field "${fname}": scalar retype ${destType}→${changes.type} gated — set confirmRetypes:true` });
-          return;
+          if (changes.description !== undefined) await client.updateFieldDescription(destAppId, a.destFld, changes.description);
+          return 'gated';
         }
         const newOpts = changes.typeOptions ? mergeChoices(findDestField(index, a.destFld), remapRefs(changes.typeOptions, idmap)) : undefined;
         try {

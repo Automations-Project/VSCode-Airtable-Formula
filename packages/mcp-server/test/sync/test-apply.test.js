@@ -185,8 +185,9 @@ describe('apply: createField (link foreignKey) reciprocal-once', () => {
       planId: 'plnL', sourceBaseId: 'appS', destBaseId: 'appD',
       idmap: { tables: { tA: a.tableId, tB: b.tableId }, fields: {} },
       actions: [
-        { kind: 'createField', sourceTableId: 'tA', sourceFieldId: 'fldAlink', name: 'Bs', type: 'foreignKey', typeOptions: { foreignTableId: 'tB', relationship: 'many' }, description: null, computed: false, dependsOn: [], dependsOnTables: ['tB'] },
-        { kind: 'createField', sourceTableId: 'tB', sourceFieldId: 'fldBlink', name: 'As', type: 'foreignKey', typeOptions: { foreignTableId: 'tA', relationship: 'many' }, description: null, computed: false, dependsOn: [], dependsOnTables: ['tA'] },
+        // Real snapshots always carry symmetricColumnId on foreignKey typeOptions (source id-space).
+        { kind: 'createField', sourceTableId: 'tA', sourceFieldId: 'fldAlink', name: 'Bs', type: 'foreignKey', typeOptions: { foreignTableId: 'tB', relationship: 'many', symmetricColumnId: 'fldBlink' }, description: null, computed: false, dependsOn: [], dependsOnTables: ['tB'] },
+        { kind: 'createField', sourceTableId: 'tB', sourceFieldId: 'fldBlink', name: 'As', type: 'foreignKey', typeOptions: { foreignTableId: 'tA', relationship: 'many', symmetricColumnId: 'fldAlink' }, description: null, computed: false, dependsOn: [], dependsOnTables: ['tA'] },
       ],
       orphans: [], warnings: [],
     };
