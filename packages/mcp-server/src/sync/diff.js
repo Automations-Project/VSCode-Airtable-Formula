@@ -268,6 +268,11 @@ export function computePlan(srcSnap, destSnap, idmap) {
     const srcTable = srcTablesById.get(srcTableId);
     const srcNamesSet = new Set(srcTable.fields.map((f) => f.name));
     for (const df of dt.fields) {
+      // The dest primary is owned by the reconcilePrimary path (renamed/retyped in this
+      // same plan when it diverges) — it is NEVER a deletable orphan. Without this guard
+      // a primary whose name differs from every src field would be handed to pruneSchema
+      // right after reconcilePrimary renamed it.
+      if (df.id === dt.primaryFieldId) continue;
       if (!srcNamesSet.has(df.name)) {
         orphans.push({ kind: 'field', destId: df.id, name: df.name, tableName: dt.name });
       }

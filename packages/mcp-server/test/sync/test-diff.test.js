@@ -219,6 +219,16 @@ describe('diff convergence (apply-aligned typeOptions)', () => {
 
 function vw(id, name, type, config, extra = {}) { return { id, name, type, config: config ?? {}, personalForUserId: extra.personal ?? null }; }
 
+describe('diff orphan safety', () => {
+  it('never flags the dest primary as a field orphan when primary names differ (reconcilePrimary owns it)', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text')] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Title', 'text')] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.ok(plan.actions.some((a) => a.kind === 'reconcilePrimary'), 'primary rename is handled by reconcilePrimary');
+    assert.equal(plan.orphans.filter((o) => o.kind === 'field').length, 0, 'dest primary must never be a deletable orphan');
+  });
+});
+
 describe('diff view actions', () => {
   it('createView + applyViewConfig for a source-only view; skip canonical-equal matched view; views after fields', () => {
     const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text')], views: [
