@@ -145,8 +145,18 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     // Schema-only: fingerprintSchema + buildIndex use table/field/view METADATA only, not per-view
     // live config — so skip the getView/readData storm (one ~1s read per view) on the dest here.
     const destSnapshot = await snapshotSchemaOnly(client, destBaseId);
+    const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
+    // Resume path: a journal with done actions proves a prior partial run of THIS plan already
+    // mutated the dest, so the fingerprint divergence is (at least partly) our own doing —
+    // without this bypass the drift guard made journal resume/retry unreachable, forcing a full
+    // re-plan after every partial failure. Warn instead of aborting.
+    const resuming = journal.actions.some((a) => a.status === 'done');
+    let resumeDriftBypass = false;
     if (fingerprintSchema(destSnapshot) !== fullPlan.destFingerprint) {
-      return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
+      if (!resuming) {
+        return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
+      }
+      resumeDriftBypass = true;
     }
 
     // Pre-flight: validate fieldMappings synchronously before launching the background job.
@@ -163,7 +173,6 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
       }
     }
 
-    const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
     // C1: preserve the persisted records/attachments identity map across applies (see buildRunIdmap).
     const idmap = buildRunIdmap(sourceBaseId, destBaseId, fullPlan, journal);
 
@@ -172,6 +181,12 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
       persist: (m, j) => { saveIdmap(sourceBaseId, destBaseId, m); saveJournal(sourceBaseId, destBaseId, j); },
       skip, confirmRetypes,
     });
+    if (resumeDriftBypass) {
+      result.warnings.unshift({
+        code: 'RESUME_DRIFT_BYPASS',
+        message: `Destination fingerprint differs from plan ${planId}, but its journal shows prior progress — resumed non-done actions instead of aborting. If the dest was ALSO changed by someone else since the plan, re-run mode=plan to pick those changes up.`,
+      });
+    }
 
     // Schema extras phase: delete dest-only fields/views/tables under mirror, gated. Runs after
     // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
