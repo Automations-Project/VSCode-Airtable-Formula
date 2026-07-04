@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.1.10",
+  "version": "2.1.15",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
   "description": "Airtable formula, script & automation editor with MCP server (71 tools), language server, and AI skills for VS Code.",
@@ -403,6 +403,27 @@
           "minimum": 0,
           "maximum": 65535,
           "description": "Fixed TCP port for the shared MCP daemon's HTTP server. Defaults to 8723 so the daemon keeps the same port across restarts (stable MCP client config, predictable process to find/kill). Change it to any free port, or set 0 for an automatic OS-assigned port. Takes effect on the next daemon restart; if the chosen port is already in use, the daemon falls back to an automatic port."
+        },
+        "airtableFormula.mcp.authMode": {
+          "type": "string",
+          "default": "browser",
+          "enum": ["browser", "byo", "direct-login"],
+          "enumDescriptions": [
+            "Log in through a bundled headless Chrome, then run all API calls over direct HTTP (default). The browser only mints/refreshes the session cookie.",
+            "Bring your own cookie — no browser. Paste a session cookie into ~/.airtable-user-mcp/credentials.json (or set the AIRTABLE_COOKIE env var); the CSRF token is scraped automatically.",
+            "Browser-free login via email + password + TOTP. Set them in ~/.airtable-user-mcp/login.json (or AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_TOTP_SECRET). SSO/Google accounts must use 'browser'."
+          ],
+          "description": "How the MCP server authenticates to Airtable's internal API. All modes send API calls over direct HTTP; only 'browser' launches Chrome (for login). 'byo' and 'direct-login' run with no browser at all. Takes effect on the next daemon/server restart."
+        },
+        "airtableFormula.mcp.httpClient": {
+          "type": "string",
+          "default": "fetch",
+          "enum": ["fetch", "impit"],
+          "enumDescriptions": [
+            "Node's built-in fetch (default) — verified to work against Airtable's internal API with no TLS impersonation.",
+            "impit with Chrome TLS impersonation — a fallback if Airtable ever fingerprints non-browser clients. Requires the optional 'impit' package to be available to the server."
+          ],
+          "description": "HTTP client for direct Airtable API calls. Leave as 'fetch' unless requests start getting blocked; 'impit' impersonates Chrome's TLS fingerprint. Takes effect on the next daemon/server restart."
         },
         "airtableFormula.mcp.serverSource": {
           "type": "string",

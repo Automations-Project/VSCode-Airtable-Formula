@@ -92,6 +92,15 @@ export function registerMcpProvider(
             env.AIRTABLE_DEBUG_VERBOSE = '1';
           }
 
+          // Transport selection (airtableFormula.mcp.authMode / .httpClient). Only inject
+          // non-defaults so an externally-set env still applies at the default.
+          if (settings.mcp.authMode && settings.mcp.authMode !== 'browser') {
+            env.AIRTABLE_AUTH_MODE = settings.mcp.authMode;
+          }
+          if (settings.mcp.httpClient === 'impit') {
+            env.AIRTABLE_HTTP_CLIENT = 'impit';
+          }
+
           // Pass stored credentials so MCP server can auto-recover sessions
           if (authManager) {
             // Only forward credentials when loginMode is 'auto'

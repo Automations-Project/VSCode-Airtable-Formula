@@ -128,6 +128,8 @@ export interface SettingsSnapshot {
     toolProfile:            ToolProfileSnapshot;
     serverSource:           'bundled' | 'npx';
     daemonPort:             number;
+    authMode:               'browser' | 'byo' | 'direct-login';
+    httpClient:             'fetch' | 'impit';
   };
   ai:      { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2' };

@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 const NS = 'airtableFormula';
 
 export interface Settings {
-  mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx'; useDaemon: boolean; daemonPort: number };
+  mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx'; useDaemon: boolean; daemonPort: number; authMode: 'browser' | 'byo' | 'direct-login'; httpClient: 'fetch' | 'impit' };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
   script: { beautifyStyle: string; minifyLevel: string };
@@ -21,6 +21,8 @@ export function getSettings(): Settings {
       serverSource:           cfg.get('mcp.serverSource', 'bundled') as 'bundled' | 'npx',
       useDaemon:              cfg.get('mcp.useDaemon', true),
       daemonPort:             cfg.get('mcp.daemonPort', 8723),
+      authMode:               cfg.get('mcp.authMode', 'browser') as 'browser' | 'byo' | 'direct-login',
+      httpClient:             cfg.get('mcp.httpClient', 'fetch') as 'fetch' | 'impit',
     },
     ai: {
       autoInstallFiles: cfg.get('ai.autoInstallFiles', true),

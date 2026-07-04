@@ -2437,32 +2437,30 @@ const handlers = {
   async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
+      // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
+      // which blows past the MCP response window (Connection closed) even though the plan is
+      // computed + persisted. Run it as a BACKGROUND job and return the jobId immediately; poll
+      // mode=status with this planId to get the plan digest when it lands.
       const id = 'pln' + client._genRandomId();
-      const out = await sync.plan({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings });
-      return ok({ planId: id, summary: out.human }, out.machine, debug);
+      const { jobId, status } = sync.planJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings });
+      return ok({ jobId, planId: jobId, status, message: 'Plan is computing in the background — poll mode=status with this planId (jobId).' }, { jobId, status }, debug);
     }
     if (mode === 'apply') {
       if (!planId) return err('mode="apply" requires planId (from a prior mode="plan" run).');
       const runStartedAt = new Date().toISOString();
-      let out;
-      try {
-        out = await sync.apply({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys });
-      } catch (e) {
-        if (e && e.code === 'FIELD_MAP_INVALID') {
-          return err(`Field mapping validation failed:\n${(e.mappingErrors || []).map((me) => `  [${me.code}] table=${me.table || '?'}${me.source ? ' source=' + me.source : ''}${me.target ? ' target=' + me.target : ''}`).join('\n')}`);
-        }
-        throw e;
-      }
+      // Apply runs the whole schema phase (snapshot + applyPlan + pruneSchema) before it
+      // backgrounds records — long enough on a real base to trip the MCP response window. Run the
+      // WHOLE apply (schema then records) as a background job and return immediately. Field-mapping
+      // validation, DRIFT abort, and APPLY_LOCKED now surface via mode=status (phase='failed'/'done').
+      const { jobId, status } = sync.applyJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys });
       // Forward-looking note: DELETION_GATED warnings are only emitted by the background records
-      // job (after apply returns), so they cannot appear in out.machine.warnings here. Instead,
-      // we emit a synchronous advisory when the effective policy would delete dest-only records
-      // but confirmDeletions was not set. The actual DELETION_GATED warnings + deleted count are
-      // surfaced by mode=status once the background job completes.
+      // job, so they can't appear synchronously. Emit a synchronous advisory when the effective
+      // policy would delete dest-only records but confirmDeletions was not set.
       const { isDeleting: isDeletingPolicy } = await import('./sync/policy.js');
       const deletingSuffix = isDeletingPolicy(policy, policyOverrides) && !confirmDeletions
-        ? '\nMirror/remove policy set — dest-only records will be reported as DELETION_GATED (deleted nothing). Poll mode=status for counts, then re-run with confirmDeletions:true to apply deletions.'
+        ? ' Mirror/remove policy set — dest-only records will be reported as DELETION_GATED (deleted nothing); poll mode=status for counts, then re-run with confirmDeletions:true to apply deletions.'
         : '';
-      return ok({ planId, summary: out.human + deletingSuffix }, out.machine, debug);
+      return ok({ jobId, planId, status, message: 'Apply running in the background (schema then records) — poll mode=status with this planId.' + deletingSuffix }, { jobId, status }, debug);
     }
     if (mode === 'reconcile') {
       const raw = await sync.reconcile({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, naturalKeys: naturalKeys || {} });
@@ -2471,16 +2469,52 @@ const handlers = {
       return ok({ summary: out.human }, out.machine, debug);
     }
     if (mode === 'status') {
-      if (!planId) return err('mode="status" requires planId (the jobId returned by mode="apply").');
-      const raw = sync.recordsStatus({ sourceBaseId: sourceAppId, destBaseId: destAppId, planId });
-      const summary = raw.status === 'running'
-        ? `Records job ${planId}: running — ${raw.recordsMapped} records mapped so far (started ${raw.startedAt})`
-        : raw.status === 'done'
-          ? `Records job ${planId}: done — ${JSON.stringify(raw.result)} (${raw.recordsMapped} records mapped)`
-          : raw.status === 'failed'
-            ? `Records job ${planId}: FAILED — ${raw.error}`
-            : `Records job ${planId}: ${raw.status}${raw.message ? ' — ' + raw.message : ''}`;
-      return ok({ planId, status: raw.status, summary }, raw, debug);
+      if (!planId) return err('mode="status" requires planId (the jobId returned by mode="plan" or mode="apply").');
+      const s = sync.syncStatus({ sourceBaseId: sourceAppId, destBaseId: destAppId, planId });
+      const sr = s.schemaResult || {};
+      const rr = s.recordsResult || {};
+      let summary;
+      switch (s.phase) {
+        case 'planning':
+          summary = `Plan ${planId}: computing in the background (started ${s.startedAt})`;
+          break;
+        case 'schema':
+          summary = `Apply ${planId}: schema phase running (started ${s.startedAt})`;
+          break;
+        case 'records':
+          summary = `Apply ${planId}: records phase running — ${s.recordsMapped} records mapped so far ` +
+            `(schema created ${sr.created ?? 0}, updated ${sr.updated ?? 0})`;
+          break;
+        case 'done':
+          summary = s.recordsResult
+            ? `Sync ${planId}: done — ${s.recordsMapped} records mapped ` +
+              `(created ${rr.created ?? 0}, updated ${rr.updated ?? 0}, failed ${rr.failed ?? 0}, warnings ${(rr.warnings || []).length})`
+            : s.planDigest
+              ? `Plan ${planId}: done — ${s.planDigest.human || 'plan computed'}`
+              : sr.aborted
+                ? `Apply ${planId}: aborted (${sr.reason || 'DRIFT'}) — re-run mode=plan`
+                : `Sync ${planId}: done`;
+          break;
+        case 'failed':
+          summary = `Sync ${planId}: FAILED — ${s.error}`;
+          break;
+        case 'unknown':
+        default:
+          summary = `Sync ${planId}: ${s.phase}${s.message ? ' — ' + s.message : ''}`;
+      }
+      // Structured object covering the phase (superset of the M2 records-only shape: planId,
+      // status, recordsMapped, result, summary are preserved; result === recordsResult).
+      return ok({
+        planId,
+        phase: s.phase,
+        status: s.status,
+        recordsMapped: s.recordsMapped,
+        planDigest: s.planDigest ?? null,
+        schemaResult: s.schemaResult ?? null,
+        recordsResult: s.recordsResult ?? null,
+        result: s.recordsResult ?? null,
+        summary,
+      }, s, debug);
     }
     if (mode === 'diff') {
       if (detail) {

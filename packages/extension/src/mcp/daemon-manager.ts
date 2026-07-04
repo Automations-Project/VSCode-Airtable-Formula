@@ -388,6 +388,12 @@ export class DaemonManager implements vscode.Disposable {
       // already real Node (the flag is ignored).
       ELECTRON_RUN_AS_NODE: '1',
     };
+    // Transport selection (airtableFormula.mcp.authMode / .httpClient). Only inject non-defaults
+    // so an externally-set env still applies when the setting is left at its default.
+    const cfg = vscode.workspace.getConfiguration('airtableFormula');
+    const authMode = cfg.get<string>('mcp.authMode', 'browser');
+    if (authMode && authMode !== 'browser') env.AIRTABLE_AUTH_MODE = authMode;
+    if (cfg.get<string>('mcp.httpClient', 'fetch') === 'impit') env.AIRTABLE_HTTP_CLIENT = 'impit';
     if (credEnv) Object.assign(env, credEnv);
     return env;
   }

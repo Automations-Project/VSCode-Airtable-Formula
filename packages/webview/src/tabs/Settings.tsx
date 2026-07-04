@@ -208,6 +208,55 @@ export function Settings() {
             </select>
           </div>
 
+          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.72rem', flex: 1 }}>
+              Connection mode
+              <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
+                How the MCP authenticates — Cookie &amp; Direct login use no browser
+              </span>
+            </span>
+            <select
+              className="select-input"
+              value={settings.mcp.authMode ?? 'browser'}
+              onChange={e => changeHeavySetting('mcp.authMode', e.target.value)}
+            >
+              <option value="browser">Browser (log in via Chrome)</option>
+              <option value="byo">Cookie — no browser</option>
+              <option value="direct-login">Direct login — no browser</option>
+            </select>
+          </div>
+
+          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <Sliders size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.72rem', flex: 1 }}>
+              HTTP client
+              <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
+                Transport for API calls (impit impersonates Chrome's TLS)
+              </span>
+            </span>
+            <select
+              className="select-input"
+              value={settings.mcp.httpClient ?? 'fetch'}
+              onChange={e => changeHeavySetting('mcp.httpClient', e.target.value)}
+            >
+              <option value="fetch">Automatic (fetch)</option>
+              <option value="impit">Chrome impersonation (impit)</option>
+            </select>
+          </div>
+
+          {(settings.mcp.authMode === 'byo' || settings.mcp.authMode === 'direct-login') && (
+            <div className="list-row" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'flex-start' }}>
+              <FolderOpen size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0, marginTop: 2 }} />
+              <span style={{ fontSize: '0.62rem', color: 'var(--fg-subtle)', flex: 1, minWidth: 160 }}>
+                {settings.mcp.authMode === 'byo'
+                  ? 'Paste your Airtable session cookie into credentials.json in the config folder ({ "cookie": "…" }).'
+                  : 'Set email / password / TOTP in login.json in the config folder. SSO/Google accounts must use Browser mode.'}
+              </span>
+              <button className="btn btn-ghost" onClick={() => openStoragePath()}>Open folder</button>
+            </div>
+          )}
+
           {browserIsDownloaded && !downloading && (
             <div className="list-row">
               <Download size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />

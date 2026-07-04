@@ -75,6 +75,8 @@ const defaultSettings: SettingsSnapshot = {
     },
     serverSource: 'bundled' as const,
     daemonPort:   8723,
+    authMode:     'browser' as const,
+    httpClient:   'fetch' as const,
   },
   ai:      { autoInstallFiles: true, includeAgents: false },
   formula: { formatterVersion: 'v2' },

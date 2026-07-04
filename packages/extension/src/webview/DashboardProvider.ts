@@ -422,6 +422,22 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       if (msg.key.startsWith('auth.')) {
         this.authManager?.restartAutoRefresh();
       }
+      // Transport settings (authMode / httpClient) are injected into the daemon
+      // env at spawn time (buildDaemonEnv), so a running daemon must be
+      // restarted for the change to take effect.
+      if (msg.key === 'mcp.authMode' || msg.key === 'mcp.httpClient') {
+        const dm = this._daemonManager;
+        if (dm) {
+          void dm.getDaemonStatus().then(status => {
+            if (!status?.running) return;
+            return dm.restartDaemon()
+              .then(() => this.pushState())
+              .catch(err => {
+                vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
+              });
+          });
+        }
+      }
       await this.pushState();
       // No postResult here — setting:change has no id field and the webview
       // does not register a pending action for it; posting action:result with
@@ -859,6 +875,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           toolProfile,
           serverSource:           settings.mcp.serverSource,
           daemonPort:             settings.mcp.daemonPort,
+          authMode:               settings.mcp.authMode,
+          httpClient:             settings.mcp.httpClient,
         },
         ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
         formula: { formatterVersion: settings.formula.formatterVersion },
