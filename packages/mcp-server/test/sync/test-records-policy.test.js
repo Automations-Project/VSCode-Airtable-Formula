@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1, pruneRecords, collectTruncatedTableNames } from '../../src/sync/records.js';
+import { applyRecordsPass1, pruneRecords, collectTruncatedTableNames, runRecords } from '../../src/sync/records.js';
 
 export function fakeClient() {
   const calls = { create: [], update: [] };
@@ -295,5 +295,93 @@ describe('collectTruncatedTableNames', () => {
     const dest = { tables: [small('A'), big('C')] };
     const set = collectTruncatedTableNames(src, dest);
     assert.deepEqual([...set].sort(), ['A', 'C']);
+  });
+
+  it('prefers snapshotRowCount over live records length (folded synthetic rows must not count)', () => {
+    // mirrorFoldedLinks pushes synthetic rows into destTable.records during Pass 1 — the
+    // truncation heuristic must reflect the FETCHED row count, not the inflated live array.
+    const inflated = {
+      id: 'tblI', name: 'Inflated', snapshotRowCount: 400,
+      records: Array.from({ length: 1100 }, (_, i) => ({ id: 'r' + i })),
+    };
+    const genuinelyBig = {
+      id: 'tblG', name: 'Big', snapshotRowCount: 1000,
+      records: Array.from({ length: 1000 }, (_, i) => ({ id: 'g' + i })),
+    };
+    const set = collectTruncatedTableNames({ tables: [] }, { tables: [inflated, genuinelyBig] });
+    assert.equal(set.has('Inflated'), false, 'inflated-but-not-truncated table must not be flagged');
+    assert.ok(set.has('Big'), 'genuinely capped table still flagged');
+  });
+});
+
+// ── runRecords integration: prune threading ─────────────────────────────────
+
+// Combined mock client for runRecords: creates succeed (rowId per sourceKey), updates succeed,
+// deletions recorded.
+function runClient() {
+  const calls = { deleted: [], created: [], updated: [] };
+  return {
+    calls,
+    async createRecords(appId, tableId, rows) {
+      const created = rows.map((r, i) => {
+        const rowId = 'recNew_' + r.sourceKey;
+        calls.created.push({ tableId, rowId, sourceKey: r.sourceKey });
+        return { rowId, sourceKey: r.sourceKey };
+      });
+      return { created, failed: [] };
+    },
+    async updateRecords(appId, tableId, rows) { calls.updated.push({ tableId, rows }); return { updated: rows, failed: [] }; },
+    async deleteRecords(appId, tableId, rowIds) { calls.deleted.push({ tableId, rowIds }); return { deleted: rowIds.length }; },
+    async addLinkItems() { return { ok: true, added: 1 }; },
+    async updateViewFilters() { return { ok: true }; },
+  };
+}
+
+describe('runRecords — prune integration', () => {
+  it('mirror prune still runs when folded-link mirroring pushes dest records past 1000', async () => {
+    // Dest starts with 990 FETCHED rows: recD0 (mapped) + 989 orphans.
+    // Src: recS0 (mapped) + 20 new records each linking to recS0 → creates fold links,
+    // mirrorFoldedLinks pushes 20 synthetic rows → live dest records array = 1010.
+    // Truncation detection must use the fetched count (990), NOT the inflated live length.
+    const destRows = [{ id: 'recD0', cellValuesByColumnId: {} }]
+      .concat(Array.from({ length: 989 }, (_, i) => ({ id: `recOrphan${i}`, cellValuesByColumnId: {} })));
+    const destSnapshot = {
+      baseId: 'appD',
+      tables: [{ id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [], records: destRows }],
+    };
+    const srcRecords = [{ id: 'recS0', cellValuesByColumnId: { sN: 'zero' } }]
+      .concat(Array.from({ length: 20 }, (_, i) => ({
+        id: `recSNew${i}`, cellValuesByColumnId: { sN: `new${i}`, sL: ['recS0'] },
+      })));
+    const srcSnapshot = {
+      baseId: 'appS',
+      tables: [{
+        id: 'tS', name: 'Games', primaryFieldId: 'sN',
+        fields: [
+          { id: 'sN', name: 'Name', type: 'text' },
+          { id: 'sL', name: 'Self', type: 'foreignKey', typeOptions: { foreignTableId: 'tS' } },
+        ],
+        views: [],
+        records: srcRecords,
+      }],
+    };
+    const idmap = {
+      tables: { tS: 'tD' },
+      fields: { sN: { destFld: 'dN', choices: {} }, sL: { destFld: 'dL' } },
+      records: { recS0: 'recD0' },
+    };
+    const client = runClient();
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await runRecords({
+      client, srcSnapshot, destSnapshot, idmap,
+      policy: 'mirror', confirmDeletions: true,
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+    });
+    assert.equal(result.created, 20, 'all 20 new records created');
+    assert.ok(!result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'),
+      'no false truncation-skip warning from mirrored synthetic rows');
+    assert.ok(!result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED'),
+      'no false RECORDS_TRUNCATED warning from mirrored synthetic rows');
+    assert.equal(result.deleted, 989, 'all real orphans pruned under mirror+confirm');
   });
 });

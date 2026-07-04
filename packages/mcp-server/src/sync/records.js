@@ -1013,6 +1013,13 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
     throw err;
   }
 
+  // Record each table's FETCHED row count before any pass runs — Pass 1 mirrors folded-link
+  // rows into destSnapshot (mirrorFoldedLinks), and those synthetic entries must not count
+  // toward the >=1000 truncation heuristic (collectTruncatedTableNames / pruneRecords).
+  for (const t of [...(srcSnapshot.tables || []), ...(destSnapshot.tables || [])]) {
+    t.snapshotRowCount ??= (t.records || []).length;
+  }
+
   // Natural-key pre-pass: match real-but-unmapped dest records BEFORE Pass 1 + prune,
   // so Pass 1 updates (not duplicates) them and pruneRecords does not treat them as orphans.
   if (naturalKeys && Object.keys(naturalKeys).length) {
@@ -1165,11 +1172,16 @@ export async function applyRecords({ client, sourceBaseId, destBaseId, planId, r
 // collectTruncatedTableNames — set-builder for pruneRecords truncation guard
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** Table names whose snapshot hit the 1000-row read cap on EITHER side (possibly truncated). */
+/**
+ * Table names whose snapshot hit the 1000-row read cap on EITHER side (possibly truncated).
+ * Uses `snapshotRowCount` (stamped by runRecords BEFORE Pass 1) when present — the live
+ * `.records` array is inflated by mirrorFoldedLinks' synthetic rows during Pass 1, which must
+ * not fake a truncation and silently disable mirror prune.
+ */
 export function collectTruncatedTableNames(srcSnapshot, destSnapshot) {
   const names = new Set();
   for (const t of [...(srcSnapshot?.tables || []), ...(destSnapshot?.tables || [])]) {
-    if ((t.records || []).length >= 1000) names.add(t.name);
+    if ((t.snapshotRowCount ?? (t.records || []).length) >= 1000) names.add(t.name);
   }
   return names;
 }
@@ -1225,7 +1237,7 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
     // Truncation safety: a table whose snapshot hit the 1000-row cap cannot be safely pruned —
     // unmapped rows may be legitimate records whose source/dest counterpart fell beyond the window.
     // Skip deletion entirely (the >1000-row read is a capture-gated follow-up).
-    const isTruncated = truncatedTables.has(t.name) || (t.records || []).length >= 1000;
+    const isTruncated = truncatedTables.has(t.name) || (t.snapshotRowCount ?? (t.records || []).length) >= 1000;
     if (isTruncated) {
       result.warnings.push({
         code: 'RECORDS_TRUNCATED_PRUNE_SKIPPED',
