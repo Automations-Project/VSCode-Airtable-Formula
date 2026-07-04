@@ -697,6 +697,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const mcpChanged = new vscode.EventEmitter<void>();
     context.subscriptions.push(mcpChanged);
     registerMcpProvider(context, mcpChanged, authManager, daemonManager);
+    // Let the dashboard re-provision the MCP servers when transport settings change in stdio mode
+    // (no daemon to restart) — see the mcp.authMode/mcp.httpClient handler in DashboardProvider.
+    dashboardProvider.setMcpChanged(mcpChanged);
 
     // ── Auth init & auto-refresh ─────────────────────────────────────────
     await authManager.init();

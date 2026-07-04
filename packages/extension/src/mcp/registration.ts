@@ -81,6 +81,11 @@ export function registerMcpProvider(
             AIRTABLE_HEADLESS_ONLY: '1',
             NODE_PATH: nodeModulesPath,
             AIRTABLE_NO_DAEMON: '1',
+            // Pin the config/state home to the SAME dir the daemon uses (buildDaemonEnv sets
+            // AIRTABLE_USER_MCP_HOME=configDir). Without this, the stdio server falls back to its
+            // own default and byo/direct-login credential files, sync state, and jobs could resolve
+            // to a different directory than the daemon path.
+            AIRTABLE_USER_MCP_HOME: path.join(os.homedir(), '.airtable-user-mcp'),
           };
 
           // Propagate debug settings as env vars for the MCP debug-tracer

@@ -45,10 +45,18 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private _daemonManager?: DaemonManager;
   private _daemonStarting = false;
   private _lockfileWatcher?: import('fs').FSWatcher;
+  private _mcpChanged?: vscode.EventEmitter<void>;
 
   setDaemonManager(mgr: DaemonManager): void {
     this._daemonManager = mgr;
     void this._initLockfileWatch();
+  }
+
+  /** The MCP-definitions change emitter — firing it makes VS Code re-provision the MCP servers,
+   *  which respawns the stdio server with a fresh env (how authMode/httpClient take effect in
+   *  no-daemon mode, where there is no daemon to restart). */
+  setMcpChanged(emitter: vscode.EventEmitter<void>): void {
+    this._mcpChanged = emitter;
   }
 
   private async _initLockfileWatch(): Promise<void> {
@@ -429,13 +437,22 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const dm = this._daemonManager;
         if (dm) {
           void dm.getDaemonStatus().then(status => {
-            if (!status?.running) return;
-            return dm.restartDaemon()
-              .then(() => this.pushState())
-              .catch(err => {
-                vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
-              });
+            if (status?.running) {
+              // Daemon mode: restart so the new AIRTABLE_AUTH_MODE/HTTP_CLIENT env re-injects.
+              return dm.restartDaemon()
+                .then(() => this.pushState())
+                .catch(err => {
+                  vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
+                });
+            }
+            // No-daemon (stdio) mode: no daemon to restart — re-provision the MCP servers so VS Code
+            // respawns the stdio server with the fresh env.
+            this._mcpChanged?.fire();
+            return this.pushState();
           });
+        } else {
+          // No daemon manager wired → still re-provision for a stdio server.
+          this._mcpChanged?.fire();
         }
       }
       await this.pushState();
