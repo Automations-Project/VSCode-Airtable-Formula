@@ -84,17 +84,26 @@ describe('compareTable — basic wiring', () => {
 
 // ── compareViews — view type drift ────────────────────────────────────────────
 
-describe('compareViews — view type drift', () => {
-  test('view type change emits drift entry with scope view:<name> and key type', () => {
+describe('compareViews — view type mismatch (name+type matching)', () => {
+  test('same-named view of a DIFFERENT type is NOT matched: reported as onlyInSource + onlyInDest', () => {
+    // A view's type is immutable in Airtable — sync converges by creating the source-typed
+    // view and orphaning the dest one, so compare must mirror that (no per-view drift entries).
     const src = tbl('tS', 'T', 'p', [], [view('vS', 'MyView', 'grid', {})]);
     const dest = tbl('tD', 'T', 'p', [], [view('vD', 'MyView', 'gallery', {})]);
-    const im = idmap({ tables: { tS: 'tD' }, views: { vS: 'vD' } });
+    const im = idmap({ tables: { tS: 'tD' }, views: { vS: 'vD' } }); // stale name-only mapping is rejected
     const r = compareTable(src, dest, im);
-    const e = r.entries.find((e) => e.scope === 'view:MyView' && e.key === 'type');
-    assert.ok(e, 'type entry for view:MyView missing');
-    assert.equal(e.class, 'drift');
-    assert.equal(e.source, 'grid');
-    assert.equal(e.dest, 'gallery');
+    assert.ok(!r.entries.find((e) => e.scope === 'view:MyView'), 'no per-view entries for an unmatched pair');
+    assert.deepEqual(r.views.onlyInSource, ['MyView']);
+    assert.deepEqual(r.views.onlyInDest, ['MyView']);
+  });
+
+  test('falls back to a same-name same-type dest view when another same-named view of a different type exists', () => {
+    const src = tbl('tS', 'T', 'p', [], [view('vS', 'Board', 'kanban', {})]);
+    const dest = tbl('tD', 'T', 'p', [], [view('vD1', 'Board', 'grid', {}), view('vD2', 'Board', 'kanban', {})]);
+    const im = idmap({ tables: { tS: 'tD' } });
+    const r = compareTable(src, dest, im);
+    assert.deepEqual(r.views.onlyInSource, []);
+    assert.deepEqual(r.views.onlyInDest, ['Board']); // the grid duplicate
   });
 
   test('same view type produces no type entry', () => {

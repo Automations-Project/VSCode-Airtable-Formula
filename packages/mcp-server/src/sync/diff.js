@@ -29,6 +29,13 @@ function selNameMap(snap) {
 /** Return only collaborative (non-personal) views from a table. */
 function collabViews(table) { return (table.views || []).filter((v) => !v.personalForUserId); }
 
+/**
+ * Views match by (name, type): a view's TYPE is immutable in Airtable, so a same-named
+ * dest view of a different type is NOT a counterpart — the plan emits createView (source
+ * type) and the wrong-typed dest view becomes an orphan candidate under the usual gates.
+ */
+function viewKey(v) { return `${v.name}|${v.type}`; }
+
 /** Link-type fields must be created after plain scalar fields. Computed last. */
 const LINK_TYPES = new Set(['multipleRecordLinks', 'foreignKey']);
 function fieldOrder(f) { return f.isComputed ? 2 : (LINK_TYPES.has(f.type) ? 1 : 0); }
@@ -274,10 +281,10 @@ export function computePlan(srcSnap, destSnap, idmap) {
   for (const st of srcSnap.tables) {
     const destTableId = idmap.tables[st.id];
     const destTable = destTableId ? destTablesById.get(destTableId) : null;
-    const destViewsByName = destTable ? new Map(collabViews(destTable).map((v) => [v.name, v])) : new Map();
+    const destViewsByKey = destTable ? new Map(collabViews(destTable).map((v) => [viewKey(v), v])) : new Map();
     for (const sv of (st.views || [])) {
       if (sv.personalForUserId) { warnings.push({ code: 'VIEW_PERSONAL_SKIPPED', message: `Personal view "${sv.name}" in "${st.name}" skipped` }); continue; }
-      const dv = destViewsByName.get(sv.name);
+      const dv = destViewsByKey.get(viewKey(sv));
       if (!dv) {
         viewActions.push({ kind: 'createView', sourceTableId: st.id, sourceViewId: sv.id, name: sv.name, type: sv.type });
         viewActions.push({ kind: 'applyViewConfig', sourceTableId: st.id, sourceViewId: sv.id, type: sv.type, config: sv.config || {} });
@@ -288,13 +295,14 @@ export function computePlan(srcSnap, destSnap, idmap) {
   }
   actions.push(...viewActions);
 
-  // View orphans: dest-only collaborative views in a matched table.
+  // View orphans: dest-only collaborative views in a matched table. Keyed by (name, type)
+  // to mirror the matching above — a same-named dest view of a DIFFERENT type is an orphan.
   for (const dt of destSnap.tables) {
     const srcTableId = srcTableByDestId.get(dt.id);
     if (!srcTableId) continue; // whole table is already a table orphan
     const srcTable = srcTablesById.get(srcTableId);
-    const srcViewNames = new Set(collabViews(srcTable).map((v) => v.name));
-    for (const dv of collabViews(dt)) if (!srcViewNames.has(dv.name)) orphans.push({ kind: 'view', destId: dv.id, name: dv.name, tableName: dt.name });
+    const srcViewKeys = new Set(collabViews(srcTable).map(viewKey));
+    for (const dv of collabViews(dt)) if (!srcViewKeys.has(viewKey(dv))) orphans.push({ kind: 'view', destId: dv.id, name: dv.name, tableName: dt.name });
   }
 
   // Section orphans: dest-only sidebar sections in a matched table (by name).

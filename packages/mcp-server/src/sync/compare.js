@@ -269,12 +269,14 @@ function groupOrderKeys(config, fldNames) {
  * Compare views between a source table and a destination table.
  *
  * Matching strategy (per view):
- *  1. Look up dest view id via idmap.views[srcView.id].
- *  2. Fall back to matching by view name in dest.
+ *  1. Look up dest view id via idmap.views[srcView.id] — rejected if the types differ
+ *     (a view's type is immutable, so a cross-type mapping is stale/name-only noise).
+ *  2. Fall back to matching by (view name, view type) in dest. A same-named dest view of
+ *     a DIFFERENT type is NOT a counterpart: sync converges by creating the source-typed
+ *     view and orphaning the dest one, so it is reported as onlyInSource + onlyInDest.
  *  Personal views (personalForUserId is set) are skipped on both sides.
  *
  * Per matched pair emits DiffEntries with scope `view:<name>`:
- *  - `type` → class drift
  *  - `filters` / `sorts` / `groups` / `columnVisibility` / `frozen` / `color` / `cover` /
  *    `calendar` / `rowHeight` / `form` → class drift (via canonicalizeViewConfig comparison)
  *  - `columnOrder` → class best-effort
@@ -299,17 +301,19 @@ export function compareViews(srcTable, destTable, idmap) {
   const srcViews = collabViews(srcTable);
   const destViews = collabViews(destTable);
 
-  // Build dest view lookup: by id and by name.
+  // Build dest view lookup: by id and by (name, type) — a view's type is immutable, so a
+  // same-named view of a different type can never converge and must not be adopted.
   const destViewsById = new Map(destViews.map((v) => [v.id, v]));
-  const destViewsByName = new Map(destViews.map((v) => [v.name, v]));
+  const destViewsByNameType = new Map(destViews.map((v) => [`${v.name}|${v.type}`, v]));
   const matchedDestViewIds = new Set();
 
   for (const sv of srcViews) {
-    // Resolve dest view: idmap first, then by-name fallback.
+    // Resolve dest view: idmap first (same type only), then by (name, type) fallback.
     let dv = null;
     const mappedDestId = idmap.views && idmap.views[sv.id];
     if (mappedDestId) dv = destViewsById.get(mappedDestId) ?? null;
-    if (!dv) dv = destViewsByName.get(sv.name) ?? null;
+    if (dv && dv.type !== sv.type) dv = null; // stale name-only mapping across types
+    if (!dv) dv = destViewsByNameType.get(`${sv.name}|${sv.type}`) ?? null;
 
     if (!dv) {
       onlyInSource.push(sv.name);
@@ -320,11 +324,6 @@ export function compareViews(srcTable, destTable, idmap) {
     const scope = `view:${sv.name}`;
     const srcConfig = sv.config || {};
     const destConfig = dv.config || {};
-
-    // 1. Type drift.
-    if (sv.type !== dv.type) {
-      entries.push({ scope, key: 'type', source: sv.type, dest: dv.type, class: classOf('type') });
-    }
 
     // 2. Canonicalize both configs for content comparison.
     //    Source: stripRecordRefs=true (matches what apply will write)

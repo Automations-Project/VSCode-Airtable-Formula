@@ -247,4 +247,28 @@ describe('diff view actions', () => {
     assert.ok(plan.orphans.some((o) => o.kind === 'view' && o.name === 'DestOnly'));
     assert.ok(plan.warnings.some((w) => w.code === 'VIEW_PERSONAL_SKIPPED'));
   });
+
+  it('same-named view of a DIFFERENT type is no match: createView (source type) + dest view is an orphan candidate', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text')], views: [
+      vw('vS1', 'Board', 'kanban', {}) ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text')], views: [
+      vw('vD1', 'Board', 'grid', {}) ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const cv = plan.actions.find((a) => a.kind === 'createView');
+    assert.ok(cv, 'createView must be emitted for the type-mismatched view');
+    assert.equal(cv.name, 'Board');
+    assert.equal(cv.type, 'kanban');
+    assert.ok(plan.orphans.some((o) => o.kind === 'view' && o.destId === 'vD1'), 'wrong-typed dest view becomes an orphan candidate');
+  });
+
+  it('matched view of the SAME name+type is adopted even when another same-named view of a different type exists', () => {
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [field('fS1', 'Name', 'text')], views: [
+      vw('vS1', 'Board', 'kanban', {}) ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [field('fD1', 'Name', 'text')], views: [
+      vw('vD1', 'Board', 'grid', {}), vw('vD2', 'Board', 'kanban', {}) ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.equal(plan.actions.filter((a) => a.kind === 'createView').length, 0, 'kanban Board already exists — no createView');
+    assert.ok(plan.orphans.some((o) => o.kind === 'view' && o.destId === 'vD1'), 'the grid duplicate is the orphan');
+    assert.ok(!plan.orphans.some((o) => o.kind === 'view' && o.destId === 'vD2'));
+  });
 });
