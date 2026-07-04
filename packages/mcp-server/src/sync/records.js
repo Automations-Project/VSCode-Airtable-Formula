@@ -313,7 +313,7 @@ function mirrorFoldedLinks(destTableById, destTableId, destRowId, linkCells) {
  * a folded link array to ~one chunk of retries (the create-with-links capability is high-confidence
  * but not live-verified — this is the calibration knob).
  */
-async function createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById }) {
+async function createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById, createdDestIds }) {
   const gate = makeGate(limiter); // paces each inner per-row create POST under the phase limiter
   let res;
   try {
@@ -326,6 +326,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
 
   for (const created of (res.created || [])) {
     idmap.records[created.sourceKey] = created.rowId;
+    createdDestIds?.add(created.rowId);
     result.created++;
     const row = chunk.find((r) => r.sourceKey === created.sourceKey);
     mirrorFoldedLinks(destTableById, destTableId, created.rowId, row?.linkCells);
@@ -365,6 +366,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   let rescued = 0;
   for (const created of (retryRes.created || [])) {
     idmap.records[created.sourceKey] = created.rowId; // links NOT folded → Pass 2 adds them (no mirror)
+    createdDestIds?.add(created.rowId);
     result.created++;
     rescued++;
   }
@@ -381,7 +383,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   }
 }
 
-export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings = [] }) {
+export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings = [], createdDestIds }) {
   if (!idmap.records) idmap.records = {};
 
   // destAppId comes from the snapshot (set by snapshotBase); fall back to '' for tests that omit it.
@@ -447,7 +449,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     const CREATE_CHUNK = 50;
     for (let i = 0; i < createRows.length; i += CREATE_CHUNK) {
       const chunk = createRows.slice(i, i + CREATE_CHUNK);
-      await createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById });
+      await createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById, createdDestIds });
       persist(idmap, journal);
     }
 
@@ -499,9 +501,14 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
  * @param {object} opts.journal         - journal from newJournal()
  * @param {Function} opts.persist       - persist(idmap, journal) called after each table
  * @param {object} opts.result          - result accumulator { created, updated, skipped, failed, warnings }
+ * @param {string}   [opts.policy]         - global preset ('mirror'|'overlay'|'preserve')
+ * @param {object}   [opts.policyOverrides]- per-table preset overrides
+ * @param {Set<string>} [opts.createdDestIds] - dest row ids CREATED this run (Pass 1); under
+ *   conflicts=dest-wins only these rows receive link writes — a PRE-EXISTING mapped dest row is
+ *   never touched (the dest user may have removed the link on purpose).
  * @returns {Promise<void>}
  */
-export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result }) {
+export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result, policy, policyOverrides, createdDestIds = new Set() }) {
   const destAppId = destSnapshot.baseId || '';
 
   // Build a fast lookup: destTableId → Map<destRecId, Set<linkedDestRecId>>
@@ -519,6 +526,9 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue;
 
+    // Conflicts axis: under dest-wins, only rows created THIS run get link writes.
+    const { conflicts } = resolvePolicy(policy, policyOverrides, srcTable.name);
+
     // Find all link fields in this source table that have a dest mapping
     const linkFields = (srcTable.fields || []).filter(
       (f) => (f.type === 'multipleRecordLinks' || f.type === 'foreignKey') && idmap.fields[f.id],
@@ -530,6 +540,8 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
     for (const rec of (srcTable.records || [])) {
       const destRowId = idmap.records[rec.id];
       if (!destRowId) continue; // src row not yet mapped → skip
+      // Pre-existing mapped dest row under dest-wins: never re-add links the dest user removed.
+      if (conflicts === 'dest-wins' && !createdDestIds.has(destRowId)) continue;
 
       const srcCells = rec.cellValuesByColumnId || {};
       const destCells = destRecMap.get(destRowId) || {};
@@ -691,6 +703,12 @@ async function uploadAttachmentFallback({ client, destAppId, destRowId, destFldI
  * @param {Function} opts.persist         - persist(idmap, journal) called after each table
  * @param {object}   opts.result          - result accumulator (must include .warnings array and .attachmentsUploaded counter)
  * @param {Function} [opts.fetchBytes]    - async (url) => { bytes, contentType? } (default: real fetch)
+ * @param {string}   [opts.policy]         - global preset ('mirror'|'overlay'|'preserve')
+ * @param {object}   [opts.policyOverrides]- per-table preset overrides
+ * @param {Set<string>} [opts.createdDestIds] - dest row ids CREATED this run (Pass 1); under
+ *   conflicts=dest-wins only these rows receive attachment writes — pasteAttachmentsCrossBase
+ *   SETS (replaces) the target cell, so a pre-existing mapped dest row must never be included
+ *   (dest-added attachments would be destroyed).
  * @returns {Promise<void>}
  */
 export async function applyAttachments({
@@ -703,6 +721,9 @@ export async function applyAttachments({
   persist,
   result,
   fetchBytes = defaultFetchBytes,
+  policy,
+  policyOverrides,
+  createdDestIds = new Set(),
 }) {
   // Initialize dedupe map if not already present (survives across calls for idempotency)
   idmap.attachments ??= {};
@@ -713,6 +734,11 @@ export async function applyAttachments({
   for (const srcTable of (srcSnapshot.tables || [])) {
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
+
+    // Conflicts axis: under dest-wins, only rows created THIS run get attachment writes —
+    // both the fast-path paste (which wholesale-replaces the target cell) and the fallback.
+    const { conflicts } = resolvePolicy(policy, policyOverrides, srcTable.name);
+    const destWinsSkip = (destRowId) => conflicts === 'dest-wins' && !createdDestIds.has(destRowId);
 
     try {
       // Find attachment fields that have a dest mapping
@@ -735,6 +761,7 @@ export async function applyAttachments({
         for (const rec of (srcTable.records || [])) {
           const destRowId = idmap.records[rec.id];
           if (!destRowId) continue;
+          if (destWinsSkip(destRowId)) continue; // preserve dest edits on pre-existing rows
           const srcCells = rec.cellValuesByColumnId || {};
           for (const field of attFields) {
             const cellValue = srcCells[field.id];
@@ -749,11 +776,14 @@ export async function applyAttachments({
         continue;
       }
 
-      // Collect included records: must be mapped AND have ≥1 attachment cell
+      // Collect included records: must be mapped AND have ≥1 attachment cell.
+      // Under dest-wins, pre-existing mapped rows are excluded from BOTH the paste payload
+      // and every fallback derived from includedRecs (pasteCells replaces the target cell).
       const includedRecs = [];
       for (const rec of (srcTable.records || [])) {
         const destRowId = idmap.records[rec.id];
         if (!destRowId) continue;
+        if (destWinsSkip(destRowId)) continue; // preserve dest edits on pre-existing rows
         const srcCells = rec.cellValuesByColumnId || {};
         const hasAtt = attFields.some((f) => {
           const cv = srcCells[f.id];
@@ -1027,8 +1057,12 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
     persist(idmap, journal);
   }
 
+  // Dest row ids created THIS run — Pass 2/3 use it so conflicts=dest-wins only blocks
+  // writes to PRE-EXISTING mapped rows (created rows always get their links/attachments).
+  const createdDestIds = new Set();
+
   // Pass 1: scalar / select upsert — fills idmap.records
-  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings: resolved });
+  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings: resolved, createdDestIds });
   persist(idmap, journal);
 
   // Rebuild destDisplayNames from idmap.records now populated by Pass 1.
@@ -1045,11 +1079,11 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   }
 
   // Pass 2: link cells
-  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result });
+  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result, policy, policyOverrides, createdDestIds });
   persist(idmap, journal);
 
   // Pass 3: attachments
-  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, createdDestIds });
   persist(idmap, journal);
 
   // Reapply view filters whose record refs now resolve

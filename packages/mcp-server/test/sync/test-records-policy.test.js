@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRecordsPass1, pruneRecords, collectTruncatedTableNames, runRecords } from '../../src/sync/records.js';
+import { applyRecordsPass1, applyRecordsPass2, applyAttachments, pruneRecords, collectTruncatedTableNames, runRecords } from '../../src/sync/records.js';
 
 export function fakeClient() {
   const calls = { create: [], update: [] };
@@ -500,5 +500,226 @@ describe('runRecords — prune integration', () => {
     assert.deepEqual(client.calls.deleted, [{ tableId: 'tD', rowIds: ['recStale'] }], 'source-deleted counterpart pruned');
     assert.equal(idmap.records.recSGone, undefined, 'stale idmap entry dropped');
     assert.equal(idmap.records.recS1, 'recKeep', 'live mapping kept');
+  });
+});
+
+// ── Conflicts axis in Pass 2 (links) ─────────────────────────────────────────
+// Under conflicts=dest-wins (preserve), a PRE-EXISTING mapped dest row must not have
+// source links re-added (the dest user may have removed them on purpose). Rows CREATED
+// this run always get their links.
+
+function pass2Fixtures() {
+  const calls = [];
+  const client = {
+    async addLinkItems(appId, rowId, fldId, items) { calls.push({ rowId, fldId, items }); return { ok: true, added: items.length }; },
+  };
+  const srcSnapshot = {
+    baseId: 'appS',
+    tables: [{
+      id: 'tS', name: 'Games',
+      fields: [{ id: 'sL', name: 'Link', type: 'foreignKey' }],
+      records: [{ id: 'recS1', cellValuesByColumnId: { sL: ['recSTarget'] } }],
+    }],
+  };
+  const destSnapshot = {
+    baseId: 'appD',
+    tables: [{
+      id: 'tD', name: 'Games', fields: [],
+      // dest link cell is EMPTY — the dest user removed the link
+      records: [{ id: 'recD1', cellValuesByColumnId: {} }],
+    }],
+  };
+  const idmap = {
+    tables: { tS: 'tD' },
+    fields: { sL: { destFld: 'dL' } },
+    records: { recS1: 'recD1', recSTarget: 'recDTarget' },
+  };
+  return { calls, client, srcSnapshot, destSnapshot, idmap };
+}
+
+describe('Pass2 conflict policy (links)', () => {
+  it('preserve (dest-wins) does NOT re-add links to a pre-existing mapped dest row', async () => {
+    const { calls, client, srcSnapshot, destSnapshot, idmap } = pass2Fixtures();
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames: new Map(),
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+      policy: 'preserve',
+    });
+    assert.equal(calls.length, 0, 'no addLinkItems under preserve for a pre-existing row');
+  });
+
+  it('preserve still writes links to a dest row CREATED this run', async () => {
+    const { calls, client, srcSnapshot, destSnapshot, idmap } = pass2Fixtures();
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames: new Map(),
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+      policy: 'preserve', createdDestIds: new Set(['recD1']),
+    });
+    assert.equal(calls.length, 1, 'created-this-run row still gets its links');
+    assert.equal(calls[0].rowId, 'recD1');
+  });
+
+  it('overlay (source-wins) still adds the missing link (regression)', async () => {
+    const { calls, client, srcSnapshot, destSnapshot, idmap } = pass2Fixtures();
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames: new Map(),
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+      policy: 'overlay',
+    });
+    assert.equal(calls.length, 1, 'link re-added under source-wins');
+  });
+
+  it('policyOverrides: per-table preserve blocks the link add under a global overlay', async () => {
+    const { calls, client, srcSnapshot, destSnapshot, idmap } = pass2Fixtures();
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass2({
+      client, srcSnapshot, destSnapshot, idmap, destDisplayNames: new Map(),
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+      policy: 'overlay', policyOverrides: { Games: 'preserve' },
+    });
+    assert.equal(calls.length, 0, 'table-level preserve override respected');
+  });
+});
+
+// ── Conflicts axis in Pass 3 (attachments) ───────────────────────────────────
+// Under conflicts=dest-wins (preserve), a PRE-EXISTING mapped dest row must not have its
+// attachment cells wholesale-replaced (pasteAttachmentsCrossBase SETS the target cells) nor
+// receive fallback uploads. Rows CREATED this run always get their attachments.
+
+function pass3Fixtures({ withDestView = false } = {}) {
+  const uploads = [];
+  const pastes = [];
+  const client = {
+    async uploadAttachment(appId, rowId, columnId, payload) { uploads.push({ rowId, columnId, filename: payload.filename }); return { ok: true }; },
+    async createDataTransferPolicy() { return { policy: 'signed' }; },
+    async pasteAttachmentsCrossBase(appId, tableId, payload) { pastes.push(payload); return { pastedRowIds: payload.targetRowIds }; },
+  };
+  const fetchBytes = async () => ({ bytes: Buffer.from('x'), contentType: 'image/png' });
+  const srcSnapshot = {
+    baseId: 'appS',
+    tables: [{
+      id: 'tS', name: 'Games',
+      fields: [{ id: 'sA', name: 'Att', type: 'multipleAttachments' }],
+      records: [{
+        id: 'recS1',
+        cellValuesByColumnId: { sA: [{ id: 'att1', url: 'https://src/a.png', filename: 'a.png', size: 10, type: 'image/png' }] },
+      }],
+    }],
+  };
+  const destSnapshot = {
+    baseId: 'appD',
+    tables: [{
+      id: 'tD', name: 'Games', fields: [],
+      ...(withDestView ? { views: [{ id: 'viwD' }] } : {}),
+      records: [{ id: 'recD1', cellValuesByColumnId: {} }],
+    }],
+  };
+  const idmap = { tables: { tS: 'tD' }, fields: { sA: { destFld: 'dA' } }, records: { recS1: 'recD1' } };
+  return { uploads, pastes, client, fetchBytes, srcSnapshot, destSnapshot, idmap };
+}
+
+describe('Pass3 conflict policy (attachments)', () => {
+  it('preserve (dest-wins): fast path does not paste over a pre-existing mapped dest row', async () => {
+    const { uploads, pastes, client, fetchBytes, srcSnapshot, destSnapshot, idmap } = pass3Fixtures({ withDestView: true });
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: noLimiter, journal: {}, persist: () => {}, result, fetchBytes,
+      policy: 'preserve',
+    });
+    assert.equal(pastes.length, 0, 'pasteAttachmentsCrossBase not called under preserve');
+    assert.equal(uploads.length, 0, 'no fallback upload under preserve');
+  });
+
+  it('preserve (dest-wins): fallback path does not upload to a pre-existing mapped dest row', async () => {
+    const { uploads, client, fetchBytes, srcSnapshot, destSnapshot, idmap } = pass3Fixtures({ withDestView: false });
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: noLimiter, journal: {}, persist: () => {}, result, fetchBytes,
+      policy: 'preserve',
+    });
+    assert.equal(uploads.length, 0, 'no fallback upload under preserve for a pre-existing row');
+  });
+
+  it('preserve: a dest row CREATED this run still receives attachments (fast path)', async () => {
+    const { pastes, client, fetchBytes, srcSnapshot, destSnapshot, idmap } = pass3Fixtures({ withDestView: true });
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: noLimiter, journal: {}, persist: () => {}, result, fetchBytes,
+      policy: 'preserve', createdDestIds: new Set(['recD1']),
+    });
+    assert.equal(pastes.length, 1, 'created-this-run row still gets its attachments');
+    assert.deepEqual(pastes[0].targetRowIds, ['recD1']);
+  });
+
+  it('overlay (source-wins) still pastes attachments (regression)', async () => {
+    const { pastes, client, fetchBytes, srcSnapshot, destSnapshot, idmap } = pass3Fixtures({ withDestView: true });
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: noLimiter, journal: {}, persist: () => {}, result, fetchBytes,
+      policy: 'overlay',
+    });
+    assert.equal(pastes.length, 1);
+  });
+});
+
+// ── runRecords threads policy + created-set into Pass 2 ──────────────────────
+
+describe('runRecords — preserve policy threads into Pass 2', () => {
+  it('under preserve, links are written only to rows created this run — never re-added to pre-existing rows', async () => {
+    const linkCalls = [];
+    const client = {
+      async createRecords(appId, tableId, rows) {
+        return { created: rows.map((r) => ({ rowId: 'recNew_' + r.sourceKey, sourceKey: r.sourceKey })), failed: [] };
+      },
+      async updateRecords(appId, tableId, rows) { return { updated: rows, failed: [] }; },
+      async addLinkItems(appId, rowId, fldId, items) { linkCalls.push({ rowId, fldId }); return { ok: true, added: items.length }; },
+    };
+    // recS1 is PRE-EXISTING (mapped → recD1) and links to recS2; its dest link cell is EMPTY
+    // (dest user removed the link). recS2 + recS3 are NEW; recS2 links to recS3 (forward ref →
+    // unresolvable at create time → Pass 2 must write it).
+    const srcSnapshot = {
+      baseId: 'appS',
+      tables: [{
+        id: 'tS', name: 'Games', primaryFieldId: 'sN',
+        fields: [
+          { id: 'sN', name: 'Name', type: 'text' },
+          { id: 'sL', name: 'Link', type: 'foreignKey', typeOptions: { foreignTableId: 'tS' } },
+        ],
+        views: [],
+        records: [
+          { id: 'recS1', cellValuesByColumnId: { sN: 'one', sL: ['recS2'] } },
+          { id: 'recS2', cellValuesByColumnId: { sN: 'two', sL: ['recS3'] } },
+          { id: 'recS3', cellValuesByColumnId: { sN: 'three' } },
+        ],
+      }],
+    };
+    const destSnapshot = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [],
+        records: [{ id: 'recD1', cellValuesByColumnId: {} }],
+      }],
+    };
+    const idmap = {
+      tables: { tS: 'tD' },
+      fields: { sN: { destFld: 'dN', choices: {} }, sL: { destFld: 'dL' } },
+      records: { recS1: 'recD1' },
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await runRecords({
+      client, srcSnapshot, destSnapshot, idmap,
+      policy: 'preserve',
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+    });
+    assert.equal(result.created, 2, 'both new records created');
+    assert.ok(linkCalls.every((c) => c.rowId !== 'recD1'), 'pre-existing recD1 never receives addLinkItems under preserve');
+    assert.ok(linkCalls.some((c) => c.rowId === 'recNew_recS2'), 'created-this-run row still gets its forward link');
   });
 });
