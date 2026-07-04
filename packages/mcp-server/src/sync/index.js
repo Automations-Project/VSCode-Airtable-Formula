@@ -49,6 +49,15 @@ export async function plan({ client, sourceBaseId, destBaseId, planId, direction
   const src = await snapshotBase(client, effectiveSrcId);
   const dest = await snapshotBase(client, effectiveDestId);
   const idmap = matchByName(src, dest);
+  // matchByName returns only schema-level maps (tables/fields/views). The persisted
+  // records/attachments maps are the rec→rec identity built by prior record syncs and MUST
+  // be preserved VERBATIM: (a) saveIdmap below is a full-file replace, so without this merge
+  // every re-plan wiped them and the next apply re-created (duplicated) every record;
+  // (b) computePlan's view compare needs idmap.records to remap record-referencing filter
+  // values, otherwise a correctly-synced record filter re-flags as drift on every plan.
+  const persisted = loadIdmap(effectiveSrcId, effectiveDestId);
+  idmap.records = { ...(persisted.records || {}) };
+  idmap.attachments = { ...(persisted.attachments || {}) };
   const base = computePlan(src, dest, idmap);
   const fullPlan = {
     planId,
@@ -84,6 +93,11 @@ export async function diff({ client, sourceBaseId, destBaseId, diffId, fieldMapp
   const src = await snapshotBase(client, sourceBaseId);
   const dest = await snapshotBase(client, destBaseId);
   const idmap = matchByName(src, dest);
+  // Merge the persisted records map so compare's view canonicalization remaps
+  // record-referencing filter values instead of stripping them — otherwise a filter a prior
+  // sync correctly restored on the dest re-flags as `filters` drift forever (see plan()).
+  const persisted = loadIdmap(sourceBaseId, destBaseId);
+  idmap.records = { ...(persisted.records || {}) };
   const base = compare(src, dest, idmap);
   const fullDiff = { diffId, ...base };
   saveDiff(sourceBaseId, destBaseId, fullDiff);
