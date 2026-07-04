@@ -2775,6 +2775,66 @@ export class AirtableClient {
   }
 
   /**
+   * Attach a file to an attachment cell BY URL — Airtable's servers fetch the
+   * URL (this is the UI's "Add attachment → Add URL", NOT a byte proxy through
+   * this server). Two internal calls:
+   *   A. POST /v0.3/attachments/urlUpload (JSON) — Airtable downloads the URL and
+   *      returns fileUploadResult { propsToAddToAttachmentObj, filename, expiringInitialPreviewUrl }.
+   *   B. POST /v0.3/row/{rowId}/updateArrayTypeCellByAddingItem (form) — append the item.
+   * Soft-fails (returns {ok:false,error}) instead of throwing.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {{url: string, filename?: string}} opts
+   * @returns {Promise<{ok:boolean, attachmentId?:string, url?:string, error?:string}>}
+   */
+  async addAttachmentByUrl(appId, rowId, columnId, { url, filename } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(rowId, 'rowId');
+    assertAirtableId(columnId, 'columnId');
+    if (!url) return { ok: false, error: 'url is required' };
+    try {
+      // Call A — Airtable server-side fetch of the URL.
+      const uploadBody = {
+        url,
+        userId: this.auth.userId,
+        applicationId: appId,
+        enterpriseAccountId: null,
+        directUploadUserContentPurpose: 'directUploadAttachment',
+        _csrf: this.auth.csrfToken,
+      };
+      const upRes = await this.auth.postJSON('https://airtable.com/v0.3/attachments/urlUpload', uploadBody, appId);
+      if (!upRes.ok) {
+        const body = await upRes.text().catch(() => '');
+        return { ok: false, error: `urlUpload failed (${upRes.status}): ${body}` };
+      }
+      const upData = await upRes.json().catch(() => ({}));
+      const fur = upData?.fileUploadResult;
+      if (!upData?.success || !fur?.propsToAddToAttachmentObj) {
+        return { ok: false, error: `urlUpload: unexpected response — ${JSON.stringify(upData).slice(0, 200)}` };
+      }
+      // Call B — append the attachment item to the cell (same as the multipart path).
+      const attachmentId = 'att' + this._genRandomId();
+      const item = {
+        id: attachmentId,
+        ...fur.propsToAddToAttachmentObj,
+        filename: filename || fur.filename,
+        expiringInitialPreviewUrl: fur.expiringInitialPreviewUrl,
+      };
+      const attachUrl = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+      const res = await this.auth.postForm(attachUrl, this._mutationParams({ columnId, item }, appId), appId);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { ok: false, error: `attach failed (${res.status}): ${body}` };
+      }
+      return { ok: true, attachmentId, url: fur.url };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
+  /**
    * Add linked-record items to a link cell via `updateArrayTypeCellByAddingItem`.
    * Called once per item (Airtable has no SET endpoint for link cells — only APPEND).
    * Soft-fails (returns {ok:false,error}) instead of throwing, so one bad link

@@ -552,6 +552,23 @@ export function Settings() {
               <option value="npx">npx</option>
             </select>
           </div>
+          <div className="toggle-row">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Daemon port</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
+                Default 8723 — stays fixed across restarts · set 0 for an automatic port · applies on daemon restart
+              </div>
+            </div>
+            <input
+              type="number"
+              className="select-input"
+              style={{ width: 80, textAlign: 'right' }}
+              min={0}
+              max={65535}
+              value={settings.mcp.daemonPort ?? 8723}
+              onChange={e => changeHeavySetting('mcp.daemonPort', Number(e.target.value))}
+            />
+          </div>
         </div>
       </div>
 

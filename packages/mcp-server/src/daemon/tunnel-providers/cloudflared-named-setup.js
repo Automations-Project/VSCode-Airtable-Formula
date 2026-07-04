@@ -601,7 +601,14 @@ function killChild(child) {
 function serializeConfigYaml(opts) {
   // Simple, stable YAML — cloudflared's ingress format is well-defined and
   // our values are mechanically generated (UUIDs, paths, hostnames).
+  //
+  // Force `protocol: http2` (TCP) instead of cloudflared's default QUIC (UDP).
+  // Some networks throttle or block UDP/7844, which makes the tunnel flaky on
+  // startup. The MCP channel is low-volume control traffic, so QUIC's
+  // throughput/latency gains don't matter here — TCP/http2 trades them for
+  // reliability.
   return [
+    'protocol: http2',
     `tunnel: ${opts.uuid}`,
     `credentials-file: ${yamlQuoteIfNeeded(opts.credentialsPath)}`,
     'ingress:',

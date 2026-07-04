@@ -57,21 +57,34 @@ const FETCH_BLOCKED_PORTS = new Set([
 ]);
 
 async function listenAvoidingBlockedPorts(server, requestedPort, host) {
-  const maxAttempts = requestedPort === 0 ? 5 : 1;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise((resolve, reject) => {
-      const onError = (error) => {
-        server.removeListener('listening', onListening);
-        reject(error);
-      };
-      const onListening = () => {
-        server.removeListener('error', onError);
-        resolve();
-      };
-      server.once('error', onError);
-      server.once('listening', onListening);
-      server.listen(requestedPort, host);
-    });
+  // A fixed port (requestedPort > 0) gets one shot; if it's already in use or
+  // turns out to be a browser-blocked port, we fall back to an OS-assigned
+  // ephemeral port so the daemon always starts. The bound port is read back and
+  // persisted to the lockfile, so clients still discover it. With requestedPort
+  // 0 we simply retry on ephemeral ports until one is not browser-blocked.
+  let port = requestedPort;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const onError = (error) => {
+          server.removeListener('listening', onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.removeListener('error', onError);
+          resolve();
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
+        server.listen(port, host);
+      });
+    } catch (error) {
+      if (error?.code === 'EADDRINUSE' && port !== 0) {
+        port = 0; // fixed port taken → fall back to an ephemeral port
+        continue;
+      }
+      throw error;
+    }
 
     const boundPort = getBoundPort(server);
     if (!FETCH_BLOCKED_PORTS.has(boundPort)) {
@@ -79,6 +92,7 @@ async function listenAvoidingBlockedPorts(server, requestedPort, host) {
     }
 
     await new Promise((resolve) => server.close(() => resolve()));
+    port = 0; // blocked port → next attempt uses an ephemeral port
   }
 }
 

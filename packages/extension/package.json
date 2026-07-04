@@ -1,10 +1,10 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.1.6",
+  "version": "2.1.10",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
-  "description": "Airtable formula, script & automation editor with MCP server (70 tools), language server, and AI skills for VS Code.",
+  "description": "Airtable formula, script & automation editor with MCP server (71 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -397,6 +397,13 @@
           "default": true,
           "description": "Start and use a shared daemon process for MCP server. Disable to use a direct per-session process (legacy behavior)."
         },
+        "airtableFormula.mcp.daemonPort": {
+          "type": "number",
+          "default": 8723,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Fixed TCP port for the shared MCP daemon's HTTP server. Defaults to 8723 so the daemon keeps the same port across restarts (stable MCP client config, predictable process to find/kill). Change it to any free port, or set 0 for an automatic OS-assigned port. Takes effect on the next daemon restart; if the chosen port is already in use, the daemon falls back to an automatic port."
+        },
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",
@@ -491,8 +498,8 @@
           ],
           "enumDescriptions": [
             "Schema inspection, formula validation, and record reading only (12 tools)",
-            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (70 tools)",
+            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (55 tools)",
+            "All tools enabled including destructive ops, form metadata, and extensions (71 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -560,7 +567,7 @@
         "airtableFormula.mcp.categories.recordWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Record Write tools: create_records, update_records, duplicate_records (bulk record create/update/duplication)."
+          "description": "Record Write tools: create_records, update_records, duplicate_records, upload_attachment (bulk record create/update/duplication and URL-based attachment uploads)."
         },
         "airtableFormula.mcp.categories.recordDestructive": {
           "type": "boolean",
@@ -679,7 +686,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 70 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 71 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate / upload_attachment), and extension management. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },

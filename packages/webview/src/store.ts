@@ -62,8 +62,8 @@ const defaultSettings: SettingsSnapshot = {
     notifyOnUpdates:        true,
     toolProfile: {
       profile:      'safe-write',
-      enabledCount: 54,
-      totalCount:   70,
+      enabledCount: 55,
+      totalCount:   71,
       categories: {
         read: true, recordRead: true, tableWrite: true, tableDestructive: true,
         fieldWrite: true, fieldDestructive: true, recordDestructive: true,
@@ -74,6 +74,7 @@ const defaultSettings: SettingsSnapshot = {
       },
     },
     serverSource: 'bundled' as const,
+    daemonPort:   8723,
   },
   ai:      { autoInstallFiles: true, includeAgents: false },
   formula: { formatterVersion: 'v2' },

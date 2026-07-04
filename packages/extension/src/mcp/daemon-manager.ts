@@ -112,7 +112,12 @@ export class DaemonManager implements vscode.Disposable {
 
   private async _spawnDetached(): Promise<void> {
     const serverPath = path.join(this.extensionPath, 'dist', 'mcp', 'index.mjs');
-    const child = spawn(process.execPath, [serverPath, 'daemon', 'start'], {
+    const args = [serverPath, 'daemon', 'start'];
+    // Fixed daemon port (0 = OS-ephemeral). Read fresh each spawn so a settings
+    // change takes effect on the next (re)start without reloading the window.
+    const daemonPort = vscode.workspace.getConfiguration('airtableFormula').get<number>('mcp.daemonPort', 0);
+    if (Number.isInteger(daemonPort) && daemonPort > 0 && daemonPort <= 65535) args.push('--port', String(daemonPort));
+    const child = spawn(process.execPath, args, {
       detached: true,
       stdio: 'ignore',
       env: { ...process.env, ...this.buildDaemonEnv() },

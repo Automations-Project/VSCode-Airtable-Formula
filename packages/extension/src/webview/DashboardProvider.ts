@@ -556,7 +556,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       const dm = this._daemonManager;
       if (dm) {
         this.postResult(msg.id, true);
-        dm.restartDaemon()
+        // Start = attach-if-healthy (idempotent, reuses a running daemon); Restart = force stop+respawn.
+        // Previously both routed through restartDaemon(), so pressing Start killed a healthy
+        // daemon and respawned it on a new port — the reported "forgets the running process" bug.
+        (msg.type === 'daemon:restart' ? dm.restartDaemon() : dm.ensureDaemon())
           .then(() => { this._daemonStarting = false; void this._initLockfileWatch(); return this.pushState(); })
           .catch(err => {
             this._daemonStarting = false;
@@ -855,6 +858,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           notifyOnUpdates:        settings.mcp.notifyOnUpdates,
           toolProfile,
           serverSource:           settings.mcp.serverSource,
+          daemonPort:             settings.mcp.daemonPort,
         },
         ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
         formula: { formatterVersion: settings.formula.formatterVersion },

@@ -97,6 +97,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import path from 'path';
 import { stripHeader } from './formula-header.js';
+import { uploadAttachmentsByUrl } from './attachments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -1560,6 +1561,33 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
     },
   },
   {
+    name: 'upload_attachment',
+    description: "Upload attachments into an attachment cell by URL. Airtable's servers fetch each URL directly (the UI's 'Add attachment → Add URL') — bytes are NOT proxied through this server. Use for multipleAttachments fields, which update_records cannot set. Appends to the cell (calling twice adds two). Per-update isolation: a failing update is reported, not fatal.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        updates: {
+          type: 'array',
+          description: 'Attachments to upload, each { rowId: "recXXX", columnId: "fldXXX", url: "https://...", filename?: "name.jpg" }. filename defaults to the URL path basename.',
+          items: {
+            type: 'object',
+            properties: {
+              rowId:    { type: 'string', description: 'Record ID (recXXX)' },
+              columnId: { type: 'string', description: 'Field/column ID (fldXXX)' },
+              url:      { type: 'string', description: 'Public URL of the file to fetch and upload' },
+              filename: { type: 'string', description: 'Optional filename override; defaults to the URL path basename' },
+            },
+            required: ['rowId', 'columnId', 'url'],
+          },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'updates'],
+    },
+  },
+  {
     name: 'delete_records',
     description: 'Delete one or more records from a table in a single batch call. The returned deleted count equals rowIds.length (optimistic) — already-deleted rows are silently skipped by the server.',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -2394,6 +2422,11 @@ const handlers = {
     return ok(result, result, debug);
   },
 
+  async upload_attachment({ appId, updates, debug }) {
+    const result = await uploadAttachmentsByUrl(client, appId, updates || []);
+    return ok(result, result, debug);
+  },
+
   async delete_records({ appId, tableId, rowIds, viewId, debug }) {
     const result = await client.deleteRecords(appId, tableId, rowIds, { viewId });
     return ok(result, result, debug);
@@ -2637,9 +2670,19 @@ let activeTransport = null;
 
 async function main() {
   if (isDaemonStart) {
+    // ponytail: optional fixed daemon port; 0/absent => OS-ephemeral (the default)
+    let fixedPort;
+    for (let i = 2; i < cliArgs.length; i++) {
+      const a = cliArgs[i];
+      const raw = a === '--port' ? cliArgs[i + 1] : a.startsWith('--port=') ? a.slice(7) : undefined;
+      if (raw === undefined) continue;
+      const n = Number(raw);
+      if (Number.isInteger(n) && n >= 1 && n <= 65535) fixedPort = n;
+    }
     const { startDaemon } = await import('./daemon/launcher.js');
     const result = await startDaemon({
       configDir: process.env.AIRTABLE_USER_MCP_HOME,
+      port: fixedPort,
       getTools: (tc) => {
         const enabledTools = tc.filterTools(TOOLS);
         const enabledNames = new Set(enabledTools.map(t => t.name));

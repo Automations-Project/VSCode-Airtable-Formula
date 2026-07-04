@@ -110,6 +110,7 @@ export const TOOL_CATEGORIES = {
   duplicate_records:      'record-write',
   create_records:         'record-write',
   update_records:         'record-write',
+  upload_attachment:      'record-write',
 
   // Record Destructive (batch record deletion)
   delete_records:         'record-destructive',

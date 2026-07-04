@@ -112,6 +112,7 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   duplicate_records:         'record-write',
   create_records:            'record-write',
   update_records:            'record-write',
+  upload_attachment:         'record-write',
   // Record destructive (batch record deletion)
   delete_records:            'record-destructive',
   // Sync (base-to-base schema sync)
