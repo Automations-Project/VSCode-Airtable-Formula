@@ -18,7 +18,7 @@ import { coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue, isWr
 import { resolvePolicy, validateFieldMappings } from './policy.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
-import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords } from './snapshot.js';
+import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords, isComputedType } from './snapshot.js';
 import { loadIdmap, saveIdmap, syncDir } from './idmap.js';
 import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
 import { safeAtomicWriteFileSync } from '../safe-write.js';
@@ -147,6 +147,13 @@ function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
  *     (no warning spam for already-converged cells; when the dest record's cells are unknown,
  *     the warning is emitted conservatively).
  *
+ * Cleared cells: readQueries omits empty cells, so a cell CLEARED on source arrives as an
+ * ABSENT key. Since buildUpdateCells only runs under conflicts=source-wins, the clear must
+ * propagate: an explicit null is emitted for a mapped, writable, non-array field whose dest
+ * cell is known to still hold a value. Never cleared: unmapped fields, computed fields,
+ * array cells (Pass 2/3 / deferral own those), and anything when the dest record's cells are
+ * unknown (dest record absent from the snapshot).
+ *
  * @param {Array}  srcFields  - source table field descriptors
  * @param {object} srcCells   - source record cellValuesByColumnId
  * @param {object|undefined} destCells - dest record cellValuesByColumnId (undefined when the
@@ -159,13 +166,13 @@ function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
 function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRecId) {
   const cells = {};
   for (const field of srcFields) {
-    const srcVal = srcCells[field.id];
-    if (srcVal === undefined) continue;
     const mapping = idmap.fields[field.id];
     if (!mapping) continue; // field not mapped → skip
+    const srcVal = srcCells[field.id]; // ABSENT key = cell is EMPTY on source
     // Array-shaped cells are never accepted by updateRecords → defer
     if (ARRAY_CELL_TYPES.has(field.type)) {
       if (!isWritableForRecords(field)) continue; // links/attachments: Pass 2 / Pass 3 own these
+      if (srcVal === undefined && !destCells) continue; // empty src, unknown dest — nothing to report
       // multiSelect: remap source choice ids into the dest vocabulary before comparing
       // (unmappable choices keep a sentinel so they always count as a difference).
       const cmp = isMultiSelect(field.type)
@@ -176,6 +183,14 @@ function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRe
         code: 'RECORD_ARRAY_UPDATE_DEFERRED',
         message: `Record ${srcRecId}: field ${field.id} (${field.type}) is array-typed — update deferred (updateRecords does not support arrays)`,
       });
+      continue;
+    }
+    if (isComputedType(field.type)) continue; // Pass 1 never writes (or clears) computed cells
+    if (srcVal === undefined) {
+      // Cleared on source: propagate the clear (source-wins) as an explicit null, but only
+      // when the dest record is known to still hold a value for this field.
+      const destVal = destCells ? destCells[mapping.destFld] : undefined;
+      if (destVal !== undefined && destVal !== null) cells[mapping.destFld] = null;
       continue;
     }
     const coerced = coercePass1Cell(field, srcVal, idmap);

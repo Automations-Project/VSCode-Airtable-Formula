@@ -236,6 +236,147 @@ describe('records.applyRecordsPass1', () => {
     // A truly diverged multiSelect must still warn (pinned by the earlier test with no dest record).
   });
 
+  it('propagates a cell cleared on source as an explicit null under source-wins', async () => {
+    // readQueries omits empty cells: a cleared source cell arrives as an ABSENT key.
+    // Under source-wins the clear must reach the dest, or the stale value lives forever.
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {
+        fldT: { destFld: 'fldTD', choices: {} },
+        fldN: { destFld: 'fldND', choices: {} },
+      },
+      records: { recS1: 'recD1' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [
+          { id: 'fldT', type: 'text' },
+          { id: 'fldN', type: 'number' },
+          { id: 'fldF', type: 'formula' }, // computed — must never be cleared
+        ],
+        // fldT was cleared on source (absent key); fldN still has a value.
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldN: 42 } }],
+      }],
+    };
+    const destSnapshot = {
+      tables: [{
+        id: 'tblD', name: 'T', fields: [],
+        records: [{
+          id: 'recD1',
+          // dest still holds the stale text value; also holds a dest-only unmapped cell
+          // and a computed cell — both must remain untouched.
+          cellValuesByColumnId: { fldTD: 'stale', fldND: 41, fldX: 'dest-only', fldFD: 'computed' },
+        }],
+      }],
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3d', 't'),
+      persist: () => {},
+      result,
+    });
+    assert.equal(updateCalls.length, 1);
+    const sentCells = updateCalls[0].rows[0].cellValuesByColumnId;
+    assert.equal(sentCells.fldTD, null, 'cleared source cell must be written as explicit null');
+    assert.equal(sentCells.fldND, 42, 'changed scalar still sent');
+    assert.ok(!('fldX' in sentCells), 'unmapped dest-only field must not be touched');
+    assert.ok(!('fldFD' in sentCells), 'computed field must never be cleared');
+  });
+
+  it('does not emit clears when the dest cell is already empty or the dest record is unknown', async () => {
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldT: { destFld: 'fldTD', choices: {} }, fldN: { destFld: 'fldND', choices: {} } },
+      records: { recS1: 'recD1', recS2: 'recD2' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldT', type: 'text' }, { id: 'fldN', type: 'number' }],
+        records: [
+          { id: 'recS1', cellValuesByColumnId: { fldN: 7 } },  // fldT absent; dest fldTD also empty
+          { id: 'recS2', cellValuesByColumnId: { fldN: 8 } },  // dest record missing from snapshot
+        ],
+      }],
+    };
+    const destSnapshot = {
+      tables: [{
+        id: 'tblD', name: 'T', fields: [],
+        records: [{ id: 'recD1', cellValuesByColumnId: { fldND: 6 } }], // no fldTD value; recD2 absent
+      }],
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3e', 't'),
+      persist: () => {},
+      result,
+    });
+    assert.equal(updateCalls.length, 1);
+    for (const row of updateCalls[0].rows) {
+      assert.ok(!('fldTD' in row.cellValuesByColumnId), `no null for empty/unknown dest cell (row ${row.rowId})`);
+    }
+  });
+
+  it('never clears (or writes) anything under conflicts=dest-wins', async () => {
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldT: { destFld: 'fldTD', choices: {} } },
+      records: { recS1: 'recD1' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldT', type: 'text' }],
+        records: [{ id: 'recS1', cellValuesByColumnId: {} }], // cleared on source
+      }],
+    };
+    const destSnapshot = {
+      tables: [{
+        id: 'tblD', name: 'T', fields: [],
+        records: [{ id: 'recD1', cellValuesByColumnId: { fldTD: 'dest edit' } }],
+      }],
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3f', 't'),
+      persist: () => {},
+      result,
+      policy: 'preserve', // conflicts=dest-wins
+    });
+    assert.equal(updateCalls.length, 0, 'dest-wins must not send any update (no clears)');
+  });
+
   it('pushes RECORD_CELL_SKIPPED warning when a select choice cannot be mapped', async () => {
     const captured = [];
     const idmap = {
