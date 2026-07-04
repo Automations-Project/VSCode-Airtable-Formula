@@ -1,6 +1,6 @@
 // compare.js — base-schema comparator helpers (pure: no fs, no network, no Date.now/Math.random)
 
-import { choiceNames, scalarTypeOptionsChanged, computedSig } from './field-compare.js';
+import { choiceNames, scalarTypeOptionsChanged, computedSig, linkSig } from './field-compare.js';
 import { canonicalizeViewConfig } from './remap.js';
 
 const BEST_EFFORT = new Set(['fieldOrder', 'viewOrder', 'columnOrder', 'sortOrder', 'groupOrder']);
@@ -139,21 +139,12 @@ export function compareFields(srcTable, destTable, idmap, srcGlobalFldNames, des
           entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
         }
       } else if (sf.type === 'foreignKey' || sf.type === 'multipleRecordLinks') {
-        // Link fields: canonicalize before comparing.
-        // foreignTableId is base-scoped (always differs cross-base) → resolve to table NAME.
-        // symmetricColumnId is a base-scoped reciprocal field id → drop it entirely (no semantic
-        // content that sync controls; it's auto-created by Airtable when the link is made).
-        const canonLink = (opts, tblNames) => {
-          if (!opts) return null;
-          const { symmetricColumnId: _dropped, foreignTableId, ...rest } = opts; // eslint-disable-line no-unused-vars
-          return JSON.stringify({
-            ...rest,
-            foreignTableName: (tblNames && tblNames[foreignTableId]) ?? foreignTableId ?? null,
-          });
-        };
+        // Link fields: canonical remap-aware identity (linkSig, shared with diff.js so
+        // mode=diff and mode=plan agree) — foreignTableId resolves to the table NAME;
+        // base-scoped symmetricColumnId / viewIdForRecordSelection are dropped entirely.
         const srcTblNames = srcGlobalTblNames ?? {};
         const destTblNames = destGlobalTblNames ?? {};
-        if (canonLink(sf.typeOptions, srcTblNames) !== canonLink(df.typeOptions, destTblNames)) {
+        if (linkSig(sf, srcTblNames) !== linkSig(df, destTblNames)) {
           entries.push({ scope, key: 'typeOptions', source: sf.typeOptions, dest: df.typeOptions, class: classOf('typeOptions') });
         }
       } else {

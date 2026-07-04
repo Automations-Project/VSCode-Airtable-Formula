@@ -157,6 +157,52 @@ describe('diff convergence (apply-aligned typeOptions)', () => {
     const plan = computePlan(src, dest, matchByName(src, dest));
     assert.equal(plan.actions.filter((a) => a.kind === 'updateField').length, 0);
   });
+
+  const linkOpts = (tbl, sym, extra = {}) => ({ typeOptions: { foreignTableId: tbl, symmetricColumnId: sym, relationship: 'many', unreversed: true, ...extra } });
+
+  it('no phantom updateField for a matched link field that differs only by base-local ids', () => {
+    const src = { baseId: 'appS', tables: [
+      { id: 'tS1', name: 'Projects', primaryFieldId: 'fSp', fields: [field('fSp', 'Name', 'text')] },
+      { id: 'tS2', name: 'Tasks', primaryFieldId: 'fSt', fields: [field('fSt', 'Task', 'text'), field('fSl', 'Project', 'foreignKey', linkOpts('tS1', 'fSsym'))] },
+    ] };
+    const dest = { baseId: 'appD', tables: [
+      { id: 'tD1', name: 'Projects', primaryFieldId: 'fDp', fields: [field('fDp', 'Name', 'text')] },
+      { id: 'tD2', name: 'Tasks', primaryFieldId: 'fDt', fields: [field('fDt', 'Task', 'text'), field('fDl', 'Project', 'foreignKey', linkOpts('tD1', 'fDsym'))] },
+    ] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.equal(plan.actions.length, 0, 'equivalent link fields must not emit updateField');
+  });
+
+  it('link field with a limit-to-view id that differs only cross-base still converges', () => {
+    const src = { baseId: 'appS', tables: [
+      { id: 'tS1', name: 'Projects', primaryFieldId: 'fSp', fields: [field('fSp', 'Name', 'text')] },
+      { id: 'tS2', name: 'Tasks', primaryFieldId: 'fSt', fields: [field('fSt', 'Task', 'text'), field('fSl', 'Project', 'foreignKey', linkOpts('tS1', 'fSsym', { viewIdForRecordSelection: 'viwSRC' }))] },
+    ] };
+    const dest = { baseId: 'appD', tables: [
+      { id: 'tD1', name: 'Projects', primaryFieldId: 'fDp', fields: [field('fDp', 'Name', 'text')] },
+      { id: 'tD2', name: 'Tasks', primaryFieldId: 'fDt', fields: [field('fDt', 'Task', 'text'), field('fDl', 'Project', 'foreignKey', linkOpts('tD1', 'fDsym', { viewIdForRecordSelection: 'viwDST' }))] },
+    ] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    assert.equal(plan.actions.filter((a) => a.kind === 'updateField').length, 0);
+  });
+
+  it('updateField when a matched link field genuinely diverges (points at a different-named table)', () => {
+    const src = { baseId: 'appS', tables: [
+      { id: 'tS1', name: 'Projects', primaryFieldId: 'fSp', fields: [field('fSp', 'Name', 'text')] },
+      { id: 'tS3', name: 'Archive', primaryFieldId: 'fSa', fields: [field('fSa', 'Name', 'text')] },
+      { id: 'tS2', name: 'Tasks', primaryFieldId: 'fSt', fields: [field('fSt', 'Task', 'text'), field('fSl', 'Project', 'foreignKey', linkOpts('tS1', 'fSsym'))] },
+    ] };
+    const dest = { baseId: 'appD', tables: [
+      { id: 'tD1', name: 'Projects', primaryFieldId: 'fDp', fields: [field('fDp', 'Name', 'text')] },
+      { id: 'tD3', name: 'Archive', primaryFieldId: 'fDa', fields: [field('fDa', 'Name', 'text')] },
+      { id: 'tD2', name: 'Tasks', primaryFieldId: 'fDt', fields: [field('fDt', 'Task', 'text'), field('fDl', 'Project', 'foreignKey', linkOpts('tD3', 'fDsym'))] },
+    ] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const upd = plan.actions.filter((a) => a.kind === 'updateField');
+    assert.equal(upd.length, 1);
+    assert.equal(upd[0].destFld, 'fDl');
+    assert.ok(upd[0].changes.typeOptions, 'real link divergence carries typeOptions');
+  });
 });
 
 function vw(id, name, type, config, extra = {}) { return { id, name, type, config: config ?? {}, personalForUserId: extra.personal ?? null }; }

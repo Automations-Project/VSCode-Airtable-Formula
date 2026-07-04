@@ -1,5 +1,5 @@
 import { canonicalizeViewConfig } from './remap.js';
-import { stableStringify, choiceNames, scalarTypeOptionsChanged, computedSig, fieldSignature } from './field-compare.js';
+import { stableStringify, choiceNames, scalarTypeOptionsChanged, computedSig, fieldSignature, linkSig } from './field-compare.js';
 
 /**
  * Build a flat map of { fieldId → fieldName } across all tables in a snapshot.
@@ -50,6 +50,17 @@ function referencedFieldIds(field) {
   const formula = o.formulaTextParsed ?? o.formulaText ?? '';
   if (typeof formula === 'string') (formula.match(/fld[A-Za-z0-9]+/g) || []).forEach((id) => ids.add(id));
   return [...ids];
+}
+
+/**
+ * Build a flat map of { tableId → tableName } for a snapshot (link canonical compare).
+ * @param {{ tables: Array<{id:string, name:string}> }} snap
+ * @returns {Record<string, string>}
+ */
+function tblNameMap(snap) {
+  const m = {};
+  for (const t of snap.tables) m[t.id] = t.name;
+  return m;
 }
 
 /**
@@ -121,6 +132,8 @@ export function computePlan(srcSnap, destSnap, idmap) {
 
   const srcNames = fldNameMap(srcSnap);
   const destNames = fldNameMap(destSnap);
+  const srcTblNames = tblNameMap(srcSnap);
+  const destTblNames = tblNameMap(destSnap);
   const destTablesById = new Map(destSnap.tables.map((t) => [t.id, t]));
 
   // ── Duplicate-name detection in src (warn; first-occurrence wins in idmap) ──
@@ -202,6 +215,14 @@ export function computePlan(srcSnap, destSnap, idmap) {
         // For scalar fields, use a raw stable-stringify comparison.
         if (sf.isComputed) {
           if (computedSig(sf, srcNames) !== computedSig(df, destNames)) {
+            changes.typeOptions = sf.typeOptions;
+          }
+        } else if (LINK_TYPES.has(sf.type) && LINK_TYPES.has(df.type)) {
+          // Link fields: raw typeOptions carry base-local ids (foreignTableId,
+          // symmetricColumnId) that NEVER match cross-base — compare the canonical
+          // remap-aware identity instead, so updateField is emitted only on REAL
+          // divergence (e.g. the link points at a different-named table).
+          if (linkSig(sf, srcTblNames) !== linkSig(df, destTblNames)) {
             changes.typeOptions = sf.typeOptions;
           }
         } else if (scalarTypeOptionsChanged(sf, df)) {

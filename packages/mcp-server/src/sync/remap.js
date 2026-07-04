@@ -59,6 +59,19 @@ export function remapRefs(typeOptions, idmap) {
   for (const k of FORMULA_KEYS) if (typeof out[k] === 'string') out[k] = subFormulaTokens(out[k], refTokens);
   for (const k of SINGLE_ID_REF_KEYS) if (out[k] && flds[out[k]]) out[k] = flds[out[k]];
   if (out.foreignTableId && tbls[out.foreignTableId]) out.foreignTableId = tbls[out.foreignTableId];
+  // Link-only base-scoped keys: symmetricColumnId (the reciprocal field, auto-managed by
+  // Airtable) and viewIdForRecordSelection (limit-to-view). Remap when the idmap knows the
+  // dest id; otherwise DROP — sending a source-base id to the dest API is always wrong
+  // (422 or a bogus reciprocal/view reference).
+  if (out.symmetricColumnId) {
+    if (flds[out.symmetricColumnId]) out.symmetricColumnId = flds[out.symmetricColumnId];
+    else delete out.symmetricColumnId;
+  }
+  if (out.viewIdForRecordSelection) {
+    const vws = idmap.views || {};
+    if (vws[out.viewIdForRecordSelection]) out.viewIdForRecordSelection = vws[out.viewIdForRecordSelection];
+    else delete out.viewIdForRecordSelection;
+  }
   const dep = out.dependencies && out.dependencies.referencedColumnIdsForValue;
   if (Array.isArray(dep)) out.dependencies.referencedColumnIdsForValue = dep.map((id) => flds[id] ?? id);
 

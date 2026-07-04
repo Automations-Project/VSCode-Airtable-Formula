@@ -27,6 +27,19 @@ describe('remap.remapRefs', () => {
     assert.equal(out.foreignTableRollupColumnId, 'fldY');
     assert.equal(out.foreignTableId, 'tblDST');
   });
+  it('remaps symmetricColumnId when mapped; DROPS it when unmappable (never sends a source id)', () => {
+    const mapped = remapRefs({ foreignTableId: 'tblSRC', symmetricColumnId: 'fldA' }, idmap);
+    assert.equal(mapped.symmetricColumnId, 'fldX');
+    const unmapped = remapRefs({ foreignTableId: 'tblSRC', symmetricColumnId: 'fldNOPE' }, idmap);
+    assert.equal('symmetricColumnId' in unmapped, false);
+  });
+  it('remaps viewIdForRecordSelection via idmap.views; DROPS it when unmappable', () => {
+    const im = { ...idmap, views: { viwSRC: 'viwDST' } };
+    const mapped = remapRefs({ foreignTableId: 'tblSRC', viewIdForRecordSelection: 'viwSRC' }, im);
+    assert.equal(mapped.viewIdForRecordSelection, 'viwDST');
+    const unmapped = remapRefs({ foreignTableId: 'tblSRC', viewIdForRecordSelection: 'viwNOPE' }, im);
+    assert.equal('viewIdForRecordSelection' in unmapped, false);
+  });
   it('rewrites the dependencies array and leaves unknown ids intact', () => {
     const out = remapRefs({ dependencies: { referencedColumnIdsForValue: ['fldA', 'fldUNKNOWN'] } }, idmap);
     assert.deepEqual(out.dependencies.referencedColumnIdsForValue, ['fldX', 'fldUNKNOWN']);

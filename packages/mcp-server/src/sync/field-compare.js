@@ -109,6 +109,29 @@ export function computedSig(field, fldNames) {
 }
 
 /**
+ * Canonical signature for a link (foreignKey/multipleRecordLinks) field's typeOptions.
+ * Link options carry base-scoped ids that ALWAYS differ across bases:
+ *  - foreignTableId → resolved to the referenced table NAME (stable cross-base)
+ *  - symmetricColumnId (Airtable-managed reciprocal) and viewIdForRecordSelection
+ *    (base-scoped view id) → dropped entirely
+ * so two semantically equivalent links compare equal — the raw scalar signature can
+ * never converge for links and used to emit a phantom updateField on every plan.
+ *
+ * @param {{ type:string, typeOptions:object|null }} field
+ * @param {Record<string, string>} tblNames  tableId → name for the relevant base
+ * @returns {string}
+ */
+export function linkSig(field, tblNames) {
+  const opts = field.typeOptions;
+  if (!opts) return 'L|' + field.type + '|null';
+  const { symmetricColumnId: _sym, viewIdForRecordSelection: _view, foreignTableId, ...rest } = opts; // eslint-disable-line no-unused-vars
+  return 'L|' + field.type + '|' + stableStringify({
+    ...rest,
+    foreignTableName: (tblNames && tblNames[foreignTableId]) ?? foreignTableId ?? null,
+  });
+}
+
+/**
  * Comparable signature for a field.
  * - Computed fields canonicalize field-ID references to field names so
  *   cross-base ID churn is invisible.
