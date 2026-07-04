@@ -7,12 +7,24 @@ function subIds(str, fldIdToName) {
   return str.replace(FLD_TOKEN, (id) => `{{${fldIdToName[id] ?? id}}}`);
 }
 
+// Computed types whose WRITE path (toWritableComputedOptions) drops display-format options —
+// comparing format for them would flag drift apply can never fix (perpetual re-flag).
+const FORMAT_INCOMPARABLE_TYPES = new Set(['lookup', 'multipleLookupValues', 'count']);
+
 export function canonicalizeComputed(type, typeOptions, fldIdToName) {
   const opts = typeOptions || {};
   // Pull the formula expression under whichever key the API used.
   const formula = opts.formulaTextParsed ?? opts.formulaText ?? opts.formula ?? '';
   const relation = opts.relationColumnId ?? opts.recordLinkFieldId ?? '';
   const target = opts.foreignTableRollupColumnId ?? opts.fieldIdInLinkedTable ?? '';
+  // Writable display/format options (currency vs decimal, precision, dateFormat…) ARE synced
+  // by apply (toWritableComputedOptions carries COMPUTED_FORMAT_KEYS), so they must participate
+  // in the compare canonical — otherwise format drift on computed fields is invisible forever
+  // (false identical/converged verdict + no updateField). Value-stable across bases.
+  const format = {};
+  if (!FORMAT_INCOMPARABLE_TYPES.has(type)) {
+    for (const k of COMPUTED_FORMAT_KEYS) if (k in opts) format[k] = opts[k];
+  }
   return JSON.stringify({
     type,
     formula: subIds(formula, fldIdToName),
@@ -20,6 +32,7 @@ export function canonicalizeComputed(type, typeOptions, fldIdToName) {
     target: fldIdToName[target] ?? target,
     // result aggregation type (rollup) is value-stable across bases
     result: opts.result?.type ?? null,
+    format,
   });
 }
 

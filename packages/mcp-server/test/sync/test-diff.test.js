@@ -203,6 +203,18 @@ describe('diff convergence (apply-aligned typeOptions)', () => {
     assert.equal(upd[0].destFld, 'fDl');
     assert.ok(upd[0].changes.typeOptions, 'real link divergence carries typeOptions');
   });
+
+  it('detects format divergence on a matched formula field (same formula, different display format)', () => {
+    const formulaField = (id, ref, fmt) => ({ id, name: 'Total', type: 'formula', typeOptions: { formulaTextParsed: `{${ref}}*2`, ...fmt }, description: null, isComputed: true });
+    const src = { baseId: 'appS', tables: [{ id: 'tS', name: 'T', primaryFieldId: 'fS1', fields: [
+      field('fS1', 'Name', 'text'), formulaField('fS2', 'fS1', { format: 'currency', symbol: '$', precision: 2 }) ] }] };
+    const dest = { baseId: 'appD', tables: [{ id: 'tD', name: 'T', primaryFieldId: 'fD1', fields: [
+      field('fD1', 'Name', 'text'), formulaField('fD2', 'fD1', { format: 'decimal', precision: 0 }) ] }] };
+    const plan = computePlan(src, dest, matchByName(src, dest));
+    const upd = plan.actions.filter((a) => a.kind === 'updateField');
+    assert.equal(upd.length, 1, 'format-only divergence on a computed field must be detected');
+    assert.ok(upd[0].changes.typeOptions);
+  });
 });
 
 function vw(id, name, type, config, extra = {}) { return { id, name, type, config: config ?? {}, personalForUserId: extra.personal ?? null }; }
