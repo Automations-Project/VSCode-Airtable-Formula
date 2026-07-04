@@ -285,6 +285,88 @@ describe('pruneRecords (extras axis)', () => {
   });
 });
 
+// ── Source-deletion propagation: stale idmap entries must not protect dest rows ──
+
+// Dest table with two rows: recKeep (mapped, source alive) + recStale (mapped, source DELETED).
+const destSnapStale = () => ({
+  baseId: 'appD',
+  tables: [{
+    id: 'tD',
+    name: 'Games',
+    views: [{ id: 'viwD' }],
+    fields: [],
+    records: [{ id: 'recKeep', cellValuesByColumnId: {} }, { id: 'recStale', cellValuesByColumnId: {} }],
+  }],
+});
+
+describe('pruneRecords — source-deletion propagation (stale idmap entries)', () => {
+  it('mirror + confirmDeletions deletes a dest row whose SOURCE record was deleted and drops the stale mapping', async () => {
+    const client = pruneClient();
+    // recSGone's source record no longer exists (not in liveSourceRecordIds)
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep', recSGone: 'recStale' } };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({
+      client, destSnapshot: destSnapStale(), idmap, policy: 'mirror', confirmDeletions: true,
+      limiter: noLimiter, result, liveSourceRecordIds: new Set(['recS1']),
+    });
+    assert.deepEqual(client.calls.deleted, [{ tableId: 'tD', rowIds: ['recStale'] }], 'stale-mapped dest row deleted');
+    assert.equal(result.deleted, 1);
+    assert.equal(idmap.records.recSGone, undefined, 'stale idmap entry dropped after deletion');
+    assert.equal(idmap.records.recS1, 'recKeep', 'live mapping kept');
+  });
+
+  it('does NOT delete stale-mapped rows in a truncated table (source may lie beyond the cap)', async () => {
+    const client = pruneClient();
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep', recSGone: 'recStale' } };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({
+      client, destSnapshot: destSnapStale(), idmap, policy: 'mirror', confirmDeletions: true,
+      limiter: noLimiter, result, liveSourceRecordIds: new Set(['recS1']), truncatedTables: new Set(['Games']),
+    });
+    assert.equal(client.calls.deleted.length, 0, 'no deletion on a truncated table');
+    assert.equal(idmap.records.recSGone, 'recStale', 'stale mapping kept when table truncated');
+    assert.ok(result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'));
+  });
+
+  it('overlay (keep policy) never deletes stale-mapped rows nor drops the mapping', async () => {
+    const client = pruneClient();
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep', recSGone: 'recStale' } };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({
+      client, destSnapshot: destSnapStale(), idmap, policy: 'overlay', confirmDeletions: true,
+      limiter: noLimiter, result, liveSourceRecordIds: new Set(['recS1']),
+    });
+    assert.equal(client.calls.deleted.length, 0);
+    assert.equal(idmap.records.recSGone, 'recStale', 'mapping untouched under keep policy');
+  });
+
+  it('mirror WITHOUT confirmDeletions gates the stale-mapped row (counted, not deleted, mapping kept)', async () => {
+    const client = pruneClient();
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep', recSGone: 'recStale' } };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({
+      client, destSnapshot: destSnapStale(), idmap, policy: 'mirror', confirmDeletions: false,
+      limiter: noLimiter, result, liveSourceRecordIds: new Set(['recS1']),
+    });
+    assert.equal(client.calls.deleted.length, 0);
+    const w = result.warnings.find((x) => x.code === 'DELETION_GATED');
+    assert.ok(w && /1/.test(w.message), 'gated warning counts the stale-mapped row');
+    assert.equal(idmap.records.recSGone, 'recStale', 'mapping kept while gated');
+  });
+
+  it('back-compat: without liveSourceRecordIds every mapping still protects its dest row', async () => {
+    const client = pruneClient();
+    const idmap = { tables: { tS: 'tD' }, fields: {}, records: { recS1: 'recKeep', recSGone: 'recStale' } };
+    const result = { deleted: 0, failed: 0, warnings: [] };
+    await pruneRecords({
+      client, destSnapshot: destSnapStale(), idmap, policy: 'mirror', confirmDeletions: true,
+      limiter: noLimiter, result,
+    });
+    assert.equal(client.calls.deleted.length, 0, 'no liveSourceRecordIds → all mapped rows protected');
+    assert.equal(idmap.records.recSGone, 'recStale');
+  });
+});
+
 // ── Task 2: collectTruncatedTableNames helper ────────────────────────────────
 
 describe('collectTruncatedTableNames', () => {
@@ -383,5 +465,40 @@ describe('runRecords — prune integration', () => {
     assert.ok(!result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED'),
       'no false RECORDS_TRUNCATED warning from mirrored synthetic rows');
     assert.equal(result.deleted, 989, 'all real orphans pruned under mirror+confirm');
+  });
+
+  it('threads live source ids: a source-deleted record is pruned under mirror+confirm and its mapping dropped', async () => {
+    // Source only has recS1; idmap still maps recSGone → recStale (source record deleted).
+    const srcSnapshot = {
+      baseId: 'appS',
+      tables: [{
+        id: 'tS', name: 'Games', primaryFieldId: 'sN',
+        fields: [{ id: 'sN', name: 'Name', type: 'text' }],
+        views: [],
+        records: [{ id: 'recS1', cellValuesByColumnId: { sN: 'Zelda' } }],
+      }],
+    };
+    const destSnapshot = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD', name: 'Games', views: [{ id: 'viwD' }], fields: [],
+        records: [{ id: 'recKeep', cellValuesByColumnId: {} }, { id: 'recStale', cellValuesByColumnId: {} }],
+      }],
+    };
+    const idmap = {
+      tables: { tS: 'tD' },
+      fields: { sN: { destFld: 'dN', choices: {} } },
+      records: { recS1: 'recKeep', recSGone: 'recStale' },
+    };
+    const client = runClient();
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, deleted: 0, warnings: [] };
+    await runRecords({
+      client, srcSnapshot, destSnapshot, idmap,
+      policy: 'mirror', confirmDeletions: true,
+      limiter: noLimiter, journal: {}, persist: () => {}, result,
+    });
+    assert.deepEqual(client.calls.deleted, [{ tableId: 'tD', rowIds: ['recStale'] }], 'source-deleted counterpart pruned');
+    assert.equal(idmap.records.recSGone, undefined, 'stale idmap entry dropped');
+    assert.equal(idmap.records.recS1, 'recKeep', 'live mapping kept');
   });
 });

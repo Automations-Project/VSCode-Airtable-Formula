@@ -1065,7 +1065,13 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
         `and mirror deletion is skipped for this table (>1000-row pagination is a follow-up).`,
     });
   }
-  await pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables });
+  // Live source record ids: a persisted mapping whose source record no longer exists must not
+  // protect its dest row — otherwise mirror never propagates source-side record deletions.
+  const liveSourceRecordIds = new Set();
+  for (const t of (srcSnapshot.tables || [])) {
+    for (const r of (t.records || [])) liveSourceRecordIds.add(r.id);
+  }
+  await pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables, liveSourceRecordIds });
   persist(idmap, journal);
 
   return result;
@@ -1211,14 +1217,28 @@ export function collectTruncatedTableNames(srcSnapshot, destSnapshot) {
  * @param {object}   opts.limiter          - rate limiter { run: (fn) => fn() }
  * @param {object}   opts.result           - result accumulator (mutated: result.deleted, result.warnings)
  * @param {Set<string>} [opts.truncatedTables] - table names whose snapshot hit the 1000-row cap (skipped to avoid false-orphan deletion)
+ * @param {Set<string>} [opts.liveSourceRecordIds] - all record ids present in the SOURCE snapshot; when
+ *   provided, a mapping whose source id is absent is STALE (source record deleted) and does not
+ *   protect its dest row — the dest row becomes an ordinary orphan (gated + truncation-guarded),
+ *   and the stale idmap entry is dropped once the row is actually deleted. Omit (null) to keep
+ *   the legacy behaviour where every mapping protects its dest row.
  * @returns {Promise<void>}
  */
-export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables = new Set() }) {
+export async function pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables = new Set(), liveSourceRecordIds = null }) {
   if (result.deleted == null) result.deleted = 0;
   if (result.failed == null) result.failed = 0;
   if (!result.warnings) result.warnings = [];
 
-  const mappedDestIds = new Set(Object.values(idmap.records || {}));
+  // A mapping protects its dest row only while its SOURCE record is still alive — otherwise
+  // mirror could never propagate source deletions (the stale entry shields the row forever).
+  // Stale-mapped dest rows fall through to the ordinary orphan path (same confirm gate, same
+  // truncation guard); their idmap entries are dropped only after the row is really deleted.
+  const mappedDestIds = new Set();
+  const staleDestToSrc = new Map(); // destRecId → srcRecId for mappings whose source is gone
+  for (const [srcRecId, destRecId] of Object.entries(idmap.records || {})) {
+    if (liveSourceRecordIds && !liveSourceRecordIds.has(srcRecId)) staleDestToSrc.set(destRecId, srcRecId);
+    else mappedDestIds.add(destRecId);
+  }
 
   // M3 guard: only prune tables that are the dest-side of a matched pair.
   // A dest table whose id is NOT a value in idmap.tables is a dest-only (schema-orphan) table —
@@ -1270,6 +1290,11 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
       try {
         await limiter.run(() => client.deleteRecords(destSnapshot.baseId, t.id, chunk, { viewId }));
         result.deleted += chunk.length;
+        // Drop stale idmap entries whose dest row was just deleted (source already gone).
+        for (const id of chunk) {
+          const srcRecId = staleDestToSrc.get(id);
+          if (srcRecId !== undefined) delete idmap.records[srcRecId];
+        }
       } catch (e) {
         result.failed += chunk.length;
         result.warnings.push({ code: 'RECORD_DELETE_FAILED', message: `Table "${t.name}": ${e.message ?? e}` });
