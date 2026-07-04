@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { trace } from './debug-tracer.js';
 import { getProfileDir } from './paths.js';
 import { HttpTransport } from './http-transport.js';
+import { loadByoCredentials } from './byo-credentials.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
@@ -53,6 +54,12 @@ export class AirtableAuth {
     this.isLoggedIn = false;
     this.userId = null;
     this.csrfToken = null;
+
+    // Credential source. 'browser' (default) launches Chromium and mints
+    // cookies+CSRF from a persistent profile. 'byo' skips the browser entirely
+    // and uses a pasted session cookie (AIRTABLE_COOKIE / credentials.json).
+    // 'direct-login' (Phase B) will replicate the HAR login flow over HTTP.
+    this._authMode = (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase();
 
     // Request queue — serializes all browser-backed API calls.
     // Bounded so a runaway LLM loop cannot blow up memory even when the
@@ -143,6 +150,17 @@ export class AirtableAuth {
   }
 
   async _doInit() {
+    // ── Browser-free credential modes ──────────────────────────────
+    // These never launch Chromium: there is no this.page/this.context. All
+    // browser-touching helpers below must therefore be guarded against a null
+    // page (see _snapshotCredentials / ensureLoggedIn / _recoverSession / close).
+    if (this._authMode === 'byo') {
+      return this._doInitByo();
+    }
+    if (this._authMode === 'direct-login') {
+      throw new Error('direct-login mode not yet available');
+    }
+
     // Close existing context if recovering. Detach the prior network listener
     // from the old page so we don't leak a handler per recovery cycle.
     if (this.context) {
@@ -206,6 +224,35 @@ export class AirtableAuth {
       this._networkHandler = null;
       throw err;
     }
+  }
+
+  /**
+   * BYO (bring-your-own cookie) init: no browser. Load the pasted cookie+csrf,
+   * mark logged-in, then verify the cookie is actually accepted by a real
+   * direct-HTTP call. A rejected cookie fails fast with an actionable error
+   * rather than letting every subsequent tool call 401.
+   */
+  async _doInitByo() {
+    console.error('[auth] AIRTABLE_AUTH_MODE=byo — using pasted cookie credentials (no browser).');
+    this._credentials = await loadByoCredentials();
+    this.csrfToken = this._credentials.csrfToken ?? null;
+    this.isLoggedIn = true;
+
+    // Direct-HTTP validity check. _rawApiCall reads this._credentials.
+    const result = await this._rawApiCall('GET', '/v0.3/getUserProperties');
+    if (!(result.status >= 200 && result.status < 300)) {
+      this.isLoggedIn = false;
+      throw new Error(
+        `BYO_CREDENTIALS_INVALID: the provided AIRTABLE_COOKIE/credentials.json cookie was rejected (status ${result.status}) — refresh it from a logged-in browser`
+      );
+    }
+    try {
+      const data = JSON.parse(result.body);
+      this.userId = data?.data?.userId || null;
+    } catch {
+      this.userId = null;
+    }
+    console.error('[auth] BYO session verified!', this.userId ? `User: ${this.userId}` : '(userId not in payload)');
   }
 
   /**
@@ -300,6 +347,9 @@ export class AirtableAuth {
    * so a re-login's fresh cookies take effect immediately.
    */
   async _snapshotCredentials() {
+    // Browser-only. In byo/direct-login modes there is no page — never wipe the
+    // pasted credentials with an empty snapshot.
+    if (!this.page) return;
     let cookieHeader = '';
     try {
       const cookies = await this.page.context().cookies();
@@ -387,6 +437,24 @@ export class AirtableAuth {
     if (this._recovering) return;
     this._recovering = true;
     try {
+      // BYO mode has no browser to relaunch. Re-load the credentials (the user
+      // may have refreshed the file/env with a fresh cookie) and re-verify.
+      if (this._authMode === 'byo') {
+        console.error('[auth] BYO session rejected. Re-loading credentials...');
+        this.isLoggedIn = false;
+        this._credentials = await loadByoCredentials();
+        this.csrfToken = this._credentials.csrfToken ?? null;
+        const result = await this._rawApiCall('GET', '/v0.3/getUserProperties');
+        if (!(result.status >= 200 && result.status < 300)) {
+          throw new Error(
+            'BYO_CREDENTIALS_EXPIRED: cookie no longer valid — paste a fresh cookie into ~/.airtable-user-mcp/credentials.json or AIRTABLE_COOKIE'
+          );
+        }
+        this.isLoggedIn = true;
+        console.error('[auth] BYO session recovered with re-loaded credentials.');
+        return;
+      }
+
       console.error('[auth] Session expired. Attempting recovery...');
       this.isLoggedIn = false;
       // Atomic assignment — init() observes this as already-in-progress and
@@ -611,6 +679,15 @@ export class AirtableAuth {
   // ─── Public API ───────────────────────────────────────────────
 
   async ensureLoggedIn() {
+    // BYO mode: no browser context/page to inspect for a redirect. Initialize
+    // once (loads + verifies the cookie); thereafter it's a no-op — a mid-run
+    // 401 is handled by _apiCall's backoff → _recoverSession (which re-loads the
+    // credentials).
+    if (this._authMode === 'byo') {
+      if (!this._credentials) await this.init();
+      return;
+    }
+
     if (!this.context || !this.isLoggedIn) {
       await this.init();
       return;

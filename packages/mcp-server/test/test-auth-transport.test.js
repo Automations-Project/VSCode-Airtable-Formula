@@ -180,6 +180,125 @@ describe('auth._snapshotCredentials', () => {
   });
 });
 
+describe('auth AIRTABLE_AUTH_MODE=byo', () => {
+  const ENV = ['AIRTABLE_AUTH_MODE', 'AIRTABLE_COOKIE', 'AIRTABLE_CSRF'];
+  let saved;
+  beforeEach(() => {
+    saved = {};
+    for (const k of ENV) saved[k] = process.env[k];
+    for (const k of ENV) delete process.env[k];
+  });
+  const restore = () => {
+    for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  };
+
+  function byoAuth(transport) {
+    // AIRTABLE_AUTH_MODE is read in the constructor, so env must be set first.
+    process.env.AIRTABLE_AUTH_MODE = 'byo';
+    const auth = new AirtableAuth();
+    auth._httpTransport = transport;
+    return auth;
+  }
+
+  it('init loads pasted creds and verifies WITHOUT launching a browser', async () => {
+    process.env.AIRTABLE_COOKIE = 'brw=byo; __Host-airtable-session=sess';
+    process.env.AIRTABLE_CSRF = 'BYO-CSRF'; // avoids a network scrape
+    const transport = fakeTransport();
+    transport.next = { status: 200, body: JSON.stringify({ data: { userId: 'usr999' } }) };
+    try {
+      const auth = byoAuth(transport);
+      await auth.init();
+      // No browser: context/page stay null, but the session is logged in.
+      assert.equal(auth.context, null);
+      assert.equal(auth.page, null);
+      assert.equal(auth.isLoggedIn, true);
+      assert.equal(auth.userId, 'usr999');
+      // The verify GET carried the byo cookie via the direct-HTTP transport.
+      assert.equal(transport.calls[0].method, 'GET');
+      assert.match(transport.calls[0].url, /getUserProperties/);
+      assert.equal(transport.calls[0].headers.Cookie, 'brw=byo; __Host-airtable-session=sess');
+    } finally {
+      restore();
+    }
+  });
+
+  it('a rejected cookie throws BYO_CREDENTIALS_INVALID', async () => {
+    process.env.AIRTABLE_COOKIE = 'brw=stale';
+    process.env.AIRTABLE_CSRF = 'x';
+    const transport = fakeTransport();
+    transport.next = { status: 401, body: 'nope' };
+    try {
+      const auth = byoAuth(transport);
+      await assert.rejects(() => auth.init(), /BYO_CREDENTIALS_INVALID.*401/);
+      assert.equal(auth.isLoggedIn, false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a subsequent _apiCall carries the byo cookie and needs no browser', async () => {
+    process.env.AIRTABLE_COOKIE = 'brw=byo2';
+    process.env.AIRTABLE_CSRF = 'c2';
+    const transport = fakeTransport();
+    transport.next = { status: 200, body: '{"data":{}}' };
+    try {
+      const auth = byoAuth(transport);
+      const res = await auth.get('/v0.3/x', 'appZZ');
+      assert.equal(res.status, 200);
+      // First call = the init verify, second = our get; both carry the cookie.
+      assert.ok(transport.calls.length >= 2);
+      for (const c of transport.calls) assert.equal(c.headers.Cookie, 'brw=byo2');
+    } finally {
+      restore();
+    }
+  });
+
+  it('recovery re-loads credentials (user refreshed the cookie) and re-verifies', async () => {
+    process.env.AIRTABLE_COOKIE = 'brw=old';
+    process.env.AIRTABLE_CSRF = 'c';
+    const transport = fakeTransport();
+    transport.next = { status: 200, body: '{"data":{"userId":"u1"}}' };
+    try {
+      const auth = byoAuth(transport);
+      await auth.init();
+      assert.equal(auth._credentials.cookieHeader, 'brw=old');
+      // User pastes a fresh cookie, then a recovery fires.
+      process.env.AIRTABLE_COOKIE = 'brw=fresh';
+      await auth._recoverSession();
+      assert.equal(auth._credentials.cookieHeader, 'brw=fresh');
+      assert.equal(auth.isLoggedIn, true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('recovery with a still-invalid cookie throws BYO_CREDENTIALS_EXPIRED', async () => {
+    process.env.AIRTABLE_COOKIE = 'brw=old';
+    process.env.AIRTABLE_CSRF = 'c';
+    const transport = fakeTransport();
+    let n = 0;
+    transport.next = () => (++n === 1 ? { status: 200, body: '{"data":{}}' } : { status: 401, body: '' });
+    try {
+      const auth = byoAuth(transport);
+      await auth.init();
+      await assert.rejects(() => auth._recoverSession(), /BYO_CREDENTIALS_EXPIRED/);
+    } finally {
+      restore();
+    }
+  });
+
+  it('direct-login mode throws a not-yet-available error', async () => {
+    process.env.AIRTABLE_AUTH_MODE = 'direct-login';
+    try {
+      const auth = new AirtableAuth();
+      auth._httpTransport = fakeTransport();
+      await assert.rejects(() => auth.init(), /direct-login mode not yet available/);
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('auth passive secretSocketId injection (postForm)', () => {
   let auth, transport;
   beforeEach(() => {
