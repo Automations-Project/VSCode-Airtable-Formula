@@ -120,14 +120,52 @@ export async function snapshotSchemaOnly(client, appId) {
   return { baseId: appId, ...normalizeSchema(raw) };
 }
 
+/** True when a normalized view config carries at least one active filter clause. */
+function hasActiveFilters(cfg) {
+  const fs = cfg && cfg.filters && cfg.filters.filterSet;
+  return Array.isArray(fs) && fs.length > 0;
+}
+
 /**
- * Pull a table's records via its first collaborative view (single call, ≤1000 rows;
+ * Pull a table's records via a collaborative view (single call, ≤1000 rows;
  * the internal readQueries endpoint has no cursor — Task-11 pre-flight warns on >1000).
+ *
+ * The readQueries endpoint only reads THROUGH a view (no table-scoped source is captured),
+ * and a view's own filters silently shrink the row set — a partial snapshot means missed
+ * syncs and false orphan prunes downstream. So the view is picked deliberately:
+ *   1. first collaborative view KNOWN to have no filters (config already on the snapshot,
+ *      or probed via one getView per candidate);
+ *   2. else first candidate whose filter state is UNKNOWN (no getView / probe failed) —
+ *      legacy behavior, unverifiable;
+ *   3. else (every checkable candidate is filtered) the FIRST candidate, and the table is
+ *      flagged `table.snapshotViewFiltered = { viewId, viewName }` so callers can warn
+ *      (SNAPSHOT_VIEW_FILTERED) and destructive steps can treat it like a truncated table.
+ * A true unfiltered read is capture-gated (needs a non-view readQueries source).
+ *
  * @returns {Promise<Array<{id:string, cellValuesByColumnId:object}>>}
  */
 export async function snapshotTableRecords(client, appId, table) {
-  const view = (table.views || []).find((v) => !v.personalForUserId) || (table.views || [])[0];
-  if (!view) return [];
+  const views = table.views || [];
+  const candidates = views.filter((v) => !v.personalForUserId);
+  if (!candidates.length && views.length) candidates.push(views[0]); // personal-only fallback
+  if (!candidates.length) return [];
+
+  let unfiltered = null;   // first known-unfiltered
+  let unknown = null;      // first unverifiable (no getView / probe failed)
+  let firstFiltered = null;
+  for (const v of candidates) {
+    let cfg = v.config;
+    if (cfg === undefined && typeof client.getView === 'function') {
+      try { cfg = normalizeViewConfig(await client.getView(appId, v.id)); } catch { /* unknown */ }
+    }
+    if (cfg === undefined) { unknown ??= v; continue; }
+    if (!hasActiveFilters(cfg)) { unfiltered = v; break; }
+    firstFiltered ??= v;
+  }
+  const view = unfiltered || unknown || firstFiltered;
+  if (!unfiltered && !unknown) {
+    table.snapshotViewFiltered = { viewId: view.id, viewName: view.name ?? null };
+  }
   const res = await client.queryRecords(appId, table.id, view.id, { limit: 1000 });
   return (res?.summary?.rows || []).map((r) => ({ id: r.id, cellValuesByColumnId: r.fields || {} }));
 }

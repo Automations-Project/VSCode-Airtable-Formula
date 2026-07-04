@@ -1131,6 +1131,25 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
         `and mirror deletion is skipped for this table (>1000-row pagination is a follow-up).`,
     });
   }
+  // Filtered-view guard: a table whose records were read through a FILTERED view (every
+  // collaborative view carries filters — snapshotTableRecords flags it) is a partial row set
+  // of unknown extent: hidden source rows are not synced, and hidden dest rows are
+  // indistinguishable from orphans/stale mappings. Same false-orphan hazard as truncation,
+  // so reuse the truncatedTables guard (no prune, no stale-mapping deletion) and warn loudly.
+  // An unfiltered read is a capture-gated follow-up (readQueries only reads through a view).
+  const srcTableSet = new Set(srcSnapshot.tables || []);
+  for (const t of [...(srcSnapshot.tables || []), ...(destSnapshot.tables || [])]) {
+    if (!t.snapshotViewFiltered) continue;
+    const side = srcTableSet.has(t) ? 'source' : 'dest';
+    result.warnings.push({
+      code: 'SNAPSHOT_VIEW_FILTERED',
+      message: `Table "${t.name}" (${side}): every collaborative view is filtered — records were read ` +
+        `through filtered view "${t.snapshotViewFiltered.viewName ?? t.snapshotViewFiltered.viewId}" and the ` +
+        `row set is PARTIAL. Records hidden by the filter are not synced, and mirror deletion is skipped ` +
+        `for this table. Add an unfiltered view to sync it fully.`,
+    });
+    truncatedTables.add(t.name);
+  }
   // Live source record ids: a persisted mapping whose source record no longer exists must not
   // protect its dest row — otherwise mirror never propagates source-side record deletions.
   const liveSourceRecordIds = new Set();
@@ -1495,16 +1514,32 @@ export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys 
   // existence-prune unsafe — pruning a live mapping would make the next apply re-create the
   // record as a duplicate. Skip the prune entirely and warn instead.
   const truncatedDestTables = collectTruncatedTableNames(null, destSnapshot);
-  if (truncatedDestTables.size > 0) {
-    for (const name of truncatedDestTables) {
-      result.warnings.push({
-        code: 'RECORDS_TRUNCATED_PRUNE_SKIPPED',
-        message: `Table "${name}": dest snapshot capped at 1000 rows — a mapping whose dest row lies ` +
-          `beyond the window cannot be told apart from a deleted record; skipping reconcile's ` +
-          `existence-prune to avoid duplicating live records on the next apply ` +
-          `(>1000-row pagination is a follow-up).`,
-      });
-    }
+  for (const name of truncatedDestTables) {
+    result.warnings.push({
+      code: 'RECORDS_TRUNCATED_PRUNE_SKIPPED',
+      message: `Table "${name}": dest snapshot capped at 1000 rows — a mapping whose dest row lies ` +
+        `beyond the window cannot be told apart from a deleted record; skipping reconcile's ` +
+        `existence-prune to avoid duplicating live records on the next apply ` +
+        `(>1000-row pagination is a follow-up).`,
+    });
+  }
+  // Filtered-view guard (same false-prune class): a dest table whose records were read through
+  // a filtered view (snapshotTableRecords found no unfiltered collaborative view) hides live
+  // rows from the snapshot — a mapping to a hidden row must not be pruned, or the next apply
+  // re-creates the record as a duplicate.
+  const filteredDestTables = (destSnapshot.tables || []).filter((t) => t.snapshotViewFiltered);
+  for (const t of filteredDestTables) {
+    result.warnings.push({
+      code: 'SNAPSHOT_VIEW_FILTERED',
+      message: `Table "${t.name}" (dest): every collaborative view is filtered — records were read ` +
+        `through filtered view "${t.snapshotViewFiltered.viewName ?? t.snapshotViewFiltered.viewId}" and the ` +
+        `row set is PARTIAL; skipping reconcile's existence-prune to avoid pruning live mappings. ` +
+        `Add an unfiltered view to reconcile this base pair.`,
+    });
+  }
+  if (truncatedDestTables.size > 0 || filteredDestTables.length > 0) {
+    // Existence-prune skipped — a missing dest id cannot be attributed to a table, so any
+    // partial dest snapshot makes the whole prune unsafe.
   } else {
     // Build set of all live dest record IDs across all tables
     const allLiveDestIds = new Set();
