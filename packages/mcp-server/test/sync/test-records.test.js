@@ -139,6 +139,103 @@ describe('records.applyRecordsPass1', () => {
     );
   });
 
+  it('defers multiCollaborator arrays on the UPDATE path (never sent to updateRecords)', async () => {
+    // updatePrimitiveCell cannot write arrays: an internal-typed 'multiCollaborator' cell in the
+    // payload would fail the cell POST and poison the rest of the row update.
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {
+        fldT: { destFld: 'fldTD', choices: {} },
+        fldCol: { destFld: 'fldColD', choices: {} },
+      },
+      records: { recS1: 'recD1' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [
+          { id: 'fldT', type: 'text' },
+          { id: 'fldCol', type: 'multiCollaborator' }, // INTERNAL spelling
+        ],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldT: 'hello', fldCol: ['usrA', 'usrB'] } }],
+      }],
+    };
+    const destSnapshot = { tables: [{ id: 'tblD', name: 'T', fields: [] }] };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3b', 't'),
+      persist: () => {},
+      result,
+    });
+    assert.equal(updateCalls.length, 1);
+    const sentCells = updateCalls[0].rows[0].cellValuesByColumnId;
+    assert.ok('fldTD' in sentCells, 'scalar text should be sent');
+    assert.ok(!('fldColD' in sentCells), 'multiCollaborator array must NOT be sent to updateRecords');
+    assert.ok(
+      result.warnings.some((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED'),
+      'expected RECORD_ARRAY_UPDATE_DEFERRED warning for the collaborator array',
+    );
+  });
+
+  it('does not warn RECORD_ARRAY_UPDATE_DEFERRED when the multiSelect cell is already converged on dest', async () => {
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {
+        fldT: { destFld: 'fldTD', choices: {} },
+        fldMS: { destFld: 'fldMSD', choices: { c1: 'c1D', c2: 'c2D' } },
+      },
+      records: { recS1: 'recD1' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [
+          { id: 'fldT', type: 'text' },
+          { id: 'fldMS', type: 'multiSelect' },
+        ],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldT: 'hello', fldMS: ['c1', 'c2'] } }],
+      }],
+    };
+    // Dest record already holds the remapped choice ids (order-insensitive) → converged.
+    const destSnapshot = {
+      tables: [{
+        id: 'tblD', name: 'T', fields: [],
+        records: [{ id: 'recD1', cellValuesByColumnId: { fldMSD: ['c2D', 'c1D'] } }],
+      }],
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3c', 't'),
+      persist: () => {},
+      result,
+    });
+    assert.equal(
+      result.warnings.filter((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED').length, 0,
+      'converged multiSelect must not emit a deferral warning',
+    );
+    // A truly diverged multiSelect must still warn (pinned by the earlier test with no dest record).
+  });
+
   it('pushes RECORD_CELL_SKIPPED warning when a select choice cannot be mapped', async () => {
     const captured = [];
     const idmap = {
