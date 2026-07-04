@@ -180,7 +180,7 @@ describe('auth._snapshotCredentials', () => {
   });
 });
 
-describe('auth lazy secretSocketId capture (postForm)', () => {
+describe('auth passive secretSocketId injection (postForm)', () => {
   let auth, transport;
   beforeEach(() => {
     auth = new AirtableAuth();
@@ -189,53 +189,30 @@ describe('auth lazy secretSocketId capture (postForm)', () => {
     auth._credentials = { cookieHeader: 'c=1', csrfToken: 'z' };
     auth.context = {};
     auth.isLoggedIn = true;
+    // No page.goto stub on purpose — postForm must NEVER navigate to capture a
+    // socketId (the blocking nav-capture was removed; live smoke proved mutations
+    // succeed without it).
+    auth.page = { url: () => 'https://airtable.com/' };
   });
 
-  it('navigates to the base once, captures a socketId, and injects it into the params', async () => {
-    let gotoCount = 0;
-    auth.page = {
-      url: () => 'https://airtable.com/',
-      goto: async (u) => {
-        gotoCount++;
-        // Simulate the request-interception handler observing a base POST.
-        const m = u.match(/(app[A-Za-z0-9]+)/);
-        if (m) auth._secretSocketIds.set(m[1], 'SID-123');
-      },
-    };
+  it('injects a passively-captured socketId into the params when one exists', async () => {
+    auth._secretSocketIds.set('appABC123', 'SID-123'); // as if captured during login
     transport.next = { status: 200, body: '{"ok":true}' };
     const params = { stringifiedObjectParams: '{}', requestId: 'r1' };
     await auth.postForm('https://airtable.com/v0.3/column/x/create', params, 'appABC123');
     assert.equal(params.secretSocketId, 'SID-123');
     const body = new URLSearchParams(transport.calls[0].body);
     assert.equal(body.get('secretSocketId'), 'SID-123');
-    assert.equal(gotoCount, 1);
-
-    // A second mutation on the same base reuses the cache — no re-navigation.
-    const params2 = { stringifiedObjectParams: '{}', requestId: 'r2', secretSocketId: auth.getSecretSocketId('appABC123') };
-    await auth.postForm('https://airtable.com/v0.3/column/y/create', params2, 'appABC123');
-    assert.equal(gotoCount, 1);
   });
 
-  it('does not fail the call when capture times out — proceeds without a socketId and does not nav-storm', async () => {
-    process.env.AIRTABLE_SOCKETID_CAPTURE_MS = '40';
-    let gotoCount = 0;
-    auth.page = {
-      url: () => 'https://airtable.com/',
-      goto: async () => { gotoCount++; /* never captures */ },
-    };
-    try {
-      transport.next = { status: 200, body: '{"ok":true}' };
-      const params = { stringifiedObjectParams: '{}', requestId: 'r1' };
-      const res = await auth.postForm('https://airtable.com/v0.3/column/x/create', params, 'appABC123');
-      assert.equal(res.status, 200);
-      assert.equal('secretSocketId' in params, false);
-
-      // Attempt-guard: a later mutation must not navigate again after a miss.
-      const res2 = await auth.postForm('https://airtable.com/v0.3/column/y/create', { stringifiedObjectParams: '{}', requestId: 'r2' }, 'appABC123');
-      assert.equal(res2.status, 200);
-      assert.equal(gotoCount, 1);
-    } finally {
-      delete process.env.AIRTABLE_SOCKETID_CAPTURE_MS;
-    }
+  it('proceeds WITHOUT a socketId (and never navigates) when none was captured', async () => {
+    let gotoCalled = false;
+    auth.page.goto = async () => { gotoCalled = true; };
+    transport.next = { status: 200, body: '{"ok":true}' };
+    const params = { stringifiedObjectParams: '{}', requestId: 'r1' };
+    const res = await auth.postForm('https://airtable.com/v0.3/column/x/create', params, 'appABC123');
+    assert.equal(res.status, 200);
+    assert.equal('secretSocketId' in params, false);
+    assert.equal(gotoCalled, false);
   });
 });

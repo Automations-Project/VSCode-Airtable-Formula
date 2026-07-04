@@ -67,9 +67,6 @@ export class AirtableAuth {
     // indefinitely.
     this._secretSocketIds = new Map();
     this._maxSocketIdCache = 50;
-    // Per-app guard so a base whose socketId never captures isn't re-navigated
-    // on every subsequent mutation (avoid a lazy-capture navigation storm).
-    this._socketIdCaptureAttempted = new Set();
 
     // Direct-HTTP transport. API calls now go straight out over node HTTP
     // (fetch by default; impit via AIRTABLE_HTTP_CLIENT=impit) using the
@@ -289,54 +286,6 @@ export class AirtableAuth {
     // signed call.
     if (!appId) return null;
     return this._secretSocketIds.get(appId) || null;
-  }
-
-  /**
-   * Lazily capture a secretSocketId for a base before a mutation.
-   *
-   * With the direct-HTTP transport the browser no longer sees API POSTs, so the
-   * passive interception that used to capture secretSocketId "for free" never
-   * fires. We restore it on demand: navigate the still-open login page to the
-   * base once — loading the base fires its own POSTs, and the existing request
-   * interception handler captures the socketId from them — then poll briefly.
-   *
-   * Best-effort by design (secretSocketId is applied "when available"): if the
-   * capture times out we proceed WITHOUT it rather than fail the mutation. A
-   * per-app guard prevents re-navigating on every mutation when capture misses.
-   *
-   * NOTE: captured socketIds are reused for the whole session (no page traffic
-   * to refresh them). This matches the pre-existing "cache and reuse" behavior;
-   * a stale socketId surfaces as a normal API error handled by _apiCall.
-   */
-  async _ensureSecretSocketId(appId) {
-    if (!appId) return;
-    if (this.getSecretSocketId(appId)) return;              // already cached
-    if (this._socketIdCaptureAttempted.has(appId)) return;  // don't nav-storm on a miss
-    this._socketIdCaptureAttempted.add(appId);
-
-    try {
-      await this.ensureLoggedIn(); // make sure a live page exists to navigate
-    } catch {
-      // Couldn't establish a session here — let the upcoming _apiCall surface
-      // the real error; just skip capture.
-      return;
-    }
-    if (!this.page) return;
-
-    const maxMs = Number(process.env.AIRTABLE_SOCKETID_CAPTURE_MS) || 8000;
-    const deadline = Date.now() + maxMs;
-    try {
-      await this.page
-        .goto(`https://airtable.com/${appId}`, { waitUntil: 'domcontentloaded', timeout: maxMs })
-        .catch(() => {}); // navigation errors are non-fatal — the base may still POST
-      while (Date.now() < deadline) {
-        if (this.getSecretSocketId(appId)) return;
-        await new Promise((r) => setTimeout(r, Math.min(200, Math.max(10, deadline - Date.now()))));
-      }
-    } catch (err) {
-      console.error(`[auth] secretSocketId capture for ${appId} failed: ${err.message}`);
-    }
-    // Still not captured → proceed without it (secretSocketId is "when available").
   }
 
   // ─── Credential Snapshot (direct-HTTP) ───────────────────────
@@ -725,12 +674,11 @@ export class AirtableAuth {
 
   async postForm(url, params, appId) {
     // Mutations (all postForm callers) embed secretSocketId "when available".
-    // With the direct-HTTP transport the browser no longer sees these POSTs, so
-    // the passive capture is gone; recover it by lazily navigating the login
-    // page to the base once, then inject the captured id into the outgoing
-    // params. If capture misses, the mutation still proceeds without it.
+    // Live smoke proved a field create SUCCEEDS via direct-HTTP WITHOUT a
+    // secretSocketId, and the login-page→base nav-capture returned nothing while
+    // adding ~8s — so we no longer navigate to capture one. We still inject an
+    // id if the passive login-time interception happened to capture it.
     if (appId && params && typeof params === 'object' && !params.secretSocketId) {
-      await this._ensureSecretSocketId(appId);
       const sid = this.getSecretSocketId(appId);
       if (sid) params.secretSocketId = sid;
     }
