@@ -55,7 +55,7 @@ describe('remap — record-ref filter REMAP when records exist', () => {
   });
 
   it('drops entire leaf when all array elements are unresolvable', () => {
-    const recMiss2 = 'recALSOGONEXXXXX';
+    const recMiss2 = 'recALSOGONEXXXXXX'; // rec + 14 chars — a real record-id shape
     const cfg = {
       filters: {
         conjunction: 'and',
@@ -65,7 +65,7 @@ describe('remap — record-ref filter REMAP when records exist', () => {
     assert.equal(remapViewConfig(cfg, idmap).filters.filterSet.length, 0);
   });
 
-  it('collaborator usr ids are still stripped (not in idmap.records)', () => {
+  it('collaborator usr ids pass through verbatim (user ids are Airtable-global, never in idmap.records)', () => {
     const USR = 'usrCCCCCCCCCCCCCC';
     const cfg = {
       filters: {
@@ -73,7 +73,9 @@ describe('remap — record-ref filter REMAP when records exist', () => {
         filterSet: [{ columnId: 'fldG', operator: '=', value: USR }],
       },
     };
-    assert.equal(remapViewConfig(cfg, idmap).filters.filterSet.length, 0);
+    const out = remapViewConfig(cfg, idmap);
+    assert.equal(out.filters.filterSet.length, 1);
+    assert.equal(out.filters.filterSet[0].value, USR);
   });
 
   it('empty idmap.records -> strip -> leaf dropped (backward compat)', () => {

@@ -126,13 +126,14 @@ function destSelId(idmap, src) {
   for (const v of Object.values(idmap.fields || {})) { const d = ((v && v.choices) || {})[src]; if (d) return d; }
   return src;
 }
-// A filter LEAF whose value references a record/collaborator id — or a structured/dynamic
-// value carrying SOURCE field/table/row ids — cannot be resolved in the dest: records and
-// users are not synced (and ids differ across bases regardless). Detect by value SHAPE, which
-// needs NO source field-type context (those types aren't carried into apply). Portable
-// sentinels (current-user "me", null, booleans) are not id-shaped → kept. Forward-compat: once
-// records sync (M3), a populated idmap.records lets these REMAP instead of strip — see canon note.
-const RECORD_REF_ID = /^(rec|usr)[A-Za-z0-9]{14,}$/;
+// A filter LEAF whose value references a RECORD id — or a structured/dynamic value carrying
+// SOURCE field/table/row ids — is base-scoped: remap via idmap.records when possible, strip
+// otherwise. Detect by value SHAPE, which needs NO source field-type context (those types
+// aren't carried into apply). Collaborator ids (usrXXX) are NOT record refs: Airtable user
+// ids are account-global — identical in every base the user can access — so they pass through
+// VERBATIM (stripping them silently widened the dest view's row set). Portable sentinels
+// (current-user "me", null, booleans) are not id-shaped → kept.
+const RECORD_REF_ID = /^rec[A-Za-z0-9]{14,}$/;
 // Remap a record-ref leaf VALUE via idmap.records.
 //  stripUnresolved=true  (source/write path): src rec ids -> dest ids; ids with no mapping are DROPPED;
 //                         returns undefined if nothing resolves (caller drops the whole leaf).
@@ -144,7 +145,10 @@ function remapRecRefValue(value, idmap, stripUnresolved) {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return stripUnresolved ? undefined : value;
   }
-  const mapOne = (v) => (typeof v === 'string' ? (recs[v] ?? (stripUnresolved ? undefined : v)) : v);
+  const mapOne = (v) => {
+    if (typeof v !== 'string' || !RECORD_REF_ID.test(v)) return v; // non-record values (e.g. global usr ids) pass verbatim
+    return recs[v] ?? (stripUnresolved ? undefined : v);
+  };
   if (Array.isArray(value)) {
     const out = value.map(mapOne).filter((v) => v !== undefined);
     return out.length ? out : undefined;
@@ -168,11 +172,12 @@ function collectRecordRefIds(set) {
   }
   return ids;
 }
-// Source record/collaborator ids that view-filter strip will drop (for the apply-side warning).
+// Source record ids that view-filter strip will drop (for the apply-side warning).
+// Collaborator usr ids are global and pass through — they are never collected here.
 export function collectFilterRecordRefs(config) {
   return (config && config.filters && Array.isArray(config.filters.filterSet)) ? collectRecordRefIds(config.filters.filterSet) : [];
 }
-// Remap resolvable refs (fld/choice ids) and STRIP unresolvable record/collaborator-ref leaves,
+// Remap resolvable refs (fld/choice ids) and STRIP unresolvable record-ref leaves,
 // pruning groups emptied by stripping (bottom-up). Mirrored exactly by canonFilterSet so a
 // stripped source filter canonicalizes identically to the stripped dest readback → converges.
 function remapFilterSet(set, idmap) {

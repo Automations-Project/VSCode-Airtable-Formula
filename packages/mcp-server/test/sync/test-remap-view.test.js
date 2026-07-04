@@ -111,14 +111,29 @@ describe('remap — record-referencing view filters (strip + report + converge)'
     assert.equal(out.filters.filterSet.length, 1);                 // emptied nested group pruned
     assert.equal(out.filters.filterSet[0].columnId, 'fldY');
   });
-  it('strips collaborator usr ids but keeps the portable "me" sentinel', () => {
+  it('passes collaborator usr ids through VERBATIM (user ids are Airtable-global) and keeps "me"', () => {
     const cfg = { filters: { conjunction: 'and', filterSet: [
       { columnId: 'fldB', operator: '=', value: USR },
       { columnId: 'fldB', operator: '=', value: 'me' },
     ] } };
     const out = remapViewConfig(cfg, idmap);
+    assert.equal(out.filters.filterSet.length, 2);
+    assert.equal(out.filters.filterSet[0].value, USR);
+    assert.equal(out.filters.filterSet[1].value, 'me');
+    assert.deepEqual(collectFilterRecordRefs(cfg), []);            // usr is not a stripped record ref
+  });
+  it('usr filter canonicalizes identically on source (strip) and dest (keep) sides — converges', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [{ columnId: 'fldB', operator: '=', value: USR }] } };
+    const srcSide = canonicalizeViewConfig(cfg, { fldB: 'Assignee' }, {}, true);
+    const destSide = canonicalizeViewConfig(cfg, { fldB: 'Assignee' }, {}, false);
+    assert.equal(srcSide, destSide);
+    assert.match(srcSide, /usrCCCCCCCCCCCCCC/);                    // the condition survives, not dropped
+  });
+  it('mixed [rec, usr] array value: rec remapped/stripped per idmap.records, usr kept verbatim', () => {
+    const cfg = { filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '=', value: [REC, USR] }] } };
+    const out = remapViewConfig(cfg, idmap);                       // idmap has no records → REC unresolvable
     assert.equal(out.filters.filterSet.length, 1);
-    assert.equal(out.filters.filterSet[0].value, 'me');
+    assert.deepEqual(out.filters.filterSet[0].value, [USR]);
   });
   it('strips structured/dynamic filter values that carry source ids', () => {
     const cfg = { filters: { conjunction: 'and', filterSet: [{ columnId: 'fldA', operator: '|', value: { tableId: 'tblZ', columnId: 'fldZ', rowId: null } }] } };
