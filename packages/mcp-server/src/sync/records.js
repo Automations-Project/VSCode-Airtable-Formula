@@ -433,6 +433,9 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
         if (conflicts === 'dest-wins') continue; // preserve dest edits: skip the overwrite
         const cells = buildUpdateCells(srcTable.fields, srcCells, destCellsById.get(destRecId), idmap, result.warnings, rec.id);
         injectFieldMappings(cells, tableMappings, srcCells);
+        // Nothing to write → skip: client.updateRecords rejects an empty cell map per row,
+        // which would misreport this healthy record as RECORD_UPDATE_FAILED on every re-sync.
+        if (Object.keys(cells).length === 0) { result.skipped++; continue; }
         updateRows.push({ rowId: destRecId, cellValuesByColumnId: cells });
       }
     }

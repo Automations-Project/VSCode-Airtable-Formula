@@ -377,6 +377,55 @@ describe('records.applyRecordsPass1', () => {
     assert.equal(updateCalls.length, 0, 'dest-wins must not send any update (no clears)');
   });
 
+  it('does not send an update row whose cell map is empty (no spurious RECORD_UPDATE_FAILED)', async () => {
+    // A mapped record whose writable cells produce nothing to write (e.g. all data lives in
+    // link/attachment fields, or src+dest are both empty) must be skipped — client.updateRecords
+    // rejects an empty cellValuesByColumnId per row, which misreported healthy records as failed.
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {
+        fldT: { destFld: 'fldTD', choices: {} },
+        fldL: { destFld: 'fldLD', choices: {} },
+      },
+      records: { recS1: 'recD1' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [
+          { id: 'fldT', type: 'text' },
+          { id: 'fldL', type: 'multipleRecordLinks' }, // Pass 2 owns this — never in the update payload
+        ],
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldL: ['recS9'] } }], // only a link cell
+      }],
+    };
+    const destSnapshot = {
+      tables: [{
+        id: 'tblD', name: 'T', fields: [],
+        records: [{ id: 'recD1', cellValuesByColumnId: {} }], // dest text also empty → no clear either
+      }],
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3g', 't'),
+      persist: () => {},
+      result,
+    });
+    assert.equal(updateCalls.length, 0, 'updateRecords must not be called with an empty cell map');
+    assert.equal(result.failed, 0, 'no spurious failure for a healthy record');
+    assert.equal(result.skipped, 1, 'empty-update record counted as skipped');
+  });
+
   it('pushes RECORD_CELL_SKIPPED warning when a select choice cannot be mapped', async () => {
     const captured = [];
     const idmap = {
