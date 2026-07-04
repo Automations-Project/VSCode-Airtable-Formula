@@ -20,6 +20,10 @@ const ILLEGAL_PRIMARY_TYPES = new Set([
   'asyncText', 'aiText', 'checkbox',
 ]);
 
+// (name, type) view identity — mirrors diff.js viewKey. A view's TYPE is immutable in
+// Airtable, so a same-named dest view of a different type is never an adoption counterpart.
+function viewKey(name, type) { return `${name}|${type}`; }
+
 function buildIndex(snap) {
   const tablesById = new Map();
   const tablesByName = new Map();
@@ -27,7 +31,7 @@ function buildIndex(snap) {
     const entry = {
       id: t.id, name: t.name, primaryFieldId: t.primaryFieldId,
       fieldsByName: new Map(t.fields.map((f) => [f.name, { id: f.id, name: f.name, type: f.type, typeOptions: f.typeOptions }])),
-      viewsByName: new Map((t.views || []).map((v) => [v.name, { id: v.id, type: v.type }])),
+      viewsByKey: new Map((t.views || []).map((v) => [viewKey(v.name, v.type), { id: v.id, type: v.type }])),
     };
     tablesById.set(t.id, entry);
     tablesByName.set(t.name, entry);
@@ -137,7 +141,7 @@ export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, 
   const attempt = async (idx, a) => {
     const warnStart = result.warnings.length;
     try {
-      const disposition = await applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes });
+      const disposition = await applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes, journal, idx });
       if (disposition === 'deferred') return { status: 'deferred', warns: result.warnings.splice(warnStart) };
       if (disposition === 'gated') { result.skipped++; persist(idmap, journal); return { status: 'gated' }; }
       recordDone(journal, idx, a.kind, idmap.tables[a.sourceTableId] ?? (a.sourceFieldId && idmap.fields[a.sourceFieldId]?.destFld));
@@ -188,7 +192,7 @@ export async function applyPlan({ client, plan, destAppId, destSnapshot, idmap, 
   return result;
 }
 
-async function applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes }) {
+async function applyAction({ client, destAppId, a, idmap, index, state, result, confirmRetypes, journal, idx }) {
   switch (a.kind) {
     case 'createTable': {
       const existing = index.tablesByName.get(a.name);
@@ -218,7 +222,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         id: tableId, name: a.name, primaryFieldId: primaryId,
         fieldsByName: new Map([[primary.name, { id: primaryId, name: primary.name, type: primary.type, typeOptions: primary.typeOptions ?? null }]]),
         // include the auto-created default view(s) so a same-run createView adopts (not duplicates) them
-        viewsByName: new Map((views || []).map((v) => [v.name, { id: v.id, type: v.type }])),
+        viewsByKey: new Map((views || []).map((v) => [viewKey(v.name, v.type), { id: v.id, type: v.type }])),
       };
       index.tablesById.set(tableId, entry);
       index.tablesByName.set(a.name, entry);
@@ -275,7 +279,17 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         if (renamed) { entry.fieldsByName.delete(primary.name); primary.name = a.toName; entry.fieldsByName.set(a.toName, primary); }
         if (retyped) primary.type = a.toType;
       }
-      if (disposition) return disposition; // gated/deferred retype: NOT journaled done → retryable
+      if (disposition) {
+        // A gated/deferred retype whose accompanying RENAME did apply has already mutated the
+        // dest fingerprint while journaling ZERO done actions — the prescribed follow-up (same
+        // plan + confirmRetypes:true) then hit the DRIFT abort (the resume bypass needs ≥1 done
+        // journal action). Journal the applied rename as a done SUB-action: the string idx never
+        // collides with isDone()'s integer plan indices, and upsert keeps re-recording idempotent
+        // (on resume the name already matches → renamed stays false). The retype itself stays
+        // retryable (main idx NOT journaled done).
+        if (renamed) recordDone(journal, `${idx}:rename`, 'reconcilePrimary:rename', primaryId);
+        return disposition; // gated/deferred retype: NOT journaled done → retryable
+      }
       if (renamed || retyped) result.updated++; else result.skipped++;
       return;
     }
@@ -394,15 +408,24 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
         if (COMPUTED_TYPES.has(destType)) {
           // Computed updates need the writable shape (drop read-only formulaTextParsed/
           // dependencies/resultType — the API 422s on them). Defer if a referenced field
-          // isn't created yet (updates run before creates); a re-plan after creates converges.
+          // isn't created yet (updates run before creates) — same disposition as createField:
+          // retried later this run, NOT journaled done otherwise (a plain return journaled it
+          // done and the update was never retried).
           const refs = (changes.typeOptions.dependencies && changes.typeOptions.dependencies.referencedColumnIdsForValue) || [];
           const unresolved = refs.filter((d) => !(idmap.fields[d] && idmap.fields[d].destFld));
           if (unresolved.length) {
-            result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Update of "${a.destFld}" typeOptions deferred — refs [${unresolved.join(', ')}] not yet created (re-plan after creates)` });
+            result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Update of "${a.destFld}" typeOptions deferred — refs [${unresolved.join(', ')}] not yet created` });
+            return 'deferred';
           } else {
             await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: toWritableComputedOptions(destType, remapped) });
             mutated = true;
           }
+        } else if (LINK_TYPES.has(destType)) {
+          // Genuine link divergence (linkSig differs): send the WRITABLE link shape — same
+          // shaping as the createField link path. The raw remapped options still carry the
+          // read-only 'unreversed' key, so the update 422'd on every apply and never converged.
+          await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: writableLinkOptions(remapped) });
+          mutated = true;
         } else {
           await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: mergeChoices(findDestField(index, a.destFld), remapped) });
           mutated = true;
@@ -416,12 +439,16 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
     case 'createView': {
       const destTableId = idmap.tables[a.sourceTableId];
       const entry = index.tablesById.get(destTableId);
-      const existing = entry && entry.viewsByName.get(a.name);
+      // Adopt only a same-name AND same-type dest view (mirrors diff.js's (name, type) match):
+      // name-only adoption grabbed a same-named view of a DIFFERENT immutable type, wrote the
+      // source config onto it, pointed idmap.views at it — and under mirror+confirmDeletions
+      // pruneSchema then deleted that very view (diff orphans it by (name, type)).
+      const existing = entry && entry.viewsByKey.get(viewKey(a.name, a.type));
       if (existing) { idmap.views[a.sourceViewId] = existing.id; result.skipped++; return; }
-      const template = entry && [...entry.viewsByName.values()][0]; // dest table always has ≥1 view
+      const template = entry && [...entry.viewsByKey.values()][0]; // dest table always has ≥1 view
       const { viewId } = await client.createView(destAppId, destTableId, { name: a.name, type: a.type, copyFromViewId: template ? template.id : undefined });
       idmap.views[a.sourceViewId] = viewId;
-      if (entry) entry.viewsByName.set(a.name, { id: viewId, type: a.type });
+      if (entry) entry.viewsByKey.set(viewKey(a.name, a.type), { id: viewId, type: a.type });
       result.created++;
       return;
     }
