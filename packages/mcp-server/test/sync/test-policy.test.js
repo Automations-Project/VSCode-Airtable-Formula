@@ -74,6 +74,24 @@ describe('policy.validateFieldMappings', () => {
     const { errors } = validateFieldMappings(srcMulti, dst, { Offers: { Tags: 'InjectID' } });
     assert.equal(errors[0].code, 'FIELD_MAP_TYPE_INCOMPATIBLE');
   });
+  it('FIELD_MAP_TYPE_INCOMPATIBLE for INTERNAL array spellings (multipleAttachment / multiCollaborator)', () => {
+    // Snapshots carry internal type names verbatim — the validator must reject those too.
+    const srcInternal = { tables: [{ id: 'tS', name: 'Offers', fields: [
+      { id: 'fAtt', name: 'Files', type: 'multipleAttachment' },
+      { id: 'fCol', name: 'Owners', type: 'multiCollaborator' },
+      { id: 'fTxt', name: 'Note', type: 'text' },
+    ] }] };
+    const dstInternal = { tables: [{ id: 'tD', name: 'Offers', fields: [
+      { id: 'dInject', name: 'InjectID', type: 'number' },
+      { id: 'dAtt', name: 'DestFiles', type: 'multipleAttachment' },
+    ] }] };
+    const { errors: e1 } = validateFieldMappings(srcInternal, dstInternal, { Offers: { Files: 'InjectID' } });
+    assert.equal(e1[0]?.code, 'FIELD_MAP_TYPE_INCOMPATIBLE', 'source multipleAttachment must be rejected');
+    const { errors: e2 } = validateFieldMappings(srcInternal, dstInternal, { Offers: { Owners: 'InjectID' } });
+    assert.equal(e2[0]?.code, 'FIELD_MAP_TYPE_INCOMPATIBLE', 'source multiCollaborator must be rejected');
+    const { errors: e3 } = validateFieldMappings(srcInternal, dstInternal, { Offers: { Note: 'DestFiles' } });
+    assert.equal(e3[0]?.code, 'FIELD_MAP_TYPE_INCOMPATIBLE', 'target multipleAttachment must be rejected');
+  });
   it('FIELD_MAP_COLLISION when two sources target the same dest field', () => {
     const src2 = { tables: [{ id: 'tS', name: 'Offers', fields: [
       { id: 'fa', name: 'A', type: 'text' }, { id: 'fb', name: 'B', type: 'text' },

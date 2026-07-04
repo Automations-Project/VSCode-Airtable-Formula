@@ -1,4 +1,5 @@
 import { isComputedType } from './snapshot.js';
+import { ARRAY_CELL_TYPES } from './cells.js';
 
 // Reconciliation policy: two axes (extras keep|remove, conflicts source-wins|dest-wins)
 // expressed as three named presets. See docs spec 2026-06-20-records-reconciliation-policy.
@@ -19,8 +20,12 @@ export function isDeleting(globalPreset, overrides) {
   return Object.values(overrides || {}).some(removes);
 }
 
-// Array-shaped source values can't be injected into a scalar dest field.
-const ARRAY_SOURCE_TYPES = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAttachments', 'multiSelect', 'multipleSelects', 'multipleLookupValues']);
+// Array-shaped source values can't be injected into a scalar dest field (nor a scalar into an
+// array-typed dest cell). ARRAY_CELL_TYPES carries the public + INTERNAL spellings
+// (multipleAttachment, multiCollaborator, …); multipleLookupValues is array-shaped too
+// (computed, so it is only reachable as a mapping SOURCE — targets are caught by the
+// FIELD_MAP_TARGET_COMPUTED check first).
+const ARRAY_SOURCE_TYPES = new Set([...ARRAY_CELL_TYPES, 'multipleLookupValues']);
 
 export function validateFieldMappings(srcSnapshot, destSnapshot, fieldMappings) {
   const errors = [];

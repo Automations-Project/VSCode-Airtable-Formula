@@ -10,8 +10,13 @@ describe('cells.isWritableForRecords', () => {
     assert.equal(isWritableForRecords({ type: 'multipleRecordLinks' }), false);
     assert.equal(isWritableForRecords({ type: 'foreignKey' }), false); // internal link type — must be remapped, not written raw
     assert.equal(isWritableForRecords({ type: 'multipleAttachments' }), false);
+    assert.equal(isWritableForRecords({ type: 'multipleAttachment' }), false); // INTERNAL spelling (real snapshots use it)
     assert.equal(isWritableForRecords({ type: 'text' }), true);
     assert.equal(isWritableForRecords({ type: 'select' }), true);
+  });
+  it('does not write a raw attachment array under the internal type spelling', () => {
+    const att = [{ id: 'attS1', url: 'https://src/x.png', filename: 'x.png', size: 9 }];
+    assert.equal(coercePass1Cell({ id: 'fldA', type: 'multipleAttachment' }, att, idmap).write, false);
   });
 });
 describe('cells.coercePass1Cell', () => {

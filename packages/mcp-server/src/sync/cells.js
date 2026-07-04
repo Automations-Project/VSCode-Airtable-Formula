@@ -3,9 +3,21 @@ import { isComputedType } from './snapshot.js';
 // Array-type cells whose raw source value must NOT be written verbatim by buildCreate/UpdateCells:
 // links carry source rec-ids that need src→dest remapping (handled by the link-fold path in Pass 1
 // + Pass 2), attachments need the cross-base transfer (Pass 3). `foreignKey` is the INTERNAL link
-// type (snapshot passes type through verbatim) — omitting it here would write raw source rec-ids at
-// create time (only "worked" against an id-duplicate dest base).
-const ARRAY_DEFERRED = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAttachments']);
+// type and `multipleAttachment` (singular) the INTERNAL attachment type (snapshot passes types
+// through verbatim — real snapshots carry the internal spellings) — omitting either would write raw
+// source values (rec-ids / expiring signed attachment URLs) at create time.
+const ARRAY_DEFERRED = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAttachments', 'multipleAttachment']);
+
+// ALL array-shaped cell types, public + internal spellings. The Pass-1 UPDATE path
+// (`updateRecords` → per-cell `updatePrimitiveCell`) cannot write arrays, so buildUpdateCells
+// defers every member of this set (links/attachments to Pass 2/3; select/collaborator arrays
+// with a RECORD_ARRAY_UPDATE_DEFERRED warning). policy.js also builds its fieldMappings
+// array-type rejection from this set.
+export const ARRAY_CELL_TYPES = new Set([
+  ...ARRAY_DEFERRED,
+  'multiSelect', 'multipleSelects',
+  'multiCollaborator', 'multipleCollaborators',
+]);
 
 /**
  * Extract the record ID from a link-cell element.
