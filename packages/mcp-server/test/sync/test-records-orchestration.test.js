@@ -201,3 +201,61 @@ describe('runRecords — pre-flight field-mapping validation', () => {
     assert.ok(out, 'result should be returned');
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Filter-restore failure must not block pruneRecords
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('runRecords — filter-restore failure cannot skip pruneRecords', () => {
+  it('mirror still prunes orphans when getView fails during reapplyViewFilters', async () => {
+    const deleted = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => ({ updated: rows, failed: [] }),
+      deleteRecords: async (appId, tableId, rowIds) => { deleted.push({ tableId, rowIds }); return {}; },
+      // Simulates a session hiccup / deleted view at the tail of a long job.
+      getView: async () => { throw new Error('SESSION_INVALID'); },
+      updateViewFilters: async () => ({ ok: true }),
+    };
+    const srcSnapshot = {
+      baseId: 'appS',
+      tables: [{
+        id: 'tS', name: 'Games', primaryFieldId: 'sN',
+        fields: [{ id: 'sN', name: 'Name', type: 'text' }],
+        // View WITHOUT .config (schema-only snapshot) → reapplyViewFilters must call getView.
+        views: [{ id: 'vS1', name: 'Grid view', type: 'grid', personalForUserId: null }],
+        records: [{ id: 'recS1', cellValuesByColumnId: { sN: 'A' } }],
+      }],
+    };
+    const destSnapshot = {
+      baseId: 'appD',
+      tables: [{
+        id: 'tD', name: 'Games', views: [{ id: 'vD1' }], fields: [],
+        records: [
+          { id: 'recD1', cellValuesByColumnId: {} },
+          { id: 'recOrphan', cellValuesByColumnId: {} },
+        ],
+      }],
+    };
+    const idmap = {
+      tables: { tS: 'tD' },
+      fields: { sN: { destFld: 'dN', choices: {} } },
+      records: { recS1: 'recD1' },
+    };
+    const result = makeResult();
+
+    // Must not throw, and the prune step must still run.
+    await runRecords({
+      client, srcSnapshot, destSnapshot, idmap,
+      policy: 'mirror', confirmDeletions: true,
+      limiter: { run: (f) => f() }, journal: {}, persist: () => {}, result,
+    });
+
+    assert.equal(deleted.length, 1, 'pruneRecords ran despite the filter-restore failure');
+    assert.deepEqual(deleted[0].rowIds, ['recOrphan']);
+    assert.ok(
+      result.warnings.some((w) => w.code === 'VIEW_FILTER_REAPPLY_FAILED'),
+      'failed view fetch surfaced as a warning',
+    );
+  });
+});

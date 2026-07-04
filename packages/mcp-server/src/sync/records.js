@@ -18,7 +18,7 @@ import { coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue, isWr
 import { resolvePolicy, validateFieldMappings } from './policy.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
-import { snapshotSchemaOnly, snapshotViews, snapshotTableRecords, isComputedType } from './snapshot.js';
+import { snapshotSchemaOnly, snapshotTableRecords, normalizeViewConfig, isComputedType } from './snapshot.js';
 import { loadIdmap, saveIdmap, syncDir } from './idmap.js';
 import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
 import { safeAtomicWriteFileSync } from '../safe-write.js';
@@ -968,10 +968,28 @@ export async function reapplyViewFilters({ client, srcSnapshot, destSnapshot, id
 
   // applyRecords takes a SCHEMA-ONLY snapshot (no view configs) to avoid a getView storm.
   // Populate SOURCE view live-configs now (source-only, once, at the end) so we can find and
-  // remap the record-ref filters. If configs are already present this is a no-op-ish refresh.
+  // remap the record-ref filters. Views that already carry a config are skipped.
+  //
+  // Each getView is guarded PER VIEW (limiter + retry + catch): this runs at the tail of a
+  // multi-minute request-heavy job, and one failed view read (deleted view, 404, session
+  // hiccup) must not abort the whole filter restore — the other views still get their
+  // record-ref filters back, and the failed one is reported as a warning.
   if (typeof client.getView === 'function') {
-    const needsConfig = (srcSnapshot.tables || []).some((t) => (t.views || []).some((v) => !v.personalForUserId && !v.config));
-    if (needsConfig) await snapshotViews(client, srcSnapshot.baseId || '', srcSnapshot);
+    const srcAppId = srcSnapshot.baseId || '';
+    for (const t of (srcSnapshot.tables || [])) {
+      for (const v of (t.views || [])) {
+        if (v.personalForUserId || v.config) continue;
+        try {
+          const live = await limiter.run(() => withRetry(() => client.getView(srcAppId, v.id)));
+          v.config = normalizeViewConfig(live);
+        } catch (err) {
+          result.warnings.push({
+            code: 'VIEW_FILTER_REAPPLY_FAILED',
+            message: `View ${v.id}: getView failed during filter restore (${err.message}) — view skipped`,
+          });
+        }
+      }
+    }
   }
 
   for (const srcTable of (srcSnapshot.tables || [])) {
@@ -1091,8 +1109,17 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, createdDestIds });
   persist(idmap, journal);
 
-  // Reapply view filters whose record refs now resolve
-  await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  // Reapply view filters whose record refs now resolve.
+  // Defensive guard: a filter-restore failure must NEVER prevent the prune step below —
+  // otherwise one tail-step error discards completed passes and skips the extras axis.
+  try {
+    await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+  } catch (err) {
+    result.warnings.push({
+      code: 'VIEW_FILTER_REAPPLY_FAILED',
+      message: `reapplyViewFilters failed (${err.message}) — continuing to prune`,
+    });
+  }
   persist(idmap, journal);
 
   // Extras axis: prune dest-only orphan records under mirror policy

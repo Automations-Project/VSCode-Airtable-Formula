@@ -379,4 +379,73 @@ describe('reapplyViewFilters — mock client', () => {
     assert.ok(result.warnings[0].message.includes('viwSRCSRCSRCSRCS'));
     assert.ok(result.warnings[0].message.includes('viwDSTDSTDSTDSTO'));
   });
+
+  it('one failed getView during config fetch warns and CONTINUES — the other views are still restored', async () => {
+    // applyRecords uses schema-only snapshots, so source views arrive WITHOUT .config and
+    // reapplyViewFilters must fetch them via getView. A single failing view (deleted mid-job,
+    // 404, session hiccup) must not abort the whole restore.
+    const brokenView = 'viwSRCBROKENXXXXX';
+    const goodView = 'viwSRCSRCSRCSRCS';
+    const calls = [];
+    const client = {
+      getView: async (appId, viewId) => {
+        if (viewId === brokenView) throw new Error('view read failed (404)');
+        return {
+          filters: {
+            conjunction: 'and',
+            filterSet: [{ columnId: 'fldG', operator: '=', value: [recSrc] }],
+          },
+        };
+      },
+      updateViewFilters: async (appId, viewId, filters) => {
+        calls.push({ viewId, filters });
+        return { ok: true };
+      },
+    };
+
+    const srcSnapshot = {
+      baseId: 'appSRC',
+      tables: [{
+        id: 'tblSRCSRCSRCSRCS',
+        fields: [],
+        records: [],
+        views: [
+          // No .config on either view (schema-only snapshot) — forces the getView fetch.
+          { id: brokenView, name: 'Broken', type: 'grid', personalForUserId: null },
+          { id: goodView, name: 'By Game', type: 'grid', personalForUserId: null },
+        ],
+      }],
+    };
+
+    const destSnapshot = { baseId: 'appDST', tables: [] };
+
+    const idmap = {
+      tables: { tblSRCSRCSRCSRCS: 'tblDSTDSTDSTDSTO' },
+      views: { [brokenView]: 'viwDSTBROKENXXXXX', [goodView]: 'viwDSTDSTDSTDSTO' },
+      fields: { fldG: { destFld: 'fldGD', choices: {} } },
+      records: { [recSrc]: recDst },
+    };
+
+    const result = { warnings: [], viewFiltersReapplied: 0 };
+
+    // Must not throw
+    await reapplyViewFilters({
+      client,
+      srcSnapshot,
+      destSnapshot,
+      idmap,
+      limiter: makeLimiter(),
+      journal: makeJournal(),
+      persist: makeNoop(),
+      result,
+    });
+
+    assert.equal(calls.length, 1, 'good view still restored despite the broken one');
+    assert.equal(calls[0].viewId, 'viwDSTDSTDSTDSTO');
+    assert.deepEqual(calls[0].filters.filterSet[0].value, [recDst]);
+    const w = result.warnings.filter((x) => x.code === 'VIEW_FILTER_REAPPLY_FAILED');
+    assert.equal(w.length, 1, 'one warning for the failed view fetch');
+    assert.ok(w[0].message.includes(brokenView), 'warning names the failed view');
+    assert.equal(result.viewFiltersReapplied, 1);
+  });
 });
