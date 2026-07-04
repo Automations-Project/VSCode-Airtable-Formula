@@ -396,4 +396,48 @@ describe('reconcile — prunes stale idmap.records entries', () => {
     assert.equal(after.records['recSX2'], 'recDX2', 'entry 2 should be kept');
     assert.equal(result.skipped, 0, 'no pruning expected');
   });
+
+  it('skips the existence-prune when a dest table snapshot is truncated (1000-row cap)', async () => {
+    const srcApp = 'appSrcRecZZZZZZZZ';
+    const destApp = 'appDstRecZZZZZZZZ';
+
+    // recSZbeyond → recBeyondCap is a LIVE dest record that fell beyond the 1000-row read
+    // window; a naive existence-prune would drop it and the next apply would duplicate it.
+    saveIdmap(srcApp, destApp, {
+      tables: { tblSZ: 'tblDZ' },
+      fields: {},
+      records: { recSZ0: 'recDZ0', recSZbeyond: 'recBeyondCap' },
+      views: {},
+    });
+
+    // Snapshot returns exactly 1000 rows (the cap) — recBeyondCap is not among them.
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ id: `recDZ${i}`, cellValuesByColumnId: {} }));
+    const destData = {
+      tables: [{
+        id: 'tblDZ', name: 'Z',
+        primaryColumnId: 'fldDZ',
+        columns: [{ id: 'fldDZ', name: 'Name', type: 'text', typeOptions: null, description: null }],
+        views: [{ id: 'vDZ', name: 'Grid view', type: 'grid', personalForUserId: null }],
+        records: rows,
+      }],
+    };
+
+    const client = {
+      getApplicationData: async () => ({ data: { tableSchemas: JSON.parse(JSON.stringify(destData.tables)) } }),
+      queryRecords: async (appId, tableId) => {
+        const tbl = destData.tables.find((t) => t.id === tableId);
+        return { summary: { rows: ((tbl && tbl.records) || []).slice(0, 1000).map((r) => ({ id: r.id, fields: {} })) } };
+      },
+      getView: async () => ({}),
+    };
+
+    const result = await reconcile({ client, sourceBaseId: srcApp, destBaseId: destApp, naturalKeys: {} });
+
+    const after = loadIdmap(srcApp, destApp);
+    assert.equal(after.records['recSZbeyond'], 'recBeyondCap', 'mapping beyond the cap must survive');
+    assert.equal(after.records['recSZ0'], 'recDZ0', 'in-window mapping kept too');
+    assert.equal(result.skipped, 0, 'nothing pruned while any dest table is truncated');
+    assert.ok(result.warnings.some((w) => w.code === 'RECORDS_TRUNCATED_PRUNE_SKIPPED'),
+      'truncation-skip warning emitted');
+  });
 });

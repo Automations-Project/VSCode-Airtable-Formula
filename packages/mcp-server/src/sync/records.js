@@ -1349,6 +1349,9 @@ export function matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idm
  * 2. Snapshots the DEST base schema only, then pulls dest records for each matched table.
  * 3. Builds a Set of all live dest record IDs across all tables.
  * 4. Drops any idmap.records[src]=dest entry whose dest ID is not present in the snapshot.
+ *    SKIPPED entirely (with RECORDS_TRUNCATED_PRUNE_SKIPPED warnings) when any dest table's
+ *    snapshot hit the 1000-row cap — a live mapping beyond the window would otherwise be
+ *    falsely pruned and re-created as a duplicate on the next apply.
  * 5. Natural-key re-match: snapshots source records and calls matcher to add idmap.records entries by key value.
  * 6. Saves the pruned idmap.
  * 7. Returns a result shaped like { created:0, updated:0, skipped, failed:0, matched, warnings, idmap }.
@@ -1382,19 +1385,38 @@ export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys 
     table.records = await snapshotTableRecords(client, destBaseId, table);
   }
 
-  // Build set of all live dest record IDs across all tables
-  const allLiveDestIds = new Set();
-  for (const dt of destSnapshot.tables) {
-    for (const r of (dt.records || [])) {
-      allLiveDestIds.add(r.id);
+  // Truncation guard (same false-orphan class pruneRecords guards with
+  // RECORDS_TRUNCATED_PRUNE_SKIPPED): a dest table whose snapshot hit the 1000-row cap may
+  // hold live records beyond the read window. A missing dest id cannot be attributed to a
+  // table (record ids carry no table info), so ANY truncated dest table makes the whole
+  // existence-prune unsafe — pruning a live mapping would make the next apply re-create the
+  // record as a duplicate. Skip the prune entirely and warn instead.
+  const truncatedDestTables = collectTruncatedTableNames(null, destSnapshot);
+  if (truncatedDestTables.size > 0) {
+    for (const name of truncatedDestTables) {
+      result.warnings.push({
+        code: 'RECORDS_TRUNCATED_PRUNE_SKIPPED',
+        message: `Table "${name}": dest snapshot capped at 1000 rows — a mapping whose dest row lies ` +
+          `beyond the window cannot be told apart from a deleted record; skipping reconcile's ` +
+          `existence-prune to avoid duplicating live records on the next apply ` +
+          `(>1000-row pagination is a follow-up).`,
+      });
     }
-  }
+  } else {
+    // Build set of all live dest record IDs across all tables
+    const allLiveDestIds = new Set();
+    for (const dt of destSnapshot.tables) {
+      for (const r of (dt.records || [])) {
+        allLiveDestIds.add(r.id);
+      }
+    }
 
-  // Existence-prune
-  for (const [srcRecId, destRecId] of Object.entries(idmap.records)) {
-    if (!allLiveDestIds.has(destRecId)) {
-      delete idmap.records[srcRecId];
-      result.skipped++;
+    // Existence-prune
+    for (const [srcRecId, destRecId] of Object.entries(idmap.records)) {
+      if (!allLiveDestIds.has(destRecId)) {
+        delete idmap.records[srcRecId];
+        result.skipped++;
+      }
     }
   }
 
