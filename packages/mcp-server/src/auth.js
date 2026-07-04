@@ -6,6 +6,7 @@ import { getProfileDir } from './paths.js';
 import { HttpTransport } from './http-transport.js';
 import { loadByoCredentials } from './byo-credentials.js';
 import { directLogin } from './direct-login.js';
+import { isProfileLockError, killProfileHolders } from './profile-lock.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
@@ -88,6 +89,17 @@ export class AirtableAuth {
     // Direct-login (browser-free) credential minter. Injectable for tests so
     // the impit/TOTP HTTP flow can be driven over canned responses.
     this._directLogin = options.directLogin || directLogin;
+
+    // Chromium factory seam. When null we lazy-load the real patchright chromium
+    // via the module getChromium(); tests inject a fake chromium here.
+    this._getChromium = options.getChromium || null;
+    // Profile-lock recovery seams. The persistent .chrome-profile is
+    // MCP-EXCLUSIVE, so a Chrome still holding its lock (crash/leak → exit 21)
+    // is a stale instance safe to kill. _launchContext kills the holder and
+    // retries the launch ONCE. Both the killer and the inter-attempt wait are
+    // injectable so tests never touch a real process or sleep.
+    this._killProfileHolders = options.killProfileHolders || killProfileHolders;
+    this._relaunchWaitMs = options.relaunchWaitMs ?? 600;
 
     // Reference to the page-level 'request' listener so we can detach it on
     // _doInit's context-close step rather than leak it per session-recovery.
@@ -192,8 +204,8 @@ export class AirtableAuth {
       viewport: null,
     };
     if (browserPath) launchOpts.executablePath = browserPath;
-    const chromium = await getChromium();
-    this.context = await chromium.launchPersistentContext(this.profileDir, launchOpts);
+    const chromium = this._getChromium ? await this._getChromium() : await getChromium();
+    this.context = await this._launchContext(chromium, launchOpts);
 
     // M5 — if anything after launchPersistentContext throws (page creation,
     // navigation, CSRF extraction, session verification), close the context
@@ -228,6 +240,34 @@ export class AirtableAuth {
       this.page = null;
       this._networkHandler = null;
       throw err;
+    }
+  }
+
+  /**
+   * Launch the persistent browser context, recovering ONCE from a locked profile.
+   *
+   * The persistent `.chrome-profile` is MCP-EXCLUSIVE — only our headless Chrome
+   * ever opens it. So if launchPersistentContext fails with a profile-lock error
+   * (Chrome exit 21 / SingletonLock — a crashed or leaked Chrome still holding
+   * the lock), the holder is a stale instance safe to kill. We kill it, wait
+   * briefly for the lock to clear, then retry the launch EXACTLY once.
+   *
+   * REACTIVE only: we never kill before the first launch (that could take down a
+   * legitimately-running instance). We only act after actually colliding with
+   * the lock, when we are the one trying to launch. Any non-lock error — and a
+   * still-failing retry — propagates unchanged, so browser behavior is otherwise
+   * identical.
+   */
+  async _launchContext(chromium, launchOpts) {
+    try {
+      return await chromium.launchPersistentContext(this.profileDir, launchOpts);
+    } catch (err) {
+      if (!isProfileLockError(err)) throw err;
+      console.error('[auth] Chrome profile locked (exit 21) — killing stale holder and retrying once...');
+      await this._killProfileHolders(this.profileDir);
+      await new Promise((resolve) => setTimeout(resolve, this._relaunchWaitMs));
+      // Retry ONCE. If this throws too, it propagates unchanged.
+      return await chromium.launchPersistentContext(this.profileDir, launchOpts);
     }
   }
 
