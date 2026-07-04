@@ -132,6 +132,15 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
 }
 
 /**
+ * Execute a saved plan (schema phase) then launch the background records job.
+ *
+ * THROWS (does not return an abort object) for pre-flight failures: a missing saved plan, and
+ * `FIELD_MAP_INVALID` when fieldMappings validation fails (err.code='FIELD_MAP_INVALID',
+ * err.mappingErrors=[...]). This is intentional and pinned by tests — direct callers must catch it.
+ * applyJob() (the background wrapper the sync_base tool uses) catches these and surfaces them via
+ * mode=status as phase='failed'. A DRIFT mismatch is NOT thrown: it returns a renderApplyResult
+ * with aborted:true, reason:'DRIFT'.
+ *
  * @param {object} opts
  * @param {(event:'records-start'|'records-done'|'records-failed', payload:object)=>void} [opts.onPhase]
  *   Optional phase-timeline callback. Wired by applyJob() so the unified sync-job file tracks the
@@ -319,9 +328,16 @@ export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedA
     .then(() => apply({ client, sourceBaseId, destBaseId, planId, runStartedAt: startedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase }))
     .then((rendered) => {
       const m = (rendered && rendered.machine) || {};
-      // When the records phase launched, its own onPhase callbacks own the terminal write —
-      // don't clobber it. Otherwise (clean DRIFT abort / no-records path) finalize as 'done'.
+      // When the records phase launched, its own onPhase callbacks (records-done/records-failed)
+      // own the terminal write — don't clobber it. m.records.status is a STATIC 'running' snapshot
+      // set at apply() return time (records writes to the status FILE, never mutating this object),
+      // so this check normally suffices. As belt-and-suspenders (and to satisfy a review concern),
+      // ALSO re-read the file's phase: only finalize here if it's still 'schema' — i.e. the records
+      // phase never started (clean DRIFT abort / no-records path). Any non-'schema' phase means
+      // records or a terminal write already owns the file.
       if (m.records && m.records.status === 'running') return;
+      const current = readSyncJobStatus(sourceBaseId, destBaseId, planId);
+      if (current && current.phase !== 'schema') return;
       writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'done', schemaResult: m, finishedAt: new Date().toISOString() });
     })
     .catch((e) => {
@@ -382,6 +398,10 @@ export function syncStatus({ sourceBaseId, destBaseId, planId }) {
 }
 
 /**
+ * @deprecated Use `syncStatus()` instead — it reports the full plan→schema→records phase timeline
+ * and already falls back to the legacy `records-job-<planId>.json` file this reads. Retained only
+ * for existing direct callers/tests; new code should not use it.
+ *
  * Poll the background records job started by apply(). Reads the persisted status file and
  * derives live progress (records mapped so far) from idmap.records.
  * @returns {{ planId:string, status:string, recordsMapped:number, startedAt?:string, finishedAt?:string, result?:object, error?:string, message?:string }}
