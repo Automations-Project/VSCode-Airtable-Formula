@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { AirtableAuth } from '../src/auth.js';
 
@@ -287,15 +287,64 @@ describe('auth AIRTABLE_AUTH_MODE=byo', () => {
     }
   });
 
-  it('direct-login mode throws a not-yet-available error', async () => {
+});
+
+describe('auth AIRTABLE_AUTH_MODE=direct-login', () => {
+  let saved;
+  beforeEach(() => {
+    saved = process.env.AIRTABLE_AUTH_MODE;
     process.env.AIRTABLE_AUTH_MODE = 'direct-login';
-    try {
-      const auth = new AirtableAuth();
-      auth._httpTransport = fakeTransport();
-      await assert.rejects(() => auth.init(), /direct-login mode not yet available/);
-    } finally {
-      restore();
-    }
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AIRTABLE_AUTH_MODE;
+    else process.env.AIRTABLE_AUTH_MODE = saved;
+  });
+
+  it('_doInit calls directLogin (via the injected seam) and never launches a browser', async () => {
+    const auth = new AirtableAuth();
+    let called = false;
+    // Inject the login minter — real directLogin would need impit + network.
+    auth._directLogin = async () => {
+      called = true;
+      return { cookieHeader: 'brw=1; __Host-airtable-session=s', csrfToken: 'C' };
+    };
+    await auth.init();
+    assert.equal(called, true);
+    // No browser: context/page stay null, but the session is logged in.
+    assert.equal(auth.context, null);
+    assert.equal(auth.page, null);
+    assert.equal(auth.isLoggedIn, true);
+    assert.equal(auth.csrfToken, 'C');
+    assert.equal(auth._credentials.cookieHeader, 'brw=1; __Host-airtable-session=s');
+  });
+
+  it('_recoverSession re-runs directLogin to mint fresh cookies', async () => {
+    const auth = new AirtableAuth();
+    let n = 0;
+    auth._directLogin = async () => { n++; return { cookieHeader: `c=${n}`, csrfToken: `csrf${n}` }; };
+    await auth.init();
+    assert.equal(auth._credentials.cookieHeader, 'c=1');
+    await auth._recoverSession();
+    assert.equal(auth._credentials.cookieHeader, 'c=2');
+    assert.equal(auth.csrfToken, 'csrf2');
+    assert.equal(auth.isLoggedIn, true);
+  });
+
+  it('a subsequent _apiCall carries the minted cookie and needs no browser', async () => {
+    const auth = new AirtableAuth();
+    const transport = fakeTransport();
+    auth._httpTransport = transport;
+    auth._directLogin = async () => ({ cookieHeader: 'brw=minted', csrfToken: 'mc' });
+    transport.next = { status: 200, body: '{"data":{}}' };
+    const res = await auth.get('/v0.3/x', 'appZZ');
+    assert.equal(res.status, 200);
+    assert.equal(transport.calls[0].headers.Cookie, 'brw=minted');
+  });
+
+  it('_recoverSession surfaces a SESSION_INVALID error when the login flow fails', async () => {
+    const auth = new AirtableAuth();
+    auth._directLogin = async () => { throw new Error('DIRECT_LOGIN_BAD_CREDENTIALS: nope'); };
+    await assert.rejects(() => auth._recoverSession(), /SESSION_INVALID.*DIRECT_LOGIN_BAD_CREDENTIALS/);
   });
 });
 

@@ -5,6 +5,7 @@ import { trace } from './debug-tracer.js';
 import { getProfileDir } from './paths.js';
 import { HttpTransport } from './http-transport.js';
 import { loadByoCredentials } from './byo-credentials.js';
+import { directLogin } from './direct-login.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
@@ -84,6 +85,10 @@ export class AirtableAuth {
     // Populated by _snapshotCredentials() during init/recovery.
     this._credentials = null;
 
+    // Direct-login (browser-free) credential minter. Injectable for tests so
+    // the impit/TOTP HTTP flow can be driven over canned responses.
+    this._directLogin = options.directLogin || directLogin;
+
     // Reference to the page-level 'request' listener so we can detach it on
     // _doInit's context-close step rather than leak it per session-recovery.
     this._networkHandler = null;
@@ -158,7 +163,7 @@ export class AirtableAuth {
       return this._doInitByo();
     }
     if (this._authMode === 'direct-login') {
-      throw new Error('direct-login mode not yet available');
+      return this._doInitDirectLogin();
     }
 
     // Close existing context if recovering. Detach the prior network listener
@@ -253,6 +258,21 @@ export class AirtableAuth {
       this.userId = null;
     }
     console.error('[auth] BYO session verified!', this.userId ? `User: ${this.userId}` : '(userId not in payload)');
+  }
+
+  /**
+   * Direct-login init: no browser. Replicate the HAR login flow over HTTP
+   * (impit + TOTP) to mint fresh session cookies + csrf, then drive all API
+   * calls through the direct-HTTP transport with them. directLogin() itself
+   * validates the session (checks the session cookie is present and re-scrapes
+   * an authed page), so no separate browser verify is needed.
+   */
+  async _doInitDirectLogin() {
+    console.error('[auth] AIRTABLE_AUTH_MODE=direct-login — browser-free login via impit + TOTP (no browser).');
+    this._credentials = await this._directLogin();
+    this.csrfToken = this._credentials?.csrfToken ?? null;
+    this.isLoggedIn = true;
+    console.error('[auth] direct-login complete.');
   }
 
   /**
@@ -452,6 +472,22 @@ export class AirtableAuth {
         }
         this.isLoggedIn = true;
         console.error('[auth] BYO session recovered with re-loaded credentials.');
+        return;
+      }
+
+      // Direct-login mode has no browser to relaunch. Re-run the HTTP login
+      // flow to mint fresh cookies/csrf.
+      if (this._authMode === 'direct-login') {
+        console.error('[auth] direct-login session rejected. Re-running login for fresh cookies...');
+        this.isLoggedIn = false;
+        try {
+          this._credentials = await this._directLogin();
+        } catch (err) {
+          throw new Error(`SESSION_INVALID: direct-login refresh failed — ${err.message}`);
+        }
+        this.csrfToken = this._credentials?.csrfToken ?? null;
+        this.isLoggedIn = true;
+        console.error('[auth] direct-login session recovered.');
         return;
       }
 
@@ -679,11 +715,12 @@ export class AirtableAuth {
   // ─── Public API ───────────────────────────────────────────────
 
   async ensureLoggedIn() {
-    // BYO mode: no browser context/page to inspect for a redirect. Initialize
-    // once (loads + verifies the cookie); thereafter it's a no-op — a mid-run
-    // 401 is handled by _apiCall's backoff → _recoverSession (which re-loads the
-    // credentials).
-    if (this._authMode === 'byo') {
+    // Browser-free modes (byo / direct-login): no browser context/page to
+    // inspect for a redirect. Initialize once (byo loads+verifies the cookie;
+    // direct-login mints cookies via the HTTP login flow); thereafter it's a
+    // no-op — a mid-run 401 is handled by _apiCall's backoff → _recoverSession
+    // (which re-loads/re-mints the credentials).
+    if (this._authMode === 'byo' || this._authMode === 'direct-login') {
       if (!this._credentials) await this.init();
       return;
     }
