@@ -10,6 +10,7 @@ import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeReco
 import { validateFieldMappings, isDeleting } from './policy.js';
 import { pruneSchema } from './prune-schema.js';
 import { acquireApplyLock } from './apply-lock.js';
+import { writeSyncJobStatus, readSyncJobStatus } from './job-status.js';
 
 const ENGINE_VERSION = '2b';
 
@@ -130,7 +131,17 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   return renderDiff(savedDiff, { detail, offset, limit });
 }
 
-export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys }) {
+/**
+ * @param {object} opts
+ * @param {(event:'records-start'|'records-done'|'records-failed', payload:object)=>void} [opts.onPhase]
+ *   Optional phase-timeline callback. Wired by applyJob() so the unified sync-job file tracks the
+ *   schema→records→done/failed transitions. Kept optional so direct apply() callers (tests, the
+ *   engine) are unaffected. `records-start` fires once the schema phase is committed and the
+ *   background records job is launched (payload: `{ schemaResult }`); `records-done` /
+ *   `records-failed` fire from the records job's own completion path (payload: `{ recordsResult }`
+ *   / `{ error }`).
+ */
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase }) {
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
@@ -200,24 +211,33 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
       // journal) and writes a status file; poll via `sync_base mode=status`.
       writeRecordsJobStatus(sourceBaseId, destBaseId, planId, { status: 'running', startedAt: runStartedAt });
       lockHeldByRecordsJob = true; // the job's .finally below owns the release from here on
+      result.records = { status: 'running', jobId: planId };
+      // Unified sync-job timeline: schema phase committed, records phase now running. Fires
+      // BEFORE the return so applyJob's own resolution handler already sees phase='records'.
+      if (onPhase) onPhase('records-start', { schemaResult: renderApplyResult(result).machine });
       applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys })
-        .then((r) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
-          status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
-          result: {
+        .then((r) => {
+          const recordsResult = {
             created: r.created, updated: r.updated, failed: r.failed,
             matched: r.matched || 0,
             attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
             deleted: r.deleted || 0,
             warningCount: (r.warnings || []).length,
             warnings: r.warnings || [],
-          },
-        }))
-        .catch((err) => writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
-          status: 'failed', startedAt: runStartedAt, finishedAt: new Date().toISOString(),
-          error: String(err && err.message ? err.message : err),
-        }))
+          };
+          writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
+            status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(), result: recordsResult,
+          });
+          if (onPhase) onPhase('records-done', { recordsResult });
+        })
+        .catch((err) => {
+          const error = String(err && err.message ? err.message : err);
+          writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
+            status: 'failed', startedAt: runStartedAt, finishedAt: new Date().toISOString(), error,
+          });
+          if (onPhase) onPhase('records-failed', { error });
+        })
         .finally(releaseLock);
-      result.records = { status: 'running', jobId: planId };
     }
 
     saveState(sourceBaseId, destBaseId, { sourceBaseId, destBaseId, engineVersion: ENGINE_VERSION, lastPlanId: planId, lastApplyAt: runStartedAt });
@@ -227,6 +247,138 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     // records job — release here. When the job launched, it owns the release.
     if (!lockHeldByRecordsJob) releaseLock();
   }
+}
+
+/**
+ * Launch plan() as a BACKGROUND job and return immediately.
+ *
+ * plan() snapshots BOTH bases (one ~1s getView/readData per view — minutes on a view-heavy base),
+ * which blows past the MCP client's response window and surfaces as `Connection closed` even though
+ * the plan is computed + persisted. So the tool handler calls this instead of awaiting plan():
+ * it writes `sync-job-<planId>.json` phase='planning' (with our pid), fires plan() fire-and-forget,
+ * and returns synchronously. On resolve → phase='done' + the rendered digest; on reject → phase='failed'.
+ * plan() itself is unchanged (the engine/tests call it directly).
+ *
+ * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string, direction?: string, fieldMappings?: object }} opts
+ * @returns {{ jobId: string, status: 'running' }}
+ */
+export function planJob({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings }) {
+  const startedAt = new Date().toISOString();
+  writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'planning', startedAt });
+  // Defer to a microtask so a synchronous throw inside plan() still becomes a phase='failed'
+  // write rather than propagating out of planJob (which must return synchronously).
+  Promise.resolve()
+    .then(() => plan({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings }))
+    .then((rendered) => {
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, {
+        phase: 'done',
+        planDigest: { human: rendered.human, machine: rendered.machine },
+        finishedAt: new Date().toISOString(),
+      });
+    })
+    .catch((e) => {
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, {
+        phase: 'failed',
+        error: String(e && e.message ? e.message : e),
+        finishedAt: new Date().toISOString(),
+      });
+    });
+  return { jobId: planId, status: 'running' };
+}
+
+/**
+ * Launch apply() as a BACKGROUND job and return immediately.
+ *
+ * apply() runs the whole schema phase synchronously (snapshotSchemaOnly + applyPlan + pruneSchema)
+ * before it backgrounds the records phase — long enough on a real base to trip the MCP response
+ * window. applyJob threads an `onPhase` callback into apply() so the unified sync-job file reflects
+ * the full timeline: phase='schema' (here) → phase='records' (records-start) → phase='done'
+ * (records-done) / phase='failed' (records-failed). A clean DRIFT abort (apply resolves with an
+ * aborted result and never launches records) is terminal-'done' carrying the aborted schemaResult;
+ * a synchronous apply() throw (no saved plan, FIELD_MAP_INVALID, applyPlan throw, APPLY_LOCKED) is
+ * terminal-'failed'. The apply-lock is still acquired inside apply() (semantics unchanged).
+ *
+ * @param {object} opts — every apply() param (client, sourceBaseId, destBaseId, planId, runStartedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys)
+ * @returns {{ jobId: string, status: 'running' }}
+ */
+export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys }) {
+  const startedAt = runStartedAt || new Date().toISOString();
+  writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'schema', startedAt });
+
+  const onPhase = (event, payload = {}) => {
+    if (event === 'records-start') {
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'records', schemaResult: payload.schemaResult });
+    } else if (event === 'records-done') {
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'done', recordsResult: payload.recordsResult, finishedAt: new Date().toISOString() });
+    } else if (event === 'records-failed') {
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'failed', error: payload.error, finishedAt: new Date().toISOString() });
+    }
+  };
+
+  Promise.resolve()
+    .then(() => apply({ client, sourceBaseId, destBaseId, planId, runStartedAt: startedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase }))
+    .then((rendered) => {
+      const m = (rendered && rendered.machine) || {};
+      // When the records phase launched, its own onPhase callbacks own the terminal write —
+      // don't clobber it. Otherwise (clean DRIFT abort / no-records path) finalize as 'done'.
+      if (m.records && m.records.status === 'running') return;
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'done', schemaResult: m, finishedAt: new Date().toISOString() });
+    })
+    .catch((e) => {
+      const error = e && e.code === 'FIELD_MAP_INVALID'
+        ? `Field mapping validation failed: ${(e.mappingErrors || []).map((me) => `[${me.code}] table=${me.table || '?'}${me.source ? ' source=' + me.source : ''}${me.target ? ' target=' + me.target : ''}`).join('; ')}`
+        : String(e && e.message ? e.message : e);
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, {
+        phase: 'failed', error, ...(e && e.code ? { errorCode: e.code } : {}), finishedAt: new Date().toISOString(),
+      });
+    });
+
+  return { jobId: planId, status: 'running' };
+}
+
+/**
+ * Poll a background plan/apply job by planId. Reads the unified sync-job file (+ pid-liveness) and
+ * derives live progress (records mapped so far) from idmap.records. Falls back to the records-job
+ * file when no unified sync-job file exists (e.g. an apply that ran before this file existed).
+ * Supersedes recordsStatus() for the tool handler; recordsStatus() is kept for existing callers.
+ *
+ * @param {{ sourceBaseId: string, destBaseId: string, planId: string }} opts
+ * @returns {{ planId:string, phase:string, status:'running'|'done'|'failed'|'unknown', recordsMapped:number, planDigest?:object, schemaResult?:object, recordsResult?:object, startedAt?:string, finishedAt?:string, error?:string, message?:string }}
+ */
+export function syncStatus({ sourceBaseId, destBaseId, planId }) {
+  const idmap = loadIdmap(sourceBaseId, destBaseId);
+  const recordsMapped = Object.keys((idmap && idmap.records) || {}).length;
+
+  const job = readSyncJobStatus(sourceBaseId, destBaseId, planId);
+  if (!job) {
+    // Fallback: a records job written directly by apply() before the unified sync-job existed.
+    const rj = readRecordsJobStatus(sourceBaseId, destBaseId, planId);
+    if (rj) {
+      const phase = rj.status === 'running' ? 'records' : rj.status; // 'done' | 'failed' | 'records'
+      return {
+        planId, phase, status: rj.status, recordsMapped,
+        ...(rj.result !== undefined ? { recordsResult: rj.result } : {}),
+        ...(rj.startedAt !== undefined ? { startedAt: rj.startedAt } : {}),
+        ...(rj.finishedAt !== undefined ? { finishedAt: rj.finishedAt } : {}),
+        ...(rj.error !== undefined ? { error: rj.error } : {}),
+      };
+    }
+    return { planId, phase: 'unknown', status: 'unknown', recordsMapped, message: 'No sync job found for this planId (run mode=plan or mode=apply first).' };
+  }
+
+  const status = job.phase === 'done' ? 'done' : job.phase === 'failed' ? 'failed' : 'running';
+  return {
+    planId,
+    phase: job.phase,
+    status,
+    recordsMapped,
+    ...(job.planDigest !== undefined ? { planDigest: job.planDigest } : {}),
+    ...(job.schemaResult !== undefined ? { schemaResult: job.schemaResult } : {}),
+    ...(job.recordsResult !== undefined ? { recordsResult: job.recordsResult } : {}),
+    ...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),
+    ...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
+    ...(job.error !== undefined ? { error: job.error } : {}),
+  };
 }
 
 /**
