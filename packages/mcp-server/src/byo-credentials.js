@@ -12,12 +12,14 @@
  * page — the same token embedded in the /login HTML that the browser flow reads.
  *
  * Source order (first hit wins for the cookie):
+ *   0. injected in-memory store (daemon runtime channel — see cred-store.js)
  *   1. env AIRTABLE_COOKIE (+ optional AIRTABLE_CSRF)
  *   2. file ~/.airtable-user-mcp/credentials.json  { cookie, csrf? }
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { getHomeDir } from './paths.js';
+import { getInjectedCredentials } from './daemon/cred-store.js';
 
 /** Path to the BYO credentials file. */
 export function getCredentialsPath() {
@@ -56,10 +58,16 @@ export async function loadByoCredentials({ fetchImpl } = {}) {
   let cookieHeader = null;
   let csrfToken = null;
 
-  // 1. Environment.
-  const envCookie = process.env.AIRTABLE_COOKIE;
-  if (envCookie && envCookie.trim()) {
-    cookieHeader = envCookie.trim();
+  // 0. Injected in-memory store — the daemon's runtime credential channel
+  //    (POST /daemon/auth-credentials; never env/disk). Highest priority so a
+  //    freshly-pushed cookie wins over stale env/file. In-memory only.
+  const injected = getInjectedCredentials();
+  if (injected && typeof injected.cookie === 'string' && injected.cookie.trim()) {
+    cookieHeader = injected.cookie.trim();
+    if (typeof injected.csrf === 'string' && injected.csrf.trim()) csrfToken = injected.csrf.trim();
+  } else if (process.env.AIRTABLE_COOKIE && process.env.AIRTABLE_COOKIE.trim()) {
+    // 1. Environment.
+    cookieHeader = process.env.AIRTABLE_COOKIE.trim();
     const envCsrf = process.env.AIRTABLE_CSRF;
     if (envCsrf && envCsrf.trim()) csrfToken = envCsrf.trim();
   } else {

@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { directLogin } from '../src/direct-login.js';
+import { setInjectedCredentials, clearInjectedCredentials } from '../src/daemon/cred-store.js';
 
 /**
  * Phase B — browser-free direct login (impit + TOTP), replicating the
@@ -214,6 +215,71 @@ describe('directLogin — credential resolution', () => {
   });
 
   it('reads email/password from env when params are omitted', async () => {
+    process.env.AIRTABLE_EMAIL = 'env@example.com';
+    process.env.AIRTABLE_PASSWORD = 'envpw';
+    const impit = makeFakeImpit([
+      { status: 200, body: '{"csrfToken":"C1"}', setCookies: ['brw=B; Path=/'] },
+      { status: 200, body: JSON.stringify({ loginType: 'password' }) },
+      { status: 302, location: '/', setCookies: ['__Host-airtable-session=S; Path=/'] },
+      { status: 200, body: '{"csrfToken":"C2"}' },
+    ]);
+    const out = await directLogin({ impitFactory: () => impit });
+    assert.equal(bodyParams(impit.calls[1]).get('email'), 'env@example.com');
+    assert.equal(bodyParams(impit.calls[2]).get('password'), 'envpw');
+    assert.ok(out.cookieHeader.includes('__Host-airtable-session=S'));
+  });
+});
+
+describe('directLogin — injected in-memory store (daemon runtime channel)', () => {
+  const ENV = ['AIRTABLE_EMAIL', 'AIRTABLE_PASSWORD', 'AIRTABLE_TOTP_SECRET', 'AIRTABLE_USER_MCP_HOME'];
+  let saved;
+  beforeEach(() => {
+    saved = {};
+    for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; }
+    process.env.AIRTABLE_USER_MCP_HOME = '/nonexistent-airtable-home-xyz';
+    clearInjectedCredentials();
+  });
+  afterEach(() => {
+    for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    clearInjectedCredentials();
+  });
+
+  it('resolves email/password/totpSecret from the injected store first (over env)', async () => {
+    // Env is present but the injected store must win.
+    process.env.AIRTABLE_EMAIL = 'env@example.com';
+    process.env.AIRTABLE_PASSWORD = 'env-loses';
+    process.env.AIRTABLE_TOTP_SECRET = 'ENV-SECRET-LOSES';
+    setInjectedCredentials({
+      authMode: 'direct-login',
+      email: 'injected@example.com',
+      password: 'injected-pw',
+      totpSecret: 'INJECTED-TOTP-SECRET',
+    });
+
+    const impit = makeFakeImpit([
+      { status: 200, body: '{"csrfToken":"C1"}', setCookies: ['brw=B; Path=/'] },
+      { status: 200, body: JSON.stringify({ loginType: 'password' }) },
+      { status: 302, location: '/2fa/tfaINJ', setCookies: ['__Host-airtable-session=S1; Path=/'] },
+      { status: 302, location: '/', setCookies: ['__Host-airtable-session=S2; Path=/'] },
+      { status: 200, body: '{"csrfToken":"C2"}' },
+    ]);
+
+    let totpArg = null;
+    const out = await directLogin({
+      impitFactory: () => impit,
+      otpFactory: (secret) => { totpArg = secret; return '111222'; },
+    });
+
+    assert.equal(bodyParams(impit.calls[1]).get('email'), 'injected@example.com');
+    assert.equal(bodyParams(impit.calls[2]).get('email'), 'injected@example.com');
+    assert.equal(bodyParams(impit.calls[2]).get('password'), 'injected-pw');
+    // Injected TOTP secret was handed to the generator, and its code posted.
+    assert.equal(totpArg, 'INJECTED-TOTP-SECRET');
+    assert.equal(bodyParams(impit.calls[3]).get('code'), '111222');
+    assert.ok(out.cookieHeader.includes('__Host-airtable-session=S2'));
+  });
+
+  it('empty injected store → falls back to env (existing behavior unchanged)', async () => {
     process.env.AIRTABLE_EMAIL = 'env@example.com';
     process.env.AIRTABLE_PASSWORD = 'envpw';
     const impit = makeFakeImpit([

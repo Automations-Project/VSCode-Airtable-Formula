@@ -18,6 +18,7 @@ import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { ensureToken, rotateToken, getTokenPath } from './token.js';
+import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
 import {
   runCloudflaredLogin,
@@ -395,6 +396,59 @@ export async function startDaemonServer(options = {}) {
       clientInitPromise = null;
     }
     res.json({ ok: true });
+  });
+
+  // POST /daemon/auth-credentials (C2) — runtime credential channel.
+  // The extension pushes byo/direct-login creds here instead of via env/disk
+  // (the daemon deliberately gets no creds in its environment). The body is
+  // stored IN MEMORY ONLY (src/daemon/cred-store.js) — NEVER persisted, NEVER
+  // logged. Do not console.log / trace the body or any field value below.
+  app.post('/daemon/auth-credentials', requireBearer, async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const { authMode } = body;
+      if (authMode !== 'byo' && authMode !== 'direct-login') {
+        res.status(400).json({ ok: false, error: "authMode must be 'byo' or 'direct-login'" });
+        return;
+      }
+      // Basic shape validation only — string-typed secrets, values never
+      // inspected/logged (avoid leaking a secret into an error message).
+      for (const key of ['cookie', 'csrf', 'email', 'password', 'totpSecret']) {
+        if (body[key] !== undefined && typeof body[key] !== 'string') {
+          res.status(400).json({ ok: false, error: `${key} must be a string` });
+          return;
+        }
+      }
+
+      setInjectedCredentials({
+        authMode,
+        cookie: body.cookie,
+        csrf: body.csrf,
+        email: body.email,
+        password: body.password,
+        totpSecret: body.totpSecret,
+      });
+
+      // Invalidate the CURRENT auth session so the next API call re-inits and
+      // picks up the freshly-injected creds. Mirror getClient()'s lazy pattern
+      // (create auth if absent), then reset the session state. AirtableAuth has
+      // no single reset method that also clears _credentials, so we reset the
+      // fields directly: for byo/direct-login, ensureLoggedIn() re-runs
+      // _doInit whenever _credentials is null (which re-reads cred-store first);
+      // isLoggedIn=false covers the browser path. We do NOT launch the browser
+      // here — clearing clientInitPromise only marks the client stale so the
+      // NEXT getClient() (i.e. the next MCP tool call) rebuilds it.
+      if (!auth) { auth = new AirtableAuth(); }
+      auth.isLoggedIn = false;
+      auth._credentials = null;
+      auth.csrfToken = null;
+      auth.resetSessionHealth?.(); // clear the dead-session circuit-breaker
+      clientInitPromise = null;
+
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.post('/daemon/rotate-token', requireBearer, async (_req, res, next) => {

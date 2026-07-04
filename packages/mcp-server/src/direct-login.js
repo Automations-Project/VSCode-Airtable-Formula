@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getHomeDir } from './paths.js';
 import { scrapeCsrf } from './byo-credentials.js';
+import { getInjectedCredentials } from './daemon/cred-store.js';
 
 const BASE = 'https://airtable.com';
 
@@ -218,9 +219,14 @@ async function request(impit, method, urlPath, { jar, form } = {}) {
 // ── Credential resolution ───────────────────────────────────────────
 
 function resolveCredentials({ email, password, totpSecret }) {
-  let e = email ?? process.env.AIRTABLE_EMAIL;
-  let p = password ?? process.env.AIRTABLE_PASSWORD;
-  let t = totpSecret ?? process.env.AIRTABLE_TOTP_SECRET;
+  // Priority: injected in-memory store (daemon runtime channel — cred-store.js)
+  // → explicit params → env (AIRTABLE_EMAIL/PASSWORD/TOTP_SECRET) → login.json.
+  // The injected store is in-memory only (never env/disk) and empty for stdio,
+  // so the env/file path is unchanged when nothing is injected.
+  const injected = getInjectedCredentials() || {};
+  let e = injected.email ?? email ?? process.env.AIRTABLE_EMAIL;
+  let p = injected.password ?? password ?? process.env.AIRTABLE_PASSWORD;
+  let t = injected.totpSecret ?? totpSecret ?? process.env.AIRTABLE_TOTP_SECRET;
 
   if (!e || !p) {
     // File fallback: ~/.airtable-user-mcp/login.json { email, password, totpSecret }

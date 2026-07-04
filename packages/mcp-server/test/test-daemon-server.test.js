@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import { startDaemonServer } from '../src/daemon/server.js';
+import { getInjectedCredentials, clearInjectedCredentials } from '../src/daemon/cred-store.js';
 
 let tmpDir;
 let server;
@@ -105,6 +106,70 @@ describe('POST /daemon/release-browser', () => {
     assert.strictEqual(response.status, 200);
     const body = await response.json();
     assert.strictEqual(body.ok, true);
+  });
+});
+
+describe('POST /daemon/auth-credentials', () => {
+  const url = () => `http://127.0.0.1:${server.port}/daemon/auth-credentials`;
+  const authed = (body) => ({
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${server.bearerToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  after(() => clearInjectedCredentials());
+
+  it('returns 401 when Authorization header is missing (and does not touch the store)', async () => {
+    clearInjectedCredentials();
+    const response = await fetch(url(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ authMode: 'byo', cookie: 'brw=should-not-store' }),
+    });
+    assert.strictEqual(response.status, 401);
+    assert.equal(getInjectedCredentials(), null); // unauthorized request never stored creds
+  });
+
+  it('stores byo creds in memory and returns ok:true with a valid token', async () => {
+    clearInjectedCredentials();
+    const response = await fetch(url(), authed({ authMode: 'byo', cookie: 'brw=1; sess=abc', csrf: 'CSRF-99' }));
+    assert.strictEqual(response.status, 200);
+    const body = await response.json();
+    assert.strictEqual(body.ok, true);
+    // setInjectedCredentials was called with the pushed creds.
+    const stored = getInjectedCredentials();
+    assert.equal(stored.authMode, 'byo');
+    assert.equal(stored.cookie, 'brw=1; sess=abc');
+    assert.equal(stored.csrf, 'CSRF-99');
+  });
+
+  it('stores direct-login creds (email/password/totpSecret) in memory', async () => {
+    clearInjectedCredentials();
+    const response = await fetch(url(), authed({
+      authMode: 'direct-login', email: 'u@x.com', password: 'p', totpSecret: 'JBSWY3DPEHPK3PXP',
+    }));
+    assert.strictEqual(response.status, 200);
+    const stored = getInjectedCredentials();
+    assert.equal(stored.authMode, 'direct-login');
+    assert.equal(stored.email, 'u@x.com');
+    assert.equal(stored.password, 'p');
+    assert.equal(stored.totpSecret, 'JBSWY3DPEHPK3PXP');
+  });
+
+  it('rejects an invalid authMode with 400 (store unchanged)', async () => {
+    clearInjectedCredentials();
+    const response = await fetch(url(), authed({ authMode: 'browser', cookie: 'brw=x' }));
+    assert.strictEqual(response.status, 400);
+    const body = await response.json();
+    assert.strictEqual(body.ok, false);
+    assert.equal(getInjectedCredentials(), null); // invalid request never stored creds
+  });
+
+  it('rejects a non-string secret field with 400', async () => {
+    clearInjectedCredentials();
+    const response = await fetch(url(), authed({ authMode: 'byo', cookie: 12345 }));
+    assert.strictEqual(response.status, 400);
+    assert.equal(getInjectedCredentials(), null);
   });
 });
 
