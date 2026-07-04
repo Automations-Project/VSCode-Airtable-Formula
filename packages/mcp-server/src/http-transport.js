@@ -1,0 +1,102 @@
+/**
+ * Direct-HTTP transport for Airtable API calls (Phase 1 of the transport rework).
+ *
+ * Every Airtable API call used to run as a `fetch()` INSIDE the Chrome page via
+ * page.evaluate(); the browser was both the auth store (cookies + scraped CSRF)
+ * AND the transport. A live spike fired the same request three ways — in-page
+ * fetch, impit (Chrome TLS impersonation), and plain node fetch — and all three
+ * returned byte-identical 200s. There is no TLS-fingerprint barrier, so we
+ * demote the browser to login / credential-capture only and route API traffic
+ * through this transport.
+ *
+ * The return shape mirrors the old in-page fetch EXACTLY so that
+ * auth._wrapResponse and the _apiCall backoff/recovery loop stay untouched:
+ *   success        → { status, body }
+ *   thrown network → { status: 0, body: '', error }
+ *
+ * Clients:
+ *   - 'fetch' (default): global fetch. No impersonation needed (spike-proven).
+ *   - 'impit'          : opt-in Chrome TLS impersonation, behind
+ *                        AIRTABLE_HTTP_CLIENT=impit. impit is an OPTIONAL
+ *                        dependency, lazy-loaded like patchright/otpauth; if it
+ *                        is not installed we throw a clear, actionable error.
+ */
+
+let _ImpitClass = null;
+async function loadImpit() {
+  if (_ImpitClass) return _ImpitClass;
+  try {
+    const mod = await import('impit');
+    _ImpitClass = mod.Impit || mod.default?.Impit;
+    if (!_ImpitClass) throw new Error('the `impit` module did not export `Impit`');
+    return _ImpitClass;
+  } catch (err) {
+    throw new Error(
+      'AIRTABLE_HTTP_CLIENT=impit requires the optional `impit` package, which is not installed. ' +
+      'Install it (`npm i impit`) or use the default fetch client ' +
+      '(unset AIRTABLE_HTTP_CLIENT or set it to "fetch").\n' +
+      `Original error: ${err.message}`
+    );
+  }
+}
+
+export class HttpTransport {
+  /**
+   * @param {object} [opts]
+   * @param {'fetch'|'impit'} [opts.client='fetch'] transport backend
+   * @param {Function}        [opts.fetchImpl]      test seam — overrides global fetch
+   * @param {Function}        [opts.impitFactory]   test seam — async () => ({ fetch })
+   */
+  constructor({ client = 'fetch', fetchImpl, impitFactory } = {}) {
+    // Only 'impit' opts into the fallback; anything else (undefined, '', a typo)
+    // falls back to plain fetch.
+    this.client = client === 'impit' ? 'impit' : 'fetch';
+    this._fetchImpl = fetchImpl || null;
+    this._impitFactory = impitFactory || null;
+  }
+
+  /**
+   * @param {{ method: string, url: string, headers: object, body?: string|null }} req
+   * @returns {Promise<{ status: number, body: string, error?: string }>}
+   */
+  async request(req) {
+    return this.client === 'impit' ? this._impitRequest(req) : this._fetchRequest(req);
+  }
+
+  async _fetchRequest({ method, url, headers, body }) {
+    const fetchFn = this._fetchImpl || globalThis.fetch;
+    const options = { method, headers };
+    if (body !== null && body !== undefined && method !== 'GET') {
+      options.body = body;
+    }
+    try {
+      const res = await fetchFn(url, options);
+      return { status: res.status, body: await res.text() };
+    } catch (e) {
+      return { status: 0, body: '', error: e.message };
+    }
+  }
+
+  async _impitRequest({ method, url, headers, body }) {
+    // A failed import propagates as a thrown error (not a { status: 0 } result):
+    // an uninstalled optional dependency is a config problem the caller must fix,
+    // not a transient network failure to retry.
+    let impit;
+    if (this._impitFactory) {
+      impit = await this._impitFactory();
+    } else {
+      const Impit = await loadImpit();
+      impit = new Impit({ browser: 'chrome' });
+    }
+    const options = { method, headers };
+    if (body !== null && body !== undefined && method !== 'GET') {
+      options.body = body;
+    }
+    try {
+      const res = await impit.fetch(url, options);
+      return { status: res.status, body: await res.text() };
+    } catch (e) {
+      return { status: 0, body: '', error: e.message };
+    }
+  }
+}

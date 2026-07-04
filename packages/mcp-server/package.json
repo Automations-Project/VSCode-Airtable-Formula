@@ -75,6 +75,7 @@
   },
   "optionalDependencies": {
     "@ngrok/ngrok": "^1.7.0",
+    "impit": "^0.14.2",
     "otpauth": "^9.5.0",
     "patchright": "^1.58.2"
   }

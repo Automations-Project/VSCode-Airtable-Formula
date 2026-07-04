@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import { randomBytes } from 'node:crypto';
 import { trace } from './debug-tracer.js';
 import { getProfileDir } from './paths.js';
+import { HttpTransport } from './http-transport.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
@@ -66,6 +67,18 @@ export class AirtableAuth {
     // indefinitely.
     this._secretSocketIds = new Map();
     this._maxSocketIdCache = 50;
+    // Per-app guard so a base whose socketId never captures isn't re-navigated
+    // on every subsequent mutation (avoid a lazy-capture navigation storm).
+    this._socketIdCaptureAttempted = new Set();
+
+    // Direct-HTTP transport. API calls now go straight out over node HTTP
+    // (fetch by default; impit via AIRTABLE_HTTP_CLIENT=impit) using the
+    // credential snapshot below — the browser is only used for login/refresh
+    // and secretSocketId capture.
+    this._httpTransport = new HttpTransport({ client: process.env.AIRTABLE_HTTP_CLIENT });
+    // Captured session credentials for direct HTTP: { cookieHeader, csrfToken }.
+    // Populated by _snapshotCredentials() during init/recovery.
+    this._credentials = null;
 
     // Reference to the page-level 'request' listener so we can detach it on
     // _doInit's context-close step rather than leak it per session-recovery.
@@ -179,6 +192,11 @@ export class AirtableAuth {
       console.error('[auth] Page URL:', this.page.url());
 
       await this._extractCsrf();
+      // Snapshot cookies + CSRF BEFORE verifying — _verifySession now issues a
+      // direct-HTTP call (not an in-page fetch) and needs the Cookie header.
+      // (The plan said "after _extractCsrf/_verifySession"; it must precede the
+      // verify call now that verify no longer runs inside the browser.)
+      await this._snapshotCredentials();
       await this._verifySession();
       trace('auth', 'auth:csrf_captured', {
         success: !!this.csrfToken,
@@ -273,6 +291,79 @@ export class AirtableAuth {
     return this._secretSocketIds.get(appId) || null;
   }
 
+  /**
+   * Lazily capture a secretSocketId for a base before a mutation.
+   *
+   * With the direct-HTTP transport the browser no longer sees API POSTs, so the
+   * passive interception that used to capture secretSocketId "for free" never
+   * fires. We restore it on demand: navigate the still-open login page to the
+   * base once — loading the base fires its own POSTs, and the existing request
+   * interception handler captures the socketId from them — then poll briefly.
+   *
+   * Best-effort by design (secretSocketId is applied "when available"): if the
+   * capture times out we proceed WITHOUT it rather than fail the mutation. A
+   * per-app guard prevents re-navigating on every mutation when capture misses.
+   *
+   * NOTE: captured socketIds are reused for the whole session (no page traffic
+   * to refresh them). This matches the pre-existing "cache and reuse" behavior;
+   * a stale socketId surfaces as a normal API error handled by _apiCall.
+   */
+  async _ensureSecretSocketId(appId) {
+    if (!appId) return;
+    if (this.getSecretSocketId(appId)) return;              // already cached
+    if (this._socketIdCaptureAttempted.has(appId)) return;  // don't nav-storm on a miss
+    this._socketIdCaptureAttempted.add(appId);
+
+    try {
+      await this.ensureLoggedIn(); // make sure a live page exists to navigate
+    } catch {
+      // Couldn't establish a session here — let the upcoming _apiCall surface
+      // the real error; just skip capture.
+      return;
+    }
+    if (!this.page) return;
+
+    const maxMs = Number(process.env.AIRTABLE_SOCKETID_CAPTURE_MS) || 8000;
+    const deadline = Date.now() + maxMs;
+    try {
+      await this.page
+        .goto(`https://airtable.com/${appId}`, { waitUntil: 'domcontentloaded', timeout: maxMs })
+        .catch(() => {}); // navigation errors are non-fatal — the base may still POST
+      while (Date.now() < deadline) {
+        if (this.getSecretSocketId(appId)) return;
+        await new Promise((r) => setTimeout(r, Math.min(200, Math.max(10, deadline - Date.now()))));
+      }
+    } catch (err) {
+      console.error(`[auth] secretSocketId capture for ${appId} failed: ${err.message}`);
+    }
+    // Still not captured → proceed without it (secretSocketId is "when available").
+  }
+
+  // ─── Credential Snapshot (direct-HTTP) ───────────────────────
+
+  /**
+   * Snapshot the profile's session credentials so direct-HTTP calls can carry
+   * the same auth the browser had. Reads the browser context's cookies (incl.
+   * HttpOnly) and keeps only airtable-domain cookies as a Cookie header, plus
+   * the CSRF token already extracted by _extractCsrf().
+   *
+   * Called during init (before _verifySession) and after each refresh/recovery
+   * so a re-login's fresh cookies take effect immediately.
+   */
+  async _snapshotCredentials() {
+    let cookieHeader = '';
+    try {
+      const cookies = await this.page.context().cookies();
+      cookieHeader = cookies
+        .filter((c) => (c.domain || '').includes('airtable'))
+        .map((c) => `${c.name}=${c.value}`)
+        .join('; ');
+    } catch (err) {
+      console.error(`[auth] Failed to snapshot session cookies: ${err.message}`);
+    }
+    this._credentials = { cookieHeader, csrfToken: this.csrfToken };
+  }
+
   // ─── CSRF Extraction ─────────────────────────────────────────
 
   async _extractCsrf() {
@@ -359,6 +450,10 @@ export class AirtableAuth {
       } finally {
         this._initPromise = null;
       }
+      // Re-snapshot so the relaunched session's fresh cookies/CSRF drive
+      // subsequent direct-HTTP calls. (_doInit already snapshots before its
+      // verify; this is belt-and-suspenders in case that ordering changes.)
+      await this._snapshotCredentials();
       console.error('[auth] Session recovered successfully.');
     } finally {
       this._recovering = false;
@@ -414,54 +509,36 @@ export class AirtableAuth {
   async _rawApiCall(method, urlPath, body = null, appId = null, contentType = 'form', evalTimeoutMs = 15_000) {
     const url = urlPath.startsWith('http') ? urlPath : `https://airtable.com${urlPath}`;
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const csrfToken = this.csrfToken;
-    // Generate page-load-id Node-side — `Math.random()` inside page.evaluate
-    // is still not cryptographically strong and we can't reach node:crypto
-    // from the browser context.
+    // Generate page-load-id Node-side — `Math.random()` is not cryptographically
+    // strong; genPageLoadId() uses node:crypto.
     const pageLoadId = genPageLoadId();
 
-    // H3 — per-evaluate timeout. Playwright has no built-in timeout on
-    // page.evaluate; a CDP-dead Chromium can hang forever. We race against
-    // a configurable timer (default 15s) and let _apiCall's catch trigger
-    // _recoverSession. Callers handling large responses (e.g. getApplicationData)
-    // should pass a higher evalTimeoutMs to avoid spurious recovery cycles.
-    const withTimeout = (promise) => Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error(`page.evaluate exceeded ${evalTimeoutMs / 1000}s; browser may be unresponsive`)),
-        evalTimeoutMs,
-      )),
-    ]);
+    // Direct HTTP now carries the session explicitly: the browser is no longer
+    // the transport, so the profile's cookies + CSRF must ride on every request.
+    const creds = this._credentials || {};
+    const cookieHeader = creds.cookieHeader || '';
+    const csrfToken = creds.csrfToken ?? this.csrfToken;
 
+    // Build the SAME headers the in-page fetch sent, plus an explicit Cookie.
+    let headers;
+    let requestBody = null;
     if (contentType === 'json') {
-      return withTimeout(this.page.evaluate(async ({ url, method, body, appId, timeZone, pageLoadId }) => {
-        const headers = {
-          'Content-Type': 'application/json',
-          'x-airtable-inter-service-client': 'webClient',
-          'x-airtable-page-load-id': pageLoadId,
-          'x-requested-with': 'XMLHttpRequest',
-          'x-user-locale': 'en',
-          'x-time-zone': timeZone,
-        };
-        if (appId) headers['x-airtable-application-id'] = appId;
-
-        try {
-          // Honor caller's method — previously this was hardcoded to POST which
-          // silently broke any GET/PUT/PATCH JSON call.
-          const options = { method, headers };
-          if (body !== null && body !== undefined && method !== 'GET') {
-            options.body = JSON.stringify(body);
-          }
-          const res = await fetch(url, options);
-          return { status: res.status, body: await res.text() };
-        } catch (e) {
-          return { status: 0, body: '', error: e.message };
-        }
-      }, { url, method, body, appId, timeZone, pageLoadId }));
-    }
-
-    return withTimeout(this.page.evaluate(async ({ url, method, body, appId, timeZone, csrfToken, pageLoadId }) => {
-      const headers = {
+      headers = {
+        'Content-Type': 'application/json',
+        'x-airtable-inter-service-client': 'webClient',
+        'x-airtable-page-load-id': pageLoadId,
+        'x-requested-with': 'XMLHttpRequest',
+        'x-user-locale': 'en',
+        'x-time-zone': timeZone,
+      };
+      if (appId) headers['x-airtable-application-id'] = appId;
+      if (cookieHeader) headers['Cookie'] = cookieHeader;
+      // Honor caller's method — a body only rides on non-GET requests.
+      if (body !== null && body !== undefined && method !== 'GET') {
+        requestBody = JSON.stringify(body);
+      }
+    } else {
+      headers = {
         'x-airtable-inter-service-client': 'webClient',
         'x-airtable-page-load-id': pageLoadId,
         'x-requested-with': 'XMLHttpRequest',
@@ -473,21 +550,35 @@ export class AirtableAuth {
         headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
         headers['Accept'] = 'application/json, text/javascript, */*; q=0.01';
       }
-
-      const options = { method, headers };
+      if (cookieHeader) headers['Cookie'] = cookieHeader;
       if (body && method !== 'GET') {
         const params = new URLSearchParams(body);
         if (csrfToken) params.set('_csrf', csrfToken);
-        options.body = params.toString();
+        requestBody = params.toString();
       }
+    }
 
-      try {
-        const res = await fetch(url, options);
-        return { status: res.status, body: await res.text() };
-      } catch (e) {
-        return { status: 0, body: '', error: e.message };
-      }
-    }, { url, method, body, appId, timeZone, csrfToken, pageLoadId }));
+    // Preserve the old per-call timeout semantics: page.evaluate had no built-in
+    // timeout, so a hung request was raced against a configurable timer (default
+    // 15s) and its rejection let _apiCall's catch trigger _recoverSession. Direct
+    // HTTP keeps the same race — a stuck request still rejects promptly. Callers
+    // handling large responses (e.g. getApplicationData) pass a higher timeout.
+    // Clear the timer on settle — otherwise a pending setTimeout dangles for the
+    // full evalTimeoutMs after every (fast) call, leaking timers now that this
+    // is the universal request path (the old page.evaluate version left it
+    // uncleared, but that only ran on the slow browser path).
+    const withTimeout = (promise) => {
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`HTTP request exceeded ${evalTimeoutMs / 1000}s; upstream may be unresponsive`)),
+          evalTimeoutMs,
+        );
+      });
+      return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    };
+
+    return withTimeout(this._httpTransport.request({ method, url, headers, body: requestBody }));
   }
 
   // ─── Queued API Call (with session recovery & rate-limit backoff) ──────────────────
@@ -633,6 +724,17 @@ export class AirtableAuth {
   }
 
   async postForm(url, params, appId) {
+    // Mutations (all postForm callers) embed secretSocketId "when available".
+    // With the direct-HTTP transport the browser no longer sees these POSTs, so
+    // the passive capture is gone; recover it by lazily navigating the login
+    // page to the base once, then inject the captured id into the outgoing
+    // params. If capture misses, the mutation still proceeds without it.
+    if (appId && params && typeof params === 'object' && !params.secretSocketId) {
+      await this._ensureSecretSocketId(appId);
+      const sid = this.getSecretSocketId(appId);
+      if (sid) params.secretSocketId = sid;
+    }
+
     const pattern = url.replace(/.*v0\.3\//, '').replace(/(app|tbl|viw|fld|rec|usr|wsp|sel|flt|blk|ext|col)[A-Za-z0-9]{10,}/g, '$1*');
     trace('http', 'http:request', { method: 'POST', endpoint_pattern: pattern, has_payload: true });
     const start = Date.now();
