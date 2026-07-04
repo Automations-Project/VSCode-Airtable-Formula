@@ -869,11 +869,12 @@ describe('records.applyAttachments', () => {
     assert.equal(uploadCalls[0].payload.filename, 'image.png');
     assert.ok(uploadCalls[0].payload.bytes, 'bytes must be provided');
 
-    // dedupe key should be set after success
-    assert.equal(idmap.attachments['image.png|1024'], true);
+    // dedupe key should be set after success — scoped to the destination CELL
+    // (row|field|filename|size), so a same-named file on ANOTHER record is never suppressed
+    assert.equal(idmap.attachments['recD1|fldAttD|image.png|1024'], true);
   });
 
-  it('deduplicates: same filename|size not re-uploaded on second applyAttachments call', async () => {
+  it('deduplicates: same cell (row|field|filename|size) not re-uploaded on second applyAttachments call', async () => {
     const { client, fetchBytes, uploadCalls, idmap, srcSnapshot, destSnapshot, result } = makeFixtures();
 
     // First call
@@ -899,7 +900,71 @@ describe('records.applyAttachments', () => {
       fetchBytes,
     });
 
-    assert.equal(uploadCalls.length, 1, 'second call must NOT re-upload (dedupe by filename|size)');
+    assert.equal(uploadCalls.length, 1, 'second call must NOT re-upload (dedupe by cell-scoped key)');
+  });
+
+  it('same filename|size on DIFFERENT records both get uploaded (dedupe is cell-scoped, not global)', async () => {
+    const uploadCalls = [];
+    const client = {
+      uploadAttachment: async (appId, rowId, columnId, payload) => {
+        uploadCalls.push({ rowId, filename: payload.filename });
+        return { ok: true, attachmentId: 'att' + uploadCalls.length };
+      },
+    };
+    const fetchBytes = async () => ({ bytes: Buffer.from('pdf'), contentType: 'application/pdf' });
+
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: { fldAtt: { destFld: 'fldAttD' } },
+      records: { recS1: 'recD1', recS2: 'recD2' },
+    };
+    // Two records each carry the SAME template file (same filename + size).
+    const att = (id) => [{ id, url: 'https://src/contract.pdf', filename: 'contract.pdf', size: 12345, type: 'application/pdf' }];
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [{ id: 'fldAtt', type: 'multipleAttachments' }],
+        records: [
+          { id: 'recS1', cellValuesByColumnId: { fldAtt: att('attA') } },
+          { id: 'recS2', cellValuesByColumnId: { fldAtt: att('attB') } },
+        ],
+      }],
+    };
+    const destSnapshot = { baseId: 'appDest' };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, attachmentsUploaded: 0, warnings: [] };
+
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-cellscope', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    assert.equal(uploadCalls.length, 2, 'both records get the same-named file (no global suppression)');
+    assert.deepEqual(uploadCalls.map((c) => c.rowId).sort(), ['recD1', 'recD2']);
+    assert.equal(idmap.attachments['recD1|fldAttD|contract.pdf|12345'], true);
+    assert.equal(idmap.attachments['recD2|fldAttD|contract.pdf|12345'], true);
+  });
+
+  it('legacy unscoped dedupe keys (filename|size) do not suppress new uploads and are kept in the map', async () => {
+    const { client, fetchBytes, uploadCalls, idmap, srcSnapshot, destSnapshot, result } = makeFixtures();
+    // Persisted idmap from an older run holds the OLD global key format.
+    idmap.attachments = { 'image.png|1024': true };
+
+    await applyAttachments({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: makeLimiter(),
+      journal: newJournal('att-legacy', 't'),
+      persist: () => {},
+      result,
+      fetchBytes,
+    });
+
+    assert.equal(uploadCalls.length, 1, 'legacy unscoped key must not suppress the cell-scoped upload');
+    assert.equal(idmap.attachments['image.png|1024'], true, 'legacy key kept (not migrated/deleted)');
+    assert.equal(idmap.attachments['recD1|fldAttD|image.png|1024'], true, 'new cell-scoped key recorded');
   });
 
   it('ok:false upload → ATTACHMENT_FAILED warning, no throw, record continues', async () => {
@@ -924,7 +989,7 @@ describe('records.applyAttachments', () => {
     assert.ok(failWarns[0].message.includes('image.png'), 'warning should mention the filename');
 
     // dedupe key must NOT be set on failure
-    assert.equal(idmap.attachments['image.png|1024'], undefined);
+    assert.equal(idmap.attachments['recD1|fldAttD|image.png|1024'], undefined);
   });
 
   it('fetchBytes error → ATTACHMENT_FAILED warning, no throw, continues to next attachment', async () => {

@@ -635,8 +635,13 @@ async function uploadAttachmentFallback({ client, destAppId, destRowId, destFldI
   const { url, filename, size, type } = attachment;
   if (!url || !filename) return;
 
-  const dedupeKey = `${filename}|${size}`;
-  if (idmap.attachments[dedupeKey]) return; // already uploaded
+  // Dedupe key is scoped to the destination CELL (row|field|filename|size): a same-named
+  // same-size file on ANOTHER record/field is a different upload and must never be suppressed,
+  // while a re-run of the SAME cell stays idempotent. Old-format `filename|size` keys persisted
+  // by earlier runs are legacy — kept in the map but never matched (a one-time re-upload of an
+  // already-filled cell beats permanently-empty cells on every other record).
+  const dedupeKey = `${destRowId}|${destFldId}|${filename}|${size}`;
+  if (idmap.attachments[dedupeKey]) return; // already uploaded to this cell
 
   let bytes;
   let contentType = type;
