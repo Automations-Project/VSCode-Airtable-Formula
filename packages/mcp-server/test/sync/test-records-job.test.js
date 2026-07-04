@@ -1,12 +1,21 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { writeRecordsJobStatus, readRecordsJobStatus } from '../../src/sync/records.js';
 import { recordsStatus } from '../../src/sync/index.js';
-import { saveIdmap } from '../../src/sync/idmap.js';
+import { saveIdmap, syncDir } from '../../src/sync/idmap.js';
 import { renderApplyResult } from '../../src/sync/report.js';
+
+/** A pid guaranteed dead: spawn a no-op node process synchronously — by the time spawnSync
+ *  returns it has exited, so its pid no longer maps to a live process. */
+function deadPid() {
+  const r = spawnSync(process.execPath, ['-e', '']);
+  assert.ok(r.pid > 0, 'spawned a probe process');
+  return r.pid;
+}
 
 const SRC = 'appSRC0000000000', DEST = 'appDST0000000000';
 
@@ -34,6 +43,41 @@ describe('records background-job status', () => {
     const s = recordsStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'plnNONE' });
     assert.equal(s.status, 'unknown');
     assert.equal(s.recordsMapped, 0);
+  });
+
+  it('stamps the writer pid on a running status write', () => {
+    writeRecordsJobStatus(SRC, DEST, 'plnPid', { status: 'running', startedAt: 't0' });
+    const j = readRecordsJobStatus(SRC, DEST, 'plnPid');
+    assert.equal(j.pid, process.pid, 'running status must carry the writing process pid');
+    assert.equal(j.status, 'running', 'writer is alive → still running');
+  });
+
+  it('reports a running job with a DEAD pid as failed with a resume hint (process died mid-job)', () => {
+    writeRecordsJobStatus(SRC, DEST, 'plnDead', { status: 'running', startedAt: 't0', pid: deadPid() });
+    const s = recordsStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'plnDead' });
+    assert.equal(s.status, 'failed', 'a dead writer can never finish the job — must not report running forever');
+    assert.match(String(s.error), /died mid-job/);
+    assert.match(String(s.error), /mode=apply/, 'error must tell the user how to resume');
+  });
+
+  it('keeps a running job with a LIVE pid as running', () => {
+    writeRecordsJobStatus(SRC, DEST, 'plnLive', { status: 'running', startedAt: 't0', pid: process.pid });
+    const s = recordsStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'plnLive' });
+    assert.equal(s.status, 'running');
+  });
+
+  it('a legacy running job file without pid stays running (cannot verify liveness)', () => {
+    // Simulate a pre-pid job file written by an older version.
+    mkdirSync(syncDir(SRC, DEST), { recursive: true });
+    writeFileSync(join(syncDir(SRC, DEST), 'records-job-plnLegacy.json'), JSON.stringify({ planId: 'plnLegacy', status: 'running', startedAt: 't0' }));
+    const s = recordsStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'plnLegacy' });
+    assert.equal(s.status, 'running');
+  });
+
+  it('done/failed statuses are never re-derived from pid', () => {
+    writeRecordsJobStatus(SRC, DEST, 'plnDone', { status: 'done', startedAt: 't0', finishedAt: 't1', pid: deadPid(), result: { created: 1 } });
+    const s = recordsStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'plnDone' });
+    assert.equal(s.status, 'done');
   });
 
   it('done status carries the result summary', () => {

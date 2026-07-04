@@ -49,14 +49,34 @@ function injectFieldMappings(cells, tableMappings, srcCells) {
 function recordsJobPath(sourceBaseId, destBaseId, planId) {
   return join(syncDir(sourceBaseId, destBaseId), `records-job-${planId}.json`);
 }
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
 export function writeRecordsJobStatus(sourceBaseId, destBaseId, planId, status) {
   mkdirSync(syncDir(sourceBaseId, destBaseId), { recursive: true });
-  safeAtomicWriteFileSync(recordsJobPath(sourceBaseId, destBaseId, planId), JSON.stringify({ planId, ...status }, null, 2));
+  // Stamp the writer's pid on 'running' so a reader can detect a job whose process died
+  // mid-run — after a crash/restart the .then/.catch that would write done/failed never
+  // fires, and the file would otherwise report 'running' forever.
+  const body = { planId, ...(status.status === 'running' ? { pid: process.pid } : {}), ...status };
+  safeAtomicWriteFileSync(recordsJobPath(sourceBaseId, destBaseId, planId), JSON.stringify(body, null, 2));
 }
 export function readRecordsJobStatus(sourceBaseId, destBaseId, planId) {
   const p = recordsJobPath(sourceBaseId, destBaseId, planId);
   if (!existsSync(p)) return null;
-  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+  let job = null;
+  try { job = JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+  // Liveness: 'running' is only believable while the writing process is alive. A pid-less
+  // (legacy) file cannot be verified and stays 'running'. Windows-safe: process.kill(pid, 0)
+  // throws for a nonexistent pid on every platform.
+  if (job && job.status === 'running' && job.pid != null && !pidAlive(job.pid)) {
+    return {
+      ...job,
+      status: 'failed',
+      error: `records job process (pid ${job.pid}) died mid-job — re-run mode=apply to resume (idmap + records journal persist per chunk, so completed work is not repeated)`,
+    };
+  }
+  return job;
 }
 
 /**
