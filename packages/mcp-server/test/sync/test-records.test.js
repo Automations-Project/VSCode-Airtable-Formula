@@ -294,6 +294,64 @@ describe('records.applyRecordsPass1', () => {
     assert.ok(!('fldFD' in sentCells), 'computed field must never be cleared');
   });
 
+  it('does not clear a cell whose DEST field is computed (scalar-source/computed-dest pair)', async () => {
+    // A name-matched field can be scalar on SOURCE but computed on DEST (persistent
+    // RETYPE_DEFERRED state). updatePrimitiveCell rejects computed writes and one failing
+    // cell poisons the whole row update — the clear must be skipped for a computed dest field.
+    const updateCalls = [];
+    const client = {
+      createRecords: async () => ({ created: [], failed: [] }),
+      updateRecords: async (appId, tableId, rows) => {
+        updateCalls.push({ rows });
+        return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+    };
+    const idmap = {
+      tables: { tblS: 'tblD' },
+      fields: {
+        fldT: { destFld: 'fldFD', choices: {} }, // scalar source → FORMULA dest (retype deferred)
+        fldN: { destFld: 'fldND', choices: {} },
+      },
+      records: { recS1: 'recD1' },
+    };
+    const srcSnapshot = {
+      tables: [{
+        id: 'tblS', name: 'T',
+        fields: [
+          { id: 'fldT', type: 'text' },   // scalar on SOURCE
+          { id: 'fldN', type: 'number' },
+        ],
+        // fldT cleared on source (absent key); fldN still has a value.
+        records: [{ id: 'recS1', cellValuesByColumnId: { fldN: 42 } }],
+      }],
+    };
+    const destSnapshot = {
+      tables: [{
+        id: 'tblD', name: 'T',
+        fields: [
+          { id: 'fldFD', type: 'formula' }, // COMPUTED on DEST
+          { id: 'fldND', type: 'number' },
+        ],
+        records: [{
+          id: 'recD1',
+          cellValuesByColumnId: { fldFD: 'computed output', fldND: 41 },
+        }],
+      }],
+    };
+    const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: createLimiter({ rps: 1000, sleep: async () => {} }),
+      journal: newJournal('p3dc', 't'),
+      persist: () => {},
+      result,
+    });
+    assert.equal(updateCalls.length, 1, 'other cells still update');
+    const sentCells = updateCalls[0].rows[0].cellValuesByColumnId;
+    assert.ok(!('fldFD' in sentCells), 'no null emitted for a computed DEST field');
+    assert.equal(sentCells.fldND, 42, 'sibling scalar cell still updated');
+  });
+
   it('does not emit clears when the dest cell is already empty or the dest record is unknown', async () => {
     const updateCalls = [];
     const client = {

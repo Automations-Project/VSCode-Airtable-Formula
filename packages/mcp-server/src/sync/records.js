@@ -21,6 +21,7 @@ import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
 import { snapshotSchemaOnly, snapshotTableRecords, normalizeViewConfig, isComputedType } from './snapshot.js';
 import { loadIdmap, saveIdmap, syncDir } from './idmap.js';
 import { newJournal, loadRecordsJournal, saveRecordsJournal } from './journal.js';
+import { acquireApplyLock } from './apply-lock.js';
 import { safeAtomicWriteFileSync } from '../safe-write.js';
 
 /**
@@ -170,9 +171,11 @@ function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
  * Cleared cells: readQueries omits empty cells, so a cell CLEARED on source arrives as an
  * ABSENT key. Since buildUpdateCells only runs under conflicts=source-wins, the clear must
  * propagate: an explicit null is emitted for a mapped, writable, non-array field whose dest
- * cell is known to still hold a value. Never cleared: unmapped fields, computed fields,
- * array cells (Pass 2/3 / deferral own those), and anything when the dest record's cells are
- * unknown (dest record absent from the snapshot).
+ * cell is known to still hold a value. Never cleared: unmapped fields, computed fields on
+ * EITHER side (a scalar-source field name-matched to a computed dest field is a persistent
+ * RETYPE_DEFERRED pair — updatePrimitiveCell rejects computed writes and one failing cell
+ * poisons the whole row update), array cells (Pass 2/3 / deferral own those), and anything
+ * when the dest record's cells are unknown (dest record absent from the snapshot).
  *
  * @param {Array}  srcFields  - source table field descriptors
  * @param {object} srcCells   - source record cellValuesByColumnId
@@ -181,9 +184,10 @@ function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
  * @param {object} idmap      - id-map (fields + choices)
  * @param {Array}  warnings   - result.warnings array (mutated)
  * @param {string} srcRecId   - source record id (for warning context)
+ * @param {Set<string>} [destComputedFldIds] - dest field ids whose DEST type is computed
  * @returns {object}          - dest cellValuesByColumnId (primitives + single-select only)
  */
-function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRecId) {
+function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRecId, destComputedFldIds = new Set()) {
   const cells = {};
   for (const field of srcFields) {
     const mapping = idmap.fields[field.id];
@@ -208,7 +212,9 @@ function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRe
     if (isComputedType(field.type)) continue; // Pass 1 never writes (or clears) computed cells
     if (srcVal === undefined) {
       // Cleared on source: propagate the clear (source-wins) as an explicit null, but only
-      // when the dest record is known to still hold a value for this field.
+      // when the dest record is known to still hold a value for this field — and never into
+      // a COMPUTED dest field (scalar-source/computed-dest RETYPE_DEFERRED pair).
+      if (destComputedFldIds.has(mapping.destFld)) continue;
       const destVal = destCells ? destCells[mapping.destFld] : undefined;
       if (destVal !== undefined && destVal !== null) cells[mapping.destFld] = null;
       continue;
@@ -427,6 +433,11 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     const destCellsById = new Map(
       (destTableById.get(destTableId)?.records || []).map((r) => [r.id, r.cellValuesByColumnId || {}]),
     );
+    // Dest fields that are COMPUTED — a name-matched scalar-source/computed-dest pair
+    // (persistent RETYPE_DEFERRED) must never receive a cleared-cell null (see buildUpdateCells).
+    const destComputedFldIds = new Set(
+      (destTableById.get(destTableId)?.fields || []).filter((f) => isComputedType(f.type)).map((f) => f.id),
+    );
 
     const records = srcTable.records || [];
     if (records.length === 0) continue;
@@ -453,7 +464,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       } else {
         // UPDATE path — array cells NOT accepted by updateRecords (deferred, Pass 2/3 or warning)
         if (conflicts === 'dest-wins') continue; // preserve dest edits: skip the overwrite
-        const cells = buildUpdateCells(srcTable.fields, srcCells, destCellsById.get(destRecId), idmap, result.warnings, rec.id);
+        const cells = buildUpdateCells(srcTable.fields, srcCells, destCellsById.get(destRecId), idmap, result.warnings, rec.id, destComputedFldIds);
         injectFieldMappings(cells, tableMappings, srcCells);
         // Nothing to write → skip: client.updateRecords rejects an empty cell map per row,
         // which would misreport this healthy record as RECORD_UPDATE_FAILED on every re-sync.
@@ -1093,20 +1104,28 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
     t.snapshotRowCount ??= (t.records || []).length;
   }
 
+  // Dest row ids created THIS plan — Pass 2/3 use it so conflicts=dest-wins only blocks
+  // writes to PRE-EXISTING mapped rows (created rows always get their links/attachments).
+  // Seeded from the records journal so a RESUMED job (same planId after a crash) still treats
+  // rows created by the crashed run as sync-created: on resume they are already in
+  // idmap.records, take Pass 1's dest-wins skip, and would otherwise never re-enter the set —
+  // leaving their link/attachment cells permanently empty under preserve. Cross-plan behavior
+  // is unchanged (a new planId gets a new journal without createdDestIds).
+  const createdDestIds = new Set(Array.isArray(journal?.createdDestIds) ? journal.createdDestIds : []);
+  // Mirror the current set into the journal before EVERY persist (incl. Pass 1's per-chunk
+  // saves) so a crash mid-run leaves the created ids durable next to idmap.records.
+  const persistRun = (m, j) => { j.createdDestIds = [...createdDestIds]; persist(m, j); };
+
   // Natural-key pre-pass: match real-but-unmapped dest records BEFORE Pass 1 + prune,
   // so Pass 1 updates (not duplicates) them and pruneRecords does not treat them as orphans.
   if (naturalKeys && Object.keys(naturalKeys).length) {
     matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idmap, result });
-    persist(idmap, journal);
+    persistRun(idmap, journal);
   }
 
-  // Dest row ids created THIS run — Pass 2/3 use it so conflicts=dest-wins only blocks
-  // writes to PRE-EXISTING mapped rows (created rows always get their links/attachments).
-  const createdDestIds = new Set();
-
   // Pass 1: scalar / select upsert — fills idmap.records
-  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, fieldMappings: resolved, createdDestIds });
-  persist(idmap, journal);
+  await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist: persistRun, result, policy, policyOverrides, fieldMappings: resolved, createdDestIds });
+  persistRun(idmap, journal);
 
   // Rebuild destDisplayNames from idmap.records now populated by Pass 1.
   // Key = dest record id, value = source primary cell value (string).
@@ -1122,25 +1141,25 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   }
 
   // Pass 2: link cells
-  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist, result, policy, policyOverrides, createdDestIds });
-  persist(idmap, journal);
+  await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist: persistRun, result, policy, policyOverrides, createdDestIds });
+  persistRun(idmap, journal);
 
   // Pass 3: attachments
-  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result, policy, policyOverrides, createdDestIds });
-  persist(idmap, journal);
+  await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist: persistRun, result, policy, policyOverrides, createdDestIds });
+  persistRun(idmap, journal);
 
   // Reapply view filters whose record refs now resolve.
   // Defensive guard: a filter-restore failure must NEVER prevent the prune step below —
   // otherwise one tail-step error discards completed passes and skips the extras axis.
   try {
-    await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist, result });
+    await reapplyViewFilters({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist: persistRun, result });
   } catch (err) {
     result.warnings.push({
       code: 'VIEW_FILTER_REAPPLY_FAILED',
       message: `reapplyViewFilters failed (${err.message}) — continuing to prune`,
     });
   }
-  persist(idmap, journal);
+  persistRun(idmap, journal);
 
   // Extras axis: prune dest-only orphan records under mirror policy
   const truncatedTables = collectTruncatedTableNames(srcSnapshot, destSnapshot);
@@ -1177,7 +1196,7 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
     for (const r of (t.records || [])) liveSourceRecordIds.add(r.id);
   }
   await pruneRecords({ client, destSnapshot, idmap, policy, policyOverrides, confirmDeletions, limiter, result, truncatedTables, liveSourceRecordIds });
-  persist(idmap, journal);
+  persistRun(idmap, journal);
 
   return result;
 }
@@ -1198,8 +1217,10 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
  *
  * RESUME MODEL: resume is driven by the persisted **idmap.records** + a fresh live dest snapshot —
  * a created row is skipped on re-run because its source id is already mapped, and Pass 2 dedups
- * links against the live dest. The records journal is persisted but currently advisory (no
- * per-record done-gating); idmap + live re-snapshot are the source of truth. Known limitation:
+ * links against the live dest. The records journal persists `createdDestIds` (dest rows created
+ * this plan) so a resume of the SAME planId keeps them dest-wins-writable in Pass 2/3; beyond
+ * that it is advisory (no per-record done-gating) — idmap + live re-snapshot are the source of
+ * truth. Known limitation:
  * a crash between a create's server-ack and the per-chunk idmap persist can re-create up to one
  * chunk (~50) of rows as duplicates on resume (reconcile existence-prunes + natural-key
  * re-matches by value).
@@ -1507,6 +1528,20 @@ export function matchByNaturalKeys({ srcSnapshot, destSnapshot, naturalKeys, idm
  * @returns {Promise<object>}           - { created, updated, skipped, failed, warnings, idmap }
  */
 export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys = {} }) {
+  // Concurrency guard: reconcile is a load-modify-save of idmap.json — run concurrently with a
+  // background records job (mode=apply) on the same pair, both would last-writer-wins clobber
+  // the idmap. Same per-pair apply.lock as apply(): throws APPLY_LOCKED while a live holder
+  // exists; a stale lock (dead pid) is replaced. Released when reconcile settles (no
+  // background phase — reconcile is fully synchronous).
+  const releaseLock = acquireApplyLock(sourceBaseId, destBaseId, 'reconcile');
+  try {
+    return await reconcileLocked({ client, sourceBaseId, destBaseId, naturalKeys });
+  } finally {
+    releaseLock();
+  }
+}
+
+async function reconcileLocked({ client, sourceBaseId, destBaseId, naturalKeys }) {
   const idmap = loadIdmap(sourceBaseId, destBaseId);
   idmap.records ??= {};
 
