@@ -9,6 +9,11 @@ const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyn
 const VIEW_GROUP_ANCHOR = new Set(['select', 'singleSelect', 'multiSelect', 'multipleSelects', 'collaborator']);
 const COMPUTED_TYPES = new Set(['formula', 'rollup', 'lookup', 'multipleLookupValues', 'count']);
 const LINK_TYPES = new Set(['foreignKey', 'multipleRecordLinks']);
+// Airtable 422s a computed (lookup/rollup/...) field's updateField when it runs in the SAME
+// apply pass as the link field it depends on — the link change hasn't settled yet. Matched
+// defensively (message wording, not a status code) so only THIS specific rejection defers;
+// every other thrown error still hard-fails via ACTION_FAILED.
+const LINK_DEPENDENCY_ERROR = /requires a link field|link field was changed/i;
 const SCALAR_RETYPE_TYPES = new Set(['text', 'multilineText', 'richText', 'number', 'currency', 'percent', 'rating', 'duration', 'checkbox', 'date', 'dateTime', 'phone', 'email', 'url', 'select', 'singleSelect', 'multiSelect', 'multipleSelects']);
 
 // Types Airtable refuses as a primary field — keep a placeholder + warn instead of
@@ -417,8 +422,20 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
             result.warnings.push({ code: 'UNRESOLVABLE_REF', message: `Update of "${a.destFld}" typeOptions deferred — refs [${unresolved.join(', ')}] not yet created` });
             return 'deferred';
           } else {
-            await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: toWritableComputedOptions(destType, remapped) });
-            mutated = true;
+            try {
+              await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: toWritableComputedOptions(destType, remapped) });
+              mutated = true;
+            } catch (e) {
+              // Same-pass link dependency not settled yet — defer instead of hard-failing so the
+              // existing retry-until-stable loop (applyPlan) re-attempts it after the link update
+              // (and Airtable's async settle) has had a chance to complete. Any other error keeps
+              // the normal ACTION_FAILED path (rethrow).
+              if (LINK_DEPENDENCY_ERROR.test(String((e && e.message) ?? e ?? ''))) {
+                result.warnings.push({ code: 'LINK_DEPENDENCY_DEFERRED', message: `Update of "${a.destFld}" deferred — depends on a link field still settling: ${e.message ?? e}` });
+                return 'deferred';
+              }
+              throw e;
+            }
           }
         } else if (LINK_TYPES.has(destType)) {
           // Genuine link divergence (linkSig differs): send the WRITABLE link shape — same

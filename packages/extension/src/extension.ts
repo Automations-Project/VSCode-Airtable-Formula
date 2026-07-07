@@ -82,7 +82,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         /(password[=:"\s]+)\S+/gi,
         /(AIRTABLE_PASSWORD[=:"\s]+)\S+/gi,
         /(AIRTABLE_OTP_SECRET[=:"\s]+)\S+/gi,
+        /(AIRTABLE_TOTP_SECRET[=:"\s]+)\S+/gi,
         /(otpSecret[=:"\s]+)\S+/gi,
+        /(AIRTABLE_COOKIE[=:"\s]+)[^\r\n]+/gi,
+        /(AIRTABLE_CSRF[=:"\s]+)\S+/gi,
         /(set-cookie:?\s*)[^\r\n]+/gi,
         /(cookie:?\s*)[^\r\n]+/gi,
     ];

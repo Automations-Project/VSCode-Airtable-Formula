@@ -57,12 +57,19 @@ const FETCH_BLOCKED_PORTS = new Set([
   6697, 10080,
 ]);
 
-async function listenAvoidingBlockedPorts(server, requestedPort, host) {
-  // A fixed port (requestedPort > 0) gets one shot; if it's already in use or
-  // turns out to be a browser-blocked port, we fall back to an OS-assigned
-  // ephemeral port so the daemon always starts. The bound port is read back and
-  // persisted to the lockfile, so clients still discover it. With requestedPort
-  // 0 we simply retry on ephemeral ports until one is not browser-blocked.
+// Bind failures on a NON-ZERO fixed port that should degrade to an ephemeral port instead of
+// crashing the daemon: the port is already in use (EADDRINUSE), sits in a Windows reserved/excluded
+// port range or is otherwise permission-denied (EACCES — the "listen EACCES 127.0.0.1:8723" case
+// that killed every startup when the default port landed in an excluded range), or is not assignable
+// (EADDRNOTAVAIL). Any of these on a fixed port → retry on port 0.
+const FIXED_PORT_FALLBACK_CODES = new Set(['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL']);
+
+export async function listenAvoidingBlockedPorts(server, requestedPort, host) {
+  // A fixed port (requestedPort > 0) gets one shot; if it's unavailable (in use, excluded/denied,
+  // not assignable) or turns out to be a browser-blocked port, we fall back to an OS-assigned
+  // ephemeral port so the daemon always starts. The bound port is read back and persisted to the
+  // lockfile, so clients still discover it. With requestedPort 0 we simply retry on ephemeral ports
+  // until one is not browser-blocked.
   let port = requestedPort;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -80,8 +87,10 @@ async function listenAvoidingBlockedPorts(server, requestedPort, host) {
         server.listen(port, host);
       });
     } catch (error) {
-      if (error?.code === 'EADDRINUSE' && port !== 0) {
-        port = 0; // fixed port taken → fall back to an ephemeral port
+      if (port !== 0 && FIXED_PORT_FALLBACK_CODES.has(error?.code)) {
+        // fixed port unavailable (taken/excluded/denied) → fall back to an ephemeral port
+        console.error(`[airtable-user-mcp] fixed daemon port ${port} unavailable (${error.code}) — falling back to an automatic port.`);
+        port = 0;
         continue;
       }
       throw error;

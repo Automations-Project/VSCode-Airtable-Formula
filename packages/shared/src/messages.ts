@@ -17,6 +17,8 @@ export type WebviewMessage =
   | { type: 'action:logout';    id: string }
   | { type: 'action:status'; id: string }
   | { type: 'action:saveCredentials'; id: string; email: string; password: string; otpSecret: string }
+  | { type: 'auth:saveCookie'; cookie: string }
+  | { type: 'auth:clearCookie' }
   | { type: 'action:install-browser'; id: string }
   | { type: 'action:removeBrowser';   id: string }
   | { type: 'action:openToolConfig';  id: string }

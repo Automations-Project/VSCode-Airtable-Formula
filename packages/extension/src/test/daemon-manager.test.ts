@@ -8,6 +8,13 @@ vi.mock('vscode', () => ({
   EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),
   Disposable: vi.fn(),
   McpHttpServerDefinition: undefined,
+  // buildDaemonEnv reads mcp.authMode / mcp.httpClient off the workspace config;
+  // return the caller-supplied default so the base env stays at its defaults.
+  workspace: {
+    getConfiguration: vi.fn(() => ({
+      get: vi.fn((_key: string, defaultValue?: unknown) => defaultValue),
+    })),
+  },
 }));
 
 // RED state — DaemonManager import will fail (module not yet created in 05-06-PLAN.md)
@@ -46,11 +53,17 @@ describe('DaemonManager.buildDaemonEnv', () => {
     expect(result.ELECTRON_RUN_AS_NODE).toBe('1');
   });
 
-  it('merges credEnv keys on top of base env', () => {
-    const credEnv = { AIRTABLE_EMAIL: 'test@test.com' };
-    const result = dm.buildDaemonEnv(credEnv);
-    expect(result.AIRTABLE_EMAIL).toBe('test@test.com');
-    expect(result.AIRTABLE_USER_MCP_HOME).toBe(tmpDir);
+  it('never injects credential keys into the daemon env (creds go via the endpoint, not env)', () => {
+    const result = dm.buildDaemonEnv();
+    // The daemon must NEVER receive credentials in its environment — they reach
+    // a running daemon only over the bearer-authed /daemon/auth-credentials
+    // endpoint (pushAuthCredentials). buildDaemonEnv is transport/config only.
+    expect(result.AIRTABLE_EMAIL).toBeUndefined();
+    expect(result.AIRTABLE_PASSWORD).toBeUndefined();
+    expect(result.AIRTABLE_TOTP_SECRET).toBeUndefined();
+    expect(result.AIRTABLE_OTP_SECRET).toBeUndefined();
+    expect(result.AIRTABLE_COOKIE).toBeUndefined();
+    expect(result.AIRTABLE_CSRF).toBeUndefined();
   });
 });
 
@@ -67,6 +80,40 @@ describe('DaemonManager.getDaemonStatus', () => {
   it('returns running:false when daemon.lock does not exist in configDir', async () => {
     const status = await dm.getDaemonStatus();
     expect(status.running).toBe(false);
+  });
+
+  const writeLock = (pid: number, port = 8723) => {
+    fs.writeFileSync(path.join(tmpDir, 'daemon.lock'), JSON.stringify({
+      pid, uuid: 'uuid-1', port, port_lsp: null, bearerToken: 'tok',
+      version: '0.0.0', startedAt: new Date().toISOString(), tunnelUrl: null,
+    }));
+  };
+
+  it('flags a STALE lock (dead pid) so ensureDaemon can respawn, without a wasted health fetch', async () => {
+    // Regression: a crashed daemon leaves a lockfile with a dead pid. getDaemonStatus used to report
+    // running:true/healthy:false for it → ensureDaemon could neither return (unhealthy) nor spawn
+    // (its branch required !running) → "Timed out waiting for daemon startup". Now `stale:true` lets
+    // ensureDaemon spawn a replacement while `running` stays true so stopDaemon can still reclaim.
+    writeLock(999999);
+    (dm as any)._isPidAlive = vi.fn(() => false);
+    const healthSpy = vi.fn(async () => true);
+    (dm as any)._httpHealthCheck = healthSpy;
+    const status = await dm.getDaemonStatus();
+    expect(status.stale).toBe(true);
+    expect(status.running).toBe(true);
+    expect(status.healthy).toBe(false);
+    expect((dm as any)._isPidAlive).toHaveBeenCalledWith(999999);
+    expect(healthSpy).not.toHaveBeenCalled(); // no 2s fetch to a known-dead daemon
+  });
+
+  it('keeps stale:false / running:true for a LIVE pid even when unhealthy (a still-starting daemon must not be culled)', async () => {
+    writeLock(4242);
+    (dm as any)._isPidAlive = vi.fn(() => true);
+    (dm as any)._httpHealthCheck = vi.fn(async () => false); // not yet serving
+    const status = await dm.getDaemonStatus();
+    expect(status.running).toBe(true);
+    expect(status.stale).toBe(false);
+    expect(status.healthy).toBe(false);
   });
 });
 
@@ -332,12 +379,69 @@ describe('DaemonManager user-stopped latch', () => {
   });
 
   it('explicit ensureDaemon clears the latch and attempts a spawn', async () => {
-    (dm as any)._spawnDetached = vi.fn();
+    // _spawnDetached returns Promise<void>; ensureDaemon's single-flight guard calls .finally() on it.
+    (dm as any)._spawnDetached = vi.fn().mockResolvedValue(undefined);
     await dm.stopDaemon();
     await expect(dm.ensureDaemon({ timeoutMs: 400 })).rejects.toThrow(/Timed out/);
     expect((dm as any)._spawnDetached).toHaveBeenCalled();
     // Latch cleared — implicit calls may spawn again now
     await expect(dm.ensureDaemon({ implicit: true, timeoutMs: 400 })).rejects.toThrow(/Timed out/);
+  });
+
+  it('concurrent ensureDaemon calls share ONE spawn (suppression window)', async () => {
+    // The runaway-daemon bug: N overlapping ensureDaemon() callers each spawned a daemon. The
+    // suppression window must collapse them to a single _spawnDetached() while no daemon is up.
+    // The mock resolves immediately and never brings a daemon "up", so each call polls to its
+    // deadline then rejects — but only the first attempt inside the window actually spawns.
+    let spawns = 0;
+    (dm as any)._spawnDetached = vi.fn(async () => { spawns++; });
+    await Promise.all([
+      dm.ensureDaemon({ timeoutMs: 300 }).catch(() => {}),
+      dm.ensureDaemon({ timeoutMs: 300 }).catch(() => {}),
+      dm.ensureDaemon({ timeoutMs: 300 }).catch(() => {}),
+    ]);
+    expect(spawns).toBe(1);
+  });
+
+  it('ensureDaemon SPAWNS when the lockfile is STALE (dead pid) instead of wedging → "Timed out"', async () => {
+    // THE "Daemon start failed: Timed out" bug: a crash leaves a lockfile with a dead pid. ensureDaemon
+    // must spawn a replacement (which reclaims the stale lock) rather than treating the corpse as a
+    // running daemon and polling forever.
+    fs.writeFileSync(path.join(tmpDir, 'daemon.lock'), JSON.stringify({
+      pid: 999999, uuid: 'u', port: 8723, port_lsp: null, bearerToken: 't',
+      version: '0.0.0', startedAt: new Date().toISOString(), tunnelUrl: null,
+    }));
+    (dm as any)._isPidAlive = vi.fn(() => false); // dead → stale
+    const spy = vi.fn().mockResolvedValue(undefined);
+    (dm as any)._spawnDetached = spy;
+    await expect(dm.ensureDaemon({ timeoutMs: 300 })).rejects.toThrow(/Timed out/);
+    expect(spy).toHaveBeenCalled(); // it spawned; did NOT wedge on the stale lock
+  });
+
+  it('EXPLICIT ensureDaemon within the suppression window still spawns (window is reset at entry)', async () => {
+    // Simulate "just spawned" — inside SPAWN_SUPPRESS_MS of now.
+    (dm as any)._lastSpawnAt = Date.now();
+    const spy = vi.fn().mockResolvedValue(undefined);
+    (dm as any)._spawnDetached = spy;
+
+    // Explicit call (no implicit:true) must reset _lastSpawnAt to 0 at entry, so
+    // it spawns immediately instead of being throttled by the window. The stub
+    // never brings a daemon up, so the call times out regardless — what matters
+    // is that the spawn was attempted.
+    await expect(dm.ensureDaemon({ timeoutMs: 300 })).rejects.toThrow(/Timed out/);
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('IMPLICIT ensureDaemon within the suppression window stays suppressed', async () => {
+    (dm as any)._lastSpawnAt = Date.now();
+    const spy = vi.fn().mockResolvedValue(undefined);
+    (dm as any)._spawnDetached = spy;
+
+    // Implicit callers keep the window — this is what breaks the runaway spawn
+    // loop. Not user-stopped, so it doesn't hit the latch-throw path; it should
+    // simply poll to the deadline and time out WITHOUT ever spawning.
+    await expect(dm.ensureDaemon({ implicit: true, timeoutMs: 300 })).rejects.toThrow(/Timed out/);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

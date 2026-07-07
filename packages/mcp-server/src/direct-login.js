@@ -10,10 +10,11 @@
  *   → re-scrape csrfToken from an authed GET / (the login session rotates the
  *     csrfSecret, so the /login token is stale for subsequent API calls).
  *
- * Transport is impit (Chrome TLS impersonation) to resist a PerimeterX
- * challenge on the login endpoints; both impit and otpauth are OPTIONAL
- * dependencies, lazy-loaded, and injectable (impitFactory / otpFactory) for
- * tests so NO live Airtable call or real crypto runs under `node --test`.
+ * Transport DEFAULTS to Node's built-in `fetch` (no dependency), so direct-login works out of the
+ * box. impit (Chrome TLS impersonation) is used ONLY when AIRTABLE_HTTP_CLIENT=impit — for the
+ * rare account whose login endpoints challenge a non-browser TLS fingerprint (PerimeterX). impit
+ * and otpauth are OPTIONAL deps, lazy-loaded, and injectable (impitFactory / otpFactory) for tests
+ * so NO live Airtable call or real crypto runs under `node --test`.
  *
  * Returns { cookieHeader, csrfToken } — the exact shape auth._credentials wants.
  */
@@ -61,12 +62,28 @@ async function loadOtpAuth() {
   }
 }
 
-async function makeImpit(impitFactory) {
+/**
+ * Build the HTTP client for the login flow.
+ *
+ * Default = Node's built-in `fetch` (WHATWG) — NO optional dependency needed, so direct-login
+ * works out of the box. The cookie-jar/Location helpers below already speak the WHATWG Response
+ * shape (getSetCookie(), headers.get(...)). We drive the exact login sequence ourselves, so the
+ * fetch client is created with `redirect: 'manual'` per request.
+ *
+ * impit (Chrome TLS impersonation) is used ONLY when explicitly requested via
+ * AIRTABLE_HTTP_CLIENT=impit — for accounts where Airtable's login endpoints challenge a
+ * non-browser TLS fingerprint (PerimeterX). If requested but not installed, loadImpit throws a
+ * clear DIRECT_LOGIN_IMPIT_MISSING. `impitFactory` (tests) always wins.
+ */
+async function makeHttpClient(impitFactory) {
   if (impitFactory) return impitFactory();
-  const Impit = await loadImpit();
-  // followRedirects:false — we drive the exact login sequence and read Location
-  // ourselves rather than let the client chase the browser's redirects.
-  return new Impit({ browser: 'chrome', followRedirects: false });
+  if ((process.env.AIRTABLE_HTTP_CLIENT || '').toLowerCase() === 'impit') {
+    const Impit = await loadImpit();
+    // followRedirects:false — we read Location ourselves rather than chase redirects.
+    return new Impit({ browser: 'chrome', followRedirects: false });
+  }
+  // Node fetch client — redirect:'manual' so a 302 is returned, not followed.
+  return { fetch: (url, options) => fetch(url, { ...options, redirect: 'manual' }) };
 }
 
 async function generateTotp(secret, otpFactory) {
@@ -201,7 +218,7 @@ function getHeader(res, name) {
  * @param {Map} opts.jar
  * @param {object} [opts.form]  form-urlencoded body fields
  */
-async function request(impit, method, urlPath, { jar, form } = {}) {
+async function request(client, method, urlPath, { jar, form } = {}) {
   const url = urlPath.startsWith('http') ? urlPath : BASE + urlPath;
   const headers = {};
   const cookie = jarToCookieHeader(jar);
@@ -211,7 +228,7 @@ async function request(impit, method, urlPath, { jar, form } = {}) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
     options.body = new URLSearchParams(form).toString();
   }
-  const res = await impit.fetch(url, options);
+  const res = await client.fetch(url, options);
   updateJar(jar, res);
   return res;
 }
@@ -284,18 +301,18 @@ function indicatesSso(body) {
  */
 export async function directLogin({ email, password, totpSecret, impitFactory, otpFactory } = {}) {
   const creds = resolveCredentials({ email, password, totpSecret });
-  const impit = await makeImpit(impitFactory);
+  const client = await makeHttpClient(impitFactory);
   const jar = new Map();
 
   // 1. GET /login — scrape the csrfToken, collect the initial cookies (brw, …).
-  const loginPage = await request(impit, 'GET', '/login', { jar });
+  const loginPage = await request(client, 'GET', '/login', { jar });
   let csrf = scrapeCsrf(await loginPage.text());
   if (!csrf) {
     throw new Error('DIRECT_LOGIN_NO_CSRF: could not scrape a csrfToken from GET /login — Airtable may have changed the login page.');
   }
 
   // 2. getLoginTypeForEmail — bail early on SSO/enterprise accounts.
-  const typeRes = await request(impit, 'POST', '/auth/getLoginTypeForEmail', {
+  const typeRes = await request(client, 'POST', '/auth/getLoginTypeForEmail', {
     jar,
     form: {
       _csrf: csrf,
@@ -311,7 +328,7 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
   }
 
   // 3. POST /auth/login/ — expect a 302 (to /2fa/… on a 2FA account, else /).
-  const loginRes = await request(impit, 'POST', '/auth/login/', {
+  const loginRes = await request(client, 'POST', '/auth/login/', {
     jar,
     form: { _csrf: csrf, urlToRedirectTo: '/', email: creds.email, password: creds.password },
   });
@@ -331,7 +348,7 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
       throw new Error('DIRECT_LOGIN_2FA_REQUIRED: set AIRTABLE_TOTP_SECRET (base32) for this account');
     }
     const code = await generateTotp(creds.totpSecret, otpFactory);
-    const verifyRes = await request(impit, 'POST', '/auth/verify2faCode', {
+    const verifyRes = await request(client, 'POST', '/auth/verify2faCode', {
       jar,
       form: { _csrf: csrf, twoFactorStrategyId, code },
     });
@@ -349,7 +366,7 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
   // session's csrfSecret, so the /login token is stale for API calls). Best-
   // effort: keep the login-flow token if the re-scrape fails.
   try {
-    const home = await request(impit, 'GET', '/', { jar });
+    const home = await request(client, 'GET', '/', { jar });
     const fresh = scrapeCsrf(await home.text());
     if (fresh) csrf = fresh;
   } catch { /* keep the existing csrf */ }

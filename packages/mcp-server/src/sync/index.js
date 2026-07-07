@@ -226,18 +226,20 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
       if (onPhase) onPhase('records-start', { schemaResult: renderApplyResult(result).machine });
       applyRecordsImpl({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys })
         .then((r) => {
-          const recordsResult = {
-            created: r.created, updated: r.updated, failed: r.failed,
-            matched: r.matched || 0,
-            attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
-            deleted: r.deleted || 0,
-            warningCount: (r.warnings || []).length,
-            warnings: r.warnings || [],
-          };
+          // A records run that ABORTED on a mid-run session death resolves normally (r.aborted=true)
+          // but must surface as phase=failed — NOT a lying `done` over 1000s of swallowed
+          // SESSION_INVALID per-record failures. recordsTerminalStatus makes that decision (and keeps
+          // the partial counts either way). See records.js sessionDied/markAborted.
+          const t = recordsTerminalStatus(r);
           writeRecordsJobStatus(sourceBaseId, destBaseId, planId, {
-            status: 'done', startedAt: runStartedAt, finishedAt: new Date().toISOString(), result: recordsResult,
+            status: t.status, startedAt: runStartedAt, finishedAt: new Date().toISOString(),
+            ...(t.error ? { error: t.error } : {}), result: t.recordsResult,
           });
-          if (onPhase) onPhase('records-done', { recordsResult });
+          if (onPhase) {
+            onPhase(t.event, t.event === 'records-failed'
+              ? { error: t.error, recordsResult: t.recordsResult }
+              : { recordsResult: t.recordsResult });
+          }
         })
         .catch((err) => {
           const error = String(err && err.message ? err.message : err);
@@ -271,6 +273,17 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
  * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string, direction?: string, fieldMappings?: object }} opts
  * @returns {{ jobId: string, status: 'running' }}
  */
+// The plan's machine output embeds the full idmap (tables/fields/views/choices) — multiple MB on a
+// large base (observed 2.7MB of a 5.4MB sync-job file). The sync-job status file is rewritten on
+// every phase transition + read on every mode=status poll, so storing the full digest is wasteful.
+// Strip the idmap for the STATUS digest — it is persisted verbatim in idmap.json and plan-<id>.json
+// for anyone who needs the full mapping. Keeps verdict/counts/sample/orphans/warnings.
+function compactPlanDigest(machine) {
+  if (!machine || typeof machine !== 'object') return machine;
+  const { idmap, ...rest } = machine;
+  return idmap ? { ...rest, idmapOmitted: true } : rest;
+}
+
 export function planJob({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings }) {
   const startedAt = new Date().toISOString();
   writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'planning', startedAt });
@@ -281,7 +294,7 @@ export function planJob({ client, sourceBaseId, destBaseId, planId, direction, f
     .then((rendered) => {
       writeSyncJobStatus(sourceBaseId, destBaseId, planId, {
         phase: 'done',
-        planDigest: { human: rendered.human, machine: rendered.machine },
+        planDigest: { human: rendered.human, machine: compactPlanDigest(rendered.machine) },
         finishedAt: new Date().toISOString(),
       });
     })
@@ -320,7 +333,13 @@ export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedA
     } else if (event === 'records-done') {
       writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'done', recordsResult: payload.recordsResult, finishedAt: new Date().toISOString() });
     } else if (event === 'records-failed') {
-      writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'failed', error: payload.error, finishedAt: new Date().toISOString() });
+      // Include the partial recordsResult (present on a mid-run session abort) so mode=status shows
+      // what landed before the failure — not just the error string.
+      writeSyncJobStatus(sourceBaseId, destBaseId, planId, {
+        phase: 'failed', error: payload.error,
+        ...(payload.recordsResult !== undefined ? { recordsResult: payload.recordsResult } : {}),
+        finishedAt: new Date().toISOString(),
+      });
     }
   };
 
@@ -352,16 +371,33 @@ export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedA
   return { jobId: planId, status: 'running' };
 }
 
+// The saved planDigest.machine (already idmap-stripped by compactPlanDigest) can still run to
+// tens of thousands of lines on a view-heavy base — big enough to push summary/schemaResult/
+// recordsResult past the MCP response's truncation window. mode=status is polled far more often
+// than anyone actually needs the raw machine payload (which stays on disk in plan-<planId>.json
+// verbatim), so project it down to the human summary by default; verbose:true opts back into the
+// full machine. This only affects the RESPONSE shape — the job FILE on disk is never touched here.
+function projectPlanDigestForResponse(planDigest, verbose) {
+  if (planDigest === undefined || planDigest === null) return planDigest;
+  if (verbose) return planDigest;
+  return { human: planDigest.human, machineOmitted: true };
+}
+
 /**
  * Poll a background plan/apply job by planId. Reads the unified sync-job file (+ pid-liveness) and
  * derives live progress (records mapped so far) from idmap.records. Falls back to the records-job
  * file when no unified sync-job file exists (e.g. an apply that ran before this file existed).
  * Supersedes recordsStatus() for the tool handler; recordsStatus() is kept for existing callers.
  *
- * @param {{ sourceBaseId: string, destBaseId: string, planId: string }} opts
+ * By default the returned planDigest is projected to `{ human, machineOmitted: true }` — the full
+ * `machine` payload (which can be tens of thousands of lines on a view-heavy base) is omitted from
+ * the RESPONSE only; it remains persisted verbatim on disk (plan-<planId>.json). Pass verbose:true
+ * to get the full planDigest (including machine) back in the response.
+ *
+ * @param {{ sourceBaseId: string, destBaseId: string, planId: string, verbose?: boolean }} opts
  * @returns {{ planId:string, phase:string, status:'running'|'done'|'failed'|'unknown', recordsMapped:number, planDigest?:object, schemaResult?:object, recordsResult?:object, startedAt?:string, finishedAt?:string, error?:string, message?:string }}
  */
-export function syncStatus({ sourceBaseId, destBaseId, planId }) {
+export function syncStatus({ sourceBaseId, destBaseId, planId, verbose = false }) {
   const idmap = loadIdmap(sourceBaseId, destBaseId);
   const recordsMapped = Object.keys((idmap && idmap.records) || {}).length;
 
@@ -388,13 +424,41 @@ export function syncStatus({ sourceBaseId, destBaseId, planId }) {
     phase: job.phase,
     status,
     recordsMapped,
-    ...(job.planDigest !== undefined ? { planDigest: job.planDigest } : {}),
+    ...(job.planDigest !== undefined ? { planDigest: projectPlanDigestForResponse(job.planDigest, verbose) } : {}),
     ...(job.schemaResult !== undefined ? { schemaResult: job.schemaResult } : {}),
     ...(job.recordsResult !== undefined ? { recordsResult: job.recordsResult } : {}),
     ...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),
     ...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
     ...(job.error !== undefined ? { error: job.error } : {}),
   };
+}
+
+/**
+ * Decide the terminal status of a finished records run (pure — no I/O, unit-testable).
+ *
+ * A records run that hit a mid-run session death resolves normally with `r.aborted === true`
+ * (records.js sets it via markAborted). That must become a records-job phase=failed — NOT a
+ * `done` that hides thousands of swallowed SESSION_INVALID failures — while still carrying the
+ * partial counts so the user sees what landed before the abort. A non-aborted run stays `done`.
+ *
+ * @param {object} r - records result accumulator ({ aborted?, abortReason?, created, updated, failed, ... })
+ * @returns {{ status:'done'|'failed', event:'records-done'|'records-failed', error?:string, recordsResult:object }}
+ */
+export function recordsTerminalStatus(r) {
+  const recordsResult = {
+    created: r.created, updated: r.updated, failed: r.failed,
+    matched: r.matched || 0,
+    attachmentsUploaded: r.attachmentsUploaded || 0, viewFiltersReapplied: r.viewFiltersReapplied || 0,
+    deleted: r.deleted || 0,
+    warningCount: (r.warnings || []).length,
+    warnings: r.warnings || [],
+  };
+  if (r.aborted) {
+    const error = r.abortReason
+      || 'SESSION_INVALID: record sync aborted — the auth session died mid-run. Re-authenticate, then re-run mode=apply with the same planId to resume (progress is persisted).';
+    return { status: 'failed', event: 'records-failed', error, recordsResult };
+  }
+  return { status: 'done', event: 'records-done', recordsResult };
 }
 
 /**

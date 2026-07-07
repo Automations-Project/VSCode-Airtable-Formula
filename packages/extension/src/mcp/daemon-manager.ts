@@ -1,12 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, rmSync, appendFileSync, openSync } from 'fs';
 import { spawn, execFileSync } from 'child_process';
 
 export interface DaemonStatus {
   running: boolean;
   healthy: boolean;
+  /** The lockfile exists but its recorded pid is NOT alive — the daemon crashed/was killed without
+   *  releasing it. `running` stays true (so stopDaemon can still reclaim the lock), but consumers that
+   *  need a LIVE daemon (ensureDaemon) treat `stale` like not-running and spawn a replacement. */
+  stale: boolean;
   pid: number | null;
   port: number | null;
   port_lsp: number | null;
@@ -28,7 +32,7 @@ export interface DaemonConnectionInfo {
 }
 
 const EMPTY_STATUS: DaemonStatus = {
-  running: false, healthy: false, pid: null, port: null,
+  running: false, healthy: false, stale: false, pid: null, port: null,
   port_lsp: null, bearerToken: null, tunnelUrl: null, uptime: null, uuid: null,
 };
 
@@ -53,11 +57,29 @@ export class DaemonManager implements vscode.Disposable {
   private _userStopped = false;
   /** Graceful-shutdown wait before kill escalation (overridable in tests). */
   private _stopWaitMs = 10_000;
+  /**
+   * Timestamp (ms) of the last spawn attempt. Suppresses further spawns for a startup window so
+   * overlapping ensureDaemon() callers — or a lockfile-watch storm — cannot each launch a daemon.
+   * Without it, N callers each held a local `spawned` flag and each ran `_spawnDetached()`; a
+   * lockfile-watch → credential-push → ensureDaemon chain re-fired on every daemon.lock write and
+   * each firing spawned another process (a runaway start/restart loop that OOM'd the machine).
+   * A timestamp beats a single-flight promise here: check-and-set is synchronous (no await between),
+   * so it holds regardless of how a fast-resolving spawn and a slow status read interleave.
+   */
+  private _lastSpawnAt = 0;
+  /** Window during which a fresh spawn is suppressed after one is attempted (~ the startup budget). */
+  private static readonly SPAWN_SUPPRESS_MS = 15_000;
 
   constructor(
     private readonly configDir: string,
     private readonly extensionPath: string,
   ) {}
+
+  /** TEMP DIAGNOSTIC — append a timestamped line to ~/.airtable-user-mcp/daemon-diag.log so the LIVE
+   *  extension host's daemon-startup path is observable (the failure is otherwise invisible). Best-effort. */
+  private _diag(msg: string): void {
+    try { appendFileSync(path.join(this.configDir, 'daemon-diag.log'), `${new Date().toISOString()} ${msg}\n`); } catch { /* ignore */ }
+  }
 
   private async _httpHealthCheck(port: number, bearerToken: string): Promise<boolean> {
     const controller = new AbortController();
@@ -67,8 +89,10 @@ export class DaemonManager implements vscode.Disposable {
         headers: { Authorization: `Bearer ${bearerToken}` },
         signal: controller.signal,
       });
+      this._diag(`_httpHealthCheck port=${port} → status=${response.status} ok=${response.ok}`);
       return response.ok;
-    } catch {
+    } catch (e) {
+      this._diag(`_httpHealthCheck port=${port} → THREW ${(e as Error)?.name}: ${(e as Error)?.message}`);
       return false;
     } finally {
       clearTimeout(timeout);
@@ -80,16 +104,31 @@ export class DaemonManager implements vscode.Disposable {
       const lockPath = path.join(this.configDir, 'daemon.lock');
       const raw = await fs.readFile(lockPath, 'utf8');
       const record = JSON.parse(raw) as Record<string, unknown>;
+      const pid = typeof record.pid === 'number' ? record.pid : null;
+      // STALE-LOCK DETECTION — the fix for "Timed out waiting for daemon startup" after a crash.
+      // A lockfile whose recorded daemon pid is no longer alive is STALE (the daemon died/was killed
+      // without releasing it — e.g. the OOM crash, or an orphaned daemon). `running` stays true so
+      // stopDaemon can still reclaim the lock, but `stale:true` tells ensureDaemon to spawn a
+      // replacement (the new daemon's launcher reclaims the stale lock via lockfile.acquire →
+      // tryReclaimStale). WITHOUT this, a stale lock wedges ensureDaemon: running:true + healthy:false
+      // means it can neither return (not healthy) nor spawn (the branch requires !running || stale) →
+      // it polls to the deadline and throws. (EPERM in _isPidAlive counts as alive — a permission
+      // probe is never a dead process.) Skip the 2s health fetch on a dead pid.
+      const stale = pid != null && pid > 0 && !this._isPidAlive(pid);
+      if (stale) {
+        console.warn(`[DaemonManager] stale daemon.lock (pid ${pid} not alive) — a fresh daemon will reclaim it.`);
+      }
       const port = typeof record.port === 'number' && Number.isInteger(record.port)
         && record.port >= 1 && record.port <= 65535 ? record.port : null;
       const bearerToken = typeof record.bearerToken === 'string' ? record.bearerToken : null;
-      const healthy = port != null && bearerToken != null
+      const healthy = !stale && port != null && bearerToken != null
         ? await this._httpHealthCheck(port, bearerToken)
         : false;
       const status: DaemonStatus = {
         running: true,
         healthy,
-        pid: typeof record.pid === 'number' ? record.pid : null,
+        stale,
+        pid,
         port,
         port_lsp: typeof record.port_lsp === 'number' ? record.port_lsp : null,
         bearerToken,
@@ -97,9 +136,11 @@ export class DaemonManager implements vscode.Disposable {
         uptime: typeof record.startedAt === 'string' ? Date.now() - Date.parse(record.startedAt) : null,
         uuid: typeof record.uuid === 'string' && record.uuid.length > 0 ? record.uuid : null,
       };
+      this._diag(`getDaemonStatus: lock@${lockPath} running=true healthy=${healthy} stale=${stale} pid=${pid} port=${port}`);
       this._status = status;
       return status;
-    } catch {
+    } catch (e) {
+      this._diag(`getDaemonStatus: NO lock (or read/parse failed) @${path.join(this.configDir, 'daemon.lock')} — ${(e as Error)?.code ?? (e as Error)?.message ?? 'ENOENT'}`);
       this._status = { ...EMPTY_STATUS };
       return { ...EMPTY_STATUS };
     }
@@ -117,22 +158,45 @@ export class DaemonManager implements vscode.Disposable {
     // change takes effect on the next (re)start without reloading the window.
     const daemonPort = vscode.workspace.getConfiguration('airtableFormula').get<number>('mcp.daemonPort', 0);
     if (Number.isInteger(daemonPort) && daemonPort > 0 && daemonPort <= 65535) args.push('--port', String(daemonPort));
+    const denv = this.buildDaemonEnv();
+    this._diag(`_spawnDetached: execPath=${process.execPath} serverPath=${serverPath} exists=${existsSync(serverPath)} port=${daemonPort} ELECTRON_RUN_AS_NODE(inherited)=${process.env.ELECTRON_RUN_AS_NODE} env.AIRTABLE_USER_MCP_HOME=${denv.AIRTABLE_USER_MCP_HOME} env.NODE_PATH=${denv.NODE_PATH}`);
+    // TEMP DIAGNOSTIC: capture the daemon's stdout/stderr to a file instead of discarding it, so a
+    // crash-on-start is visible. (Production uses stdio:'ignore'.)
+    let stdio: 'ignore' | ['ignore', number, number] = 'ignore';
+    try {
+      const fd = openSync(path.join(this.configDir, 'daemon-spawn.log'), 'a');
+      stdio = ['ignore', fd, fd];
+    } catch { /* fall back to ignore */ }
     const child = spawn(process.execPath, args, {
       detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, ...this.buildDaemonEnv() },
+      stdio,
+      env: { ...process.env, ...denv },
     });
+    child.on('error', (e) => this._diag(`_spawnDetached: child 'error' event → ${e.message}`));
+    child.on('exit', (code, sig) => this._diag(`_spawnDetached: child 'exit' code=${code} sig=${sig}`));
+    this._diag(`_spawnDetached: spawned child pid=${child.pid}`);
     child.unref();
   }
 
   async ensureDaemon(options?: { timeoutMs?: number; implicit?: boolean }): Promise<DaemonConnectionInfo> {
     if (this._disposed) throw new Error('DaemonManager disposed');
-    if (!options?.implicit) this._userStopped = false;
+    // An EXPLICIT call is a deliberate user action (Start / Restart / authMode change) — it must not
+    // be throttled by the anti-runaway spawn window. Clear the latch AND the suppression timestamp so
+    // it can spawn immediately even within SPAWN_SUPPRESS_MS of a prior spawn (a crash-then-Start, or a
+    // restart that just stopped the daemon). Implicit callers (definition provider, credential handoff,
+    // the lockfile-watch chain) keep the window — that is what breaks the runaway loop. The reset is
+    // synchronous and before any await, so three concurrent EXPLICIT calls still collapse to one spawn:
+    // each resets to 0, then the first to reach the check writes the timestamp and the others suppress.
+    if (!options?.implicit) { this._userStopped = false; this._lastSpawnAt = 0; }
     const deadline = Date.now() + (options?.timeoutMs ?? 15_000);
-    let spawned = false;
+    this._diag(`ensureDaemon: ENTER implicit=${!!options?.implicit} timeoutMs=${options?.timeoutMs ?? 15_000} configDir=${this.configDir} extensionPath=${this.extensionPath} userStopped=${this._userStopped}`);
+    let spawnedThisCall = false;
+    let polls = 0;
     while (Date.now() < deadline) {
       const status = await this.getDaemonStatus();
+      polls++;
       if (status.running && status.healthy && status.port != null && status.bearerToken != null) {
+        this._diag(`ensureDaemon: SUCCESS after ${polls} polls, port=${status.port}`);
         return {
           pid: status.pid ?? 0,
           uuid: '',
@@ -143,15 +207,35 @@ export class DaemonManager implements vscode.Disposable {
           startedAt: '',
         };
       }
-      if (!status.running && !spawned) {
+      // Spawn at most once PER CALL (spawnedThisCall) AND at most once per startup window ACROSS all
+      // calls (_lastSpawnAt) — so many overlapping ensureDaemon() callers converge on a single daemon
+      // instead of each spawning one. Spawn when there is no live daemon: either no lockfile
+      // (!running) OR a STALE lockfile whose daemon pid is dead (status.stale) — the spawned daemon
+      // reclaims the stale lock. Without the `|| status.stale`, a crash-orphaned lockfile wedges here.
+      if ((!status.running || status.stale) && !spawnedThisCall) {
         if (options?.implicit && this._userStopped) {
+          this._diag(`ensureDaemon: refusing implicit respawn (userStopped)`);
           throw new Error('Daemon was explicitly stopped by the user; not respawning implicitly.');
         }
-        await this._spawnDetached();
-        spawned = true;
+        // check-and-set is synchronous (no await between the read and the write), so two callers
+        // can't both pass the window check — the second sees the timestamp the first just wrote.
+        const sinceSpawn = Date.now() - this._lastSpawnAt;
+        this._diag(`ensureDaemon: spawn decision — running=${status.running} stale=${status.stale} sinceLastSpawn=${sinceSpawn}ms willSpawn=${sinceSpawn > DaemonManager.SPAWN_SUPPRESS_MS}`);
+        if (Date.now() - this._lastSpawnAt > DaemonManager.SPAWN_SUPPRESS_MS) {
+          this._lastSpawnAt = Date.now();
+          // Log the spawn failure (e.g. missing server script) so the eventual "Timed out waiting for
+          // daemon startup" has a diagnosable cause; the poll below still re-evaluates.
+          await this._spawnDetached().catch((e) => {
+            console.warn('[DaemonManager] _spawnDetached failed:', e instanceof Error ? e.message : 'unknown error');
+          });
+        }
+        // Whether we spawned or deferred to another caller's in-flight spawn, stop trying to spawn
+        // from this call; just poll the deadline for the daemon to come up.
+        spawnedThisCall = true;
       }
       await this._delay(200);
     }
+    this._diag(`ensureDaemon: TIMED OUT after ${polls} polls (last status running=${this._status.running} healthy=${this._status.healthy} stale=${this._status.stale} port=${this._status.port})`);
     throw new Error('Timed out waiting for daemon startup.');
   }
 
@@ -376,7 +460,59 @@ export class DaemonManager implements vscode.Disposable {
     return new Promise<void>(resolve => setTimeout(resolve, ms));
   }
 
-  buildDaemonEnv(credEnv?: Record<string, string>): Record<string, string> {
+  /**
+   * Push byo/direct-login credentials to the RUNNING daemon over its
+   * bearer-authenticated endpoint (C4). The daemon stores them IN MEMORY only
+   * and re-inits auth on its next call — creds never reach the daemon via env
+   * or disk (buildDaemonEnv stays creds-free by design).
+   *
+   * Reads {port, bearerToken} from the daemon lockfile (via getDaemonStatus,
+   * the manager's single lockfile reader). Best-effort: returns false on any
+   * failure (daemon not running, unreachable, non-2xx). The payload and its
+   * fields are NEVER logged.
+   */
+  async pushAuthCredentials(payload: {
+    authMode: 'byo' | 'direct-login';
+    cookie?: string;
+    csrf?: string;
+    email?: string;
+    password?: string;
+    totpSecret?: string;
+  }): Promise<boolean> {
+    if (this._disposed) return false;
+    try {
+      const status = await this.getDaemonStatus();
+      if (!status.running || status.port == null || !status.bearerToken) return false;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
+      try {
+        const resp = await fetch(`http://127.0.0.1:${status.port}/daemon/auth-credentials`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${status.bearerToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        if (!resp.ok) {
+          console.warn(`[DaemonManager] pushAuthCredentials: daemon returned HTTP ${resp.status}`);
+          return false;
+        }
+        const body = await resp.json().catch(() => null) as { ok?: boolean } | null;
+        return body?.ok === true;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (err) {
+      // Concise, secret-free warning only — NEVER log the payload.
+      console.warn(`[DaemonManager] pushAuthCredentials failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      return false;
+    }
+  }
+
+  buildDaemonEnv(): Record<string, string> {
     const env: Record<string, string> = {
       AIRTABLE_USER_MCP_HOME: this.configDir,
       AIRTABLE_HEADLESS_ONLY: '1',
@@ -394,7 +530,9 @@ export class DaemonManager implements vscode.Disposable {
     const authMode = cfg.get<string>('mcp.authMode', 'browser');
     if (authMode && authMode !== 'browser') env.AIRTABLE_AUTH_MODE = authMode;
     if (cfg.get<string>('mcp.httpClient', 'fetch') === 'impit') env.AIRTABLE_HTTP_CLIENT = 'impit';
-    if (credEnv) Object.assign(env, credEnv);
+    // NOTE: credentials are DELIBERATELY never injected into the daemon env —
+    // they reach a running daemon only via the bearer-authed
+    // /daemon/auth-credentials endpoint (see pushAuthCredentials).
     return env;
   }
 

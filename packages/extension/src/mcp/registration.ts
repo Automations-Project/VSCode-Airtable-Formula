@@ -106,10 +106,21 @@ export function registerMcpProvider(
             env.AIRTABLE_HTTP_CLIENT = 'impit';
           }
 
-          // Pass stored credentials so MCP server can auto-recover sessions
+          // Pass stored credentials so MCP server can auto-recover sessions.
+          // Env is acceptable here — VS Code owns the stdio spawn (the daemon
+          // path never gets creds in env; it uses /daemon/auth-credentials).
           if (authManager) {
-            // Only forward credentials when loginMode is 'auto'
-            if (settings.auth.loginMode === 'auto') {
+            const authMode = settings.mcp.authMode;
+            const isCredMode = authMode === 'byo' || authMode === 'direct-login';
+            if (isCredMode && !settings.mcp.useDaemon) {
+              // Pure stdio mode (no daemon): byo/direct-login REQUIRE credentials
+              // (no browser), and env is the only channel VS Code gives a stdio
+              // spawn. In daemon mode the daemon endpoint (/daemon/auth-credentials)
+              // is the SINGLE credential channel — never duplicate secrets into env.
+              const credEnv = await authManager.getCredentialsEnv(authMode);
+              if (credEnv) Object.assign(env, credEnv);
+            } else if (!isCredMode && settings.auth.loginMode === 'auto') {
+              // Browser mode: only forward creds for the automated login flow.
               const credEnv = await authManager.getCredentialsEnv();
               if (credEnv) Object.assign(env, credEnv);
             }

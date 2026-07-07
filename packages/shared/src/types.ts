@@ -65,6 +65,8 @@ export interface AuthState {
   lastLogin?:         string;
   error?:             string;
   hasCredentials:     boolean;
+  /** True when a byo session cookie is stored in the OS keychain (authMode='byo'). */
+  hasCookie?:         boolean;
   browser?:           BrowserInfo;
   browserDownload?:   BrowserDownloadState;
   availableBrowsers?: BrowserInfo[];

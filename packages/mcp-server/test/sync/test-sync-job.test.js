@@ -132,6 +132,41 @@ describe('syncStatus()', () => {
     assert.equal(s.phase, 'records');
     assert.equal(s.recordsMapped, 1);
   });
+
+  it('projects planDigest to human-only by default, omitting the machine payload', () => {
+    writeSyncJobStatus(SRC, DEST, 'digest1', {
+      phase: 'done',
+      planDigest: { human: 'looks good', machine: { verdict: 'converged', changeset: [{ big: 'payload' }] } },
+      finishedAt: 't1',
+    });
+    const s = syncStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'digest1' });
+    assert.equal(s.planDigest.human, 'looks good', 'human summary preserved');
+    assert.equal(s.planDigest.machine, undefined, 'machine payload omitted by default');
+    assert.equal(s.planDigest.machineOmitted, true);
+  });
+
+  it('returns the full planDigest.machine when verbose:true is passed', () => {
+    writeSyncJobStatus(SRC, DEST, 'digest2', {
+      phase: 'done',
+      planDigest: { human: 'looks good', machine: { verdict: 'converged', changeset: [{ big: 'payload' }] } },
+      finishedAt: 't1',
+    });
+    const s = syncStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'digest2', verbose: true });
+    assert.equal(s.planDigest.human, 'looks good');
+    assert.ok(s.planDigest.machine, 'machine payload present when verbose');
+    assert.equal(s.planDigest.machine.verdict, 'converged');
+    assert.equal(s.planDigest.machineOmitted, undefined, 'machineOmitted flag not set when verbose returns the full digest');
+  });
+
+  it('does not throw and omits planDigest when the job has none yet (early phase)', () => {
+    writeSyncJobStatus(SRC, DEST, 'nodigest', { phase: 'schema', startedAt: 't0' });
+    const s = syncStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'nodigest' });
+    assert.equal(s.phase, 'schema');
+    assert.equal('planDigest' in s, false, 'planDigest key omitted entirely, as before');
+
+    const sVerbose = syncStatus({ sourceBaseId: SRC, destBaseId: DEST, planId: 'nodigest', verbose: true });
+    assert.equal('planDigest' in sVerbose, false, 'verbose does not conjure a planDigest that was never written');
+  });
 });
 
 describe('planJob()', () => {

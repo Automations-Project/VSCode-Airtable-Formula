@@ -114,6 +114,12 @@ export class AirtableAuth {
     // Past the threshold, mark the session dead and fail fast with a re-login message.
     this._recoveryStreak = 0;
     this._sessionDead = false;
+    // Trip instrumentation: when the circuit-breaker latches (_sessionDead), record
+    // the triggering HTTP status + a short reason so callers (e.g. the records job)
+    // can tell a throttle trip (403/429/503) from genuine auth loss (401) or a
+    // network/page-eval failure afterward. Null while the session is alive.
+    this._lastTripStatus = null;
+    this._lastTripReason = null;
     this._sessionDeadAfter = Number(process.env.AIRTABLE_SESSION_DEAD_AFTER) || 8;
     this._rlSleep = (ms) => new Promise((r) => setTimeout(r, ms)); // injectable for tests
   }
@@ -122,6 +128,22 @@ export class AirtableAuth {
   resetSessionHealth() {
     this._sessionDead = false;
     this._recoveryStreak = 0;
+    this._lastTripStatus = null;
+    this._lastTripReason = null;
+  }
+
+  /** True once the circuit-breaker has latched (every subsequent _apiCall short-circuits). */
+  isSessionDead() {
+    return this._sessionDead;
+  }
+
+  /**
+   * The status/reason that latched the dead-session breaker, or null while alive.
+   * Lets callers distinguish a throttle trip (403/429/503) from genuine auth loss
+   * (401) or a network/page-eval failure after the fact.
+   */
+  getLastTrip() {
+    return this._sessionDead ? { status: this._lastTripStatus, reason: this._lastTripReason } : null;
   }
 
   // ─── Initialization ──────────────────────────────────────────
@@ -479,7 +501,12 @@ export class AirtableAuth {
       console.error('[auth] Session verified!', this.userId ? `User: ${this.userId}` : '(userId not in payload)');
     } else {
       this.isLoggedIn = false;
-      const sessionError = `Session invalid (${result.status}). Run "node src/login.js" to log in first.\nResponse: ${result.body?.substring(0, 200)}`;
+      const hint = this._authMode === 'byo'
+        ? 'the provided cookie was rejected — save a fresh Airtable session cookie (byo recovers only from a re-pasted cookie)'
+        : this._authMode === 'direct-login'
+          ? 'direct-login credentials were rejected — check AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_TOTP_SECRET (direct-login re-authenticates itself on the next call)'
+          : 'the Airtable login has expired — re-authenticate (open the extension dashboard and log in), or use AIRTABLE_AUTH_MODE=direct-login so long unattended jobs re-authenticate themselves';
+      const sessionError = `Session invalid (${result.status}): ${hint}.\nResponse: ${result.body?.substring(0, 200)}`;
       trace('auth', 'auth:session_check', { success: false }, sessionError);
       throw new Error(sessionError);
     }
@@ -685,9 +712,16 @@ export class AirtableAuth {
 
       const MAX_RETRIES = 3;
       const HARD_TIMEOUT_MS = 30_000;
+      // Browser-free modes (direct-login / byo): an expired session or a rotated
+      // CSRF token surfaces on mutations as 403, not 401. There _recoverSession is
+      // a single HTTP _directLogin / cookie reload — NO page-load burst — so
+      // escalating a PERSISTENT 403 to re-auth is safe (unlike browser mode, where
+      // a relaunch fires a burst that re-trips the ~5 req/s limit → 403 storm).
+      const browserFree = this._authMode === 'direct-login' || this._authMode === 'byo';
       let deadline = Date.now() + HARD_TIMEOUT_MS; // extended by intentional rate-limit backoff waits
       let attempt = 0;    // browser-recovery (relaunch) attempts
       let rlAttempt = 0;  // rate-limit/throttle backoff attempts (same session, no relaunch)
+      let http403Backoffs = 0; // 403s already given a throttle backoff this call (browser-free escalation gate)
       while (true) {
         if (Date.now() > deadline) {
           // Bail out rather than retry past the caller's patience budget.
@@ -702,6 +736,8 @@ export class AirtableAuth {
           if (!this._recovering && attempt < MAX_RETRIES) {
             if (++this._recoveryStreak >= this._sessionDeadAfter) {
               this._sessionDead = true;
+              this._lastTripStatus = 0; // no HTTP status — request never completed
+              this._lastTripReason = 'network/page-eval';
               throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive failures across recoveries (page.evaluate) — re-authenticate (run \`login\`) and retry.`);
             }
             console.error(`[auth] page.evaluate failed: ${evalError.message}. Recovering... (streak ${this._recoveryStreak})`);
@@ -720,8 +756,31 @@ export class AirtableAuth {
         // the ~30s official penalty; intentional waits don't count against the work budget; the
         // dead-session circuit-breaker still bounds a throttle that never clears.
         if (result.status === 429 || result.status === 503 || result.status === 403) {
+          // Browser-free 403 escalation: 429/503 (and the FIRST 403, and ALL 403s
+          // in browser mode) stay pure throttle. But a 403 that PERSISTS past its
+          // one allowed throttle backoff in direct-login/byo mode is a dead/rotated
+          // session, not throttle — escalate to re-auth like the 401 path below,
+          // bounded by the same attempt cap + single-flight guard. It still counts
+          // toward _recoveryStreak so an unrecoverable 403 (IP/account block whose
+          // _directLogin also 403s) latches _sessionDead instead of looping forever.
+          const persist403 = result.status === 403 && browserFree && http403Backoffs >= 1;
+          if (persist403 && !this._recovering && attempt < MAX_RETRIES) {
+            if (++this._recoveryStreak >= this._sessionDeadAfter) {
+              this._sessionDead = true;
+              this._lastTripStatus = result.status;
+              this._lastTripReason = 'auth-403-persist';
+              throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive 403s that did not clear after re-authentication — the login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
+            }
+            console.error(`[auth] 403 persisted after backoff (${this._authMode}) — re-authenticating on the same session (streak ${this._recoveryStreak})...`);
+            await this._recoverSession();
+            attempt++;
+            continue;
+          }
+
           if (++this._recoveryStreak >= this._sessionDeadAfter) {
             this._sessionDead = true;
+            this._lastTripStatus = result.status;
+            this._lastTripReason = 'throttle';
             throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.`);
           }
           const delay = Math.min(30_000, 1000 * (2 ** rlAttempt)) + Math.floor(Math.random() * 500);
@@ -729,6 +788,7 @@ export class AirtableAuth {
           await this._rlSleep(delay);
           deadline += delay; // an intentional backoff wait is not a stall — don't let it trip the budget
           rlAttempt++;
+          if (result.status === 403) http403Backoffs++; // this 403 has now had its one throttle backoff
           continue;
         }
 
@@ -737,6 +797,8 @@ export class AirtableAuth {
         if (needsRecovery && !this._recovering && attempt < MAX_RETRIES) {
           if (++this._recoveryStreak >= this._sessionDeadAfter) {
             this._sessionDead = true;
+            this._lastTripStatus = result.status;
+            this._lastTripReason = result.error ? 'network' : 'auth-401';
             throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive auth failures (status=${result.status}) across recoveries — the Airtable login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
           }
           console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering... (streak ${this._recoveryStreak})`);
@@ -814,6 +876,35 @@ export class AirtableAuth {
       return { valid: false, status: res.status };
     } catch (err) {
       return { valid: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Records-facing health gate. Probe the session via checkSessionHealth(); if
+   * it's already valid, do nothing. In a browser-free mode (direct-login / byo)
+   * a rejected probe is re-authenticated in place (_recoverSession is a single
+   * HTTP login/cookie reload) and re-probed once. In browser mode we leave
+   * recovery to the existing _apiCall wrapper and just report unhealthy.
+   *
+   * Never throws — degrades to { healthy:false } on any error so a long records
+   * job can decide whether to continue or abort without a try/catch at the call
+   * site.
+   *
+   * @returns {Promise<{healthy: boolean, recovered: boolean, error?: string}>}
+   */
+  async ensureSessionHealthy() {
+    try {
+      const probe = await this.checkSessionHealth();
+      if (probe && probe.valid) return { healthy: true, recovered: false };
+
+      const browserFree = this._authMode === 'direct-login' || this._authMode === 'byo';
+      if (!browserFree) return { healthy: false, recovered: false };
+
+      await this._recoverSession();
+      const reprobe = await this.checkSessionHealth();
+      return { healthy: !!(reprobe && reprobe.valid), recovered: true };
+    } catch (err) {
+      return { healthy: false, recovered: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

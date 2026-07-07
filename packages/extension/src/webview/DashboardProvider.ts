@@ -45,11 +45,20 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private _daemonManager?: DaemonManager;
   private _daemonStarting = false;
   private _lockfileWatcher?: import('fs').FSWatcher;
+  /** Coalesces the burst of fs.watch events a single lockfile write emits into one reaction, so
+   *  the cred-push / mcp-sync chain runs once per real change instead of N times per write. */
+  private _lockfileDebounce?: ReturnType<typeof setTimeout>;
   private _mcpChanged?: vscode.EventEmitter<void>;
+  /** Daemon HTTP port VS Code was last provisioned with. Lets us detect an EXTERNAL daemon
+   *  restart (CLI/OS) onto a new ephemeral port and re-provision the MCP definition only then. */
+  private _lastMcpPort: number | null | undefined = undefined;
 
   setDaemonManager(mgr: DaemonManager): void {
     this._daemonManager = mgr;
     void this._initLockfileWatch();
+    // A daemon already running at activation (byo/direct-login) needs its creds delivered
+    // without waiting for the dashboard to open. setAuthManager runs first, so authManager is set.
+    void this._pushDaemonCredsIfNeeded();
   }
 
   /** The MCP-definitions change emitter — firing it makes VS Code re-provision the MCP servers,
@@ -64,11 +73,148 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const configDir = path.join(os.homedir(), '.airtable-user-mcp');
     try {
       this._lockfileWatcher?.close();
+      clearTimeout(this._lockfileDebounce);
       this._lockfileWatcher = fsMod.watch(configDir, { persistent: false }, (_, filename) => {
-        if (filename === 'daemon.lock') void this.pushState();
+        if (filename === 'daemon.lock') {
+          // Debounce: one lockfile write fires several fs.watch events, and a restart writes it more
+          // than once. Coalesce into a single reaction ~250ms after the burst settles so we don't
+          // stampede the cred-push / mcp-sync chain (which each read daemon status) per raw event.
+          clearTimeout(this._lockfileDebounce);
+          this._lockfileDebounce = setTimeout(() => {
+            void this.pushState();
+            // Catch an EXTERNAL daemon restart onto a new port. Our own start/restart/stop handlers
+            // already fire _mcpChanged, so skip while we are the one (re)starting. An external restart
+            // also loses the daemon's in-memory creds — re-deliver them FIRST (push-then-sync), so the
+            // daemon has creds before VS Code reconnects on the (possibly new) port.
+            if (!this._daemonStarting) {
+              void (async () => { await this._pushDaemonCredsIfNeeded(); await this._syncMcpDefinition(); })();
+            }
+          }, 250);
+        }
       });
       this._lockfileWatcher.on('error', () => { /* transient FS errors — ignore */ });
     } catch { /* configDir doesn't exist yet — re-initialized after first daemon start */ }
+    // Seed the last-known port WITHOUT firing, so _syncMcpDefinition only fires on a real change.
+    try {
+      const s = await this._daemonManager?.getDaemonStatus();
+      this._lastMcpPort = s?.running ? (s.port ?? null) : null;
+    } catch { /* best-effort */ }
+  }
+
+  /**
+   * Re-provision the MCP server definition (registration.ts reads the live lockfile port) IFF the
+   * daemon's HTTP port changed since VS Code last provisioned it — so an external daemon restart
+   * onto a new ephemeral port is picked up instead of leaving VS Code on a stale URI. Records the
+   * current port; best-effort (never throws).
+   */
+  private async _syncMcpDefinition(): Promise<void> {
+    try {
+      const s = await this._daemonManager?.getDaemonStatus();
+      const port = s?.running ? (s.port ?? null) : null;
+      if (port !== this._lastMcpPort) {
+        this._lastMcpPort = port;
+        this._mcpChanged?.fire();
+      }
+    } catch { /* best-effort */ }
+  }
+
+  /** Fire _mcpChanged for a KNOWN daemon lifecycle change (our start/restart/stop, authMode change),
+   *  recording the current port so the detect-mode _syncMcpDefinition() does not then re-fire. */
+  private async _fireMcpChanged(): Promise<void> {
+    try { const s = await this._daemonManager?.getDaemonStatus(); this._lastMcpPort = s?.running ? (s.port ?? null) : null; }
+    catch { /* best-effort — still fire below */ }
+    this._mcpChanged?.fire();
+  }
+
+  /**
+   * When running the daemon transport with a credential-based auth mode
+   * (byo / direct-login), push the stored credentials to the running daemon
+   * over its bearer-authenticated /daemon/auth-credentials endpoint. The daemon
+   * deliberately gets no creds in its env or on disk — this endpoint is the ONLY
+   * channel. Fully best-effort: every await is guarded and nothing throws to the
+   * webview. No secret value is ever logged.
+   */
+  private async _pushDaemonCredsIfNeeded(): Promise<boolean> {
+    try {
+      const settings = getSettings();
+      const authMode = settings.mcp.authMode;
+      // Nothing to push in these cases — treat as success (true).
+      if (!settings.mcp.useDaemon) return true;
+      if (authMode !== 'byo' && authMode !== 'direct-login') return true;
+
+      const dm = this._daemonManager;
+      const am = this.authManager;
+      if (!dm || !am) return true;
+
+      // Only push to a daemon that is actually up AND healthy. Pushing to a still-starting daemon
+      // is pointless, and — critically — must never itself cause a spawn: this runs from the
+      // lockfile watcher, so a spawn here would rewrite the lockfile and re-fire the watcher.
+      const status = await dm.getDaemonStatus();
+      if (!status.running || !status.healthy) return true;
+
+      if (authMode === 'byo') {
+        const cookie = await am.getCookie();
+        if (!cookie) return true;
+        // CSRF is auto-scraped server-side from the cookie's session — not stored/sent here.
+        // false ONLY when a real push failed.
+        return await dm.pushAuthCredentials({ authMode, cookie });
+      } else {
+        // { ensureDaemon: false }: we already confirmed the daemon is healthy above; never let the
+        // credential read spawn one (that is the runaway-loop trigger).
+        const creds = await am.getCredentials({ ensureDaemon: false });
+        if (!creds) return true;
+        return await dm.pushAuthCredentials({
+          authMode,
+          email: creds.email,
+          password: creds.password,
+          ...(creds.otpSecret ? { totpSecret: creds.otpSecret } : {}),
+        });
+      }
+    } catch (err) {
+      // An unexpected throw means delivery could NOT be confirmed — report it as a failure so the
+      // explicit-action callers (saveCookie/saveCredentials/authMode change) can warn the user. The
+      // background callers (`void this._pushDaemonCredsIfNeeded()`) ignore the return, so this never
+      // adds noise there. Log the error (message only — the secret payload is never logged, here or
+      // in pushAuthCredentials) for diagnosis.
+      console.warn('[DashboardProvider] credential push threw:', err instanceof Error ? err.message : 'unknown error');
+      return false;
+    }
+  }
+
+  /**
+   * After the keychain credentials are cleared in a daemon + byo/direct-login
+   * setup, the running daemon still holds the injected credentials in memory.
+   * Restart it so it re-spawns creds-free — with the keychain now empty it has
+   * nothing to load, so the stale in-memory copy is dropped. Fully best-effort:
+   * every await is guarded and nothing throws to the webview.
+   */
+  private async _restartDaemonAfterCredClear(): Promise<void> {
+    try {
+      const settings = getSettings();
+      const authMode = settings.mcp.authMode;
+      if (!settings.mcp.useDaemon) return;
+      if (authMode !== 'byo' && authMode !== 'direct-login') return;
+      const dm = this._daemonManager;
+      if (!dm) return;
+      const status = await dm.getDaemonStatus();
+      if (!status?.running) return;
+      try {
+        await dm.restartDaemon();
+      } catch (restartErr) {
+        // The daemon still holds the (now-cleared) creds in memory. A restart would
+        // drop them but it failed — force-stop so the stale in-memory session dies.
+        console.warn('[DashboardProvider] daemon restart after credential clear failed:', restartErr instanceof Error ? restartErr.message : 'unknown error');
+        try {
+          await dm.forceStop();
+          vscode.window.showErrorMessage('Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.');
+        } catch (stopErr) {
+          console.warn('[DashboardProvider] daemon force-stop after failed restart also failed:', stopErr instanceof Error ? stopErr.message : 'unknown error');
+          vscode.window.showErrorMessage('Credentials cleared, but the daemon may still hold your session in memory — stop/restart it manually to fully clear it.');
+        }
+      }
+    } catch (err) {
+      console.warn('[DashboardProvider] daemon restart after credential clear failed:', err instanceof Error ? err.message : 'unknown error');
+    }
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -82,7 +228,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     // Re-sync when the sidebar is re-opened — daemon/tunnel/auth state may
     // have changed while the view was hidden and no watcher fired since.
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) void this.pushState();
+      if (webviewView.visible) {
+        void this.pushState();
+        // An externally-restarted daemon (CLI/OS) loses its in-memory creds and may be on a new
+        // port — re-deliver creds FIRST, then re-provision the MCP def if the port changed, so the
+        // daemon has creds before the definition is re-provisioned. Best-effort.
+        void (async () => { await this._pushDaemonCredsIfNeeded(); await this._syncMcpDefinition(); })();
+      }
     });
   }
 
@@ -92,6 +244,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     });
     if (msg.type === 'ready') {
       await this.pushState();
+      // An externally-restarted daemon (CLI/OS) loses its in-memory creds and may be on a new
+      // port — re-deliver creds FIRST, then re-provision the MCP def if the port changed, so the
+      // daemon has creds before the definition is re-provisioned. Best-effort.
+      void (async () => { await this._pushDaemonCredsIfNeeded(); await this._syncMcpDefinition(); })();
       return;
     }
     if (msg.type === 'action:refresh') {
@@ -155,10 +311,58 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'action:saveCredentials') {
       try {
         await this.authManager?.saveCredentials(msg.email, msg.password, msg.otpSecret || undefined);
+        // If in a daemon + byo/direct-login setup, deliver the fresh creds to the
+        // running daemon over its endpoint (never env/disk). Best-effort.
+        const pushed = await this._pushDaemonCredsIfNeeded();
         await this.pushState();
+        if (!pushed) {
+          vscode.window.showWarningMessage('Credentials saved to the keychain, but the running daemon could not be updated — restart the daemon to apply them.');
+        }
         this.postResult(msg.id, true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+
+    if (msg.type === 'auth:saveCookie') {
+      try {
+        // No auth manager wired → nowhere to store the cookie; skip the success message.
+        if (!this.authManager) return;
+        // CSRF is auto-scraped server-side from the cookie's authed session, so it's not collected here.
+        await this.authManager.saveCookie(msg.cookie);
+        const pushed = await this._pushDaemonCredsIfNeeded();
+        await this.pushState();
+        if (!pushed) {
+          // Cookie is safely in the keychain, but the running daemon didn't take it.
+          vscode.window.showWarningMessage('Cookie saved to the keychain, but the running daemon could not be updated — restart the daemon to apply it.');
+        } else {
+          // Confirm the save — never echo the cookie value.
+          vscode.window.showInformationMessage('Airtable session cookie saved to the keychain.');
+        }
+      } catch (err) {
+        // Never surface the cookie — log only a concise, secret-free message + a user-facing error
+        // (a silent failure would leave the "Not set" chip with no explanation).
+        const m = err instanceof Error ? err.message : 'unknown error';
+        console.warn('[DashboardProvider] saveCookie failed:', m);
+        vscode.window.showErrorMessage(`Failed to save the Airtable cookie to the keychain: ${m}`);
+      }
+      return;
+    }
+    if (msg.type === 'auth:clearCookie') {
+      if (!this.authManager) return;
+      try {
+        await this.authManager.clearCookie();
+        // Drop the daemon's in-memory copy of the (now-cleared) cookie.
+        await this._restartDaemonAfterCredClear();
+      } catch (err) {
+        // Never echo the cookie value — surface a concise, secret-free error.
+        const m = err instanceof Error ? err.message : 'unknown error';
+        console.warn('[DashboardProvider] clearCookie failed:', m);
+        vscode.window.showErrorMessage(`Failed to clear the saved cookie: ${m}`);
+      } finally {
+        // Always refresh the UI so the chip reflects the real keychain state.
+        await this.pushState();
       }
       return;
     }
@@ -181,6 +385,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         );
         if (confirm === 'Logout') {
           await this.authManager!.logout();
+          // Logout clears the keychain — drop the daemon's in-memory creds too.
+          await this._restartDaemonAfterCredClear();
           await this.pushState();
           this.postResult(msg.id, true);
         } else {
@@ -436,23 +642,40 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       if (msg.key === 'mcp.authMode' || msg.key === 'mcp.httpClient') {
         const dm = this._daemonManager;
         if (dm) {
-          void dm.getDaemonStatus().then(status => {
+          void dm.getDaemonStatus().then(async status => {
             if (status?.running) {
               // Daemon mode: restart so the new AIRTABLE_AUTH_MODE/HTTP_CLIENT env re-injects.
-              return dm.restartDaemon()
-                .then(() => this.pushState())
-                .catch(err => {
-                  vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
-                });
+              // Guard the lockfile watcher against our own restart so it does not double-fire
+              // (cleared in finally); _fireMcpChanged records the port so the watcher's detect
+              // path also finds no change.
+              this._daemonStarting = true;
+              try {
+                await dm.restartDaemon();
+                // Fresh daemon is creds-free in env by design — deliver byo/direct-login
+                // creds over the endpoint so the new auth mode has what it needs.
+                const pushed = await this._pushDaemonCredsIfNeeded();
+                if (!pushed) {
+                  void vscode.window.showWarningMessage('Auth mode changed and the daemon restarted, but its credentials could not be updated — restart the daemon to apply them.');
+                }
+                // The restart may have changed the port — re-query the definition provider
+                // so VS Code rebuilds the HTTP URI from the current daemon.lock.
+                await this._fireMcpChanged();
+                await this.pushState();
+              } catch (err) {
+                vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
+              } finally {
+                this._daemonStarting = false;
+              }
+              return;
             }
             // No-daemon (stdio) mode: no daemon to restart — re-provision the MCP servers so VS Code
             // respawns the stdio server with the fresh env.
-            this._mcpChanged?.fire();
-            return this.pushState();
+            await this._fireMcpChanged();
+            await this.pushState();
           });
         } else {
           // No daemon manager wired → still re-provision for a stdio server.
-          this._mcpChanged?.fire();
+          void this._fireMcpChanged();
         }
       }
       await this.pushState();
@@ -593,7 +816,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         // Previously both routed through restartDaemon(), so pressing Start killed a healthy
         // daemon and respawned it on a new port — the reported "forgets the running process" bug.
         (msg.type === 'daemon:restart' ? dm.restartDaemon() : dm.ensureDaemon())
-          .then(() => { this._daemonStarting = false; void this._initLockfileWatch(); return this.pushState(); })
+          // A freshly (re)started daemon is spawned creds-free by design; in byo/direct-login
+          // mode it needs the keychain creds delivered over its endpoint, or every tool call fails.
+          // A (re)start with an ephemeral daemonPort (default 0) yields a NEW port —
+          // fire mcpChanged so VS Code re-queries the definition provider and rebuilds
+          // the HTTP URI from the current daemon.lock, instead of keeping the stale one.
+          .then(async () => { this._daemonStarting = false; void this._initLockfileWatch(); await this._pushDaemonCredsIfNeeded(); await this._fireMcpChanged(); return this.pushState(); })
           .catch(err => {
             this._daemonStarting = false;
             vscode.window.showErrorMessage(`Daemon start failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -627,6 +855,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             // Stopped, but with a caveat (e.g. stale lock cleaned up) — inform, don't alarm.
             vscode.window.showInformationMessage(`Daemon stopped: ${result.reason}`);
           }
+          // Re-query the definition provider so VS Code drops the now-dead HTTP URI.
+          try { await this._fireMcpChanged(); } catch { /* best-effort */ }
           this.postResult(msg.id, true);
         }
       } catch (err) {
@@ -844,7 +1074,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     // reports stale hasCredentials. Querying directly avoids that race.
     const baseAuthState: AuthState = this.authManager?.state ?? { status: 'unknown', hasCredentials: false };
     const freshHasCredentials = this.authManager ? await this.authManager.hasCredentials() : false;
-    const authState: AuthState = { ...baseAuthState, hasCredentials: freshHasCredentials };
+    const freshHasCookie = this.authManager ? await this.authManager.hasCookie() : false;
+    const authState: AuthState = { ...baseAuthState, hasCredentials: freshHasCredentials, hasCookie: freshHasCookie };
 
     // Fall back to a 'full' snapshot with every category enabled if the
     // ToolProfileManager isn't wired yet — keeps the webview render-safe
@@ -857,10 +1088,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         read: true,                 recordRead: true,
         tableWrite: true,           tableDestructive: true,
         fieldWrite: true,           fieldDestructive: true,
-        viewWrite: true,            viewDestructive: true,
-        viewSection: true,          viewSectionDestructive: true,
-        formWrite: true,            recordWrite: true,
-        extension: true,
+        recordDestructive: true,    viewWrite: true,
+        viewDestructive: true,      viewSection: true,
+        viewSectionDestructive: true, formWrite: true,
+        recordWrite: true,          extension: true,
+        sync: true,
       },
     };
 

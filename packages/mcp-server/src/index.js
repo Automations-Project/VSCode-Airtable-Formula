@@ -1606,7 +1606,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
   // ── Sync Tools ──
   {
     name: 'sync_base',
-    description: 'Base-to-base schema + record sync. IMPORTANT: BOTH mode="plan" and mode="apply" run as BACKGROUND JOBS — they return {jobId, planId, status:"running"} IMMEDIATELY (jobId === planId), NOT a synchronous result; poll mode="status" with that planId to get progress and the final result. mode="plan" (read-only, does NOT mutate): computes an ordered plan (tables/fields to create/update + orphans + warnings) by comparing source/dest schema; when the job finishes, mode="status" returns the plan digest in planDigest. mode="apply" (requires planId from a prior plan): executes the saved plan against the destination — creates tables, reconciles the primary, creates scalar/link/computed fields (source->dest reference remapping + formula validation), applies non-destructive field updates, then runs the RECORD sync (two-pass cells + links, attachments, view-filter restore); aborts if the destination drifted since the plan. mode="status" (poll a plan OR apply job by its planId): returns { phase: "planning"|"schema"|"records"|"done"|"failed", status, recordsMapped, planDigest?, schemaResult?, recordsResult? }. Field-mapping errors, APPLY_LOCKED, and DRIFT surface HERE (phase="failed" or an aborted schemaResult), not as a synchronous error. mode="reconcile" (SYNCHRONOUS): rebuild/repair the record map — existence-prune dead idmap entries, optional natural-key re-match per table. mode="diff" (SYNCHRONOUS): schema digest comparing source and destination WITHOUT saving a plan; returns a diffId and summary; pass detail=<section> to drill into a section of a prior diff.',
+    description: 'Base-to-base schema + record sync. IMPORTANT: BOTH mode="plan" and mode="apply" run as BACKGROUND JOBS — they return {jobId, planId, status:"running"} IMMEDIATELY (jobId === planId), NOT a synchronous result; poll mode="status" with that planId to get progress and the final result. mode="plan" (read-only, does NOT mutate): computes an ordered plan (tables/fields to create/update + orphans + warnings) by comparing source/dest schema; when the job finishes, mode="status" returns the plan digest in planDigest. mode="apply" (requires planId from a prior plan): executes the saved plan against the destination — creates tables, reconciles the primary, creates scalar/link/computed fields (source->dest reference remapping + formula validation), applies non-destructive field updates, then runs the RECORD sync (two-pass cells + links, attachments, view-filter restore); aborts if the destination drifted since the plan. mode="status" (poll a plan OR apply job by its planId): returns { phase: "planning"|"schema"|"records"|"done"|"failed", status, recordsMapped, summary, schemaResult?, recordsResult?, result?, planDigest? }. planDigest is human-only by default ({ human, machineOmitted: true }) — pass verbose:true for the full planDigest.machine. Field-mapping errors, APPLY_LOCKED, and DRIFT surface HERE (phase="failed" or an aborted schemaResult), not as a synchronous error. mode="reconcile" (SYNCHRONOUS): rebuild/repair the record map — existence-prune dead idmap entries, optional natural-key re-match per table. mode="diff" (SYNCHRONOUS): schema digest comparing source and destination WITHOUT saving a plan; returns a diffId and summary; pass detail=<section> to drill into a section of a prior diff.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1628,6 +1628,7 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         confirmTableDeletions: { type: 'boolean', description: 'Used by mode=apply with policy=mirror: required to delete whole dest-only TABLES. confirmDeletions alone never drops a table; without confirmTableDeletions, orphan tables report TABLE_DELETION_GATED and are kept.' },
         confirmRetypes: { type: 'boolean', description: 'Used by mode=apply: required to apply a matched field\'s SCALAR type change to the destination (source-wins). Without it, a diverging scalar type reports RETYPE_GATED and the field is kept. Non-scalar retypes (to/from formula/rollup/lookup/count/autoNumber/link/attachment) stay RETYPE_DEFERRED.' },
         fieldMappings: { type: 'object', description: 'Field mapping overrides: maps table name → { sourceField: destField } to inject a source field\'s value into a different (writable scalar) dest field during record sync. Example: { "Games": { "Title": "Name" } }. In mode="plan" and mode="diff", fieldMappings are validated against the two schemas (dry-run, no mutation) and errors are returned in fieldMappingErrors.', additionalProperties: { type: 'object', additionalProperties: { type: 'string' } } },
+        verbose: { type: 'boolean', description: 'Used only by mode="status": by default planDigest is projected to { human, machineOmitted: true } (the full machine payload can be tens of thousands of lines on a view-heavy base and pushes the useful result fields out of the response — it always stays on disk). Set verbose:true to get the full planDigest.machine back in the response.' },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
@@ -2434,7 +2435,7 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, verbose, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
@@ -2470,7 +2471,7 @@ const handlers = {
     }
     if (mode === 'status') {
       if (!planId) return err('mode="status" requires planId (the jobId returned by mode="plan" or mode="apply").');
-      const s = sync.syncStatus({ sourceBaseId: sourceAppId, destBaseId: destAppId, planId });
+      const s = sync.syncStatus({ sourceBaseId: sourceAppId, destBaseId: destAppId, planId, verbose });
       const sr = s.schemaResult || {};
       const rr = s.recordsResult || {};
       let summary;
@@ -2504,16 +2505,20 @@ const handlers = {
       }
       // Structured object covering the phase (superset of the M2 records-only shape: planId,
       // status, recordsMapped, result, summary are preserved; result === recordsResult).
+      // Field order matters here: `summary`/schemaResult/recordsResult/result are the fields a
+      // caller actually needs and are placed BEFORE planDigest, so that if the response is still
+      // truncated (e.g. a verbose planDigest.machine on a view-heavy base), it's the least-useful
+      // field that gets cut, not these. (Object insertion order === JSON key order.)
       return ok({
         planId,
         phase: s.phase,
         status: s.status,
         recordsMapped: s.recordsMapped,
-        planDigest: s.planDigest ?? null,
+        summary,
         schemaResult: s.schemaResult ?? null,
         recordsResult: s.recordsResult ?? null,
         result: s.recordsResult ?? null,
-        summary,
+        planDigest: s.planDigest ?? null,
       }, s, debug);
     }
     if (mode === 'diff') {

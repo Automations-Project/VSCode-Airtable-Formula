@@ -21,6 +21,8 @@ interface Store extends DashboardState {
   logout: () => void;
   status: () => void;
   saveCredentials: (email: string, password: string, otpSecret: string) => void;
+  saveCookie: (cookie: string) => void;
+  clearCookie: () => void;
   installBrowser: () => void;
   removeBrowser: () => void;
   unconfigureIde: (ideId: string) => void;
@@ -88,6 +90,7 @@ const defaultSettings: SettingsSnapshot = {
 const defaultAuth: AuthState = {
   status: 'unknown',
   hasCredentials: false,
+  hasCookie: false,
 };
 
 // If the extension never answers (host crash, lost message, webview reload),
@@ -145,7 +148,13 @@ export const useStore = create<Store>((set, get) => {
     const auth =
       currentAuth.status !== 'unknown'
         ? currentAuth
-        : { ...incomingAuth, hasCredentials: currentAuth.hasCredentials || incomingAuth.hasCredentials };
+        : {
+            ...incomingAuth,
+            // hasCredentials AND hasCookie are both sticky — a stale state:update
+            // during cold start must not clobber a known-good saved-credential flag.
+            hasCredentials: currentAuth.hasCredentials || incomingAuth.hasCredentials,
+            hasCookie: currentAuth.hasCookie || incomingAuth.hasCookie,
+          };
     return { ...state, auth, loading: false };
   }),
   applyAuthState: (state) => set({ auth: state }),
@@ -196,6 +205,15 @@ export const useStore = create<Store>((set, get) => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:saveCredentials', id, email, password, otpSecret });
+  },
+
+  // Fire-and-forget (no action id): the byo cookie save has no acknowledgement
+  // round-trip — the refreshed hasCookie arrives on the next auth:state/state:update.
+  saveCookie: (cookie) => {
+    sendToExtension({ type: 'auth:saveCookie', cookie });
+  },
+  clearCookie: () => {
+    sendToExtension({ type: 'auth:clearCookie' });
   },
 
   installBrowser: () => {

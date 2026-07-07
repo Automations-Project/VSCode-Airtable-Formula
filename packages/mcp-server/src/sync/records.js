@@ -96,6 +96,48 @@ export function readRecordsJobStatus(sourceBaseId, destBaseId, planId) {
  */
 const makeGate = (limiter) => (fn) => limiter.run(() => withRetry(fn));
 
+// ── Session-death detection (Task 2) ──────────────────────────────────────────
+// The records phase runs 1000s of per-row writes. When the auth circuit-breaker latches
+// (a browser-free re-auth kept failing, or a throttle 403 never cleared), EVERY subsequent
+// per-row POST short-circuits to SESSION_INVALID — but the client SWALLOWS each into its
+// failed[] array (it does not throw at the batch level), so the naive engine marches through
+// all rows as per-record failures and then reports the job `done`. These helpers let each
+// write pass detect a fatal, run-wide session death and abort the whole job instead.
+
+/**
+ * True when the session is dead run-wide: the breaker has latched (isSessionDead) OR a
+ * SESSION_INVALID error propagated (covers the Task-1 Minor-4 case where a 403-escalation's
+ * _recoverSession itself threw, so the breaker may not be latched yet).
+ *
+ * @param {object} client - AirtableClient (may lack .auth on older/mocked clients → guarded)
+ * @param {*} [err]        - a caught error or a per-row error string to inspect
+ * @returns {boolean}
+ */
+function sessionDied(client, err) {
+  if (client?.auth?.isSessionDead?.() === true) return true;
+  return !!err && /SESSION_INVALID/.test(String(err && err.message ? err.message : err));
+}
+
+/**
+ * Build the abort reason: trip detail (when available) + partial counts + resume advice.
+ * @param {object} client
+ * @param {object} result - { created, updated }
+ * @returns {string}
+ */
+function buildAbortReason(client, result) {
+  const trip = client?.auth?.getLastTrip?.();
+  return `SESSION_INVALID: session died during record sync${trip ? ` (last status=${trip.status})` : ''} after ${result.created} created / ${result.updated} updated. Re-authenticate, then resume by re-running mode=apply with the same planId (progress is persisted).`;
+}
+
+/**
+ * Flag the result as aborted (first-wins abortReason). Called from every write pass the moment
+ * a session death is detected; runRecords then skips the remaining passes + prune.
+ */
+function markAborted(client, result) {
+  result.aborted = true;
+  if (!result.abortReason) result.abortReason = buildAbortReason(client, result);
+}
+
 /**
  * Returns true if the field type is a multiSelect (arrays not accepted by updateRecords).
  * @param {string} type
@@ -345,11 +387,14 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   try {
     res = await client.createRecords(destAppId, destTableId, chunk, { gate });
   } catch (err) {
+    // A run-wide session death aborts the whole job; any other throw is a per-chunk failure.
+    if (sessionDied(client, err)) { markAborted(client, result); return; }
     result.failed += chunk.length;
     result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: createRecords threw: ${err.message}` });
     return;
   }
 
+  // Record rows that landed BEFORE any death (preserve partial progress), then check for death.
   for (const created of (res.created || [])) {
     idmap.records[created.sourceKey] = created.rowId;
     createdDestIds?.add(created.rowId);
@@ -359,6 +404,15 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   }
 
   const failed = res.failed || [];
+
+  // Session death during the per-row POSTs: the client swallows each dead POST into failed[]
+  // (it does NOT throw at the batch level). Detect it here and abort BEFORE processing/retrying
+  // any failures — a dead session must not spin the link-strip retry or march the remaining rows.
+  if (sessionDied(client) || failed.some((f) => sessionDied(client, f.error))) {
+    markAborted(client, result);
+    return;
+  }
+
   if (failed.length === 0) return;
 
   // Split failures: those whose row carried folded links (retryable) vs genuine failures.
@@ -385,6 +439,7 @@ async function createChunkWithFallback({ client, destAppId, destTableId, chunk, 
   try {
     retryRes = await client.createRecords(destAppId, destTableId, stripped, { gate });
   } catch (err) {
+    if (sessionDied(client, err)) { markAborted(client, result); return; }
     result.failed += stripped.length;
     result.warnings.push({ code: 'RECORD_CREATE_FAILED', message: `Table ${destTableId}: retry-without-links threw: ${err.message}` });
     return;
@@ -424,6 +479,8 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
   const orderedTables = orderTablesByLinkDeps(srcSnapshot.tables || [], idmap);
 
   for (const srcTable of orderedTables) {
+    // A session death latched by a prior table/chunk aborts the whole job — never start a new table.
+    if (client.auth?.isSessionDead?.()) { markAborted(client, result); return; }
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
 
@@ -482,14 +539,23 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       const chunk = createRows.slice(i, i + CREATE_CHUNK);
       await createChunkWithFallback({ client, destAppId, destTableId, chunk, idmap, result, limiter, runState, destTableById, createdDestIds });
       persist(idmap, journal);
+      if (result.aborted) return; // session died mid-chunk — stop walking rows/tables
     }
 
     // ── UPDATE batch ──────────────────────────────────────────────────────
     if (updateRows.length > 0) {
       try {
         const res = await client.updateRecords(destAppId, destTableId, updateRows, { gate: makeGate(limiter) });
+        const updFailed = res.failed || [];
+        // Session death mid-batch: updateRecords swallows dead per-cell POSTs into failed[] too.
+        if (sessionDied(client) || updFailed.some((f) => sessionDied(client, f.error))) {
+          result.updated += (res.updated || []).length;
+          markAborted(client, result);
+          persist(idmap, journal);
+          return;
+        }
         result.updated += (res.updated || []).length;
-        for (const failed of (res.failed || [])) {
+        for (const failed of updFailed) {
           result.failed++;
           result.warnings.push({
             code: 'RECORD_UPDATE_FAILED',
@@ -497,6 +563,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
           });
         }
       } catch (err) {
+        if (sessionDied(client, err)) { markAborted(client, result); persist(idmap, journal); return; }
         result.failed += updateRows.length;
         result.warnings.push({
           code: 'RECORD_UPDATE_FAILED',
@@ -554,6 +621,8 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
   }
 
   for (const srcTable of (srcSnapshot.tables || [])) {
+    // A session death latched by a prior table aborts the whole job — never start a new table.
+    if (client.auth?.isSessionDead?.()) { markAborted(client, result); return; }
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue;
 
@@ -613,6 +682,8 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
         try {
           const res = await client.addLinkItems(destAppId, destRowId, destFldId, items, { gate: makeGate(limiter) });
           if (!res.ok) {
+            // addLinkItems never throws — a dead session surfaces as ok:false + a SESSION_INVALID error.
+            if (sessionDied(client, res.error)) { markAborted(client, result); persist(idmap, journal); return; }
             result.warnings.push({
               code: 'RECORD_LINK_FAILED',
               message: `Record ${rec.id} field ${field.id} → dest row ${destRowId}: addLinkItems failed: ${res.error}`,
@@ -621,6 +692,7 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
             result.updated++;
           }
         } catch (err) {
+          if (sessionDied(client, err)) { markAborted(client, result); persist(idmap, journal); return; }
           result.warnings.push({
             code: 'RECORD_LINK_FAILED',
             message: `Record ${rec.id} field ${field.id} → dest row ${destRowId}: addLinkItems threw: ${err.message}`,
@@ -768,6 +840,8 @@ export async function applyAttachments({
   const destAppId = destSnapshot.baseId || '';
 
   for (const srcTable of (srcSnapshot.tables || [])) {
+    // A session death latched by a prior table aborts the whole job — never start a new table.
+    if (client.auth?.isSessionDead?.()) { markAborted(client, result); return; }
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
 
@@ -939,6 +1013,9 @@ export async function applyAttachments({
           }
         }
       } catch (fastPathErr) {
+        // A dead session aborts the whole job — do NOT fall back (every fallback upload would
+        // also fail under the dead session, spinning per-attachment ATTACHMENT_FAILED warnings).
+        if (sessionDied(client, fastPathErr)) { markAborted(client, result); persist(idmap, journal); return; }
         // Fast-path threw — fall back to per-attachment upload for all included records
         result.warnings.push({
           code: 'ATTACHMENT_FALLBACK',
@@ -956,9 +1033,14 @@ export async function applyAttachments({
               await uploadAttachmentFallback({ client, destAppId, destRowId, destFldId, attachment: att, idmap, result, fetchBytes, limiter });
             }
           }
+          // uploadAttachmentFallback swallows its errors — poll the breaker so a mid-fallback
+          // session death still aborts instead of spinning through every remaining record.
+          if (client.auth?.isSessionDead?.()) { markAborted(client, result); persist(idmap, journal); return; }
         }
       }
     } catch (tableErr) {
+      // A dead session aborts; any other unexpected per-table error is a warning (continue-on-failure).
+      if (sessionDied(client, tableErr)) { markAborted(client, result); persist(idmap, journal); return; }
       // Top-level per-table guard: never throw out of the loop
       result.warnings.push({
         code: 'ATTACHMENT_FAILED',
@@ -1126,6 +1208,9 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   // Pass 1: scalar / select upsert — fills idmap.records
   await applyRecordsPass1({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist: persistRun, result, policy, policyOverrides, fieldMappings: resolved, createdDestIds });
   persistRun(idmap, journal);
+  // Session died mid-Pass-1: skip the remaining passes, reapplyViewFilters, AND pruneRecords —
+  // a dead/partial session must never reach prune (deleting under a dead session is dangerous).
+  if (result.aborted) return result;
 
   // Rebuild destDisplayNames from idmap.records now populated by Pass 1.
   // Key = dest record id, value = source primary cell value (string).
@@ -1143,10 +1228,26 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
   // Pass 2: link cells
   await applyRecordsPass2({ client, srcSnapshot, destSnapshot, idmap, destDisplayNames, limiter, journal, persist: persistRun, result, policy, policyOverrides, createdDestIds });
   persistRun(idmap, journal);
+  if (result.aborted) return result; // session died mid-Pass-2 — skip attachments/filters/prune
 
   // Pass 3: attachments
   await applyAttachments({ client, srcSnapshot, destSnapshot, idmap, limiter, journal, persist: persistRun, result, policy, policyOverrides, createdDestIds });
   persistRun(idmap, journal);
+  if (result.aborted) return result; // session died mid-Pass-3 — skip reapplyViewFilters + prune
+
+  // Honest-failure gate: a run that attempted writes and had ZERO successes AND ZERO skips, with
+  // only failures, is a run-wide failure (e.g. a non-SESSION_INVALID hang that the per-pass abort
+  // detection doesn't catch). Route it through the same aborted→phase=failed path so it never
+  // reports a misleading 'done' with a burned batch, and skip reapplyViewFilters + prune (nothing
+  // synced). The skipped===0 guard is critical: a skip-heavy resume run (most rows already
+  // mapped/converged → skipped, a few genuine per-record failures, 0 created) must NOT trip this.
+  if (!result.aborted && result.failed > 0 && result.created === 0 && result.updated === 0 && result.skipped === 0) {
+    result.aborted = true;
+    result.abortReason = `RECORDS_ALL_FAILED: all ${result.failed} record write(s) failed with zero successes — a run-wide failure (not classified as a session death). Investigate (see warnings), then re-run mode=apply with the same planId to resume (progress is persisted).`;
+    result.warnings.push({ code: 'RECORDS_ALL_FAILED', message: result.abortReason });
+    persistRun(idmap, journal);
+    return result;
+  }
 
   // Reapply view filters whose record refs now resolve.
   // Defensive guard: a filter-restore failure must NEVER prevent the prune step below —
@@ -1189,6 +1290,13 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
     });
     truncatedTables.add(t.name);
   }
+  // Final safety net before the DESTRUCTIVE prune step: a session death that a swallowing
+  // sub-loop (e.g. attachment fallback on the last table) never surfaced as result.aborted must
+  // STILL never reach pruneRecords — deleting under a dead/partial session is dangerous. Re-check
+  // the breaker directly here (the per-pass guards cover mid-run; this closes the tail window).
+  if (!result.aborted && client.auth?.isSessionDead?.()) markAborted(client, result);
+  if (result.aborted) { persistRun(idmap, journal); return result; }
+
   // Live source record ids: a persisted mapping whose source record no longer exists must not
   // protect its dest row — otherwise mirror never propagates source-side record deletions.
   const liveSourceRecordIds = new Set();
@@ -1239,6 +1347,26 @@ export async function runRecords({ client, srcSnapshot, destSnapshot, idmap, pol
  * @returns {Promise<object>}           - result accumulator
  */
 export async function applyRecords({ client, sourceBaseId, destBaseId, planId, runStartedAt, policy, policyOverrides, confirmDeletions, fieldMappings, naturalKeys }) {
+  // 0. Proactive session health (B): the schema phase runs thousands of mutations right before this
+  //    and can leave the auth circuit-breaker LATCHED (a browser-free re-auth kept failing / a
+  //    throttle 403 never cleared). Un-latch it and probe (browser-free modes re-mint a stale
+  //    cookie) so the snapshots + writes below all run on a FRESH, healthy session. Throwing here is
+  //    correct and resumable: nothing has been written yet, and applyRecordsImpl's .catch turns the
+  //    throw into records-job status:'failed'. Guarded so an older/mocked client without the surface
+  //    (Task-1 client.auth.*) simply skips this block instead of crashing.
+  if (client.auth?.ensureSessionHealthy) {
+    client.auth.resetSessionHealth?.();               // clear a breaker left dead by the schema phase
+    const health = await client.auth.ensureSessionHealthy(); // probe + (browser-free) re-mint if stale
+    if (!health.healthy) {
+      const err = new Error(
+        `SESSION_INVALID: session is not healthy at the records-phase start${health.error ? ` (${health.error})` : ''} — ` +
+          `re-authenticate, then resume by re-running mode=apply with the same planId (nothing was written yet).`,
+      );
+      err.code = 'SESSION_INVALID';
+      throw err;
+    }
+  }
+
   // 1. Load the converged idmap (produced by the schema apply phase)
   const idmap = loadIdmap(sourceBaseId, destBaseId);
   idmap.records ??= {};

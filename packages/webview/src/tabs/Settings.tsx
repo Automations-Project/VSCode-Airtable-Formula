@@ -58,7 +58,7 @@ export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
-  const { saveCredentials, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession, selectCustomBrowser, setBrowserChoice } = useStore();
+  const { saveCredentials, saveCookie, clearCookie, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession, selectCustomBrowser, setBrowserChoice } = useStore();
 
   const [settingsPending, setSettingsPending] = useState(false);
 
@@ -78,6 +78,7 @@ export function Settings() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otpSecret, setOtpSecret] = useState('');
+  const [cookie, setCookie] = useState('');
   const [showCreds, setShowCreds] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
   const storage = useStore(s => s.storage);
@@ -106,6 +107,24 @@ export function Settings() {
   const loginMode = settings.auth.loginMode ?? 'manual';
   const isManual = loginMode === 'manual';
 
+  // Connection mode is primary: it decides which credential fields render.
+  //   browser      → login-mode toggle + browser dropdown; Auto → email/pw/TOTP form
+  //   direct-login → email/pw/TOTP form (always; no browser, no login-mode toggle)
+  //   byo          → session-cookie field
+  const authMode = settings.mcp.authMode ?? 'browser';
+  const showCredsForm = authMode === 'direct-login' || (authMode === 'browser' && !isManual);
+
+  const handleSaveCookie = () => {
+    const trimmed = cookie.trim();
+    if (!trimmed) return;
+    // Keep the value on submit so a failed save doesn't lose the user's input.
+    // The field clears via the effect below once the save is confirmed (hasCookie flips true).
+    saveCookie(trimmed);
+  };
+
+  // Clear the cookie input only after the save is confirmed by the extension.
+  useEffect(() => { if (auth.hasCookie) setCookie(''); }, [auth.hasCookie]);
+
   const isBusy = auth.status === 'checking' || auth.status === 'logging-in';
   const browserFound = auth.browser?.found ?? true; // optimistic until probe runs
   const browserLabel = auth.browser?.label;
@@ -127,31 +146,33 @@ export function Settings() {
           <div className="title">Airtable Account</div>
         </div>
         <div className="stack stack-sm">
-          <div className="toggle-row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8, marginBottom: 4 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Login mode</div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
-                {isManual ? 'You log in through the browser — no credentials stored' : 'Automated login with stored credentials'}
+          {authMode === 'browser' && (
+            <div className="toggle-row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8, marginBottom: 4 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Login mode</div>
+                <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
+                  {isManual ? 'You log in through the browser — no credentials stored' : 'Automated login with stored credentials'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.68rem' }}>
+                <span style={{ color: isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: isManual ? 600 : 400 }}>Manual</span>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-checked={!isManual}
+                    aria-label={isManual ? 'Switch to automatic login with stored credentials' : 'Switch to manual login in the browser'}
+                    checked={!isManual}
+                    onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })}
+                  />
+                  <span className="toggle-track" />
+                </label>
+                <span style={{ color: !isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: !isManual ? 600 : 400 }}>Auto</span>
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.68rem' }}>
-              <span style={{ color: isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: isManual ? 600 : 400 }}>Manual</span>
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-checked={!isManual}
-                  aria-label={isManual ? 'Switch to automatic login with stored credentials' : 'Switch to manual login in the browser'}
-                  checked={!isManual}
-                  onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })}
-                />
-                <span className="toggle-track" />
-              </label>
-              <span style={{ color: !isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: !isManual ? 600 : 400 }}>Auto</span>
-            </div>
-          </div>
+          )}
 
-          {!isManual && (
+          {showCredsForm && (
             <div className="list-row">
               <Shield size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
               <span style={{ fontSize: '0.72rem', flex: 1 }}>Credentials stored in OS keychain</span>
@@ -161,6 +182,7 @@ export function Settings() {
             </div>
           )}
 
+          {authMode === 'browser' && (
           <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
             <Globe size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
             <span style={{ fontSize: '0.72rem', flex: 1 }}>
@@ -207,6 +229,7 @@ export function Settings() {
               <option value="custom">Custom path...</option>
             </select>
           </div>
+          )}
 
           <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
             <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
@@ -245,19 +268,53 @@ export function Settings() {
             </select>
           </div>
 
-          {(settings.mcp.authMode === 'byo' || settings.mcp.authMode === 'direct-login') && (
-            <div className="list-row" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'flex-start' }}>
-              <FolderOpen size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0, marginTop: 2 }} />
-              <span style={{ fontSize: '0.62rem', color: 'var(--fg-subtle)', flex: 1, minWidth: 160 }}>
-                {settings.mcp.authMode === 'byo'
-                  ? 'Paste your Airtable session cookie into credentials.json in the config folder ({ "cookie": "…" }).'
-                  : 'Set email / password / TOTP in login.json in the config folder. SSO/Google accounts must use Browser mode.'}
-              </span>
-              <button className="btn btn-ghost" onClick={() => openStoragePath()}>Open folder</button>
+          {authMode === 'byo' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
+              <div className="list-row" style={{ padding: 0 }}>
+                <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.72rem', flex: 1 }}>Cookie stored in OS keychain</span>
+                <span className={auth.hasCookie ? 'chip chip-ok' : 'chip chip-warn'}>
+                  {auth.hasCookie ? 'Set' : 'Not set'}
+                </span>
+              </div>
+              <label style={{ fontSize: '0.7rem', fontWeight: 500 }} htmlFor="byo-cookie-input">Airtable session cookie</label>
+              <textarea
+                id="byo-cookie-input"
+                className="input-field"
+                placeholder="brw=…; __Host-airtable-session=…"
+                aria-label="Airtable session cookie"
+                value={cookie}
+                onChange={e => setCookie(e.target.value)}
+                rows={3}
+                style={{ fontSize: '0.7rem', fontFamily: 'var(--font-mono)', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--fg)', resize: 'vertical' }}
+              />
+              <div style={{ fontSize: '0.6rem', color: 'var(--fg-muted)', lineHeight: 1.4 }}>
+                Paste the Cookie header from a logged-in Airtable browser session
+                (DevTools → Network → any airtable.com request → Cookie).
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleSaveCookie}
+                  disabled={!cookie.trim()}
+                  style={{ flex: 1, fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8, cursor: cookie.trim() ? 'pointer' : 'not-allowed', opacity: cookie.trim() ? 1 : 0.5 }}
+                >
+                  Save to Keychain
+                </button>
+                {auth.hasCookie && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => clearCookie()}
+                    style={{ fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8 }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
-          {browserIsDownloaded && !downloading && (
+          {authMode === 'browser' && browserIsDownloaded && !downloading && (
             <div className="list-row">
               <Download size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
               <span style={{ fontSize: '0.72rem', flex: 1 }}>
@@ -277,7 +334,7 @@ export function Settings() {
             </div>
           )}
 
-          {chromeMissing && (
+          {authMode === 'browser' && chromeMissing && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', background: 'var(--bg-error)', border: '1px solid var(--border-error)', borderRadius: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <AlertTriangle size={14} style={{ color: 'var(--at-red)', flexShrink: 0, marginTop: 1 }} />
@@ -337,7 +394,7 @@ export function Settings() {
             </div>
           )}
 
-          {!isManual && !showCreds && (
+          {showCredsForm && !showCreds && (
             <button type="button" className="action-card" onClick={() => setShowCreds(true)}>
               <div className="icon-badge icon-badge-blue">
                 <Key size={13} />
@@ -353,7 +410,7 @@ export function Settings() {
             </button>
           )}
 
-          {!isManual && showCreds && (
+          {showCredsForm && showCreds && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
               <input
                 className="input-field"
@@ -443,12 +500,27 @@ export function Settings() {
           )}
 
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <button type="button" className="action-card" onClick={isManual ? manualLogin : login} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
-              <div className="icon-badge icon-badge-green" style={{ width: 22, height: 22 }}>
-                <LogIn size={11} />
-              </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>{isManual ? 'Login in Browser' : 'Login'}</span>
-            </button>
+            {/* byo has no Login button — the cookie field above IS how you
+                authenticate. direct-login validates stored creds (no browser);
+                browser keeps the loginMode-driven manual/auto behavior. */}
+            {authMode !== 'byo' && (
+              <button
+                type="button"
+                className="action-card"
+                onClick={authMode === 'browser' && isManual ? manualLogin : login}
+                disabled={isBusy}
+                style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}
+              >
+                <div className="icon-badge icon-badge-green" style={{ width: 22, height: 22 }}>
+                  <LogIn size={11} />
+                </div>
+                <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>
+                  {authMode === 'direct-login'
+                    ? 'Validate credentials'
+                    : isManual ? 'Login in Browser' : 'Login'}
+                </span>
+              </button>
+            )}
             <button type="button" className="action-card" onClick={status} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
               <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
                 <RefreshCw size={11} />

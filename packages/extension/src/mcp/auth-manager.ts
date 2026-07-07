@@ -15,6 +15,7 @@ const SECRET_PREFIX = 'airtableFormula';
 const SECRET_EMAIL      = `${SECRET_PREFIX}.email`;
 const SECRET_PASSWORD   = `${SECRET_PREFIX}.password`;
 const SECRET_OTP_SECRET = `${SECRET_PREFIX}.otpSecret`;
+const SECRET_COOKIE     = `${SECRET_PREFIX}.cookie`;
 
 const PROFILE_DIR = path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
 const CONFIG_DIR = path.join(os.homedir(), '.airtable-user-mcp');
@@ -32,7 +33,7 @@ export class AuthManager implements vscode.Disposable {
   private readonly _onDidChange = new vscode.EventEmitter<AuthState>();
   public readonly onDidChange = this._onDidChange.event;
 
-  private _state: AuthState = { status: 'unknown', hasCredentials: false };
+  private _state: AuthState = { status: 'unknown', hasCredentials: false, hasCookie: false };
   private _timer: ReturnType<typeof setInterval> | undefined;
   private _initCheckTimer: ReturnType<typeof setTimeout> | undefined;
   private _disposed = false;
@@ -193,6 +194,35 @@ export class AuthManager implements vscode.Disposable {
     return this.secrets.get(SECRET_OTP_SECRET);
   }
 
+  // ─── BYO session cookie (authMode='byo') ─────────────────────
+  //
+  // Stored in the OS keychain like the email/password/otp triplet. The cookie
+  // reaches the MCP server via env (stdio path, getCredentialsEnv) or the
+  // bearer-authenticated /daemon/auth-credentials endpoint (daemon path) — it
+  // is never written to disk (no plaintext credentials.json) and never logged.
+
+  async getCookie(): Promise<string | undefined> {
+    return this.secrets.get(SECRET_COOKIE);
+  }
+
+  // CSRF is not stored: for byo the server auto-scrapes it from the cookie's authed session.
+  async saveCookie(cookie: string): Promise<void> {
+    // Modes are NOT storage-exclusive: any stored email/password (direct-login)
+    // are intentionally preserved so the user can switch between byo and
+    // direct-login without re-entering credentials.
+    await this.secrets.store(SECRET_COOKIE, cookie);
+    this._updateState({ hasCookie: true });
+  }
+
+  async clearCookie(): Promise<void> {
+    await this.secrets.delete(SECRET_COOKIE);
+    this._updateState({ hasCookie: false });
+  }
+
+  async hasCookie(): Promise<boolean> {
+    return !!(await this.getCookie());
+  }
+
   async saveCredentials(email: string, password: string, otpSecret?: string): Promise<void> {
     await this.secrets.store(SECRET_EMAIL, email);
     await this.secrets.store(SECRET_PASSWORD, password);
@@ -208,7 +238,8 @@ export class AuthManager implements vscode.Disposable {
     await this.secrets.delete(SECRET_EMAIL);
     await this.secrets.delete(SECRET_PASSWORD);
     await this.secrets.delete(SECRET_OTP_SECRET);
-    this._updateState({ status: 'unknown', hasCredentials: false, userId: undefined, error: undefined });
+    await this.secrets.delete(SECRET_COOKIE);
+    this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
   }
 
   async logout(): Promise<void> {
@@ -219,6 +250,7 @@ export class AuthManager implements vscode.Disposable {
     await this.secrets.delete(SECRET_EMAIL);
     await this.secrets.delete(SECRET_PASSWORD);
     await this.secrets.delete(SECRET_OTP_SECRET);
+    await this.secrets.delete(SECRET_COOKIE);
 
     const fs = await import('fs/promises');
     try {
@@ -228,7 +260,7 @@ export class AuthManager implements vscode.Disposable {
       console.warn('[AuthManager] Failed to clear browser profile:', err);
     }
 
-    this._updateState({ status: 'unknown', hasCredentials: false, userId: undefined, error: undefined });
+    this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
   }
 
   async hasCredentials(): Promise<boolean> {
@@ -241,13 +273,16 @@ export class AuthManager implements vscode.Disposable {
    * Read stored credentials from SecretStorage.
    * Returns undefined if no credentials are stored.
    */
-  async getCredentials(): Promise<{ email: string; password: string; otpSecret?: string } | undefined> {
+  async getCredentials(opts?: { ensureDaemon?: boolean }): Promise<{ email: string; password: string; otpSecret?: string } | undefined> {
     // D-02: ensure daemon is running before handing off credentials.
     // Implicit + best-effort: credentials don't require the daemon, and this
     // path runs from provideMcpServerDefinitions — it must neither resurrect
     // a daemon the user explicitly stopped nor block login when the daemon
     // can't start.
-    if (getSettings().mcp.useDaemon && this._daemonManager) {
+    // Callers that push creds TO an already-running daemon (the lockfile-watch / dashboard re-push)
+    // pass { ensureDaemon: false }: they must NOT trigger a spawn here, or a lockfile-watch →
+    // getCredentials → ensureDaemon → spawn → lockfile-write → watch loop runs away (multiple procs).
+    if (opts?.ensureDaemon !== false && getSettings().mcp.useDaemon && this._daemonManager) {
       try {
         await this._daemonManager.ensureDaemon({ implicit: true });
       } catch { /* user-stopped latch or startup failure — proceed without daemon */ }
@@ -261,14 +296,49 @@ export class AuthManager implements vscode.Disposable {
   }
 
   /**
-   * Get credentials as env vars. ONLY for the VS Code MCP stdio definition
-   * (registration.ts), where VS Code owns the spawn and env is the only
-   * channel. Helper scripts we fork ourselves receive credentials over the
-   * IPC channel instead (_spawnScript) so they never appear in the child's
-   * environment (/proc/<pid>/environ, process listings, core dumps).
+   * Get credentials as env vars, shaped for the given auth mode. ONLY for the
+   * VS Code MCP stdio definition (registration.ts), where VS Code owns the
+   * spawn and env is the only channel. Helper scripts we fork ourselves receive
+   * credentials over the IPC channel instead (_spawnScript) so they never
+   * appear in the child's environment (/proc/<pid>/environ, process listings,
+   * core dumps).
+   *
+   *   - 'byo'          → { AIRTABLE_COOKIE } only (CSRF is auto-scraped
+   *                      server-side, never forwarded), or undefined when no
+   *                      cookie is saved.
+   *   - 'direct-login' → { AIRTABLE_EMAIL, AIRTABLE_PASSWORD, AIRTABLE_TOTP_SECRET }
+   *                      (direct-login reads TOTP as AIRTABLE_TOTP_SECRET), or
+   *                      undefined when no credentials are saved.
+   *   - browser / undefined → { AIRTABLE_EMAIL, AIRTABLE_PASSWORD,
+   *                      AIRTABLE_OTP_SECRET } (unchanged legacy behavior).
+   *
+   * NOTE: the daemon transport never uses this — daemon creds go via the
+   * bearer-authenticated /daemon/auth-credentials endpoint (see
+   * DaemonManager.pushAuthCredentials), never the daemon's env.
    */
-  async getCredentialsEnv(): Promise<Record<string, string> | undefined> {
-    const creds = await this.getCredentials();
+  async getCredentialsEnv(authMode?: string): Promise<Record<string, string> | undefined> {
+    if (authMode === 'byo') {
+      const cookie = await this.getCookie();
+      if (!cookie) return undefined;
+      // CSRF is auto-scraped server-side from the cookie session — not forwarded.
+      return { AIRTABLE_COOKIE: cookie };
+    }
+
+    if (authMode === 'direct-login') {
+      // getCredentialsEnv builds env for the STDIO (non-daemon) spawn — it must
+      // never trigger a daemon spawn from a credential read.
+      const creds = await this.getCredentials({ ensureDaemon: false });
+      if (!creds) return undefined;
+      const env: Record<string, string> = {
+        AIRTABLE_EMAIL: creds.email,
+        AIRTABLE_PASSWORD: creds.password,
+      };
+      if (creds.otpSecret) env.AIRTABLE_TOTP_SECRET = creds.otpSecret;
+      return env;
+    }
+
+    // Same rationale as the direct-login branch above.
+    const creds = await this.getCredentials({ ensureDaemon: false });
     if (!creds) return undefined;
 
     const env: Record<string, string> = {
@@ -288,6 +358,23 @@ export class AuthManager implements vscode.Disposable {
     // it works even when no local browser is installed.
     const viaDaemon = await this._checkViaDaemon();
     if (viaDaemon) return viaDaemon;
+
+    // byo / direct-login never touch a browser — the session is minted/refreshed
+    // by the MCP server over direct-HTTP. The daemon check above is the only live
+    // verification for them; with no daemon we can't probe, so surface a neutral
+    // status instead of forking Chrome or reporting 'chrome-missing'.
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      // Neutral 'unknown' state: this isn't an error. The webview renders any
+      // auth.error as a permanent yellow warning, so leave error undefined
+      // (and clear any prior error) rather than putting an informational string there.
+      this._updateState({
+        status: 'unknown',
+        lastChecked: new Date().toISOString(),
+        error: undefined,
+      });
+      return this._state;
+    }
 
     // No daemon (stdio mode) or a daemon that predates the endpoint — fall back
     // to forking our own health-check. Preflight: no browser, no point spawning.
@@ -440,6 +527,20 @@ export class AuthManager implements vscode.Disposable {
   // ─── Login ───────────────────────────────────────────────────
 
   async login(): Promise<AuthState> {
+    // byo / direct-login have no browser login: byo's cookie authenticates
+    // directly and direct-login replays email/password/TOTP server-side. The
+    // stored credentials ARE the login — validate them via checkSession()
+    // (the daemon's direct-HTTP check) instead of launching Chrome.
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      const hasCreds = mode === 'byo' ? await this.hasCookie() : await this.hasCredentials();
+      if (!hasCreds) {
+        this._updateState({ status: 'error', error: 'No credentials saved.' });
+        return this._state;
+      }
+      return this.checkSession();
+    }
+
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -484,6 +585,18 @@ export class AuthManager implements vscode.Disposable {
   }
 
   async manualLogin(): Promise<AuthState> {
+    // byo / direct-login never open a browser — route to the same credential
+    // validation as login() (the cookie / stored creds ARE the login).
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      const hasCreds = mode === 'byo' ? await this.hasCookie() : await this.hasCredentials();
+      if (!hasCreds) {
+        this._updateState({ status: 'error', error: 'No credentials saved.' });
+        return this._state;
+      }
+      return this.checkSession();
+    }
+
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -569,11 +682,22 @@ export class AuthManager implements vscode.Disposable {
     }
 
     const hasCreds = await this.hasCredentials();
-    const probe = this.refreshBrowserDetection();
-    this._updateState({
-      hasCredentials: hasCreds,
-      ...(probe.found ? {} : { status: 'chrome-missing' as const }),
-    });
+    const hasCookie = await this.hasCookie();
+
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      // No browser in these modes — don't probe or flag 'chrome-missing'. Leave
+      // status 'unknown'; the daemon check (via checkSession / auto-refresh)
+      // verifies the session without launching Chrome.
+      this._updateState({ hasCredentials: hasCreds, hasCookie });
+    } else {
+      const probe = this.refreshBrowserDetection();
+      this._updateState({
+        hasCredentials: hasCreds,
+        hasCookie,
+        ...(probe.found ? {} : { status: 'chrome-missing' as const }),
+      });
+    }
 
     await this._applyPermissions();
     this.startAutoRefresh();
@@ -594,8 +718,13 @@ export class AuthManager implements vscode.Disposable {
     if (this._disposed) return;
     if (this._state.status === 'logging-in' || this._state.status === 'checking') return;
 
-    const probe = this.refreshBrowserDetection();
-    if (!probe.found) return;
+    // Only browser mode needs a local browser to refresh; byo / direct-login
+    // verify via the daemon's direct-HTTP check and must not be blocked here.
+    const mode = getSettings().mcp.authMode;
+    if (mode !== 'byo' && mode !== 'direct-login') {
+      const probe = this.refreshBrowserDetection();
+      if (!probe.found) return;
+    }
 
     const state = await this.checkSession();
 
