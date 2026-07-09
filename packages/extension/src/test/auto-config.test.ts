@@ -4,16 +4,18 @@ import * as os from 'os';
 import * as path from 'path';
 import { mergeServerEntry, removeServerEntry, getNestedKey, setNestedKey, writeConfigAtomic } from '../auto-config/ide-detection.js';
 
-// Mock vscode before importing modules that depend on it
+// Mock vscode before importing modules that depend on it. `mockConfig` (hoisted so the mock factory
+// can read it) lets a test override specific settings; unset keys fall through to the default.
+const { mockConfig } = vi.hoisted(() => ({ mockConfig: {} as Record<string, unknown> }));
 vi.mock('vscode', () => ({
   workspace: {
     getConfiguration: () => ({
-      get: (_key: string, defaultValue: unknown) => defaultValue,
+      get: (key: string, defaultValue: unknown) => (key in mockConfig ? mockConfig[key] : defaultValue),
     }),
   },
 }));
 
-import { buildNpxServerEntry } from '../auto-config/index.js';
+import { buildNpxServerEntry, buildServerEntry } from '../auto-config/index.js';
 
 describe('mergeServerEntry', () => {
   it('adds server to empty config', () => {
@@ -79,6 +81,31 @@ describe('buildNpxServerEntry', () => {
   it('does not include NODE_PATH', () => {
     const entry = buildNpxServerEntry();
     expect((entry.env as any).NODE_PATH).toBeUndefined();
+  });
+});
+
+describe('auto-config propagates transport/auth-mode settings', () => {
+  afterEach(() => { for (const k of Object.keys(mockConfig)) delete mockConfig[k]; });
+
+  it('default (browser + fetch) → no AIRTABLE_AUTH_MODE / AIRTABLE_HTTP_CLIENT injected', () => {
+    for (const entry of [buildNpxServerEntry(), buildServerEntry('/x/dist/mcp/index.mjs')]) {
+      expect((entry.env as any).AIRTABLE_AUTH_MODE).toBeUndefined();
+      expect((entry.env as any).AIRTABLE_HTTP_CLIENT).toBeUndefined();
+    }
+  });
+
+  it('direct-login is propagated into the generated MCP config env (the reported bug)', () => {
+    mockConfig['mcp.authMode'] = 'direct-login';
+    expect((buildNpxServerEntry().env as any).AIRTABLE_AUTH_MODE).toBe('direct-login');
+    expect((buildServerEntry('/x/dist/mcp/index.mjs').env as any).AIRTABLE_AUTH_MODE).toBe('direct-login');
+  });
+
+  it('byo + impit are both propagated', () => {
+    mockConfig['mcp.authMode'] = 'byo';
+    mockConfig['mcp.httpClient'] = 'impit';
+    const env = buildNpxServerEntry().env as any;
+    expect(env.AIRTABLE_AUTH_MODE).toBe('byo');
+    expect(env.AIRTABLE_HTTP_CLIENT).toBe('impit');
   });
 });
 

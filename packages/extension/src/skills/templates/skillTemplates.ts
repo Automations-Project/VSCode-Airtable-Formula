@@ -358,7 +358,7 @@ Read-only. Safe to call at any time. Always call a read tool before mutating.
 | \`get_base_schema\` | Full schema of all tables, fields, and views. Use first when exploring an unknown base. |
 | \`list_tables\` | Lightweight table ID + name listing. Prefer over \`get_base_schema\` when you only need table names. |
 | \`get_table_schema\` | Full schema for one table (fields + views). Use when you know the table. |
-| \`list_fields\` | All fields with types and typeOptions. Call before creating formulas or mutations. |
+| \`list_fields\` | All fields with id, name, type (lightweight). Pass \`includeOptions: true\` for full typeOptions, or use \`get_table_schema\`. Call before creating formulas or mutations. |
 | \`list_views\` | All views with IDs, names, types. Call before modifying views. |
 | \`get_view\` | Live view state: filters, sorts, groups, column order, frozen cols, color config. |
 | \`validate_formula\` | **Always call before** \`create_formula_field\` or \`update_formula_field\`. Returns validity + result type. |

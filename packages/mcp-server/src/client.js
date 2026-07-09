@@ -1,4 +1,5 @@
 import { SchemaCache } from './cache.js';
+import { formulaRefsToIds } from './formula-refs.js';
 import { randomBytes, createHash } from 'node:crypto';
 
 /**
@@ -285,7 +286,13 @@ function normalizeChoices(choices) {
 }
 
 function normalizeFieldType(type, typeOptions = {}) {
-  const opts = typeOptions || {};
+  let opts = typeOptions || {};
+  // Downloaded/stored formulas carry {column_value_fldXXX} refs; the write API only
+  // accepts {fldXXX} or {Field Name}. Normalize here so every create/update path
+  // (formula, rollup) round-trips regardless of which form the caller supplies.
+  if (typeof opts.formulaText === 'string') {
+    opts = { ...opts, formulaText: formulaRefsToIds(opts.formulaText) };
+  }
 
   if (type === 'url' || type === 'URL') {
     return { type: 'text', typeOptions: { validatorName: 'url', ...opts } };
@@ -958,7 +965,8 @@ export class AirtableClient {
       config: {
         default: null,
         type: 'formula',
-        typeOptions: { formulaText },
+        // Same normalization as the write path: {column_value_fldX} → {fldX}
+        typeOptions: { formulaText: formulaRefsToIds(formulaText) },
       },
     };
 

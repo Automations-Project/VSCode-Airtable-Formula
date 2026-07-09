@@ -11,6 +11,28 @@ import {
 // Internal helper — JSON-RPC 2.0 tools/call against the daemon MCP endpoint
 // ---------------------------------------------------------------------------
 
+/**
+ * Parse a Streamable-HTTP MCP response body. New daemons answer plain JSON
+ * (enableJsonResponse); older daemons answer an SSE stream where the JSON-RPC
+ * response is a `data:` line carrying an `id`. Exported for tests.
+ */
+export function parseMcpEnvelope(raw: string, contentType: string): unknown {
+  if (!contentType.includes('text/event-stream')) return JSON.parse(raw);
+  const payloads = raw
+    .split(/\r?\n/)
+    .filter(l => l.startsWith('data:'))
+    .map(l => l.slice(5).trim());
+  for (let i = payloads.length - 1; i >= 0; i--) {
+    try {
+      const obj = JSON.parse(payloads[i]) as { id?: unknown };
+      if (obj && obj.id !== undefined && obj.id !== null) return obj;
+    } catch {
+      // not JSON (or a notification) — keep scanning backwards
+    }
+  }
+  throw new Error('No JSON-RPC response found in SSE stream from daemon');
+}
+
 async function callDaemonTool(
   daemonManager: DaemonManager,
   toolName: string,
@@ -27,6 +49,7 @@ async function callDaemonTool(
   });
 
   let raw: string;
+  let responseContentType = '';
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -36,7 +59,11 @@ async function callDaemonTool(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // MCP Streamable HTTP requires clients to accept BOTH — the daemon
+          // answers 406 otherwise (bug report 2026-07-09, Bug 2).
+          Accept: 'application/json, text/event-stream',
           Authorization: `Bearer ${bearerToken}`,
+          'x-airtable-client-id': 'vscode-formula-cmd',
         },
         body,
         signal: controller.signal,
@@ -47,6 +74,7 @@ async function callDaemonTool(
     if (!response.ok) {
       throw new Error(`Daemon returned HTTP ${response.status}: ${await response.text()}`);
     }
+    responseContentType = response.headers.get('content-type') ?? '';
     raw = await response.text();
   } catch (err) {
     if ((err as { name?: string }).name === 'AbortError') {
@@ -55,7 +83,7 @@ async function callDaemonTool(
     throw err;
   }
 
-  const envelope = JSON.parse(raw) as {
+  const envelope = parseMcpEnvelope(raw, responseContentType) as {
     result?: { content?: Array<{ type: string; text?: string }>; isError?: boolean };
     error?: { message: string };
   };

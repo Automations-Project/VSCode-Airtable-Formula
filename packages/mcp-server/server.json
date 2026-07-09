@@ -48,7 +48,7 @@
     { "name": "get_base_schema", "description": "Get full schema of all tables, fields, and views in a base" },
     { "name": "list_tables", "description": "List all tables in a base with IDs and names" },
     { "name": "get_table_schema", "description": "Get full schema for a single table including fields and views" },
-    { "name": "list_fields", "description": "List all fields in a table with types and configuration" },
+    { "name": "list_fields", "description": "List all fields in a table with id, name, and type (typeOptions via includeOptions)" },
     { "name": "list_views", "description": "List all views in a table with IDs, names, and types" },
     { "name": "create_field", "description": "Create a new field including computed types (formula, rollup, lookup, count)" },
     { "name": "create_formula_field", "description": "Create a formula field (shorthand)" },

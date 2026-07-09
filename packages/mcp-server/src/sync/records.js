@@ -126,7 +126,12 @@ function sessionDied(client, err) {
  */
 function buildAbortReason(client, result) {
   const trip = client?.auth?.getLastTrip?.();
-  return `SESSION_INVALID: session died during record sync${trip ? ` (last status=${trip.status})` : ''} after ${result.created} created / ${result.updated} updated. Re-authenticate, then resume by re-running mode=apply with the same planId (progress is persisted).`;
+  // Surface Airtable's actual response body at the trip — its 4xx JSON states the REAL reason
+  // (permission / CSRF / rate / forbidden action) that a bare "403" hides. Truncated + secrets-safe.
+  const detail = trip
+    ? ` (last status=${trip.status}${trip.body ? `; airtable said: ${trip.body}` : ''})`
+    : '';
+  return `SESSION_INVALID: session died during record sync${detail} after ${result.created} created / ${result.updated} updated. Re-authenticate, then resume by re-running mode=apply with the same planId (progress is persisted).`;
 }
 
 /**
@@ -177,13 +182,18 @@ function arrayCellEquals(a, b) {
  * @param {string} srcRecId   - source record id (for warning context)
  * @returns {object}          - dest cellValuesByColumnId
  */
-function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
+export function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId, destComputedFldIds = new Set()) {
   const cells = {};
   for (const field of srcFields) {
     const srcVal = srcCells[field.id];
     if (srcVal === undefined) continue;
     const mapping = idmap.fields[field.id];
     if (!mapping) continue; // field not mapped → skip
+    // A valued source field name-matched to a COMPUTED dest field (formula/lookup/rollup/count/
+    // autoNumber/computed timestamp|user/…) must NOT be written: Airtable rejects a write to a
+    // computed field with 403 INVALID_PERMISSIONS ("Field <id> cannot be updated"), which fails the
+    // ENTIRE row create (→ 0 created). Skip it — the dest value is derived, not synced.
+    if (destComputedFldIds.has(mapping.destFld)) continue;
     const coerced = coercePass1Cell(field, srcVal, idmap);
     if (!coerced.write) {
       // Only warn for select/multiSelect that failed choice mapping (not for structural skip)
@@ -229,7 +239,7 @@ function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId) {
  * @param {Set<string>} [destComputedFldIds] - dest field ids whose DEST type is computed
  * @returns {object}          - dest cellValuesByColumnId (primitives + single-select only)
  */
-function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRecId, destComputedFldIds = new Set()) {
+export function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRecId, destComputedFldIds = new Set()) {
   const cells = {};
   for (const field of srcFields) {
     const mapping = idmap.fields[field.id];
@@ -251,12 +261,15 @@ function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings, srcRe
       });
       continue;
     }
-    if (isComputedType(field.type)) continue; // Pass 1 never writes (or clears) computed cells
+    if (isComputedType(field.type)) continue; // Pass 1 never writes (or clears) computed SOURCE cells
+    // ...and never writes (or clears) a COMPUTED DEST field: a scalar/valued source name-matched to a
+    // computed dest field (formula/lookup/rollup/…) is a persistent RETYPE_DEFERRED pair; Airtable
+    // rejects the write with 403 INVALID_PERMISSIONS ("cannot be updated") and one failing cell
+    // poisons the whole row update. (Covers BOTH the write and clear paths.)
+    if (destComputedFldIds.has(mapping.destFld)) continue;
     if (srcVal === undefined) {
       // Cleared on source: propagate the clear (source-wins) as an explicit null, but only
-      // when the dest record is known to still hold a value for this field — and never into
-      // a COMPUTED dest field (scalar-source/computed-dest RETYPE_DEFERRED pair).
-      if (destComputedFldIds.has(mapping.destFld)) continue;
+      // when the dest record is known to still hold a value for this field.
       const destVal = destCells ? destCells[mapping.destFld] : undefined;
       if (destVal !== undefined && destVal !== null) cells[mapping.destFld] = null;
       continue;
@@ -509,7 +522,7 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
 
       if (!destRecId) {
         // CREATE path — scalar/select/multiSelect arrays ARE accepted by createRecords.
-        const cells = buildCreateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id);
+        const cells = buildCreateCells(srcTable.fields, srcCells, idmap, result.warnings, rec.id, destComputedFldIds);
         injectFieldMappings(cells, tableMappings, srcCells);
         // Fold resolvable links (remapped) into the create payload (kills most of Pass 2).
         let linkCells = {};

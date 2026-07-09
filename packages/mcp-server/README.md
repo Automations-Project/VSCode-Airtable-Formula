@@ -394,14 +394,14 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `get_base_schema` | Full schema of all tables, fields, and views in a base |
 | `list_tables` | List all tables in a base with IDs and names |
 | `get_table_schema` | Full schema for a single table |
-| `list_fields` | All fields in a table with types and configuration |
+| `list_fields` | All fields in a table with id, name, and type (lightweight); pass `includeOptions: true` for full typeOptions |
 | `list_views` | All views in a table with IDs, names, and types |
 | `get_view` | Read a single view's full state — filters, sorts, grouping, visibility, description |
 | `validate_formula` | Validate a formula expression before applying |
 | `list_view_sections` | List sidebar sections for a table with their view membership |
 | `list_record_templates` | List record templates (saved row scaffolds) for a table |
-| `download_formula_field` | Download a formula field to a local `.formula` file with an `AT:` metadata header. Pass `outputPath` to save; omit to read inline. |
-| `download_base_formulas` | Download **all** formula fields in a base to `.formula` files, organised into per-table subfolders. Each file includes the `AT:` header for one-click upload. |
+| `download_formula_field` | Download a formula field to a local `.formula` file with an `AT:` metadata header — field refs resolved to real `{Field Name}` syntax. Pass `outputPath` to save; omit to read inline. |
+| `download_base_formulas` | Download **all** formula fields in a base to `.formula` files, organised into per-table subfolders — field refs resolved to real `{Field Name}` syntax. Each file includes the `AT:` header for one-click upload. |
 
 ### Record Read (1)
 

@@ -114,6 +114,35 @@ describe('auth latch trip instrumentation (R2)', () => {
     assert.ok(typeof trip.reason === 'string' && trip.reason.length > 0);
   });
 
+  it('captures Airtable\'s 403 response BODY on the trip (so aborts show the real reason)', async () => {
+    const a = stubbedAuth('direct-login');
+    a._recoverSession = async () => {};
+    // A non-permanent 403 (block/throttle, NOT a field-permission error) still latches via the
+    // throttle streak — and now carries the response body on the trip.
+    a._rawApiCall = async () => ({ status: 403, body: '{"error":{"type":"IP_ADDRESS_NOT_ALLOWED","message":"blocked"}}' });
+
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), /SESSION_INVALID/);
+    const trip = a.getLastTrip();
+    assert.equal(trip.status, 403);
+    assert.match(trip.body, /IP_ADDRESS_NOT_ALLOWED/);
+    a.resetSessionHealth();
+    assert.equal(a.getLastTrip(), null);
+  });
+
+  it('a PERMANENT 403 (INVALID_PERMISSIONS / "cannot be updated") is a per-request FIELD_FORBIDDEN, NOT a session death', async () => {
+    const a = stubbedAuth('direct-login');
+    let recovered = 0;
+    a._recoverSession = async () => { recovered++; };
+    a._rawApiCall = async () => ({ status: 403, body: '{"error":{"type":"INVALID_PERMISSIONS","message":"Field with id fldX cannot be updated"}}' });
+
+    const e = await a.get('/v0.3/x', 'app1').then(() => null, (err) => err);
+    assert.ok(e, 'the call rejects');
+    assert.equal(e.code, 'FIELD_FORBIDDEN');
+    assert.match(e.message, /cannot be updated/);
+    assert.equal(a.isSessionDead(), false, 'session NOT killed by a field-permission 403');
+    assert.equal(recovered, 0, 'no pointless re-auth on a permanent 403');
+  });
+
   it('a 401 latch records status 401', async () => {
     const a = stubbedAuth('direct-login');
     a._recoverSession = async () => {};

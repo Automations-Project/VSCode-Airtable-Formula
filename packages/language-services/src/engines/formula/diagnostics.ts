@@ -127,6 +127,37 @@ function isInsideExclusionRange(
   return ranges.some(range => position >= range.start && position < range.end);
 }
 
+// Spans of complete {…} field references, computed outside string literals (no nesting).
+// Field NAMES may legally contain apostrophes, parentheses, or smart quotes — e.g.
+// {Owner's List}, {1) First} — so the quote/paren/smart-quote checkers must not look
+// inside a field reference. An unclosed '{' produces no range here; checkBrackets
+// still reports it.
+function getFieldRefRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  let inString = false;
+  let stringChar = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === stringChar) inString = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      continue;
+    }
+    if (ch === '{') {
+      const close = text.indexOf('}', i + 1);
+      if (close === -1) break;
+      ranges.push({ start: i, end: close + 1 });
+      i = close;
+    }
+  }
+  return ranges;
+}
+
 // ---------------------------------------------------------------------------
 // findClosestFunction helper
 // ---------------------------------------------------------------------------
@@ -187,10 +218,14 @@ function checkComments(text: string): LsDiagnostic[] {
 function checkParentheses(text: string, uri?: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const stack: Array<{ char: string; pos: number }> = [];
+  const fieldRefRanges = getFieldRefRanges(text);
   let insideString = false;
   let stringChar = '';
 
   for (let i = 0; i < text.length; i++) {
+    // Field names may contain parens/quotes — never inspect a {…} ref body
+    if (isInsideExclusionRange(i, fieldRefRanges)) continue;
+
     // Track string context to avoid false positives inside strings
     if (
       (text[i] === '"' || text[i] === "'") &&
@@ -260,10 +295,16 @@ function checkParentheses(text: string, uri?: string): LsDiagnostic[] {
 function checkBrackets(text: string, uri?: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const stack: Array<{ char: string; pos: number }> = [];
+  const fieldRefRanges = getFieldRefRanges(text);
   let insideString = false;
   let stringChar = '';
 
   for (let i = 0; i < text.length; i++) {
+    // Skip the INTERIOR of complete {…} refs (a quote in a field name must not flip
+    // string state) but still see the braces themselves so balance-checking works.
+    const interior = fieldRefRanges.some(r => i > r.start && i < r.end - 1);
+    if (interior) continue;
+
     if (
       (text[i] === '"' || text[i] === "'") &&
       (i === 0 || text[i - 1] !== '\\')
@@ -331,12 +372,16 @@ function checkBrackets(text: string, uri?: string): LsDiagnostic[] {
 
 function checkQuotes(text: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
+  const fieldRefRanges = getFieldRefRanges(text);
   let inSingleQuote = false;
   let inDoubleQuote = false;
   let singleQuoteStart = -1;
   let doubleQuoteStart = -1;
 
   for (let i = 0; i < text.length; i++) {
+    // Field names may contain quotes — never inspect a {…} ref body
+    if (isInsideExclusionRange(i, fieldRefRanges)) continue;
+
     // Skip escaped quotes
     if (i > 0 && text[i - 1] === '\\') continue;
 
@@ -446,10 +491,17 @@ function checkFunctions(text: string): LsDiagnostic[] {
 
 function checkSmartQuotes(text: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
+  // A smart quote inside a {…} field ref is part of the field's NAME (common via
+  // Airtable UI autocorrect) — "fixing" it would rename the ref to a dangling one.
+  const fieldRefRanges = getFieldRefRanges(text);
 
   for (const [smartQuote, replacement] of Object.entries(SMART_QUOTES)) {
     let index = text.indexOf(smartQuote);
     while (index !== -1) {
+      if (isInsideExclusionRange(index, fieldRefRanges)) {
+        index = text.indexOf(smartQuote, index + 1);
+        continue;
+      }
       diagnostics.push({
         range: makeRange(text, index, index + 1),
         message: `Smart quote detected. Replace with straight quote: ${replacement}`,

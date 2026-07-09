@@ -330,7 +330,7 @@ Bulk formula workflow for Airtable base **{appId}**.
 
 2. Display all formulas grouped by table. Flag any that:
    - Are empty or very short (possibly broken)
-   - Reference \`{column_value_fldXXX}\` placeholder IDs instead of readable field names (means the formula was stored internally and never had its field refs resolved)
+   - Reference \`{fldXXX}\` or \`{column_value_fldXXX}\` IDs instead of readable field names (a \`{fldXXX}\` ref means the field id could not be resolved to a name — likely a dangling reference to a deleted field; \`column_value_\` refs only appear in files downloaded before the ref-resolution fix)
    - Have mismatched parentheses
 
 3. Ask the user which formulas they want to fix.`,

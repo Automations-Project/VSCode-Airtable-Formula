@@ -643,7 +643,25 @@ export async function startDaemonServer(options = {}) {
         return renderPrompt(name, args ?? {});
       });
 
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      // Stateless (new Server per request) — nothing is ever streamed mid-call, so answer
+      // POSTs with plain application/json instead of an SSE stream.
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+
+      // Postel shim: the SDK 406s any client whose Accept header doesn't list BOTH
+      // application/json and text/event-stream. Responses here are plain JSON
+      // (enableJsonResponse above), so upgrade lenient clients (curl, n8n HTTP nodes,
+      // hand-rolled fetch) instead of failing their call with a cryptic 406.
+      const accept = String(req.headers.accept || '');
+      if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
+        const upgraded = 'application/json, text/event-stream';
+        req.headers.accept = upgraded;
+        // The SDK builds its web-standard Request from rawHeaders, not req.headers.
+        const raw = req.rawHeaders;
+        for (let i = raw.length - 2; i >= 0; i -= 2) {
+          if (String(raw[i]).toLowerCase() === 'accept') raw.splice(i, 2);
+        }
+        raw.push('Accept', upgraded);
+      }
 
       let cleanedUp = false;
       const cleanup = async () => {

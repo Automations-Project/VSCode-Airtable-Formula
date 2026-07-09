@@ -6,6 +6,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Formula round-trip + daemon upload fixes (2026-07-09)
+
+#### Fixed
+- **MCP server — formula downloads emit real field names.** `download_base_formulas` / `download_formula_field` used to write Airtable's internal `{column_value_fldXXX}` refs verbatim — unreadable, and rejected by Airtable on re-upload ("Unknown field names"). Refs are now resolved to `{Field Name}` (native syntax); unknown ids fall back to `{fldXXX}`, which the API accepts. Non-field placeholders (`{FOO_PLACEHOLDER}`) pass through untouched.
+- **MCP server — formula writes normalize legacy refs.** All formula write paths (`create_formula_field`, `update_formula_field`, `update_field_config`, `validate_formula`) convert `{column_value_fldXXX}` → `{fldXXX}` before sending, so previously-downloaded files round-trip without manual rewriting.
+- **Extension — "Upload formula" no longer fails with HTTP 406.** The right-click upload/download commands' daemon HTTP client now sends the MCP-spec-required `Accept: application/json, text/event-stream` header, and parses both JSON and SSE-framed responses (older daemons). The daemon side now answers stateless `/mcp` POSTs as plain JSON (`enableJsonResponse`).
+- **MCP server — `list_fields` lightweight by default**: returns `{ id, name, type }`; full `typeOptions` is opt-in via `includeOptions: true` (previously ~350K chars on a wide table). The installed AI-skill template and `server.json` tool listing were updated to match.
+- **Language services — field names with special characters no longer produce false errors.** With downloads now emitting real `{Field Name}` refs, names containing apostrophes (`{Owner's List}`), parentheses (`{Total (USD)}`), or smart quotes (`{Owner’s List}`, common via Airtable UI autocorrect) used to trigger spurious `Unclosed quote` / `Missing closing parenthesis` / `Smart quote` Errors in the `.formula` editor — and the smart-quote quick fix would rename the ref into a dangling reference. The paren/bracket/quote/smart-quote checkers now skip `{…}` field-ref bodies (real errors outside refs still report; an unclosed `{` still reports).
+
 ### MCP server — sync_base schema-orphan deletion under mirror (2026-06-21)
 
 #### Added

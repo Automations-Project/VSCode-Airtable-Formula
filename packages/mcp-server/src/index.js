@@ -97,6 +97,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import path from 'path';
 import { stripHeader } from './formula-header.js';
+import { formulaRefsToNames, buildFieldNameMap } from './formula-refs.js';
 import { uploadAttachmentsByUrl } from './attachments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -163,6 +164,22 @@ function err(message) {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
 
+// Cap the `warnings` array on a sync result so the mode=status response stays inside the MCP window
+// (a view-heavy apply can emit thousands of warnings — the reported 608K-char / truncated blob). The
+// FULL warnings always persist in the on-disk job file; verbose:true returns them inline. Returns a
+// projection: first `cap` warnings + a `warningCount` + `warningsOmitted` pointer, or the original
+// object when small / verbose / not a warnings-bearing result.
+function leanSyncResult(result, verbose, cap = 25) {
+  if (!result || typeof result !== 'object' || !Array.isArray(result.warnings)) return result ?? null;
+  if (verbose || result.warnings.length <= cap) return result;
+  return {
+    ...result,
+    warnings: result.warnings.slice(0, cap),
+    warningCount: result.warnings.length,
+    warningsOmitted: result.warnings.length - cap,
+  };
+}
+
 // ─── Tool Definitions ─────────────────────────────────────────
 
 const debugProp = {
@@ -214,7 +231,7 @@ const TOOLS = [
   },
   {
     name: 'list_fields',
-    description: 'List fields in a table — returns id, name, type, and typeOptions per field. Use instead of `get_table_schema` when you need fields only (no view data). Use `fieldType` or `nameContains` filters on large tables to reduce context size. Returns [{ id, name, type, typeOptions }].',
+    description: 'List fields in a table — returns id, name, and type per field (lightweight by default). Use instead of `get_table_schema` when you need fields only (no view data). Set includeOptions=true to also return each field\'s full typeOptions (can be very large on wide tables — prefer the default for name/id/type lookups). Use `fieldType` or `nameContains` filters on large tables to reduce context size. Returns [{ id, name, type, typeOptions? }].',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -223,6 +240,7 @@ const TOOLS = [
         tableIdOrName: { type: 'string', description: 'The table ID (tblXXX) or exact name' },
         fieldType: { type: 'string', description: 'Return only fields of this type, e.g. "formula", "text", "number", "checkbox"' },
         nameContains: { type: 'string', description: 'Return only fields whose name contains this substring (case-insensitive)' },
+        includeOptions: { type: 'boolean', description: 'Include full typeOptions per field (default false — the payload can exceed the MCP response window on wide tables)' },
         debug: debugProp,
       },
       required: ['appId', 'tableIdOrName'],
@@ -572,7 +590,7 @@ SELECT CHOICES:
   },
   {
     name: 'download_formula_field',
-    description: 'Download the formula text of a formula field to a local file. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
+    description: 'Download the formula text of a formula field to a local file. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so the file is readable and can be uploaded back unchanged. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -587,7 +605,7 @@ SELECT CHOICES:
   },
   {
     name: 'download_base_formulas',
-    description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
+    description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so files are readable and upload back unchanged. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1726,13 +1744,15 @@ const handlers = {
     return ok(summary, table, debug);
   },
 
-  async list_fields({ appId, tableIdOrName, fieldType, nameContains, debug }) {
+  async list_fields({ appId, tableIdOrName, fieldType, nameContains, includeOptions, debug }) {
     const table = await client.resolveTable(appId, tableIdOrName);
+    // typeOptions is opt-in: full options for every field can run to hundreds of KB on a
+    // wide table (formula dependency graphs, select choice maps) and blow the MCP window.
     let fields = (table.columns || table.fields || []).map(f => ({
       id: f.id,
       name: f.name,
       type: f.type,
-      typeOptions: f.typeOptions,
+      ...(includeOptions ? { typeOptions: f.typeOptions } : {}),
     }));
     if (fieldType) fields = fields.filter(f => f.type === fieldType);
     if (nameContains) {
@@ -1905,12 +1925,16 @@ const handlers = {
     }
     // Live Airtable internal API stores formula text under typeOptions.formulaTextParsed.
     // typeOptions.formulaText is the historical key kept as a fallback.
-    // Note: formulaTextParsed encodes field refs as {column_value_fldXXX} placeholders.
-    const formulaText = foundField.typeOptions?.formulaTextParsed
-      || foundField.typeOptions?.formulaText
-      || foundField.typeOptions?.formula
-      || foundField.formula
-      || '';
+    // formulaTextParsed encodes field refs as {column_value_fldXXX} placeholders — resolve
+    // them to real field names so the file is readable and round-trips through upload.
+    const formulaText = formulaRefsToNames(
+      foundField.typeOptions?.formulaTextParsed
+        || foundField.typeOptions?.formulaText
+        || foundField.typeOptions?.formula
+        || foundField.formula
+        || '',
+      buildFieldNameMap(tables),
+    );
     const fieldName = foundField.name ?? fieldId;
     const description = foundField.description ?? '';
     const resultType = foundField.typeOptions?.resultType ?? '';
@@ -1932,6 +1956,7 @@ const handlers = {
     const baseDir = outputDir || process.cwd();
     const raw = await client.getApplicationData(appId);
     const tables = raw?.data?.tableSchemas || raw?.data?.tables || [];
+    const fldNames = buildFieldNameMap(tables);
     const written = [];
 
     for (const table of tables) {
@@ -1944,11 +1969,14 @@ const handlers = {
       await mkdir(tableDir, { recursive: true });
 
       for (const field of formulaFields) {
-        const formulaText = field.typeOptions?.formulaTextParsed
-          || field.typeOptions?.formulaText
-          || field.typeOptions?.formula
-          || field.formula
-          || '';
+        const formulaText = formulaRefsToNames(
+          field.typeOptions?.formulaTextParsed
+            || field.typeOptions?.formulaText
+            || field.typeOptions?.formula
+            || field.formula
+            || '',
+          fldNames,
+        );
         const fieldName = field.name ?? field.id;
         const description = field.description ?? '';
         const resultType = field.typeOptions?.resultType ?? '';
@@ -2509,15 +2537,20 @@ const handlers = {
       // caller actually needs and are placed BEFORE planDigest, so that if the response is still
       // truncated (e.g. a verbose planDigest.machine on a view-heavy base), it's the least-useful
       // field that gets cut, not these. (Object insertion order === JSON key order.)
+      // Cap the (potentially thousands-long) warnings arrays so the response fits the MCP window;
+      // the full results stay on disk in the job file (and return inline with verbose:true). `result`
+      // is the SAME lean object as recordsResult (kept for M2 back-compat), not a second full copy.
+      const leanSchema = leanSyncResult(s.schemaResult ?? null, verbose);
+      const leanRecords = leanSyncResult(s.recordsResult ?? null, verbose);
       return ok({
         planId,
         phase: s.phase,
         status: s.status,
         recordsMapped: s.recordsMapped,
         summary,
-        schemaResult: s.schemaResult ?? null,
-        recordsResult: s.recordsResult ?? null,
-        result: s.recordsResult ?? null,
+        schemaResult: leanSchema,
+        recordsResult: leanRecords,
+        result: leanRecords,
         planDigest: s.planDigest ?? null,
       }, s, debug);
     }

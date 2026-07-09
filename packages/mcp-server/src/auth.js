@@ -120,6 +120,10 @@ export class AirtableAuth {
     // network/page-eval failure afterward. Null while the session is alive.
     this._lastTripStatus = null;
     this._lastTripReason = null;
+    // A short, secrets-safe snippet of Airtable's response BODY at the trip — Airtable's 403/4xx JSON
+    // states the ACTUAL reason (permission / CSRF / rate / forbidden action), which a bare status code
+    // hides. Surfaced via getLastTrip() so a records-job abort tells us WHY, not just "403".
+    this._lastTripBody = null;
     this._sessionDeadAfter = Number(process.env.AIRTABLE_SESSION_DEAD_AFTER) || 8;
     this._rlSleep = (ms) => new Promise((r) => setTimeout(r, ms)); // injectable for tests
   }
@@ -130,6 +134,7 @@ export class AirtableAuth {
     this._recoveryStreak = 0;
     this._lastTripStatus = null;
     this._lastTripReason = null;
+    this._lastTripBody = null;
   }
 
   /** True once the circuit-breaker has latched (every subsequent _apiCall short-circuits). */
@@ -143,7 +148,18 @@ export class AirtableAuth {
    * (401) or a network/page-eval failure after the fact.
    */
   getLastTrip() {
-    return this._sessionDead ? { status: this._lastTripStatus, reason: this._lastTripReason } : null;
+    return this._sessionDead
+      ? { status: this._lastTripStatus, reason: this._lastTripReason, body: this._lastTripBody }
+      : null;
+  }
+
+  /** Capture a short, secrets-safe snippet of the response body that tripped the breaker. Airtable
+   *  error bodies are small JSON with the real reason; we keep ~300 chars and never log cookies. */
+  _captureTripBody(result) {
+    try {
+      const raw = typeof result?.body === 'string' ? result.body : '';
+      this._lastTripBody = raw ? raw.replace(/\s+/g, ' ').slice(0, 300) : null;
+    } catch { this._lastTripBody = null; }
   }
 
   // ─── Initialization ──────────────────────────────────────────
@@ -756,6 +772,18 @@ export class AirtableAuth {
         // the ~30s official penalty; intentional waits don't count against the work budget; the
         // dead-session circuit-breaker still bounds a throttle that never clears.
         if (result.status === 429 || result.status === 503 || result.status === 403) {
+          // A 403 whose body is a PERMANENT per-request permission/validation error — writing a
+          // COMPUTED field or a field the caller can't edit: `INVALID_PERMISSIONS` / "cannot be
+          // updated" — is NOT throttle and NOT a session death. It fails identically on every retry
+          // and on a fresh session, so throttling/re-auth is pointless and feeding it to the
+          // dead-session breaker wrongly aborts the WHOLE records job (the 5-session "403 during
+          // record sync" saga). Surface it as a distinct per-request error so the CALLER fails just
+          // that row/cell and continues; do NOT touch _recoveryStreak or latch _sessionDead.
+          if (result.status === 403 && /INVALID_PERMISSIONS|cannot be (updated|created)/i.test(result.body || '')) {
+            const e = new Error(`FIELD_FORBIDDEN (403): ${String(result.body || '').replace(/\s+/g, ' ').slice(0, 300)}`);
+            e.code = 'FIELD_FORBIDDEN';
+            throw e;
+          }
           // Browser-free 403 escalation: 429/503 (and the FIRST 403, and ALL 403s
           // in browser mode) stay pure throttle. But a 403 that PERSISTS past its
           // one allowed throttle backoff in direct-login/byo mode is a dead/rotated
@@ -769,6 +797,7 @@ export class AirtableAuth {
               this._sessionDead = true;
               this._lastTripStatus = result.status;
               this._lastTripReason = 'auth-403-persist';
+              this._captureTripBody(result);
               throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive 403s that did not clear after re-authentication — the login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
             }
             console.error(`[auth] 403 persisted after backoff (${this._authMode}) — re-authenticating on the same session (streak ${this._recoveryStreak})...`);
@@ -781,6 +810,7 @@ export class AirtableAuth {
             this._sessionDead = true;
             this._lastTripStatus = result.status;
             this._lastTripReason = 'throttle';
+            this._captureTripBody(result);
             throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.`);
           }
           const delay = Math.min(30_000, 1000 * (2 ** rlAttempt)) + Math.floor(Math.random() * 500);
@@ -799,6 +829,7 @@ export class AirtableAuth {
             this._sessionDead = true;
             this._lastTripStatus = result.status;
             this._lastTripReason = result.error ? 'network' : 'auth-401';
+            this._captureTripBody(result);
             throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive auth failures (status=${result.status}) across recoveries — the Airtable login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
           }
           console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering... (streak ${this._recoveryStreak})`);
