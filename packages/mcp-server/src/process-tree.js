@@ -87,7 +87,7 @@ async function collectDescendantPids(rootPid, exec) {
  */
 export async function findProfileBrowserPids(
   userDataDir,
-  { platform = process.platform, exec = execFile } = {},
+  { platform = process.platform, exec = execFile, readProc } = {},
 ) {
   const marker = `--user-data-dir=${userDataDir}`;
 
@@ -133,17 +133,17 @@ export async function findProfileBrowserPids(
       return [];
     }
   }
-  return filterRootBrowserPids(pids, exec);
+  return filterRootBrowserPids(pids, exec, readProc);
 }
 
 /**
  * Drop Chromium helper processes (`--type=...`) so we only kill root browsers.
  * Linux: /proc/<pid>/cmdline. macOS/BSD: ps -p <pid> -o args=.
  */
-async function filterRootBrowserPids(pids, exec) {
+async function filterRootBrowserPids(pids, exec, readProc = readProcCmdline) {
   const roots = [];
   for (const pid of pids) {
-    const args = await readProcessArgs(pid, exec);
+    const args = await readProcessArgs(pid, exec, readProc);
     if (!args) continue;
     if (args.includes('--type=')) continue;
     roots.push(pid);
@@ -151,14 +151,22 @@ async function filterRootBrowserPids(pids, exec) {
   return roots;
 }
 
-async function readProcessArgs(pid, exec) {
-  // Prefer /proc on Linux (no shell).
+// Default /proc reader (Linux fast-path, no shell). Returns the space-joined cmdline (may be '' for
+// a kernel thread), or null when /proc is unavailable (not Linux / pid gone) so the caller falls
+// back to `ps`. Injectable so tests can bypass the runner's REAL /proc (whose low PIDs 55/66/77 are
+// kernel threads with empty cmdlines — that made the mocked `ps` path unreachable and the test fail
+// only on Linux CI).
+function readProcCmdline(pid) {
   try {
-    const raw = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-    return raw.replace(/\0/g, ' ');
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
   } catch {
-    // not Linux or pid gone
+    return null;
   }
+}
+
+async function readProcessArgs(pid, exec, readProc = readProcCmdline) {
+  const fromProc = readProc(pid);
+  if (fromProc != null) return fromProc;
   try {
     const { stdout } = await exec('ps', ['-p', String(pid), '-o', 'args='], { timeout: 5_000 });
     return String(stdout || '');

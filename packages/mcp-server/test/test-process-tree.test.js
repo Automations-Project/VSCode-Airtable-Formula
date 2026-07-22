@@ -75,6 +75,9 @@ describe("findProfileBrowserPids", () => {
     const pids = await findProfileBrowserPids("/home/u/.chrome-profile", {
       platform: "linux",
       exec: (f, a, o) => s.exec(f, a, o),
+      // Force the mocked `ps` path: on real Linux CI, /proc/55|66|77/cmdline are kernel threads
+      // with EMPTY cmdlines, which would bypass the mock and make this test fail only on Linux.
+      readProc: () => null,
     });
     assert.deepEqual(pids, [55]);
     assert.equal(s.calls[0].file, "pgrep");

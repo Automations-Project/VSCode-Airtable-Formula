@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { matchByName, saveIdmap, loadIdmap, syncDir, saveDiff, loadDiff, latestDiffId } from '../../src/sync/idmap.js';
 
@@ -81,6 +81,11 @@ describe('idmap diff I/O', () => {
   it('latestDiffId returns the id of the most recently saved diff', () => {
     process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'sync-diff-test-'));
     saveDiff(SRC, DEST, { diffId: 'd1', tables: [] });
+    // Coarse FS mtime resolution (Windows/NTFS) stamps two same-tick writes identically, so
+    // latestDiffId's mtime compare can't tell d2 from d1. Backdate d1 so d2 is unambiguously
+    // newer — mirrors production, where diffs are saved seconds/minutes apart.
+    const past = new Date(Date.now() - 5000);
+    utimesSync(join(syncDir(SRC, DEST), 'diff-d1.json'), past, past);
     assert.equal(latestDiffId(SRC, DEST), 'd1');
     // Save a second diff later — it should win
     saveDiff(SRC, DEST, { diffId: 'd2', tables: ['x'] });
