@@ -256,7 +256,15 @@ function canonFilterSet(set, fldNames, selNames, strip, idmap) {
       out.push({ col: viewNameOf(fldNames, f.columnId), op: f.operator, val: typeof v === 'string' ? viewNameOf(selNames, v) : v });
       continue;
     }
-    const mappedVal = typeof f.value === 'string' ? viewNameOf(selNames, f.value) : f.value;
+    // Name-resolve select filter values so a source choice id and its dest counterpart canonicalize
+    // to the same NAME (convergent compare). Multi-value select filters (isAnyOf/isNoneOf) carry an
+    // ARRAY of per-base choice ids — map each element too, else the raw source ids never equal the
+    // remapped dest ids and the view perpetually re-flags as `filters` drift (never converges).
+    const mappedVal = typeof f.value === 'string'
+      ? viewNameOf(selNames, f.value)
+      : Array.isArray(f.value)
+        ? f.value.map((v) => (typeof v === 'string' ? viewNameOf(selNames, v) : v))
+        : f.value;
     const n = normEmptyPredicate(f.operator, mappedVal);
     out.push({ col: viewNameOf(fldNames, f.columnId), op: n.op, val: n.val });
   }

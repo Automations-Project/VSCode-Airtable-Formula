@@ -27,7 +27,6 @@ import { getHomeDir } from './paths.js';
 import {
   evictProfileSquatters,
   findProfileBrowserPids,
-  killProfileBrowserTree,
   terminateProcessTree,
 } from './process-tree.js';
 

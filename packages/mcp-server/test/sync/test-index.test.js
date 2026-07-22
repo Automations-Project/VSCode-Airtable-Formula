@@ -317,7 +317,6 @@ describe('sync index.apply — synchronous fieldMappings pre-flight (Task 8 Fix)
     }] } };
 
     let schemaMutationCount = 0;
-    let backgroundJobLaunched = false;
 
     const client = {
       getApplicationData: async (appId) => (appId === 'appSSSSSSSSSSSSSS' ? srcSchema : destSchema),

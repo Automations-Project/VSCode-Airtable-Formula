@@ -419,8 +419,13 @@ export async function startDaemonServer(options = {}) {
     try {
       if (auth) await auth.close().catch(() => {});
     } finally {
-      auth = undefined;
-      client = undefined;
+      // Only drop LAZILY-created instances. A shared host auth/client (options.auth —
+      // the pageBusy fix) MUST keep its reference so MCP tools, /daemon/health pageBusy,
+      // and idle-park all stay on ONE PageScheduler. Nulling it would spawn a SECOND
+      // AirtableAuth on the next getClient()/session-health call — the dual-auth bug this
+      // workstream fixes. close() above already freed the browser; the next call re-inits
+      // the SAME shared instance (which re-arms the idle-park busy listener in _doInit).
+      if (!options.auth) { auth = undefined; client = undefined; }
       clientInitPromise = null;
     }
     res.json({ ok: true });

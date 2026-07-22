@@ -7,7 +7,7 @@ import { renderPlan, renderApplyResult, renderDiff } from './report.js';
 import { applyPlan } from './apply.js';
 import { newJournal, loadJournal, saveJournal } from './journal.js';
 import { applyRecords as applyRecordsImpl, reconcile as reconcileImpl, writeRecordsJobStatus, readRecordsJobStatus } from './records.js';
-import { validateFieldMappings, isDeleting } from './policy.js';
+import { validateFieldMappings } from './policy.js';
 import { pruneSchema } from './prune-schema.js';
 import { acquireApplyLock } from './apply-lock.js';
 import { writeSyncJobStatus, readSyncJobStatus } from './job-status.js';
@@ -325,6 +325,15 @@ export function planJob({ client, sourceBaseId, destBaseId, planId, direction, f
  */
 export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys }) {
   const startedAt = runStartedAt || new Date().toISOString();
+  // Don't clobber a job already running for this planId. readSyncJobStatus downgrades a
+  // running-phase-with-dead-pid to 'failed', so a live 'planning'/'schema'/'records' phase here means a
+  // genuine in-flight job — re-report it as running instead of overwriting its status file and then
+  // failing its own apply() with APPLY_LOCKED (which would misreport the live job as failed and leave
+  // a contradictory 'done'+error terminal record). A prior 'failed'/'done' file falls through to resume.
+  const existingJob = readSyncJobStatus(sourceBaseId, destBaseId, planId);
+  if (existingJob && (existingJob.phase === 'planning' || existingJob.phase === 'schema' || existingJob.phase === 'records')) {
+    return { jobId: planId, status: 'running' };
+  }
   writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'schema', startedAt });
 
   const onPhase = (event, payload = {}) => {

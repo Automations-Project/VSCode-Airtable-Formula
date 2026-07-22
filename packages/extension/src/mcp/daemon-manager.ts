@@ -327,15 +327,17 @@ export class DaemonManager implements vscode.Disposable {
    * Kill orphaned airtable-mcp daemons and stray profile-holding Chromes by
    * scanning command lines — independent of the lockfile. Best-effort.
    *
-   * ponytail: matches by `.chrome-profile` / `index.mjs … daemon start` across
-   * the whole user session, so it also nukes daemons from other installs that
-   * share ~/.airtable-user-mcp. That's the intent of a "force stop".
+   * ponytail: matches by our own `~/.airtable-user-mcp/.chrome-profile` path /
+   * `index.mjs … daemon start`, so it still nukes daemons+Chromes from other installs
+   * that share ~/.airtable-user-mcp (the intent of a "force stop"), but the profile
+   * filter is scoped to our unique config-dir fragment so it can NEVER kill an
+   * unrelated app's Chrome that merely happens to have `.chrome-profile` in its args.
    */
   private _sweepOrphans(): number {
     const pids = new Set<number>();
     try {
       if (process.platform === 'win32') {
-        for (const filter of ["CommandLine like '%.chrome-profile%'", "CommandLine like '%index.mjs%daemon%start%'"]) {
+        for (const filter of ["CommandLine like '%.airtable-user-mcp%.chrome-profile%'", "CommandLine like '%index.mjs%daemon%start%'"]) {
           try {
             const out = execFileSync('wmic', ['process', 'where', filter, 'get', 'ProcessId', '/format:list'], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
             for (const pid of this._parsePids(out)) if (pid !== process.pid) pids.add(pid);
@@ -347,7 +349,7 @@ export class DaemonManager implements vscode.Disposable {
         return pids.size;
       }
       // POSIX: pkill kills directly; we can't easily count, so report 0.
-      for (const pat of ['\\.chrome-profile', 'index\\.mjs.*daemon.*start']) {
+      for (const pat of ['\\.airtable-user-mcp.*\\.chrome-profile', 'index\\.mjs.*daemon.*start']) {
         try { execFileSync('pkill', ['-9', '-f', pat], { stdio: 'ignore', timeout: 5000 }); } catch { /* none matched */ }
       }
       return 0;

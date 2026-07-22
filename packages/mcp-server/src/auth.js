@@ -92,10 +92,8 @@ export class AirtableAuth {
     this._idleParkMs = options.idleParkMs !== undefined ? options.idleParkMs : resolveIdleParkMs();
     this._parkTimer = null;
     this._killBrowserTree = options.killBrowserTree || killProfileBrowserTree;
-    this._unsubBusy = this._scheduler.onBusyChange((state) => {
-      if (state.busy) this.cancelIdlePark();
-      else this.scheduleIdlePark();
-    });
+    this._unsubBusy = null;
+    this._subscribeBusy();
 
     // Per-app secretSocketId cache (captured from network traffic).
     // LRU-bounded so long-running servers with many bases don't grow this
@@ -219,7 +217,15 @@ export class AirtableAuth {
     let timer;
     let timedOut = false;
     const inner = this._doInit();
-    inner.then(() => { if (timedOut) this.context?.close?.().catch(() => {}); }, () => {});
+    // If the (timed-out) launch later settles, close any context it produced so we don't leak a
+    // Chromium onto the contended profile. Null-safe: a byo/direct-login init or an errored launch
+    // leaves this.context undefined — the old `this.context?.close?.().catch()` NPE'd on `.catch`
+    // of undefined when the late handler fired with no context.
+    inner.then(() => {
+      if (!timedOut) return;
+      const c = this.context;
+      if (c) Promise.resolve(c.close()).catch(() => {});
+    }, () => {});
     try {
       return await Promise.race([
         inner,
@@ -302,6 +308,9 @@ export class AirtableAuth {
       trace('auth', 'auth:csrf_captured', {
         success: !!this.csrfToken,
       });
+      // Re-arm the idle-park busy listener in case a prior close()
+      // (release-browser / non-shutdown close) unsubscribed it. Idempotent.
+      this._subscribeBusy();
       // Start the idle-park clock: a daemon that inits and then never gets a
       // tool call would otherwise hold Chromium forever (busy events only fire
       // on scheduled work).
@@ -647,6 +656,20 @@ export class AirtableAuth {
 
   onBusyChange(listener) {
     return this._scheduler.onBusyChange(listener);
+  }
+
+  // Idempotent subscribe to scheduler busy events that arm/cancel idle-park.
+  // Called from the constructor AND at the end of a successful browser _doInit,
+  // so that a prior close() (which unsubscribes for full teardown — e.g.
+  // /daemon/release-browser) does NOT leave the browser resident forever: the
+  // next init re-arms the listener. Guarded so a plain recovery re-init (listener
+  // still live) never double-subscribes and leaks a handler.
+  _subscribeBusy() {
+    if (this._unsubBusy) return;
+    this._unsubBusy = this._scheduler.onBusyChange((state) => {
+      if (state.busy) this.cancelIdlePark();
+      else this.scheduleIdlePark();
+    });
   }
 
   scheduleIdlePark() {

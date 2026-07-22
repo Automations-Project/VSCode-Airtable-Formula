@@ -10,7 +10,6 @@ import { saveIdmap } from '../../src/sync/idmap.js';
 const tbl = (name, fields, records) => ({ id: 't' + name, name, fields, records });
 const fld = (id, name, type = 'text') => ({ id, name, type });
 const rec = (id, cells) => ({ id, cellValuesByColumnId: cells });
-const fresh = () => ({ matched: 0, warnings: [], idmap: undefined });
 
 function setup(srcRecs, dstRecs, idmapRecords = {}) {
   const src = { tables: [tbl('Customers', [fld('sEmail', 'Email')], srcRecs)] };

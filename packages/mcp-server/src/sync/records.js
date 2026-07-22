@@ -14,7 +14,7 @@
 
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue, isWritableForRecords, ARRAY_CELL_TYPES } from './cells.js';
+import { coercePass1Cell, partitionLinkValue, linkRecId, coerceMappedValue, ARRAY_CELL_TYPES } from './cells.js';
 import { resolvePolicy, validateFieldMappings } from './policy.js';
 import { withRetry, createLimiter } from './ratelimit.js';
 import { remapViewConfig, collectFilterRecordRefs } from './remap.js';
@@ -115,7 +115,7 @@ const makeGate = (limiter) => (fn) => limiter.run(() => withRetry(fn));
  */
 function sessionDied(client, err) {
   if (client?.auth?.isSessionDead?.() === true) return true;
-  return !!err && /SESSION_INVALID/.test(String(err && err.message ? err.message : err));
+  return !!err && /SESSION_INVALID/.test(String(err.message ? err.message : err));
 }
 
 /**
@@ -187,7 +187,7 @@ function arrayChoiceIds(val) {
  *
  * @returns {{ columnId: string, desiredIds: string[], currentIds: string[], srcFieldId: string, type: string }[]}
  */
-export function collectArrayChoiceUpdates(srcFields, srcCells, destCells, idmap) {
+export function collectArrayChoiceUpdates(srcFields, srcCells, destCells, idmap, warnings = null, srcRecId = '') {
   const ops = [];
   if (!destCells) return ops;
   for (const field of srcFields) {
@@ -199,9 +199,17 @@ export function collectArrayChoiceUpdates(srcFields, srcCells, destCells, idmap)
     if (isMultiSelect(field.type)) {
       const cm = mapping.choices || {};
       const srcIds = arrayChoiceIds(srcVal);
-      // Unmappable choices → skip op (same as create path skip); caller may warn.
+      // Unmappable choices → skip op. Mirror the CREATE path (buildCreateCells), which
+      // emits RECORD_CELL_SKIPPED — otherwise a stale multiSelect on an EXISTING dest row
+      // fails silently and never converges on re-sync (hard to diagnose).
       const mapped = srcIds.map((s) => cm[s]).filter(Boolean);
-      if (mapped.length !== srcIds.length) continue;
+      if (mapped.length !== srcIds.length) {
+        warnings?.push({
+          code: 'RECORD_CELL_SKIPPED',
+          message: `Record ${srcRecId}: field ${field.id} (${field.type}) choice could not be mapped to dest — multiSelect update skipped`,
+        });
+        continue;
+      }
       desired = mapped;
     } else {
       desired = arrayChoiceIds(srcVal);
@@ -591,11 +599,15 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
         createRows.push({ cellValuesByColumnId: cells, sourceKey: rec.id, linkCells });
       } else {
         // UPDATE path — primitives via updateRecords; multiSelect via setArrayChoiceCell
-        if (conflicts === 'dest-wins') continue; // preserve dest edits: skip the overwrite
+        // preserve dest edits: skip the overwrite. Count it as skipped (like overlay's no-op path
+        // below) so a preserve/dest-wins re-sync of mostly-mapped rows never trips the
+        // RECORDS_ALL_FAILED gate (created==0 && updated==0 && skipped==0 && failed>0) and falsely
+        // aborts a healthy run just because a few NEW-record creates failed.
+        if (conflicts === 'dest-wins') { result.skipped++; continue; }
         const destCells = destCellsById.get(destRecId);
         const cells = buildUpdateCells(srcTable.fields, srcCells, destCells, idmap, result.warnings, rec.id, destComputedFldIds);
         injectFieldMappings(cells, tableMappings, srcCells);
-        const arrayOps = collectArrayChoiceUpdates(srcTable.fields, srcCells, destCells, idmap);
+        const arrayOps = collectArrayChoiceUpdates(srcTable.fields, srcCells, destCells, idmap, result.warnings, rec.id);
         if (arrayOps.length > 0) {
           arrayChoiceRows.push({ rowId: destRecId, srcRecId: rec.id, ops: arrayOps });
         }
@@ -775,13 +787,18 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
 
       for (const field of linkFields) {
         const srcVal = srcCells[field.id];
-        if (!srcVal || (Array.isArray(srcVal) && srcVal.length === 0)) continue;
 
         const mapping = idmap.fields[field.id];
         const destFldId = mapping.destFld;
 
-        // Partition: resolved → dest rec ids; unresolved → src rec ids with no mapping
+        // Partition: resolved → dest rec ids; unresolved → src rec ids with no mapping.
+        // (An empty/cleared source cell → resolved=[] and unresolved=[]; still evaluated
+        // below so dest-extra links are surfaced under source-wins.)
         const { resolved, unresolved } = partitionLinkValue(srcVal, idmap);
+
+        // Current dest link membership (string- or object-shaped elements).
+        const currentLinks = destCells[destFldId];
+        const currentLinkIds = (Array.isArray(currentLinks) ? currentLinks : []).map(linkRecId).filter(Boolean);
 
         // Warn for unresolved (one warning per field+record, count in message)
         if (unresolved.length > 0) {
@@ -791,12 +808,25 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
           });
         }
 
+        // Mirror/overlay (source-wins) promises dest link membership converges to source, but
+        // Pass 2 only ADDS missing links — dest-extra links are never removed (link removal is a
+        // deferred follow-up, same class as attachment-strip). Surface the gap so mirror users
+        // aren't misled that links fully converged. Only trustworthy when every source link
+        // resolved (otherwise an "extra" dest link may correspond to an unresolved source link).
+        if (conflicts === 'source-wins' && unresolved.length === 0) {
+          const desired = new Set(resolved);
+          const extra = currentLinkIds.filter((id) => !desired.has(id));
+          if (extra.length > 0) {
+            result.warnings.push({
+              code: 'LINK_REMOVE_DEFERRED',
+              message: `Record ${rec.id} field ${field.id} → dest row ${destRowId}: ${extra.length} dest-only link(s) not removed (link removal is deferred; dest not fully mirrored)`,
+            });
+          }
+        }
+
         if (resolved.length === 0) continue;
 
-        // Dedup against current dest links
-        // Map link-cell elements through linkRecId to handle both string and object shapes
-        const currentLinks = destCells[destFldId];
-        const currentLinkIds = (Array.isArray(currentLinks) ? currentLinks : []).map(linkRecId).filter(Boolean);
+        // Dedup against current dest links (only ADD ids not already present).
         const alreadyPresent = new Set(currentLinkIds);
         const toAdd = resolved.filter((id) => !alreadyPresent.has(id));
         if (toAdd.length === 0) continue;
@@ -1027,6 +1057,33 @@ export async function applyAttachments({
           return Array.isArray(cv) && cv.length > 0;
         });
         if (hasAtt) includedRecs.push({ rec, destRowId });
+      }
+
+      // Mirror/overlay (source-wins): a source row that CLEARED all its attachments is excluded
+      // from includedRecs, so its dest attachment cell is never touched. Attachment CLEARING is a
+      // deferred follow-up (like link removal), so surface the gap rather than silently reporting
+      // convergence. One warning per table with the count of dest cells left populated.
+      if (conflicts === 'source-wins') {
+        const destRecCells = new Map((destTable?.records || []).map((r) => [r.id, r.cellValuesByColumnId || {}]));
+        let clearCount = 0;
+        for (const rec of (srcTable.records || [])) {
+          const destRowId = idmap.records[rec.id];
+          if (!destRowId) continue;
+          const sCells = rec.cellValuesByColumnId || {};
+          const dCells = destRecCells.get(destRowId) || {};
+          for (const f of attFields) {
+            const sv = sCells[f.id];
+            const srcEmpty = !Array.isArray(sv) || sv.length === 0;
+            const dv = dCells[idmap.fields[f.id].destFld];
+            if (srcEmpty && Array.isArray(dv) && dv.length > 0) clearCount++;
+          }
+        }
+        if (clearCount > 0) {
+          result.warnings.push({
+            code: 'ATTACHMENT_CLEAR_DEFERRED',
+            message: `Table ${srcTable.name}: ${clearCount} dest attachment cell(s) not cleared (source emptied them; attachment clearing is deferred — dest not fully mirrored)`,
+          });
+        }
       }
 
       if (includedRecs.length === 0) {

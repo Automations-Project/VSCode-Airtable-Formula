@@ -12,7 +12,7 @@ describe('MockClient', () => {
     assert.equal(t.columns[0].id, t.primaryColumnId);
     assert.equal(t.columns[0].name, 'Name');
     assert.equal(t.columns[0].type, 'text');
-    const { columnId } = await c.createField('appD', tableId, { name: 'Score', type: 'number' });
+    await c.createField('appD', tableId, { name: 'Score', type: 'number' });
     assert.equal((await c.getApplicationData('appD')).data.tableSchemas[0].columns.length, 7);
     const notes = t.columns.find((x) => x.name === 'Notes');
     await c.deleteField('appD', notes.id, 'Notes');

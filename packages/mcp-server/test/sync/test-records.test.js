@@ -83,13 +83,19 @@ describe('records.applyRecordsPass1', () => {
     assert.equal(result.created, 0);
   });
 
-  it('updates existing records for scalar+single-select and skips multiSelect with RECORD_ARRAY_UPDATE_DEFERRED warning', async () => {
+  it('updates existing records for scalar+single-select and converges multiSelect via setArrayChoiceCell', async () => {
     const updateCalls = [];
+    const arrayChoiceCalls = [];
     const client = {
       createRecords: async () => ({ created: [], failed: [] }),
       updateRecords: async (appId, tableId, rows) => {
         updateCalls.push({ tableId, rows });
         return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+      // multiSelect / multiCollaborator UPDATEs go through the add/remove-item API, never updateRecords.
+      setArrayChoiceCell: async (appId, rowId, columnId, desiredIds, opts) => {
+        arrayChoiceCalls.push({ rowId, columnId, desiredIds, currentIds: opts?.currentIds });
+        return { ok: true };
       },
     };
     const idmap = {
@@ -115,7 +121,10 @@ describe('records.applyRecordsPass1', () => {
         }],
       }],
     };
-    const destSnapshot = { tables: [{ id: 'tblD', name: 'T', fields: [] }] };
+    // Dest record holds a DIVERGED (empty) multiSelect → setArrayChoiceCell must converge it.
+    const destSnapshot = {
+      tables: [{ id: 'tblD', name: 'T', fields: [], records: [{ id: 'recD1', cellValuesByColumnId: { fldMSD: [] } }] }],
+    };
     const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
     await applyRecordsPass1({
       client,
@@ -126,28 +135,37 @@ describe('records.applyRecordsPass1', () => {
       result,
     });
     assert.equal(result.updated, 1);
-    // multiSelect should NOT appear in the updateRecords call (arrays not supported)
+    // multiSelect should NOT appear in the updateRecords call (arrays not supported by updatePrimitiveCell)
     assert.equal(updateCalls.length, 1);
     const sentCells = updateCalls[0].rows[0].cellValuesByColumnId;
     assert.ok('fldTD' in sentCells, 'scalar text should be sent');
     assert.ok('fldSelD' in sentCells, 'single-select should be sent');
     assert.ok(!('fldMSD' in sentCells), 'multiSelect must NOT be sent to updateRecords');
-    // Warning emitted for deferred multiSelect
-    assert.ok(
-      result.warnings.some((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED'),
-      'expected RECORD_ARRAY_UPDATE_DEFERRED warning',
+    // multiSelect converges through the add/remove-item API (no longer deferred)
+    assert.equal(arrayChoiceCalls.length, 1, 'multiSelect UPDATE goes through setArrayChoiceCell');
+    assert.equal(arrayChoiceCalls[0].columnId, 'fldMSD');
+    assert.deepEqual(arrayChoiceCalls[0].desiredIds, ['c1D', 'c2D'], 'choice ids remapped src→dest');
+    assert.equal(
+      result.warnings.filter((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED').length, 0,
+      'multiSelect UPDATE is no longer deferred',
     );
   });
 
-  it('defers multiCollaborator arrays on the UPDATE path (never sent to updateRecords)', async () => {
+  it('converges multiCollaborator via setArrayChoiceCell on the UPDATE path (never sent to updateRecords)', async () => {
     // updatePrimitiveCell cannot write arrays: an internal-typed 'multiCollaborator' cell in the
-    // payload would fail the cell POST and poison the rest of the row update.
+    // payload would fail the cell POST and poison the rest of the row update — so it converges via
+    // setArrayChoiceCell (collaborator usr ids pass through, Airtable-global).
     const updateCalls = [];
+    const arrayChoiceCalls = [];
     const client = {
       createRecords: async () => ({ created: [], failed: [] }),
       updateRecords: async (appId, tableId, rows) => {
         updateCalls.push({ rows });
         return { updated: rows.map((r) => r.rowId), failed: [] };
+      },
+      setArrayChoiceCell: async (appId, rowId, columnId, desiredIds) => {
+        arrayChoiceCalls.push({ rowId, columnId, desiredIds });
+        return { ok: true };
       },
     };
     const idmap = {
@@ -168,7 +186,10 @@ describe('records.applyRecordsPass1', () => {
         records: [{ id: 'recS1', cellValuesByColumnId: { fldT: 'hello', fldCol: ['usrA', 'usrB'] } }],
       }],
     };
-    const destSnapshot = { tables: [{ id: 'tblD', name: 'T', fields: [] }] };
+    // Dest record holds a diverged (empty) collaborator cell → setArrayChoiceCell converges it.
+    const destSnapshot = {
+      tables: [{ id: 'tblD', name: 'T', fields: [], records: [{ id: 'recD1', cellValuesByColumnId: { fldColD: [] } }] }],
+    };
     const result = { created: 0, updated: 0, skipped: 0, failed: 0, warnings: [] };
     await applyRecordsPass1({
       client, srcSnapshot, destSnapshot, idmap,
@@ -181,9 +202,12 @@ describe('records.applyRecordsPass1', () => {
     const sentCells = updateCalls[0].rows[0].cellValuesByColumnId;
     assert.ok('fldTD' in sentCells, 'scalar text should be sent');
     assert.ok(!('fldColD' in sentCells), 'multiCollaborator array must NOT be sent to updateRecords');
-    assert.ok(
-      result.warnings.some((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED'),
-      'expected RECORD_ARRAY_UPDATE_DEFERRED warning for the collaborator array',
+    assert.equal(arrayChoiceCalls.length, 1, 'collaborator UPDATE goes through setArrayChoiceCell');
+    assert.equal(arrayChoiceCalls[0].columnId, 'fldColD');
+    assert.deepEqual(arrayChoiceCalls[0].desiredIds, ['usrA', 'usrB'], 'collaborator usr ids pass through');
+    assert.equal(
+      result.warnings.filter((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED').length, 0,
+      'multiCollaborator UPDATE is no longer deferred',
     );
   });
 
@@ -233,7 +257,7 @@ describe('records.applyRecordsPass1', () => {
       result.warnings.filter((w) => w.code === 'RECORD_ARRAY_UPDATE_DEFERRED').length, 0,
       'converged multiSelect must not emit a deferral warning',
     );
-    // A truly diverged multiSelect must still warn (pinned by the earlier test with no dest record).
+    // A truly diverged multiSelect converges via setArrayChoiceCell (pinned by the earlier test).
   });
 
   it('propagates a cell cleared on source as an explicit null under source-wins', async () => {

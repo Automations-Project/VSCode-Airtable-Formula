@@ -10,8 +10,9 @@ const ARRAY_DEFERRED = new Set(['multipleRecordLinks', 'foreignKey', 'multipleAt
 
 // ALL array-shaped cell types, public + internal spellings. The Pass-1 UPDATE path
 // (`updateRecords` → per-cell `updatePrimitiveCell`) cannot write arrays, so buildUpdateCells
-// defers every member of this set (links/attachments to Pass 2/3; select/collaborator arrays
-// with a RECORD_ARRAY_UPDATE_DEFERRED warning). policy.js also builds its fieldMappings
+// omits every member of this set from the primitive batch: links/attachments go to Pass 2/3,
+// and multiSelect/collaborator arrays converge separately via collectArrayChoiceUpdates +
+// client.setArrayChoiceCell (add/remove item APIs). policy.js also builds its fieldMappings
 // array-type rejection from this set.
 export const ARRAY_CELL_TYPES = new Set([
   ...ARRAY_DEFERRED,
@@ -40,17 +41,29 @@ export function isWritableForRecords(field) {
 
 function choiceMap(field, idmap) { return (idmap.fields?.[field.id]?.choices) || {}; }
 
+// Extract a choice / collaborator id from a select-cell element: a plain id string, or an
+// object like { id } / { userId } / { foreignRowId }. Mirrors records.js `arrayChoiceIds` so the
+// CREATE path (here) and the UPDATE path (collectArrayChoiceUpdates) normalize choices identically
+// — otherwise object-shaped snapshot elements are skipped on CREATE but converge on UPDATE.
+function choiceElemId(e) {
+  if (typeof e === 'string') return e || null;
+  if (e && typeof e === 'object') return e.id ?? e.userId ?? e.foreignRowId ?? null;
+  return null;
+}
+
 export function coercePass1Cell(field, srcValue, idmap) {
   if (!isWritableForRecords(field)) return { write: false };
   if (srcValue == null) return { write: true, value: srcValue };
-  if (field.type === 'select') {
-    const d = choiceMap(field, idmap)[srcValue];
+  if (field.type === 'select' || field.type === 'singleSelect') {
+    const id = choiceElemId(srcValue);
+    const d = id == null ? undefined : choiceMap(field, idmap)[id];
     return d ? { write: true, value: d } : { write: false };
   }
-  if (field.type === 'multiSelect') {
+  if (field.type === 'multiSelect' || field.type === 'multipleSelects') {
     const cm = choiceMap(field, idmap);
-    const mapped = (Array.isArray(srcValue) ? srcValue : []).map((s) => cm[s]).filter(Boolean);
-    if (mapped.length !== (srcValue?.length ?? 0)) return { write: false }; // partial choice map → skip + report upstream
+    const ids = (Array.isArray(srcValue) ? srcValue : []).map(choiceElemId).filter((x) => x != null);
+    const mapped = ids.map((s) => cm[s]).filter(Boolean);
+    if (mapped.length !== ids.length) return { write: false }; // partial choice map → skip + report upstream
     return { write: true, value: mapped };
   }
   return { write: true, value: srcValue }; // text/number/currency/date/checkbox/...

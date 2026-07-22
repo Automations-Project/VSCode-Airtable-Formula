@@ -200,7 +200,7 @@ describe('applyRecords — end-to-end orchestration (mock client)', () => {
     };
     saveIdmap(SRC_APP, DEST_APP, preIdmap);
 
-    const { client, createCalls, addLinkCalls } = makeCombinedClient(SRC_APP, DEST_APP, srcData, destData);
+    const { client, addLinkCalls } = makeCombinedClient(SRC_APP, DEST_APP, srcData, destData);
 
     const result = await applyRecords({
       client,

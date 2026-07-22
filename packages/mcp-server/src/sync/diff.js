@@ -1,5 +1,5 @@
 import { canonicalizeViewConfig } from './remap.js';
-import { stableStringify, choiceNames, scalarTypeOptionsChanged, computedSig, fieldSignature, linkSig } from './field-compare.js';
+import { scalarTypeOptionsChanged, computedSig, fieldSignature, linkSig } from './field-compare.js';
 
 /**
  * Build a flat map of { fieldId → fieldName } across all tables in a snapshot.

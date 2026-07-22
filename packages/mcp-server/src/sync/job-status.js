@@ -55,6 +55,12 @@ export function writeSyncJobStatus(sourceBaseId, destBaseId, planId, status) {
   if (RUNNING_PHASES.has(body.phase)) {
     // Honor an explicitly-supplied pid (tests inject a dead one); otherwise stamp our own.
     if (status.pid == null) body.pid = process.pid;
+    // A resumed run reuses the same planId → same file. Clear any terminal residue from a prior
+    // FAILED/DONE attempt so a subsequent 'done' write can't merge-forward a stale error/errorCode/
+    // finishedAt and report a successful sync as done-with-an-error.
+    if (status.error === undefined) delete body.error;
+    if (status.errorCode === undefined) delete body.errorCode;
+    if (status.finishedAt === undefined) delete body.finishedAt;
   } else {
     delete body.pid;
   }
