@@ -46,6 +46,10 @@ describe('GET /daemon/health', () => {
     assert.strictEqual(body.ok, true);
     assert.strictEqual(body.pid, process.pid);
     assert.ok(typeof body.uptimeMs === 'number', 'uptimeMs should be a number');
+    // Phase 3: pageBusy snapshot is always present (idle when no auth yet).
+    assert.ok(body.pageBusy && typeof body.pageBusy === 'object');
+    assert.equal(typeof body.pageBusy.busy, 'boolean');
+    assert.equal(typeof body.pageBusy.queued, 'number');
   });
 
   it('returns 401 when Authorization header is missing', async () => {

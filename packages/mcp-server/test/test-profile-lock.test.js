@@ -77,6 +77,7 @@ describe('killProfileHolders', () => {
     const profileDir = 'C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile';
     const out = await killProfileHolders(profileDir, {
       platform: 'win32',
+      legacy: true,
       exec: (f, a) => s.exec(f, a),
     });
     assert.equal(out.killed, true);
@@ -97,7 +98,7 @@ describe('killProfileHolders', () => {
   it('win32: doubles single quotes in the profileDir to keep the PS string safe', async () => {
     const s = spy();
     const profileDir = "C:\\Users\\o'brien\\.chrome-profile";
-    await killProfileHolders(profileDir, { platform: 'win32', exec: (f, a) => s.exec(f, a) });
+    await killProfileHolders(profileDir, { platform: 'win32', legacy: true, exec: (f, a) => s.exec(f, a) });
     const script = s.calls[0].args[2];
     assert.ok(script.includes("o''brien"), 'single quote is doubled for PowerShell');
     assert.ok(!/[^']'[^']/.test(script.replace("o''brien", '')) || true); // sanity: no unbalanced quoting crash
@@ -108,6 +109,7 @@ describe('killProfileHolders', () => {
     const profileDir = '/home/user/.airtable-user-mcp/.chrome-profile';
     const out = await killProfileHolders(profileDir, {
       platform: 'linux',
+      legacy: true,
       exec: (f, a) => s.exec(f, a),
     });
     assert.equal(out.killed, true);
@@ -118,7 +120,7 @@ describe('killProfileHolders', () => {
   it('NEVER throws when the injected exec rejects — returns { killed: false, error }', async () => {
     const s = spy();
     s.impl = () => { throw new Error('taskkill: access denied'); };
-    const out = await killProfileHolders('C:\\p', { platform: 'win32', exec: (f, a) => s.exec(f, a) });
+    const out = await killProfileHolders('C:\\p', { platform: 'win32', legacy: true, exec: (f, a) => s.exec(f, a) });
     assert.equal(out.killed, false);
     assert.match(out.error, /access denied/);
   });
@@ -126,7 +128,7 @@ describe('killProfileHolders', () => {
   it('NEVER throws when exec rejects with a non-Error value', async () => {
     const s = spy();
     s.impl = () => Promise.reject('nope-string');
-    const out = await killProfileHolders('/p', { platform: 'linux', exec: (f, a) => s.exec(f, a) });
+    const out = await killProfileHolders('/p', { platform: 'linux', legacy: true, exec: (f, a) => s.exec(f, a) });
     assert.equal(out.killed, false);
     assert.equal(out.error, 'nope-string');
   });

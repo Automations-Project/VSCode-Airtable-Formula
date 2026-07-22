@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync, rmSync } from 'fs';
 import { spawn, execFileSync } from 'child_process';
+import { minutesToIdleParkMs } from '../settings.js';
 
 export interface DaemonStatus {
   running: boolean;
@@ -500,6 +501,10 @@ export class DaemonManager implements vscode.Disposable {
     const authMode = cfg.get<string>('mcp.authMode', 'browser');
     if (authMode && authMode !== 'browser') env.AIRTABLE_AUTH_MODE = authMode;
     if (cfg.get<string>('mcp.httpClient', 'fetch') === 'impit') env.AIRTABLE_HTTP_CLIENT = 'impit';
+    // Idle browser parking (minutes → ms). Always inject so the daemon matches
+    // the dashboard setting even at the default (30). 0 disables parking.
+    const idleMinutes = cfg.get<number>('mcp.browserIdleParkMinutes', 30);
+    env.AIRTABLE_BROWSER_IDLE_PARK_MS = String(minutesToIdleParkMs(idleMinutes));
     // NOTE: credentials are DELIBERATELY never injected into the daemon env —
     // they reach a running daemon only via the bearer-authed
     // /daemon/auth-credentials endpoint (see pushAuthCredentials).

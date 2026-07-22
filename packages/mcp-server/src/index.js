@@ -2697,34 +2697,37 @@ function _releaseToolSlot() {
   if (_inflightToolCalls > 0) _inflightToolCalls--;
 }
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  // Ambient tool label for PageScheduler busy-state (real MCP tool name).
+  return withToolDispatchContext(request, extra, async () => {
+    const { name, arguments: args } = request.params;
 
-  const handler = handlers[name];
-  if (!handler) {
-    return err(`Unknown tool: ${name}`);
-  }
+    const handler = handlers[name];
+    if (!handler) {
+      return err(`Unknown tool: ${name}`);
+    }
 
-  if (!toolConfig.isToolEnabled(name)) {
-    return err(
-      `Tool "${name}" is currently disabled. Active profile: "${toolConfig.activeProfile}". ` +
-      `Use manage_tools to change profile or re-enable this tool.`
-    );
-  }
+    if (!toolConfig.isToolEnabled(name)) {
+      return err(
+        `Tool "${name}" is currently disabled. Active profile: "${toolConfig.activeProfile}". ` +
+        `Use manage_tools to change profile or re-enable this tool.`
+      );
+    }
 
-  try {
-    await _acquireToolSlot();
-  } catch (slotErr) {
-    return err(slotErr.message);
-  }
-  const traced = traceToolHandler(name, handler);
-  try {
-    return await traced(args || {});
-  } catch (error) {
-    return err(`Error in ${name}: ${error.message}`);
-  } finally {
-    _releaseToolSlot();
-  }
+    try {
+      await _acquireToolSlot();
+    } catch (slotErr) {
+      return err(slotErr.message);
+    }
+    const traced = traceToolHandler(name, handler);
+    try {
+      return await traced(args || {});
+    } catch (error) {
+      return err(`Error in ${name}: ${error.message}`);
+    } finally {
+      _releaseToolSlot();
+    }
+  });
 });
 
 // ─── Prompt Handlers ─────────────────────────────────────────

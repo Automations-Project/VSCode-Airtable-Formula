@@ -17,6 +17,7 @@ import express from 'express';
 import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
+import { withToolDispatchContext } from '../page-scheduler.js';
 import { ensureToken, rotateToken, getTokenPath } from './token.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
@@ -348,6 +349,14 @@ export async function startDaemonServer(options = {}) {
     uptimeMs: Date.now() - startedAt,
     startedAt: new Date(startedAt).toISOString(),
     tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
+    // Shared page/auth pipeline busy snapshot (tool name when runInToolContext is set).
+    pageBusy: auth?.getBusyState?.() ?? {
+      busy: false,
+      active: null,
+      queued: 0,
+      delaying: false,
+      updatedAt: new Date().toISOString(),
+    },
   });
 
   app.get('/daemon/health', requireBearer, (_req, res) => {
@@ -631,11 +640,14 @@ export async function startDaemonServer(options = {}) {
       mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: options.getTools ? await options.getTools(toolConfig) : [],
       }));
-      mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+      mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         if (!options.callTool) {
           return { content: [{ type: 'text', text: 'Daemon not fully initialized' }], isError: true };
         }
-        return options.callTool(request, getClient, toolConfig);
+        // Ambient tool label for PageScheduler busy-state (real MCP tool name).
+        return withToolDispatchContext(request, extra, () =>
+          options.callTool(request, getClient, toolConfig),
+        );
       });
       mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: getPrompts() }));
       mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
@@ -706,6 +718,15 @@ export async function startDaemonServer(options = {}) {
     closed = true;
 
     try { toolConfig.stopWatching(); } catch { /* best-effort */ }
+
+    // Close shared browser + tree-kill orphan Chromium before lock release.
+    // Without this, Windows leaves chrome.exe holding the profile after stop.
+    await runShutdownStep('auth-close', async () => {
+      if (auth) await auth.close().catch(() => {});
+      auth = undefined;
+      client = undefined;
+      clientInitPromise = null;
+    });
 
     // Stop tunnel before closing SSE clients — tunnel stop may publish a final event
     await runShutdownStep('tunnel-stop', () => activeTunnel?.stop().catch(() => undefined));

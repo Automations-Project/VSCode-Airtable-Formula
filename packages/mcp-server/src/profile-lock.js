@@ -9,7 +9,10 @@
  * ("Target page, context or browser has been closed", exitCode=21).
  *
  * Because the profile is only ever used by OUR Chrome, any process holding it
- * is a stale instance that is safe to kill. This module provides:
+ * is a stale instance that is safe to kill — unless a live foreign daemon owns
+ * the profile (see process-tree.evictProfileSquatters).
+ *
+ * This module provides:
  *   - `isProfileLockError` — recognise the lock-contention failure shape.
  *   - `killProfileHolders` — best-effort, NEVER-throws kill of the stale
  *     Chrome/Edge root process(es) whose command line references our profile.
@@ -20,6 +23,13 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { getHomeDir } from './paths.js';
+import {
+  evictProfileSquatters,
+  findProfileBrowserPids,
+  killProfileBrowserTree,
+  terminateProcessTree,
+} from './process-tree.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,22 +58,65 @@ export function isProfileLockError(err) {
  * profile directory. NEVER throws — a failure here just means the retry will
  * fail again and the real error propagates.
  *
- * win32: enumerate chrome.exe/msedge.exe via CIM, keep only ROOT processes
- *        (command line references our profileDir but is NOT a `--type=` child
- *        renderer/gpu/utility process), then `taskkill /T /F` the whole tree.
- * posix: `pkill -f <profileDir>` — matches any process whose command line
- *        contains the profile path.
+ * Prefer ownership-guarded eviction when configDir is known. Falls back to
+ * direct tree kill for callers that only pass profileDir (legacy tests inject
+ * `exec`/`platform`).
  *
  * @param {string} profileDir absolute path to the persistent profile directory
  * @param {object} [opts]
  * @param {NodeJS.Platform} [opts.platform=process.platform]
- * @param {(file: string, args: string[]) => Promise<any>} [opts.exec] injectable runner (default: promisified execFile)
- * @returns {Promise<{ killed: boolean, platform: string, error?: string }>}
+ * @param {(file: string, args: string[], opts?: object) => Promise<any>} [opts.exec]
+ * @param {string} [opts.configDir]
+ * @param {boolean} [opts.legacy] force legacy powershell/pkill path (unit tests)
+ * @returns {Promise<{ killed: boolean, platform: string, error?: string, refusedReason?: string|null, pids?: number[] }>}
  */
-export async function killProfileHolders(profileDir, { platform = process.platform, exec = execFileAsync } = {}) {
+export async function killProfileHolders(
+  profileDir,
+  { platform = process.platform, exec = execFileAsync, configDir, legacy = false } = {},
+) {
+  try {
+    const home = configDir ?? getHomeDir();
+    // Explicit legacy opt-in for unit tests that spy on powershell/pkill args.
+    if (legacy) {
+      return legacyKillProfileHolders(profileDir, { platform, exec });
+    }
+
+    const result = await evictProfileSquatters(profileDir, home, {
+      platform,
+      exec,
+      findPids: findProfileBrowserPids,
+      terminate: terminateProcessTree,
+      settleMs: 300,
+    });
+    if (result.refusedReason) {
+      return {
+        killed: false,
+        platform,
+        refusedReason: result.refusedReason,
+        pids: [],
+      };
+    }
+    return {
+      killed: result.evicted.length > 0,
+      platform,
+      pids: result.evicted,
+      refusedReason: null,
+    };
+  } catch (err) {
+    // Do NOT fall back to unguarded kill — that can murder a foreign daemon's
+    // Chrome if eviction threw for an unrelated reason. Surface the error.
+    return {
+      killed: false,
+      platform,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** Legacy path kept for injectable-exec unit tests. */
+async function legacyKillProfileHolders(profileDir, { platform, exec }) {
   try {
     if (platform === 'win32') {
-      // Escape single quotes for embedding in the single-quoted PowerShell strings.
       const escaped = String(profileDir).replace(/'/g, "''");
       const script =
         `Get-CimInstance Win32_Process -Filter "Name='chrome.exe' OR Name='msedge.exe'" | ` +
@@ -71,13 +124,10 @@ export async function killProfileHolders(profileDir, { platform = process.platfo
         `ForEach-Object { taskkill /PID $_.ProcessId /T /F }`;
       await exec('powershell', ['-NoProfile', '-Command', script]);
     } else {
-      // pkill exits non-zero (1) when nothing matched — that's not an error for us.
       await exec('pkill', ['-f', String(profileDir)]);
     }
     return { killed: true, platform };
   } catch (err) {
-    // Swallow everything: a non-zero exit (no match), a missing binary, a
-    // permission error — none of these should ever escape this helper.
     return { killed: false, platform, error: err instanceof Error ? err.message : String(err) };
   }
 }

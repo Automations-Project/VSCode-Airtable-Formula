@@ -65,6 +65,11 @@ describe('DaemonManager.buildDaemonEnv', () => {
     expect(result.AIRTABLE_COOKIE).toBeUndefined();
     expect(result.AIRTABLE_CSRF).toBeUndefined();
   });
+
+  it('injects AIRTABLE_BROWSER_IDLE_PARK_MS from browserIdleParkMinutes (default 30 → 1800000)', () => {
+    const result = dm.buildDaemonEnv();
+    expect(result.AIRTABLE_BROWSER_IDLE_PARK_MS).toBe(String(30 * 60_000));
+  });
 });
 
 describe('DaemonManager.getDaemonStatus', () => {
@@ -463,11 +468,29 @@ describe('createHttpDefinition', () => {
     expect(mockCtor).toHaveBeenCalledWith(
       expect.objectContaining({
         url: 'http://127.0.0.1:3000/mcp',
-        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+          'x-airtable-client-id': 'vscode-airtable-formula',
+        }),
       })
     );
 
     // Clean up
+    delete (vscodeModule as unknown as Record<string, unknown>).McpHttpServerDefinition;
+  });
+
+  it('allows overriding client id', async () => {
+    const mockCtor = vi.fn(() => ({}));
+    const vscodeModule = await import('vscode');
+    (vscodeModule as unknown as Record<string, unknown>).McpHttpServerDefinition = mockCtor;
+
+    createHttpDefinition('http://127.0.0.1:3000/mcp', 'Bearer t', 'custom-window');
+    expect(mockCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'x-airtable-client-id': 'custom-window' }),
+      }),
+    );
+
     delete (vscodeModule as unknown as Record<string, unknown>).McpHttpServerDefinition;
   });
 });

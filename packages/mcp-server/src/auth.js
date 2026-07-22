@@ -2,11 +2,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'node:crypto';
 import { trace } from './debug-tracer.js';
-import { getProfileDir } from './paths.js';
+import { getHomeDir, getProfileDir } from './paths.js';
 import { HttpTransport } from './http-transport.js';
 import { loadByoCredentials } from './byo-credentials.js';
 import { directLogin } from './direct-login.js';
 import { isProfileLockError, killProfileHolders } from './profile-lock.js';
+import { PageScheduler } from './page-scheduler.js';
+import { killProfileBrowserTree } from './process-tree.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
@@ -32,12 +34,26 @@ async function getChromium() {
   }
 }
 
+/** Idle time before the browser is parked. 0 disables. Default 30 minutes. */
+function resolveIdleParkMs() {
+  const raw = process.env.AIRTABLE_BROWSER_IDLE_PARK_MS;
+  if (raw === undefined || raw === null) return 30 * 60_000;
+  const trimmed = String(raw).trim();
+  if (trimmed === '') return 30 * 60_000;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) return 0;
+  return parsed;
+}
+
+export { resolveIdleParkMs };
+
 /**
  * Airtable session authenticator using Playwright persistent browser context.
  *
  * Architecture:
  *   - Single browser/profile owner per process
- *   - Global request queue serializes all browser-backed calls
+ *   - PageScheduler serializes exclusive work (runExclusive / runBarrier)
+ *   - Idle browser parking frees Chromium RSS while keeping cookie credentials
  *   - Automatic session recovery on 401/403
  *   - secretSocketId capture via network interception
  *   - CSRF extraction with multiple fallback strategies
@@ -46,11 +62,13 @@ async function getChromium() {
  *   1. First run: `node src/login.js` opens Chrome with persistent profile
  *   2. User logs in manually (session stored in Chrome profile dir)
  *   3. MCP server launches headless Chrome with same profile for API calls
- *   4. All requests serialized through the queue and executed via page.evaluate
+ *   4. API traffic goes over direct HTTP; browser is for login/recovery only
+ *   5. After idle, browser is parked; next recovery path resurrects it
  */
 export class AirtableAuth {
   constructor(options = {}) {
     this.profileDir = options.profileDir || getProfileDir();
+    this.configDir = options.configDir || getHomeDir();
     this.context = null;
     this.page = null;
     this.isLoggedIn = false;
@@ -63,13 +81,21 @@ export class AirtableAuth {
     // 'direct-login' (Phase B) will replicate the HAR login flow over HTTP.
     this._authMode = (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase();
 
-    // Request queue — serializes all browser-backed API calls.
-    // Bounded so a runaway LLM loop cannot blow up memory even when the
-    // upstream semaphore lets thousands of tool calls through over time.
-    this._queue = [];
-    this._processing = false;
+    // PageScheduler — serializes exclusive auth/API work and provides barriers
+    // for park/close so we never yank the page from under an in-flight call.
     this._maxQueueSize = Number(process.env.AIRTABLE_MAX_AUTH_QUEUE) || 64;
     this._rateDelayMs = Number(process.env.AIRTABLE_RATE_DELAY_MS) || 0;
+    this._scheduler = options.scheduler || new PageScheduler({
+      maxQueue: this._maxQueueSize,
+      rateDelayMs: this._rateDelayMs,
+    });
+    this._idleParkMs = options.idleParkMs !== undefined ? options.idleParkMs : resolveIdleParkMs();
+    this._parkTimer = null;
+    this._killBrowserTree = options.killBrowserTree || killProfileBrowserTree;
+    this._unsubBusy = this._scheduler.onBusyChange((state) => {
+      if (state.busy) this.cancelIdlePark();
+      else this.scheduleIdlePark();
+    });
 
     // Per-app secretSocketId cache (captured from network traffic).
     // LRU-bounded so long-running servers with many bases don't grow this
@@ -98,7 +124,8 @@ export class AirtableAuth {
     // is a stale instance safe to kill. _launchContext kills the holder and
     // retries the launch ONCE. Both the killer and the inter-attempt wait are
     // injectable so tests never touch a real process or sleep.
-    this._killProfileHolders = options.killProfileHolders || killProfileHolders;
+    this._killProfileHolders = options.killProfileHolders || ((dir) =>
+      killProfileHolders(dir, { configDir: this.configDir }));
     this._relaunchWaitMs = options.relaunchWaitMs ?? 600;
 
     // Reference to the page-level 'request' listener so we can detach it on
@@ -165,11 +192,15 @@ export class AirtableAuth {
   // ─── Initialization ──────────────────────────────────────────
 
   async init() {
-    // Deduplicate concurrent init calls
+    // Deduplicate concurrent init calls. Assign _initPromise synchronously
+    // before any await so two callers cannot both launch Chromium.
     if (this._initPromise) return this._initPromise;
     if (this.context && this.isLoggedIn) return;
 
-    this._initPromise = this._doInitBounded();
+    // Participate in PageScheduler exclusivity so park/close barriers cannot
+    // tear down a mid-flight launch (and so idle-park sees init as busy).
+    // Nested ensureLoggedIn/_enqueue paths pass through via schedulerDepth.
+    this._initPromise = this._scheduler.runExclusive('init', () => this._doInitBounded());
     try {
       await this._initPromise;
     } finally {
@@ -271,6 +302,10 @@ export class AirtableAuth {
       trace('auth', 'auth:csrf_captured', {
         success: !!this.csrfToken,
       });
+      // Start the idle-park clock: a daemon that inits and then never gets a
+      // tool call would otherwise hold Chromium forever (busy events only fire
+      // on scheduled work).
+      this.scheduleIdlePark();
     } catch (err) {
       // Don't leak a running browser when init fails.
       try { await this.context.close(); } catch { /* best-effort */ }
@@ -596,48 +631,94 @@ export class AirtableAuth {
     }
   }
 
-  // ─── Request Queue ────────────────────────────────────────────
+  // ─── Request Scheduler ──────────────────────────────────────
 
   /**
-   * Enqueue a request. All browser-backed calls go through here to prevent
-   * concurrent page.evaluate() calls from corrupting each other.
-   *
-   * H4 — the queue is bounded. When saturated we reject new calls rather than
-   * accept unbounded backlog; callers can surface this as a retry prompt to
-   * the LLM or drop the tool call gracefully.
+   * Enqueue exclusive work through the PageScheduler.
+   * Bounded; saturated queue rejects rather than growing without bound.
    */
-  _enqueue(fn) {
-    if (this._queue.length >= this._maxQueueSize) {
-      return Promise.reject(new Error(
-        `Auth queue saturated (${this._queue.length}/${this._maxQueueSize}). ` +
-        `Retry after in-flight browser calls drain, or set AIRTABLE_MAX_AUTH_QUEUE to raise the cap.`
-      ));
-    }
-    return new Promise((resolve, reject) => {
-      this._queue.push({ fn, resolve, reject });
-      this._drain();
-    });
+  _enqueue(fn, label = 'auth') {
+    return this._scheduler.runExclusive(label, fn);
   }
 
-  async _drain() {
-    if (this._processing) return;
-    this._processing = true;
+  getBusyState() {
+    return this._scheduler.getBusyState();
+  }
 
-    while (this._queue.length > 0) {
-      const { fn, resolve, reject } = this._queue.shift();
-      try {
-        resolve(await fn());
-      } catch (err) {
-        reject(err);
-      }
-      // Optional inter-call delay to stay under Airtable's 5 req/s limit.
-      // Set AIRTABLE_RATE_DELAY_MS=200 to enable; default 0 (no delay).
-      if (this._rateDelayMs > 0 && this._queue.length > 0) {
-        await new Promise(r => setTimeout(r, this._rateDelayMs));
-      }
+  onBusyChange(listener) {
+    return this._scheduler.onBusyChange(listener);
+  }
+
+  scheduleIdlePark() {
+    if (this._idleParkMs <= 0 || !this.context || this._parkTimer) return;
+    if (this._authMode === 'byo' || this._authMode === 'direct-login') return;
+    this._parkTimer = setTimeout(() => {
+      this._parkTimer = null;
+      void this.parkBrowser().catch(() => {
+        // Parking is an optimization; a failed park must never hurt anything.
+      });
+    }, this._idleParkMs);
+    // Never keep a short-lived CLI/stdio process alive just to park a browser.
+    this._parkTimer.unref?.();
+  }
+
+  cancelIdlePark() {
+    if (this._parkTimer) {
+      clearTimeout(this._parkTimer);
+      this._parkTimer = null;
     }
+  }
 
-    this._processing = false;
+  /**
+   * Close the browser, keep the daemon and cookie credentials.
+   *
+   * Deliberately NOT full shutdown: a parked daemon is still logged in
+   * (cookies in `_credentials`, session resumable). Only the browser handles
+   * are dropped; auth state survives so cookie-only HTTP keeps working.
+   */
+  async parkBrowser() {
+    return this._scheduler.runBarrier(async () => {
+      if (!this.context) return;
+      // Inside runBarrier, getBusyState().busy is always true (barrierActive).
+      // Abort only when the exclusive pipeline still has real work: active op,
+      // queued waiters, or inter-op rate delay — not because of this barrier.
+      const busy = this._scheduler.getBusyState();
+      if (busy.queued > 0 || busy.active || busy.delaying) return;
+      if (this._authMode === 'byo' || this._authMode === 'direct-login') return;
+
+      // Ensure credentials are snapshotted before we drop the browser.
+      try {
+        if (!this._credentials?.cookieHeader) await this._snapshotCredentials();
+      } catch { /* best-effort */ }
+
+      // Without a cookie header, cookie-only park would leave isLoggedIn true
+      // with no HTTP path and force a full Chromium relaunch next call.
+      if (!this._credentials?.cookieHeader) {
+        console.error('[auth] idle park aborted — no cookie snapshot available; keeping browser up.');
+        return;
+      }
+
+      console.error(
+        `[auth] parking idle browser (no page work for ${Math.round(this._idleParkMs / 60_000)}m) — ` +
+          `cookie HTTP continues; next recovery path will bring Chromium back.`,
+      );
+
+      const contextToClose = this.context;
+      if (this.page && this._networkHandler) {
+        try { this.page.removeListener('request', this._networkHandler); } catch { /* page may be dead */ }
+      }
+      await contextToClose.close().catch(() => {});
+      // Only clear handles if nothing reassigned context during close.
+      if (this.context === contextToClose) {
+        this.context = null;
+        this.page = null;
+        this._networkHandler = null;
+      }
+
+      // Hard-kill orphan chrome.exe that context.close() left behind (Windows).
+      // Safe under the barrier: init cannot launch concurrently.
+      await this._killBrowserTree(this.profileDir).catch(() => {});
+    });
   }
 
   // ─── Raw API Call (no queue, no recovery) ─────────────────────
@@ -858,6 +939,14 @@ export class AirtableAuth {
       return;
     }
 
+    // Cookie-only park: browser was closed to free RSS but credentials remain.
+    // Direct-HTTP tool calls must NOT pay a full Chromium bootstrap here —
+    // recovery (_recoverSession) relaunches only when a 401/403 proves the
+    // cookies are dead.
+    if (!this.context && this.isLoggedIn && this._credentials?.cookieHeader) {
+      return;
+    }
+
     if (!this.context || !this.isLoggedIn) {
       await this.init();
       return;
@@ -986,11 +1075,26 @@ export class AirtableAuth {
   }
 
   async close() {
-    if (this.context) {
-      await this.context.close().catch(() => {});
+    this.cancelIdlePark();
+    if (this._unsubBusy) {
+      try { this._unsubBusy(); } catch { /* ignore */ }
+      this._unsubBusy = null;
+    }
+    return this._scheduler.runBarrier(async () => {
+      if (this.page && this._networkHandler) {
+        try { this.page.removeListener('request', this._networkHandler); } catch { /* page may be dead */ }
+      }
+      if (this.context) {
+        await this.context.close().catch(() => {});
+      }
       this.context = null;
       this.page = null;
+      this._networkHandler = null;
       this.isLoggedIn = false;
-    }
+      this._credentials = null;
+      // Hard-kill orphan chrome.exe left after context.close() (esp. Windows).
+      // Barrier serializes against init so we cannot kill a concurrent relaunch.
+      await this._killBrowserTree(this.profileDir).catch(() => {});
+    });
   }
 }

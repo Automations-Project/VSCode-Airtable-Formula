@@ -425,6 +425,13 @@
           ],
           "description": "HTTP client for direct Airtable API calls. Leave as 'fetch' unless requests start getting blocked; 'impit' impersonates Chrome's TLS fingerprint. Takes effect on the next daemon/server restart."
         },
+        "airtableFormula.mcp.browserIdleParkMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Minutes of idle time before the shared daemon parks (closes) its Chromium browser to free ~300–600 MB RSS. Cookie-based HTTP keeps working; the browser is only relaunched if session recovery needs it. Set 0 to disable. Takes effect on the next daemon/server restart."
+        },
+
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",

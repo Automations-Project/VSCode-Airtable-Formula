@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import type { IdeId, IdeStatus, AiFiles } from '@airtable-formula/shared';
-import { getSettings } from '../settings.js';
+import { getSettings, minutesToIdleParkMs } from '../settings.js';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
 import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, isMcpTomlConfigured } from './lsp-config.js';
@@ -88,6 +88,7 @@ export function buildServerEntry(_serverPath: string): Record<string, unknown> {
 function applyTransportEnv(env: Record<string, string>, settings: ReturnType<typeof getSettings>): void {
   if (settings.mcp.authMode && settings.mcp.authMode !== 'browser') env.AIRTABLE_AUTH_MODE = settings.mcp.authMode;
   if (settings.mcp.httpClient === 'impit') env.AIRTABLE_HTTP_CLIENT = 'impit';
+  env.AIRTABLE_BROWSER_IDLE_PARK_MS = String(minutesToIdleParkMs(settings.mcp.browserIdleParkMinutes));
 }
 
 export function buildNpxServerEntry(): Record<string, unknown> {

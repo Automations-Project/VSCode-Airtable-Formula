@@ -5,17 +5,28 @@ import { MCP_PROVIDER_ID, MCP_SERVER_LABEL } from '../constants.js';
 import { getBundledServerPath } from './server-path.js';
 import type { AuthManager } from './auth-manager.js';
 import type { DaemonManager } from './daemon-manager.js';
-import { getSettings } from '../settings.js';
+import { getSettings, minutesToIdleParkMs } from '../settings.js';
 
 type McpCtor = new (...args: unknown[]) => unknown;
 
-export function createHttpDefinition(url: string, authHeader: string): unknown | null {
+/** Stable client id for VS Code → daemon MCP calls (pageBusy.clientId). */
+export const VSCODE_MCP_CLIENT_ID = 'vscode-airtable-formula';
+
+export function createHttpDefinition(
+  url: string,
+  authHeader: string,
+  clientId: string = VSCODE_MCP_CLIENT_ID,
+): unknown | null {
   const httpCtor = (vscode as unknown as { McpHttpServerDefinition?: McpCtor }).McpHttpServerDefinition;
   if (!httpCtor) return null;
+  const headers: Record<string, string> = {
+    Authorization: authHeader,
+    'x-airtable-client-id': clientId,
+  };
   try {
-    return new httpCtor({ url, headers: { Authorization: authHeader } });
+    return new httpCtor({ url, headers });
   } catch {
-    return new httpCtor(url, { Authorization: authHeader });
+    return new httpCtor(url, headers);
   }
 }
 
@@ -105,6 +116,7 @@ export function registerMcpProvider(
           if (settings.mcp.httpClient === 'impit') {
             env.AIRTABLE_HTTP_CLIENT = 'impit';
           }
+          env.AIRTABLE_BROWSER_IDLE_PARK_MS = String(minutesToIdleParkMs(settings.mcp.browserIdleParkMinutes));
 
           // Pass stored credentials so MCP server can auto-recover sessions.
           // Env is acceptable here — VS Code owns the stdio spawn (the daemon

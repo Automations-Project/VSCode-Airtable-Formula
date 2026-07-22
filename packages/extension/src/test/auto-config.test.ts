@@ -107,6 +107,17 @@ describe('auto-config propagates transport/auth-mode settings', () => {
     expect(env.AIRTABLE_AUTH_MODE).toBe('byo');
     expect(env.AIRTABLE_HTTP_CLIENT).toBe('impit');
   });
+
+  it('injects AIRTABLE_BROWSER_IDLE_PARK_MS (default 30 min)', () => {
+    const env = buildNpxServerEntry().env as any;
+    expect(env.AIRTABLE_BROWSER_IDLE_PARK_MS).toBe(String(30 * 60_000));
+  });
+
+  it('browserIdleParkMinutes=0 disables parking via env 0', () => {
+    mockConfig['mcp.browserIdleParkMinutes'] = 0;
+    const env = buildNpxServerEntry().env as any;
+    expect(env.AIRTABLE_BROWSER_IDLE_PARK_MS).toBe('0');
+  });
 });
 
 describe('getNestedKey / setNestedKey', () => {
