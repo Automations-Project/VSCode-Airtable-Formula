@@ -52,3 +52,20 @@ test('an unrelated fixed-port error is NOT swallowed as a fallback', async () =>
   const server = makeFakeServer((port) => (port === 8723 ? 'EPERM' : 'ok'));
   await assert.rejects(() => listenAvoidingBlockedPorts(server, 8723, '127.0.0.1'), /EPERM/);
 });
+
+test('exhausting every retry on a browser-blocked port throws a clear error (not a silent unbound return)', async () => {
+  // Force the (in-practice-unreachable) case where every bind — including ephemeral — lands on a
+  // browser-blocked port. Ephemeral ports sit above the blocked range so this cannot really happen,
+  // but the loop must not fall through returning undefined with the server unbound: the caller then
+  // reads getBoundPort() and throws the misleading "not listening". An explicit throw fails clearly.
+  const s = new EventEmitter();
+  s._bound = null;
+  s.listen = () => { queueMicrotask(() => { s._bound = 6666; s.emit('listening'); }); }; // always a blocked port
+  s.address = () => (s._bound == null ? null : { port: s._bound, address: '127.0.0.1', family: 'IPv4' });
+  s.close = (cb) => { s._bound = null; if (cb) queueMicrotask(cb); };
+
+  await assert.rejects(
+    () => listenAvoidingBlockedPorts(s, 0, '127.0.0.1'),
+    /could not bind a usable/i,
+  );
+});

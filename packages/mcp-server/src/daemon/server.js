@@ -105,6 +105,12 @@ export async function listenAvoidingBlockedPorts(server, requestedPort, host) {
     await new Promise((resolve) => server.close(() => resolve()));
     port = 0; // blocked port → next attempt uses an ephemeral port
   }
+
+  // Unreachable in practice — the first fallback sets port=0 and OS ephemeral ports (>=32768) are
+  // never in FETCH_BLOCKED_PORTS (all <=10080), so iteration 2 always binds and returns. But do NOT
+  // fall through returning undefined with the server closed/unbound: the caller reads getBoundPort()
+  // and would throw the misleading "Daemon server is not listening on a TCP port." Fail clearly.
+  throw new Error(`Daemon could not bind a usable (non-browser-blocked) port after 5 attempts (requested port ${requestedPort}).`);
 }
 
 function getBoundPort(server) {
