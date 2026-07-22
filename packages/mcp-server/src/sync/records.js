@@ -4,8 +4,8 @@
  *
  * For each matched table (those with idmap.tables[srcTableId]):
  *   CREATE path — source record not yet in idmap.records → createRecords, fill idmap.records.
- *   UPDATE path — source record already mapped → updateRecords (primitive + single-select ONLY;
- *                 multiSelect arrays are deferred with a RECORD_ARRAY_UPDATE_DEFERRED warning).
+ *   UPDATE path — source record already mapped → updateRecords (primitive + single-select),
+ *                 then setArrayChoiceCell for multiSelect / multiCollaborator diffs.
  *
  * All client calls go through `limiter.run(() => withRetry(() => ...))`.
  * Continue-on-failure: per-table errors are caught and pushed as warnings.
@@ -152,6 +152,73 @@ function isMultiSelect(type) {
   return type === 'multiSelect' || type === 'multipleSelects';
 }
 
+/** multiSelect + multiCollaborator — updated via setArrayChoiceCell (add/remove items). */
+function isArrayChoiceType(type) {
+  return (
+    type === 'multiSelect' ||
+    type === 'multipleSelects' ||
+    type === 'multiCollaborator' ||
+    type === 'multipleCollaborators'
+  );
+}
+
+/**
+ * Normalize a multiSelect / multiCollaborator cell to an array of id strings.
+ * @param {*} val
+ * @returns {string[]}
+ */
+function arrayChoiceIds(val) {
+  if (!Array.isArray(val)) return [];
+  const out = [];
+  for (const e of val) {
+    if (typeof e === 'string' && e) out.push(e);
+    else if (e && typeof e === 'object') {
+      const id = e.id ?? e.userId ?? e.foreignRowId;
+      if (typeof id === 'string' && id) out.push(id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Build setArrayChoiceCell ops for multiSelect / multiCollaborator UPDATE diffs.
+ * Choice ids are remapped through idmap.fields[srcFld].choices for multiSelect.
+ * Collaborator usr ids pass through (Airtable-global).
+ *
+ * @returns {{ columnId: string, desiredIds: string[], currentIds: string[], srcFieldId: string, type: string }[]}
+ */
+export function collectArrayChoiceUpdates(srcFields, srcCells, destCells, idmap) {
+  const ops = [];
+  if (!destCells) return ops;
+  for (const field of srcFields) {
+    if (!isArrayChoiceType(field.type)) continue;
+    const mapping = idmap.fields[field.id];
+    if (!mapping) continue;
+    const srcVal = srcCells[field.id];
+    let desired;
+    if (isMultiSelect(field.type)) {
+      const cm = mapping.choices || {};
+      const srcIds = arrayChoiceIds(srcVal);
+      // Unmappable choices → skip op (same as create path skip); caller may warn.
+      const mapped = srcIds.map((s) => cm[s]).filter(Boolean);
+      if (mapped.length !== srcIds.length) continue;
+      desired = mapped;
+    } else {
+      desired = arrayChoiceIds(srcVal);
+    }
+    const current = arrayChoiceIds(destCells[mapping.destFld]);
+    if (arrayCellEquals(desired, current)) continue;
+    ops.push({
+      columnId: mapping.destFld,
+      desiredIds: desired,
+      currentIds: current,
+      srcFieldId: field.id,
+      type: field.type,
+    });
+  }
+  return ops;
+}
+
 /**
  * Order-insensitive equality of two array cell values by normalized element id
  * (strings pass through; objects contribute .id / .foreignRowId). multiSelect /
@@ -215,10 +282,8 @@ export function buildCreateCells(srcFields, srcCells, idmap, warnings, srcRecId,
  * Excludes ALL array-shaped cells (updateRecords → updatePrimitiveCell rejects arrays — one
  * array cell in the payload would fail its cell POST and poison the rest of the row update):
  *   - link/attachment arrays are silently skipped (owned by Pass 2 / Pass 3);
- *   - multiSelect/collaborator arrays are deferred with a RECORD_ARRAY_UPDATE_DEFERRED warning,
- *     emitted only when the (choice-remapped) source value actually differs from the dest cell
- *     (no warning spam for already-converged cells; when the dest record's cells are unknown,
- *     the warning is emitted conservatively).
+ *   - multiSelect/collaborator arrays are omitted here and applied via collectArrayChoiceUpdates
+ *     + client.setArrayChoiceCell after the primitive update batch.
  *
  * Cleared cells: readQueries omits empty cells, so a cell CLEARED on source arrives as an
  * ABSENT key. Since buildUpdateCells only runs under conflicts=source-wins, the clear must
@@ -245,20 +310,11 @@ export function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings
     const mapping = idmap.fields[field.id];
     if (!mapping) continue; // field not mapped → skip
     const srcVal = srcCells[field.id]; // ABSENT key = cell is EMPTY on source
-    // Array-shaped cells are never accepted by updateRecords → defer
+    // Array-shaped cells are never accepted by updateRecords.
+    // multiSelect / multiCollaborator: handled after the primitive batch via setArrayChoiceCell
+    // (collectArrayChoiceUpdates) — no RECORD_ARRAY_UPDATE_DEFERRED spam.
+    // links / attachments: Pass 2 / Pass 3.
     if (ARRAY_CELL_TYPES.has(field.type)) {
-      if (!isWritableForRecords(field)) continue; // links/attachments: Pass 2 / Pass 3 own these
-      if (srcVal === undefined && !destCells) continue; // empty src, unknown dest — nothing to report
-      // multiSelect: remap source choice ids into the dest vocabulary before comparing
-      // (unmappable choices keep a sentinel so they always count as a difference).
-      const cmp = isMultiSelect(field.type)
-        ? (Array.isArray(srcVal) ? srcVal : []).map((s) => (mapping.choices || {})[s] ?? `?${s}`)
-        : srcVal;
-      if (destCells && arrayCellEquals(cmp, destCells[mapping.destFld])) continue; // converged — nothing to defer
-      warnings.push({
-        code: 'RECORD_ARRAY_UPDATE_DEFERRED',
-        message: `Record ${srcRecId}: field ${field.id} (${field.type}) is array-typed — update deferred (updateRecords does not support arrays)`,
-      });
       continue;
     }
     if (isComputedType(field.type)) continue; // Pass 1 never writes (or clears) computed SOURCE cells
@@ -515,6 +571,8 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     // Partition into CREATE vs UPDATE batches
     const createRows = [];
     const updateRows = [];
+    /** @type {{ rowId: string, srcRecId: string, ops: ReturnType<typeof collectArrayChoiceUpdates> }[]} */
+    const arrayChoiceRows = [];
 
     for (const rec of records) {
       const srcCells = rec.cellValuesByColumnId || {};
@@ -532,13 +590,22 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
         }
         createRows.push({ cellValuesByColumnId: cells, sourceKey: rec.id, linkCells });
       } else {
-        // UPDATE path — array cells NOT accepted by updateRecords (deferred, Pass 2/3 or warning)
+        // UPDATE path — primitives via updateRecords; multiSelect via setArrayChoiceCell
         if (conflicts === 'dest-wins') continue; // preserve dest edits: skip the overwrite
-        const cells = buildUpdateCells(srcTable.fields, srcCells, destCellsById.get(destRecId), idmap, result.warnings, rec.id, destComputedFldIds);
+        const destCells = destCellsById.get(destRecId);
+        const cells = buildUpdateCells(srcTable.fields, srcCells, destCells, idmap, result.warnings, rec.id, destComputedFldIds);
         injectFieldMappings(cells, tableMappings, srcCells);
+        const arrayOps = collectArrayChoiceUpdates(srcTable.fields, srcCells, destCells, idmap);
+        if (arrayOps.length > 0) {
+          arrayChoiceRows.push({ rowId: destRecId, srcRecId: rec.id, ops: arrayOps });
+        }
         // Nothing to write → skip: client.updateRecords rejects an empty cell map per row,
         // which would misreport this healthy record as RECORD_UPDATE_FAILED on every re-sync.
-        if (Object.keys(cells).length === 0) { result.skipped++; continue; }
+        // Array-only diffs still count as work (handled below) so don't skip the whole record.
+        if (Object.keys(cells).length === 0) {
+          if (arrayOps.length === 0) result.skipped++;
+          continue;
+        }
         updateRows.push({ rowId: destRecId, cellValuesByColumnId: cells });
       }
     }
@@ -582,6 +649,53 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
           code: 'RECORD_UPDATE_FAILED',
           message: `Table ${destTableId}: updateRecords threw: ${err.message}`,
         });
+      }
+      persist(idmap, journal);
+    }
+
+    // ── multiSelect / multiCollaborator UPDATE (add/remove item APIs) ─────
+    // updatePrimitiveCell rejects arrays; setArrayChoiceCell converges membership.
+    if (arrayChoiceRows.length > 0 && typeof client.setArrayChoiceCell === 'function') {
+      const gate = makeGate(limiter);
+      for (const row of arrayChoiceRows) {
+        if (result.aborted) return;
+        let rowOk = true;
+        for (const op of row.ops) {
+          try {
+            const res = await client.setArrayChoiceCell(
+              destAppId,
+              row.rowId,
+              op.columnId,
+              op.desiredIds,
+              { currentIds: op.currentIds, gate },
+            );
+            if (sessionDied(client) || sessionDied(client, res?.error)) {
+              markAborted(client, result);
+              persist(idmap, journal);
+              return;
+            }
+            if (!res?.ok) {
+              rowOk = false;
+              result.warnings.push({
+                code: 'RECORD_ARRAY_UPDATE_FAILED',
+                message: `Record ${row.srcRecId}: field ${op.srcFieldId} (${op.type}) array update failed: ${res?.error || 'unknown'}`,
+              });
+            }
+          } catch (err) {
+            if (sessionDied(client, err)) { markAborted(client, result); persist(idmap, journal); return; }
+            rowOk = false;
+            result.warnings.push({
+              code: 'RECORD_ARRAY_UPDATE_FAILED',
+              message: `Record ${row.srcRecId}: field ${op.srcFieldId} (${op.type}) array update threw: ${err.message}`,
+            });
+          }
+        }
+        if (rowOk) {
+          // Count as updated when only array cells changed (no primitive update row).
+          if (!updateRows.some((u) => u.rowId === row.rowId)) result.updated++;
+        } else {
+          result.failed++;
+        }
       }
       persist(idmap, journal);
     }

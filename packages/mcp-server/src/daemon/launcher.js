@@ -333,6 +333,9 @@ export async function startDaemon(options = {}) {
         version,
         configDir,
         bearerToken: token.bearerToken,
+        // Shared host auth so pageBusy / park / tools use one scheduler.
+        auth: options.auth,
+        client: options.client,
         getTools: options.getTools,
         callTool: options.callTool,
         onShutdown: finalize,

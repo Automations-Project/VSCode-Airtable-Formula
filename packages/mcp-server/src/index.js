@@ -2758,6 +2758,9 @@ async function main() {
     const result = await startDaemon({
       configDir: process.env.AIRTABLE_USER_MCP_HOME,
       port: fixedPort,
+      // One AirtableAuth for health pageBusy, park, and tool handlers.
+      auth,
+      client,
       getTools: (tc) => {
         const enabledTools = tc.filterTools(TOOLS);
         const enabledNames = new Set(enabledTools.map(t => t.name));

@@ -52,6 +52,49 @@ describe('GET /daemon/health', () => {
     assert.equal(typeof body.pageBusy.queued, 'number');
   });
 
+  it('pageBusy reflects shared auth scheduler when options.auth is provided', async () => {
+    const { AirtableAuth } = await import('../src/auth.js');
+    const { PageScheduler } = await import('../src/page-scheduler.js');
+    const tmpShared = join(tmpdir(), 'test-airtable-shared-auth-' + process.pid + '-' + Date.now());
+    mkdirSync(tmpShared, { recursive: true });
+    const scheduler = new PageScheduler({ maxQueue: 8 });
+    const sharedAuth = new AirtableAuth({
+      profileDir: join(tmpShared, 'profile'),
+      idleParkMs: 0,
+      scheduler,
+      killBrowserTree: async () => ({ killed: false, pids: [] }),
+    });
+    const s = await startDaemonServer({
+      port: 0,
+      configDir: tmpShared,
+      auth: sharedAuth,
+    });
+    try {
+      // Hold exclusive work so health can observe active tool label.
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      const work = sharedAuth._enqueue(async () => {
+        await gate;
+        return 'ok';
+      }, 'held');
+      // Ambient tool context would set real names; fallback label is fine for this test.
+      await new Promise((r) => setTimeout(r, 20));
+      const response = await fetch(`http://127.0.0.1:${s.port}/daemon/health`, {
+        headers: { Authorization: `Bearer ${s.bearerToken}` },
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.pageBusy.busy, true);
+      assert.ok(body.pageBusy.active, 'expected active exclusive op on shared auth');
+      assert.equal(body.pageBusy.active.tool, 'held');
+      release();
+      await work;
+    } finally {
+      await s.stop().catch(() => {});
+      rmSync(tmpShared, { recursive: true, force: true });
+    }
+  });
+
   it('returns 401 when Authorization header is missing', async () => {
     const response = await fetch(`http://127.0.0.1:${server.port}/daemon/health`);
     assert.strictEqual(response.status, 401);

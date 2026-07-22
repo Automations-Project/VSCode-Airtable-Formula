@@ -240,8 +240,11 @@ export async function startDaemonServer(options = {}) {
   let burstWindowStart = Date.now();
   let tunnelAutoDisabled = false;
 
-  let auth;
-  let client;
+  // Prefer a shared auth/client from the host process (index.js) so /daemon/health
+  // pageBusy, release-browser, and MCP tool calls all share one PageScheduler.
+  // Without this, health reports a second idle AirtableAuth while tools use another.
+  let auth = options.auth || null;
+  let client = options.client || null;
   let clientInitPromise = null;
 
   const getClient = async () => {
@@ -249,7 +252,14 @@ export async function startDaemonServer(options = {}) {
     if (!client) { client = new AirtableClient(auth); }
     if (!clientInitPromise) {
       const pending = auth.init();
-      pending.catch(() => { client = undefined; clientInitPromise = null; });
+      pending.catch(() => {
+        // Only clear lazily-created instances — shared host auth must survive a failed init.
+        if (!options.auth) {
+          auth = undefined;
+          client = undefined;
+        }
+        clientInitPromise = null;
+      });
       clientInitPromise = pending;
     }
     await clientInitPromise;

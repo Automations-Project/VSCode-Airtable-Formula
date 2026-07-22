@@ -2873,6 +2873,83 @@ export class AirtableClient {
     }
   }
 
+  /**
+   * Converge an array-of-ids cell (multiSelect / multiCollaborator) to `desiredIds`.
+   *
+   * Internal API has no SET for these cells — only append/remove:
+   *   POST /v0.3/row/{rowId}/updateArrayTypeCellByAddingItem   { columnId, item }
+   *   POST /v0.3/row/{rowId}/updateArrayTypeCellByRemovingItem { columnId, item }
+   * where `item` is the choice/user id string (not an object).
+   *
+   * Soft-fails (returns {ok:false}) so one bad cell does not abort a table sync.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {string[]} desiredIds  target membership (order ignored)
+   * @param {{ currentIds?: string[], gate?: Function }} [opts]
+   * @returns {Promise<{ok:boolean, added:number, removed:number, error?:string}>}
+   */
+  async setArrayChoiceCell(appId, rowId, columnId, desiredIds, { currentIds = [], gate } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(rowId, 'rowId');
+    assertAirtableId(columnId, 'columnId');
+    const g = gate || ((fn) => fn());
+    const want = new Set((desiredIds || []).filter((x) => typeof x === 'string' && x.length > 0));
+    const have = new Set((currentIds || []).filter((x) => typeof x === 'string' && x.length > 0));
+    const toAdd = [...want].filter((id) => !have.has(id));
+    const toRemove = [...have].filter((id) => !want.has(id));
+    let added = 0;
+    let removed = 0;
+    const addUrl = 'https://airtable.com/v0.3/row/' + rowId + '/updateArrayTypeCellByAddingItem';
+    const removeUrl = 'https://airtable.com/v0.3/row/' + rowId + '/updateArrayTypeCellByRemovingItem';
+    try {
+      // Remove first so a full replace never briefly exceeds choice limits.
+      for (const item of toRemove) {
+        try {
+          const res = await g(() =>
+            this.auth.postForm(removeUrl, this._mutationParams({ columnId, item }, appId), appId),
+          );
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            // Idempotent: removing an id that is already gone can 403/404.
+            if (res.status === 403 || res.status === 404) {
+              removed++;
+              continue;
+            }
+            return { ok: false, added, removed, error: 'removeArrayItem failed (' + res.status + '): ' + body };
+          }
+          removed++;
+        } catch (err) {
+          // auth._apiCall throws FIELD_FORBIDDEN on some 403s — treat remove as soft-ok.
+          const msg = String(err && err.message || err);
+          if (/FIELD_FORBIDDEN|403|NOT_FOUND|404/i.test(msg)) {
+            removed++;
+            continue;
+          }
+          return { ok: false, added, removed, error: msg };
+        }
+      }
+      for (const item of toAdd) {
+        try {
+          const res = await g(() =>
+            this.auth.postForm(addUrl, this._mutationParams({ columnId, item }, appId), appId),
+          );
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            return { ok: false, added, removed, error: 'addArrayItem failed (' + res.status + '): ' + body };
+          }
+          added++;
+        } catch (err) {
+          return { ok: false, added, removed, error: String(err && err.message || err) };
+        }
+      }
+      return { ok: true, added, removed };
+    } catch (err) {
+      return { ok: false, added, removed, error: String(err && err.message || err) };
+    }
+  }
+
   _genRequestId() {
     return 'req' + this._genRandomId();
   }
