@@ -91,6 +91,9 @@ export class AirtableAuth {
     });
     this._idleParkMs = options.idleParkMs !== undefined ? options.idleParkMs : resolveIdleParkMs();
     this._parkTimer = null;
+    // Single-flight guard for the underlying _doInit() launch — held until it TRULY settles, so a
+    // retry after a watchdog timeout re-attaches instead of starting a second Chromium (see _doInitBounded).
+    this._doInitInner = null;
     this._killBrowserTree = options.killBrowserTree || killProfileBrowserTree;
     this._unsubBusy = null;
     this._subscribeBusy();
@@ -210,28 +213,31 @@ export class AirtableAuth {
   // the serialized request queue forever. `_doInit` -> `launchPersistentContext` has no
   // built-in timeout; without this watchdog a single hung relaunch (profile contention,
   // chrome exit 21) stalls every queued request indefinitely. On timeout we reject so the
-  // caller's retry/budget can proceed; a late-arriving context is closed to avoid leaking
-  // a Chromium onto the contended profile.
+  // caller's retry/budget can proceed.
+  //
+  // Single-flight: the timeout only unblocks the CALLER — the real `_doInit` keeps running
+  // detached. A retry (or a concurrent `_recoverSession`) must RE-ATTACH to that in-flight launch
+  // via `_doInitInner`, never start a SECOND Chromium on the MCP-EXCLUSIVE profile (the double-launch
+  // bug). Nothing is force-closed on timeout: `_doInit` closes its own context on failure, and on a
+  // late SUCCESS `this.context` is a warm session kept for the next call (idle-park frees its RSS).
   async _doInitBounded() {
     const ms = Number(process.env.AIRTABLE_INIT_TIMEOUT_MS) || 90_000;
+    if (!this._doInitInner) {
+      const started = this._doInit();
+      this._doInitInner = started;
+      // Release the guard only when the real launch TRULY settles (success or failure). The dual
+      // handler also swallows a late inner rejection so it doesn't surface as an unhandled rejection
+      // after the race has already timed out.
+      const clear = () => { if (this._doInitInner === started) this._doInitInner = null; };
+      started.then(clear, clear);
+    }
+    const inner = this._doInitInner;
     let timer;
-    let timedOut = false;
-    const inner = this._doInit();
-    // If the (timed-out) launch later settles, close any context it produced so we don't leak a
-    // Chromium onto the contended profile. Null-safe: a byo/direct-login init or an errored launch
-    // leaves this.context undefined — the old `this.context?.close?.().catch()` NPE'd on `.catch`
-    // of undefined when the late handler fired with no context.
-    inner.then(() => {
-      if (!timedOut) return;
-      const c = this.context;
-      if (c) Promise.resolve(c.close()).catch(() => {});
-    }, () => {});
     try {
       return await Promise.race([
         inner,
         new Promise((_, reject) => {
           timer = setTimeout(() => {
-            timedOut = true;
             reject(new Error(`session init/recovery exceeded ${ms / 1000}s — the browser profile may be locked by another process (profile contention)`));
           }, ms);
         }),
