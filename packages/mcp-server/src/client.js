@@ -1409,25 +1409,6 @@ export class AirtableClient {
   }
 
   /**
-   * Show or hide all columns in a view.
-   */
-  async showOrHideAllColumns(appId, viewId, visibility) {
-    assertAirtableId(appId, 'appId');
-    assertAirtableId(viewId, 'viewId');
-    const url = `https://airtable.com/v0.3/view/${viewId}/showOrHideAllColumns`;
-    const payload = { visibility };
-
-    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`showOrHideAllColumns failed (${res.status}): ${errBody}`);
-    }
-
-    return res.json();
-  }
-
-  /**
    * Show or hide specific columns in a view.
    * Payload: { columnIds: ["fldXXX", ...], visibility: boolean }
    */
