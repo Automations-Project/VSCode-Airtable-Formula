@@ -133,15 +133,20 @@ function assertSafeSymlinks(rootDir) {
   }
 }
 
-for (const packageName of packagesToCopy) {
+/**
+ * Resolve + safety-check + copy a single package into dist/node_modules.
+ * Returns true on success, false if the package could not be resolved
+ * (logged as a warning, not fatal — callers decide whether that's expected).
+ */
+function copyPackage(packageName) {
   const realSource = resolvePackageRoot(packageName);
   if (!realSource) {
     console.warn(`⚠ Could not resolve "${packageName}" from ${mcpRoot} — skipping`);
-    continue;
+    return false;
   }
   if (!existsSync(realSource)) {
     console.warn(`⚠ Resolved path for "${packageName}" does not exist: ${realSource} — skipping`);
-    continue;
+    return false;
   }
 
   assertSafeSymlinks(realSource);
@@ -151,6 +156,40 @@ for (const packageName of packagesToCopy) {
   // pnpm's symlinked store to produce a self-contained VSIX.
   cpSync(realSource, target, { recursive: true, dereference: true });
   console.log(`✓ Copied ${packageName} → dist/node_modules/${packageName}  (from ${realSource})`);
+  return true;
+}
+
+for (const packageName of packagesToCopy) {
+  copyPackage(packageName);
+}
+
+// impit ships its compiled NAPI (.node) binary in a SEPARATE per-platform
+// package (e.g. impit-win32-x64-msvc), declared as an optionalDependency of
+// `impit` itself — pnpm only installs the variant matching the current
+// build machine. Copying just the `impit` package folder (above) copies the
+// pure-JS loader but never the native binary it `require()`s at runtime, so
+// AIRTABLE_HTTP_CLIENT=impit would throw "Cannot find native binding" in the
+// packaged VSIX despite the setting being selectable. Read the platform
+// package names straight from impit's own package.json (rather than
+// hardcoding them) so a future impit version adding/dropping targets can't
+// silently drift this list out of sync again.
+const impitTarget = join(extensionNodeModules, 'impit');
+if (existsSync(join(impitTarget, 'package.json'))) {
+  const impitPkg = JSON.parse(readFileSync(join(impitTarget, 'package.json'), 'utf8'));
+  const impitPlatformPackages = Object.keys(impitPkg.optionalDependencies || {});
+  let copiedAny = false;
+  for (const platformPkg of impitPlatformPackages) {
+    if (copyPackage(platformPkg)) copiedAny = true;
+  }
+  if (!copiedAny) {
+    console.warn(
+      '⚠ impit was vendored but none of its platform-specific native binary packages ' +
+      `(${impitPlatformPackages.join(', ')}) could be resolved — ` +
+      'AIRTABLE_HTTP_CLIENT=impit will fail with "Cannot find native binding" in this VSIX. ' +
+      'Run `pnpm install` on this machine before packaging so the current platform\'s ' +
+      'impit-<platform> optional dependency is present in node_modules.'
+    );
+  }
 }
 
 // Copy @airtable-formula/language-services (workspace package — not on npm,
