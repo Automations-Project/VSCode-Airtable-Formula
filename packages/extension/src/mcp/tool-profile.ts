@@ -146,7 +146,7 @@ interface ProfileDef {
 export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', ProfileDef> = {
   'read-only': { description: 'Schema inspection, formula validation, and record reading only', categories: ['read', 'record-read'] },
   'safe-write':{ description: 'Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates (no deletes, no form metadata)',
-                 categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section', 'sync'] },
+                 categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'] },
   full:        { description: 'All tools enabled including destructive ops, form metadata, and extensions',
                  categories: [
                    'read', 'record-read', 'record-write', 'record-destructive',

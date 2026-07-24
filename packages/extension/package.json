@@ -526,7 +526,7 @@
           ],
           "enumDescriptions": [
             "Schema inspection, formula validation, and record reading only (12 tools)",
-            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (55 tools)",
+            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
             "All tools enabled including destructive ops, form metadata, and extensions (71 tools)",
             "User-defined per-tool selection"
           ],
@@ -599,12 +599,12 @@
         },
         "airtableFormula.mcp.categories.recordDestructive": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Record Destructive tools: delete_records (batch record deletion)."
         },
         "airtableFormula.mcp.categories.sync": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Sync tools: sync_base (base-to-base schema plan — read-only plan mode)."
         },
         "airtableFormula.mcp.tools": {

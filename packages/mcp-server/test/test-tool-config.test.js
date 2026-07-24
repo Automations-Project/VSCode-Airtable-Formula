@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -64,6 +64,11 @@ describe('BUILTIN_PROFILES', () => {
     assert.ok(!cats.includes('extension'));
   });
 
+  it('safe-write excludes sync (sync_base can delete tables/fields/views/records via mode=apply)', () => {
+    const cats = BUILTIN_PROFILES['safe-write'].categories;
+    assert.ok(!cats.includes('sync'), 'safe-write must not silently expose sync_base');
+  });
+
   it('full includes all categories', () => {
     const cats = new Set(BUILTIN_PROFILES['full'].categories);
     for (const cat of Object.keys(CATEGORY_LABELS)) {
@@ -123,6 +128,7 @@ describe('ToolConfigManager', () => {
       assert.ok(enabled.has('create_records'));
       assert.ok(enabled.has('update_records'));
       assert.ok(!enabled.has('delete_records'));
+      assert.ok(!enabled.has('sync_base'), 'sync must not be in safe-write — its mode=apply can delete records/schema');
     });
 
     it('full enables all 71 tools', async () => {
@@ -252,5 +258,59 @@ describe('record-write tools', () => {
 describe('sync tools', () => {
   it('maps sync_base to the sync category', () => {
     assert.equal(TOOL_CATEGORIES.sync_base, 'sync');
+  });
+});
+
+describe('legacy on-disk custom config — new categories must not silently widen', () => {
+  // Regression coverage for: a ~/.airtable-user-mcp/tools-config.json with
+  // activeProfile:"custom" written before the `sync` and `record-destructive`
+  // categories existed has NO key at all for sync_base / delete_records in
+  // its customTools map. enabledToolNames()'s "absent key → enabled" default
+  // must not silently grant those (destructive) tools on upgrade.
+  const ENV_KEY = 'AIRTABLE_USER_MCP_HOME';
+  let prevHome;
+  let tmpHome;
+
+  beforeEach(async () => {
+    prevHome = process.env[ENV_KEY];
+    tmpHome = join(tmpdir(), `tool-config-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(tmpHome, { recursive: true });
+    process.env[ENV_KEY] = tmpHome;
+  });
+
+  afterEach(async () => {
+    if (prevHome === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = prevHome;
+    await rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('an old custom config with no sync_base/delete_records key keeps them disabled', async () => {
+    // Simulate a pre-existing config: activeProfile "custom" with explicit
+    // per-tool overrides for tools that existed at the time it was written,
+    // but no entry whatsoever for sync_base / delete_records.
+    const legacyConfig = {
+      activeProfile: 'custom',
+      customTools: {
+        get_base_schema: true,
+        create_table: true,
+        delete_field: false,
+      },
+    };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+    const enabled = mgr.enabledToolNames();
+
+    assert.ok(!enabled.has('sync_base'), 'sync_base must default to DISABLED for a pre-existing custom config');
+    assert.ok(!enabled.has('delete_records'), 'delete_records must default to DISABLED for a pre-existing custom config');
+
+    // Legacy behavior is preserved for already-known categories: a tool the
+    // user never explicitly toggled (e.g. create_field, part of field-write)
+    // still defaults to enabled, and an explicit false override still wins.
+    assert.ok(enabled.has('create_field'), 'unrelated tools in pre-existing categories must keep defaulting to enabled');
+    assert.ok(enabled.has('get_base_schema'));
+    assert.ok(enabled.has('create_table'));
+    assert.ok(!enabled.has('delete_field'), 'explicit false override must still be honored');
   });
 });

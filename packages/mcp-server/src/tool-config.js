@@ -138,6 +138,20 @@ export const CATEGORY_LABELS = {
   'sync':                     'Sync',
 };
 
+/**
+ * Categories added after per-tool `customTools` overrides already existed on
+ * disk (`sync`, `record-destructive`). A pre-existing `~/.airtable-user-mcp/
+ * tools-config.json` with `activeProfile: "custom"` written before these
+ * categories shipped has NO key at all for their tools (e.g. `sync_base`,
+ * `delete_records`) — the general "absent key → enabled" default below would
+ * silently grant a custom-profile user newly-introduced (and destructive)
+ * tools on upgrade. Absent keys for tools in these categories resolve to
+ * DISABLED instead; every other (pre-existing) category keeps the legacy
+ * enabled-by-default behavior so a new tool added to an already-adopted
+ * category doesn't require a config bump.
+ */
+const NEW_CATEGORIES_DEFAULT_OFF = new Set(['sync', 'record-destructive']);
+
 // ─── Built-in Profiles ───────────────────────────────────────
 
 export const BUILTIN_PROFILES = {
@@ -147,7 +161,7 @@ export const BUILTIN_PROFILES = {
   },
   'safe-write': {
     description: 'Read + record read/write + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
-    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section', 'sync'],
+    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'],
   },
   full: {
     description: 'All tools enabled including destructive ops, form metadata, and extensions',
@@ -272,8 +286,14 @@ export class ToolConfigManager {
     if (profile === 'custom') {
       const enabled = new Set();
       for (const [tool, category] of Object.entries(TOOL_CATEGORIES)) {
-        // Default: enabled unless explicitly set to false
         const override = this._config.customTools[tool];
+        if (override === undefined) {
+          // No explicit override on disk. Default: enabled unless the tool's
+          // category was introduced after per-tool overrides already
+          // existed — see NEW_CATEGORIES_DEFAULT_OFF above.
+          if (!NEW_CATEGORIES_DEFAULT_OFF.has(category)) enabled.add(tool);
+          continue;
+        }
         if (override !== false) enabled.add(tool);
       }
       return enabled;

@@ -236,7 +236,7 @@ Located at `packages/mcp-server/dev-tools/` (gitignored):
 
 All under `airtableFormula.*`:
 - `mcp.autoConfigureOnInstall` — auto-write MCP config to detected IDEs on first launch
-- `mcp.toolProfile` — `read-only` (12 tools) / `safe-write` (55 tools) / `full` (71 tools) / `custom`
+- `mcp.toolProfile` — `read-only` (12 tools) / `safe-write` (54 tools) / `full` (71 tools) / `custom`
 - `mcp.categories.{read,recordRead,recordWrite,recordDestructive,tableWrite,tableDestructive,fieldWrite,fieldDestructive,viewWrite,viewDestructive,viewSection,viewSectionDestructive,formWrite,extension,sync}` — per-category toggles when profile is `custom`
 - `mcp.daemonPort` — fixed TCP port for the shared MCP daemon HTTP server (default 8723, kept stable across restarts; 0 = automatic/ephemeral; falls back to an automatic port if the chosen port is busy; takes effect on next daemon restart)
 - `mcp.authMode` — `browser` (default; headless Chrome mints the cookie, calls go direct-HTTP) / `byo` (cookie-only, no browser; cookie from `~/.airtable-user-mcp/credentials.json` or `AIRTABLE_COOKIE`) / `direct-login` (browser-free email+password+TOTP; `login.json` or `AIRTABLE_EMAIL/PASSWORD/TOTP_SECRET`). Injected as `AIRTABLE_AUTH_MODE` into the spawned server via `buildDaemonEnv`/`registration.ts` (non-default only). Takes effect on next daemon/server restart.
