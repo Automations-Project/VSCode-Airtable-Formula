@@ -10,10 +10,10 @@
       "userInfoById": {
         "usrFIXTURE0000001": {
           "id": "usrFIXTURE0000001",
-          "firstName": "Fixture",
+          "firstName": "Fake1",
           "lastName": "User",
-          "email": "sync-fixture@example.invalid",
-          "profilePicUrl": "https://dl.airtable.com/.directUploadProfilePics/fixture00000000000000000000000fx/fixture0f/000000.png",
+          "email": "fixtureuser@example.invalid",
+          "profilePicUrl": "https://dl.airtable.com/.directUploadProfilePics/00000000000000000000000000000001/00000001/071014.png",
           "permissionLevel": "owner",
           "pageBundlePermissionLevelByPageBundleId": {},
           "appBlanketUserState": "active"
@@ -856,7 +856,7 @@
               "fldkV40yf91ZNmrHa": [
                 {
                   "id": "attROb0RNhJ8CJO0B",
-                  "url": "https://dl.airtable.com/.directUploadAttachment/fixture00000000000000000000000fx/fixture0f/test.txt",
+                  "url": "https://dl.airtable.com/.directUploadAttachment/00000000000000000000000000000002/00000002/test.txt",
                   "filename": "test.txt",
                   "type": "text/plain",
                   "size": 48
@@ -958,7 +958,7 @@
           }
         ],
         "signedUserContentUrls": {
-          "https://dl.airtable.com/.directUploadAttachment/fixture00000000000000000000000fx/fixture0f/test.txt": "https://v5.airtableusercontent.com/v3/u/00/00/0000000000000/FIXTURE_NOT_A_REAL_SIGNED_TOKEN_0000000000/FIXTURE_NOT_A_REAL_SIGNED_TOKEN_0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000/FIXTURE_NOT_A_REAL_SIGNED_TOKEN_00000000000000000000000000000000000000000"
+          "https://dl.airtable.com/.directUploadAttachment/00000000000000000000000000000002/00000002/test.txt": "https://v5.airtableusercontent.com/v3/u/00/00/0000000000000/FIXTUREFIXTUREFIXTUREF/FIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIX/FIXTUREFIXTUREFIXTUREFIXTUREFIXTUREFIXTUREF"
         },
         "hasOnlyIncludedRowAndCellDataForIncludedViews": false
       }
