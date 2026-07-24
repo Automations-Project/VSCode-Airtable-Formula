@@ -159,36 +159,66 @@ function copyPackage(packageName) {
   return true;
 }
 
-for (const packageName of packagesToCopy) {
-  copyPackage(packageName);
+/**
+ * Some vendored packages (impit, @ngrok/ngrok, and potentially future
+ * additions) ship their compiled NAPI (.node) binary in SEPARATE per-platform
+ * packages declared as their OWN optionalDependencies (e.g.
+ * impit-win32-x64-msvc, @ngrok/ngrok-darwin-arm64) — pnpm only installs the
+ * variant matching the current build machine. Copying just the parent
+ * package folder copies the pure-JS loader but never the native binary it
+ * `require()`s at runtime, so the feature throws "Cannot find native
+ * binding" in the packaged VSIX despite being selectable/enabled. This bit
+ * us for impit first; rather than hardcode a second package name when it
+ * turned out `@ngrok/ngrok` has the exact same shape, this generalizes: walk
+ * whatever optionalDependencies the ALREADY-COPIED package itself declares
+ * (read from dist/node_modules/<name>/package.json — sidesteps packages with
+ * a strict `exports` map, like otpauth, that don't expose ./package.json via
+ * require.resolve) and vendor whichever of those resolve from this machine.
+ *
+ * Not every optionalDependency is a platform-binary split, though (e.g.
+ * patchright declares `fsevents`, a genuinely-optional macOS file watcher
+ * its own code already handles being absent) — those are still vendored
+ * when resolvable (harmless, and correct when it IS available), but a
+ * missing one doesn't warrant the loud "will crash at runtime" warning.
+ * NAPI-style platform splits conventionally name the child after the
+ * parent (impit -> impit-<platform>, @ngrok/ngrok -> @ngrok/ngrok-<platform>);
+ * only THOSE trigger the stronger aggregate warning when none resolve.
+ */
+function vendorOptionalDependencies(packageName) {
+  const pkgJsonPath = join(extensionNodeModules, packageName, 'package.json');
+  if (!existsSync(pkgJsonPath)) return;
+
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'));
+  } catch {
+    return; // malformed — nothing we can do, the parent package is still vendored
+  }
+
+  const optionalDeps = Object.keys(pkg.optionalDependencies || {});
+  if (optionalDeps.length === 0) return;
+
+  const platformShaped = optionalDeps.filter((dep) => dep.startsWith(`${packageName}-`));
+
+  for (const dep of optionalDeps) {
+    copyPackage(dep);
+  }
+
+  const anyPlatformCopied = platformShaped.some((dep) => existsSync(join(extensionNodeModules, dep)));
+  if (platformShaped.length > 0 && !anyPlatformCopied) {
+    console.warn(
+      `⚠ ${packageName} was vendored but none of its platform-specific native binary packages ` +
+      `(${platformShaped.join(', ')}) could be resolved — any feature that depends on ` +
+      `${packageName}'s native binding will fail with "Cannot find native binding" in this VSIX. ` +
+      'Run `pnpm install` on this machine before packaging so the current platform\'s ' +
+      `${packageName}-<platform> optional dependency is present in node_modules.`
+    );
+  }
 }
 
-// impit ships its compiled NAPI (.node) binary in a SEPARATE per-platform
-// package (e.g. impit-win32-x64-msvc), declared as an optionalDependency of
-// `impit` itself — pnpm only installs the variant matching the current
-// build machine. Copying just the `impit` package folder (above) copies the
-// pure-JS loader but never the native binary it `require()`s at runtime, so
-// AIRTABLE_HTTP_CLIENT=impit would throw "Cannot find native binding" in the
-// packaged VSIX despite the setting being selectable. Read the platform
-// package names straight from impit's own package.json (rather than
-// hardcoding them) so a future impit version adding/dropping targets can't
-// silently drift this list out of sync again.
-const impitTarget = join(extensionNodeModules, 'impit');
-if (existsSync(join(impitTarget, 'package.json'))) {
-  const impitPkg = JSON.parse(readFileSync(join(impitTarget, 'package.json'), 'utf8'));
-  const impitPlatformPackages = Object.keys(impitPkg.optionalDependencies || {});
-  let copiedAny = false;
-  for (const platformPkg of impitPlatformPackages) {
-    if (copyPackage(platformPkg)) copiedAny = true;
-  }
-  if (!copiedAny) {
-    console.warn(
-      '⚠ impit was vendored but none of its platform-specific native binary packages ' +
-      `(${impitPlatformPackages.join(', ')}) could be resolved — ` +
-      'AIRTABLE_HTTP_CLIENT=impit will fail with "Cannot find native binding" in this VSIX. ' +
-      'Run `pnpm install` on this machine before packaging so the current platform\'s ' +
-      'impit-<platform> optional dependency is present in node_modules.'
-    );
+for (const packageName of packagesToCopy) {
+  if (copyPackage(packageName)) {
+    vendorOptionalDependencies(packageName);
   }
 }
 
