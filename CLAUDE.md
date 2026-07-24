@@ -258,6 +258,8 @@ The **authoritative** tool → category mapping lives in `packages/mcp-server/sr
 
 Run `pnpm check:tool-sync` — must print green ✓ before committing. It also runs as part of `pnpm build` and `pnpm test`.
 
+A newly added category defaults to **off** for pre-existing `custom`-profile users by design: `ToolConfigManager.enabledToolNames()` in `tool-config.js` resolves a tool with no key in an on-disk `customTools` map to enabled only if its category is in the frozen `LEGACY_CATEGORIES_DEFAULT_ON` allowlist. Do not add the new category to that allowlist — leaving it out is what keeps a `custom` profile from silently widening to include a tool it never explicitly opted into.
+
 <!-- PERPLEXITY-MCP-START -->
 # Perplexity MCP Server
 

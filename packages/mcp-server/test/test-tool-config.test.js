@@ -313,4 +313,63 @@ describe('legacy on-disk custom config — new categories must not silently wide
     assert.ok(enabled.has('create_table'));
     assert.ok(!enabled.has('delete_field'), 'explicit false override must still be honored');
   });
+
+  it('toggleTool on an absent-key tool reports changed (fires tools/list_changed)', async () => {
+    // Same legacy shape as above: sync_base has no key, so it currently
+    // resolves to disabled. Toggling it to true is a REAL change and must be
+    // notified. With the old `customTools[tool] !== false` computation for
+    // `prev`, an absent key read as `prev = true` (since `undefined !==
+    // false`), so this came out as changed=false and no notification fired
+    // even though the tool became enabled and the change was persisted —
+    // connected MCP clients would keep a stale tool list for the session.
+    const legacyConfig = { activeProfile: 'custom', customTools: { get_base_schema: true } };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+    assert.ok(!mgr.enabledToolNames().has('sync_base'), 'sanity: starts disabled');
+
+    let notifyCount = 0;
+    mgr.bindServer({ sendToolListChanged: () => { notifyCount++; } });
+
+    await mgr.toggleTool('sync_base', true);
+
+    assert.ok(mgr.enabledToolNames().has('sync_base'), 'sync_base is now enabled');
+    assert.equal(notifyCount, 1, 'tools/list_changed must fire — the effective tool set changed');
+  });
+
+  it('toggleTool on an absent-key tool does not fire a spurious notification when the value already matches the resolved default', async () => {
+    // Mirror case named in the finding: toggling an absent-key tool to the
+    // value it already effectively has (false, since sync is not in
+    // LEGACY_CATEGORIES_DEFAULT_ON) is NOT a real change and must not notify.
+    const legacyConfig = { activeProfile: 'custom', customTools: { get_base_schema: true } };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+
+    let notifyCount = 0;
+    mgr.bindServer({ sendToolListChanged: () => { notifyCount++; } });
+
+    await mgr.toggleTool('sync_base', false);
+
+    assert.ok(!mgr.enabledToolNames().has('sync_base'));
+    assert.equal(notifyCount, 0, 'no real change occurred — must not notify');
+  });
+
+  it('toggleCategory on an absent-key category reports changed for a legacy config', async () => {
+    const legacyConfig = { activeProfile: 'custom', customTools: { get_base_schema: true } };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+
+    let notifyCount = 0;
+    mgr.bindServer({ sendToolListChanged: () => { notifyCount++; } });
+
+    await mgr.toggleCategory('sync', true);
+
+    assert.ok(mgr.enabledToolNames().has('sync_base'));
+    assert.equal(notifyCount, 1, 'tools/list_changed must fire — the category actually changed');
+  });
 });

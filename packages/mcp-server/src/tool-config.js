@@ -139,18 +139,30 @@ export const CATEGORY_LABELS = {
 };
 
 /**
- * Categories added after per-tool `customTools` overrides already existed on
- * disk (`sync`, `record-destructive`). A pre-existing `~/.airtable-user-mcp/
- * tools-config.json` with `activeProfile: "custom"` written before these
- * categories shipped has NO key at all for their tools (e.g. `sync_base`,
- * `delete_records`) — the general "absent key → enabled" default below would
- * silently grant a custom-profile user newly-introduced (and destructive)
- * tools on upgrade. Absent keys for tools in these categories resolve to
- * DISABLED instead; every other (pre-existing) category keeps the legacy
- * enabled-by-default behavior so a new tool added to an already-adopted
- * category doesn't require a config bump.
+ * The categories that existed back when per-tool `customTools` overrides
+ * were first introduced. Frozen — do NOT add to this list when a new
+ * category ships; leave it exactly as-is.
+ *
+ * A `~/.airtable-user-mcp/tools-config.json` with `activeProfile: "custom"`
+ * predating a given category has NO key at all for that category's tools.
+ * `enabledToolNames()` resolves an absent key to enabled only if the tool's
+ * category is in this allowlist — so any category added in the future
+ * (like `sync`/`record-destructive` were on this branch) automatically
+ * defaults to DISABLED for pre-existing custom configs, with zero code
+ * changes required here. That's the point: the "don't silently widen a
+ * custom profile" invariant is self-maintaining and can't be forgotten by a
+ * future change the way a hand-maintained "which categories are new" list
+ * could be. See CLAUDE.md's "Keeping tool categories in sync" checklist.
  */
-const NEW_CATEGORIES_DEFAULT_OFF = new Set(['sync', 'record-destructive']);
+const LEGACY_CATEGORIES_DEFAULT_ON = Object.freeze(new Set([
+  'read', 'record-read',
+  'table-write', 'table-destructive',
+  'field-write', 'field-destructive',
+  'view-write', 'view-destructive',
+  'view-section', 'view-section-destructive',
+  'form-write', 'extension',
+  'record-write',
+]));
 
 // ─── Built-in Profiles ───────────────────────────────────────
 
@@ -288,10 +300,10 @@ export class ToolConfigManager {
       for (const [tool, category] of Object.entries(TOOL_CATEGORIES)) {
         const override = this._config.customTools[tool];
         if (override === undefined) {
-          // No explicit override on disk. Default: enabled unless the tool's
-          // category was introduced after per-tool overrides already
-          // existed — see NEW_CATEGORIES_DEFAULT_OFF above.
-          if (!NEW_CATEGORIES_DEFAULT_OFF.has(category)) enabled.add(tool);
+          // No explicit override on disk. Default: enabled only if the
+          // tool's category predates per-tool overrides — see
+          // LEGACY_CATEGORIES_DEFAULT_ON above.
+          if (LEGACY_CATEGORIES_DEFAULT_ON.has(category)) enabled.add(tool);
           continue;
         }
         if (override !== false) enabled.add(tool);
@@ -373,7 +385,15 @@ export class ToolConfigManager {
       }
       this._config.activeProfile = 'custom';
     }
-    const prev = this._config.customTools[toolName] !== false;
+    // Derive prev from enabledToolNames() rather than reading customTools[tool]
+    // directly — a key can be absent (e.g. a tool in a category newer than
+    // this on-disk config) and resolve to enabled or disabled depending on
+    // LEGACY_CATEGORIES_DEFAULT_ON, which `!== false` doesn't account for.
+    // Getting this wrong means toggling an absent-key tool can compute
+    // changed=false while the actual enabled state flips, so no
+    // tools/list_changed notification is sent even though the effective
+    // tool set changed.
+    const prev = this.enabledToolNames().has(toolName);
     this._config.customTools[toolName] = enabled;
     await this.save();
     if (prev !== enabled) this._notifyChanged();
@@ -392,10 +412,15 @@ export class ToolConfigManager {
       }
       this._config.activeProfile = 'custom';
     }
+    // Same reasoning as toggleTool(): derive "prev" from the resolved enabled
+    // set (computed once, before any mutation below), not a raw `!== false`
+    // read of customTools[tool], so absent keys are judged the same way
+    // enabledToolNames() judges them.
+    const enabledBefore = this.enabledToolNames();
     let changed = false;
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       if (cat === category) {
-        const prev = this._config.customTools[tool] !== false;
+        const prev = enabledBefore.has(tool);
         this._config.customTools[tool] = enabled;
         if (prev !== enabled) changed = true;
       }
