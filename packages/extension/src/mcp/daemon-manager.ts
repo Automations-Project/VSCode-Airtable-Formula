@@ -422,7 +422,14 @@ export class DaemonManager implements vscode.Disposable {
    * Positive ownership test — the ONLY kill criterion.
    *
    * (a) the exact bundled `<extensionPath>/dist/mcp/index.mjs` this install spawns, matched as a
-   *     whole argv token; or
+   *     whole argv token, AND the `daemon`/`start` subcommand shape `_spawnDetached()` always
+   *     emits. BOTH conjuncts are required: the path alone only proves the file is *mentioned*
+   *     in the argv, not that the process is *running* it. `code <bundled path>` (the user
+   *     opening our file in an editor), an Explorer double-click, `node --check <path>` or a
+   *     build tool listing it would otherwise be force-killed WITH THEIR PROCESS TREE — for the
+   *     editor case that is the user's unsaved work and the extension host running this sweep.
+   *     This is the same "our file appears in someone else's argv" hazard that rules out using a
+   *     bare `.airtable-user-mcp` fragment as a criterion; or
    * (b) a Chromium still squatting our persistent profile — `.airtable-user-mcp` followed by
    *     `.chrome-profile`. Semantics are UNCHANGED from the original (already correctly scoped)
    *     `%.airtable-user-mcp%.chrome-profile%` filter: both fragments, in that order. It is
@@ -432,18 +439,26 @@ export class DaemonManager implements vscode.Disposable {
   private _isOwnedCommandLine(commandLine: string): boolean {
     const cmd = DaemonManager._canon(commandLine);
     const entry = this._bundledEntryPath();
-    if (entry && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))) return true;
+    if (entry
+      && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))
+      && DaemonManager._hasDaemonStartShape(commandLine)) return true;
     const i = cmd.indexOf('.airtable-user-mcp');
     return i >= 0 && cmd.indexOf('.chrome-profile', i + '.airtable-user-mcp'.length) > i;
   }
 
   /**
-   * The OLD, unscoped kill criterion (`index.mjs` … `daemon` … `start`, in order, anywhere in
-   * argv). It is NO LONGER a kill criterion. It only decides what gets *reported* as
-   * "looked like a stray daemon, but ownership could not be established" so the user still learns
-   * about a leftover process from a different install instead of it being silently executed.
+   * `index.mjs` … `daemon` … `start`, in that order, anywhere in argv — the shape
+   * `_spawnDetached()` always emits (`[serverPath, 'daemon', 'start', …]`).
+   *
+   * This was the OLD kill criterion **on its own**, which is what made the sweep dangerous. It is
+   * never sufficient now. It serves two purposes:
+   *   1. as a REQUIRED CONJUNCT of ownership criterion (a) — proving the process is *running* our
+   *      bundled entry as a daemon rather than merely naming the file; and
+   *   2. as the REPORTING predicate — a process with this shape that fails ownership is surfaced
+   *      as "looked like a stray daemon, ownership unverified" so the user still learns about a
+   *      leftover from another install instead of it being silently executed.
    */
-  private static _looksLikeStrayDaemon(commandLine: string): boolean {
+  private static _hasDaemonStartShape(commandLine: string): boolean {
     const cmd = DaemonManager._canon(commandLine);
     const a = cmd.indexOf('index.mjs');
     if (a < 0) return false;
@@ -470,7 +485,7 @@ export class DaemonManager implements vscode.Disposable {
       if (this._isOwnedCommandLine(proc.commandLine)) {
         this._killTree(proc.pid, platform);
         killed.push(proc.pid);
-      } else if (DaemonManager._looksLikeStrayDaemon(proc.commandLine)) {
+      } else if (DaemonManager._hasDaemonStartShape(proc.commandLine)) {
         skipped.push(proc);
       }
     }
@@ -496,6 +511,12 @@ export class DaemonManager implements vscode.Disposable {
   private _listProcesses(platform: NodeJS.Platform = process.platform): SweptProcess[] {
     if (platform === 'win32') {
       const script =
+        // Windows PowerShell 5.1 writes redirected stdout in the console OEM codepage (e.g. 437),
+        // but we decode as utf8. Without this an install root containing non-ASCII
+        // (`C:\Users\José\.vscode\extensions\…`) arrives mojibaked (`Jos\uFFFD`), criterion (a)
+        // can never match, and our OWN orphan gets reported as unowned instead of swept — the
+        // feature silently stops working for those users. Fails safe (never a false kill).
+        '[Console]::OutputEncoding=[Text.Encoding]::UTF8; ' +
         '$a=$env:AIRTABLE_SWEEP_MARK_A; $b=$env:AIRTABLE_SWEEP_MARK_B; ' +
         'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { ' +
         '$c = $_.CommandLine.ToLowerInvariant(); ' +

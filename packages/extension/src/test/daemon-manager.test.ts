@@ -500,6 +500,46 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
     expect(result.skipped.map(p => p.pid)).toEqual([5003, 5004, 5005]);
   });
 
+  it('NEGATIVE (our file as someone else\'s ARGUMENT): `code <bundled path>` is NOT killed', () => {
+    // THE hazard the path-only criterion had: our bundled file merely MENTIONED in another
+    // process's argv. `taskkill /T /F` here takes the user's editor, their unsaved work, and the
+    // extension host running this sweep. Ownership requires the daemon/start subcommand shape
+    // that _spawnDetached always emits, proving the process is RUNNING the file, not naming it.
+    const { result, killTree } = sweep(WIN_ROOT, [
+      { pid: 9001, commandLine: `"C:\\Program Files\\Microsoft VS Code\\Code.exe" "${WIN_ROOT}\\dist\\mcp\\index.mjs"` },
+      { pid: 9002, commandLine: `node --check ${WIN_ROOT}\\dist\\mcp\\index.mjs` },
+      { pid: 9003, commandLine: `rg --files-with-matches daemon ${WIN_ROOT}\\dist\\mcp\\index.mjs` },
+      // Explorer double-click / default-app open.
+      { pid: 9004, commandLine: `"C:\\Windows\\System32\\NOTEPAD.EXE" ${WIN_ROOT}\\dist\\mcp\\index.mjs` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('NEGATIVE (path-suffix): a LONGER path that merely ENDS with our bundled path is NOT killed', () => {
+    // Pins the leading-boundary half of _containsPathToken. Extended-length (`\\?\C:\…`) and
+    // mounted-copy forms are the same bytes with a prefix — matching them would mean any path
+    // whose tail equals ours is "ours".
+    const { result, killTree } = sweep(WIN_ROOT, [
+      { pid: 9101, commandLine: `node \\\\?\\${WIN_ROOT}\\dist\\mcp\\index.mjs daemon start` },
+      { pid: 9102, commandLine: `node C:\\snapshots\\${WIN_ROOT.replace(/^C:\\/, '')}\\dist\\mcp\\index.mjs daemon start` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped.map(p => p.pid)).toEqual([9101, 9102]);
+  });
+
+  it('NEGATIVE (path-suffix, POSIX): `/mnt/backup` + our root is NOT killed', () => {
+    const { result, killTree } = sweep(
+      POSIX_ROOT,
+      [{ pid: 9103, commandLine: `node /mnt/backup${POSIX_ROOT}/dist/mcp/index.mjs daemon start` }],
+      'linux',
+    );
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped.map(p => p.pid)).toEqual([9103]);
+  });
+
   it('FAIL-SAFE: a matched-but-unverifiable process is left ALIVE and appears in the skipped report', () => {
     // Looks exactly like our daemon (Electron host + dist/mcp/index.mjs + daemon start) but the
     // install root is somebody else's. Ambiguity must resolve to NOT killing.
@@ -627,6 +667,10 @@ describe('DaemonManager._listProcesses / _killTree — process primitives', () =
     const script = args[args.indexOf('-Command') + 1];
     expect(script).toContain('Get-CimInstance Win32_Process');
     expect(script).not.toContain('wmic');
+    // PowerShell 5.1 writes redirected stdout in the console OEM codepage; we decode utf8.
+    // Without this, a non-ASCII install root (`C:\Users\José\…`) arrives mojibaked and our own
+    // orphan is misreported as unowned. Must be the FIRST statement — before any output.
+    expect(script.startsWith('[Console]::OutputEncoding=[Text.Encoding]::UTF8;')).toBe(true);
     // THE escaping guarantee: no part of the install path reaches the script text, so
     // `%`, `_`, `[`, `.`, `\` and spaces cannot alter match semantics or inject script.
     expect(script).not.toContain(ROOT);
