@@ -693,6 +693,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     dashboardProvider.refresh();
                 }
             }
+
+            // Transport settings (authMode / httpClient / browserIdleParkMinutes) are injected
+            // into the daemon/stdio env at spawn time, so a settings.json or Settings-UI edit
+            // needs the same restart + re-provision the dashboard performs on its own edits.
+            // Route through the shared DashboardProvider method so both paths behave identically.
+            if (e.affectsConfiguration('airtableFormula.mcp.authMode') ||
+                e.affectsConfiguration('airtableFormula.mcp.httpClient') ||
+                e.affectsConfiguration('airtableFormula.mcp.browserIdleParkMinutes')) {
+                await dashboardProvider.applyTransportSettingChange();
+            }
         }),
     );
 

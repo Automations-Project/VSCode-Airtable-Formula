@@ -127,6 +127,52 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Transport settings (authMode / httpClient / browserIdleParkMinutes) are injected
+   * into the daemon env at spawn time (buildDaemonEnv / auto-config), so a running
+   * daemon must be restarted for the change to take effect. Shared by the webview
+   * setting:change handler AND extension.ts's onDidChangeConfiguration so settings.json
+   * / Settings-UI edits behave identically to dashboard edits.
+   */
+  async applyTransportSettingChange(): Promise<void> {
+    const dm = this._daemonManager;
+    if (!dm) {
+      // No daemon manager wired → still re-provision for a stdio server.
+      void this._fireMcpChanged();
+      return;
+    }
+    const status = await dm.getDaemonStatus();
+    if (status?.running) {
+      // Daemon mode: restart so the new AIRTABLE_* transport env re-injects.
+      // Guard the lockfile watcher against our own restart so it does not double-fire
+      // (cleared in finally); _fireMcpChanged records the port so the watcher's detect
+      // path also finds no change.
+      this._daemonStarting = true;
+      try {
+        await dm.restartDaemon();
+        // Fresh daemon is creds-free in env by design — deliver byo/direct-login
+        // creds over the endpoint so the new auth mode has what it needs.
+        const pushed = await this._pushDaemonCredsIfNeeded();
+        if (!pushed) {
+          void vscode.window.showWarningMessage('Transport settings changed and the daemon restarted, but its credentials could not be updated — restart the daemon to apply them.');
+        }
+        // The restart may have changed the port — re-query the definition provider
+        // so VS Code rebuilds the HTTP URI from the current daemon.lock.
+        await this._fireMcpChanged();
+        await this.pushState();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        this._daemonStarting = false;
+      }
+      return;
+    }
+    // No-daemon (stdio) mode: no daemon to restart — re-provision the MCP servers so VS Code
+    // respawns the stdio server with the fresh env.
+    await this._fireMcpChanged();
+    await this.pushState();
+  }
+
+  /**
    * When running the daemon transport with a credential-based auth mode
    * (byo / direct-login), push the stored credentials to the running daemon
    * over its bearer-authenticated /daemon/auth-credentials endpoint. The daemon
@@ -636,47 +682,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       if (msg.key.startsWith('auth.')) {
         this.authManager?.restartAutoRefresh();
       }
-      // Transport settings (authMode / httpClient) are injected into the daemon
-      // env at spawn time (buildDaemonEnv), so a running daemon must be
-      // restarted for the change to take effect.
-      if (msg.key === 'mcp.authMode' || msg.key === 'mcp.httpClient') {
-        const dm = this._daemonManager;
-        if (dm) {
-          void dm.getDaemonStatus().then(async status => {
-            if (status?.running) {
-              // Daemon mode: restart so the new AIRTABLE_AUTH_MODE/HTTP_CLIENT env re-injects.
-              // Guard the lockfile watcher against our own restart so it does not double-fire
-              // (cleared in finally); _fireMcpChanged records the port so the watcher's detect
-              // path also finds no change.
-              this._daemonStarting = true;
-              try {
-                await dm.restartDaemon();
-                // Fresh daemon is creds-free in env by design — deliver byo/direct-login
-                // creds over the endpoint so the new auth mode has what it needs.
-                const pushed = await this._pushDaemonCredsIfNeeded();
-                if (!pushed) {
-                  void vscode.window.showWarningMessage('Auth mode changed and the daemon restarted, but its credentials could not be updated — restart the daemon to apply them.');
-                }
-                // The restart may have changed the port — re-query the definition provider
-                // so VS Code rebuilds the HTTP URI from the current daemon.lock.
-                await this._fireMcpChanged();
-                await this.pushState();
-              } catch (err) {
-                vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
-              } finally {
-                this._daemonStarting = false;
-              }
-              return;
-            }
-            // No-daemon (stdio) mode: no daemon to restart — re-provision the MCP servers so VS Code
-            // respawns the stdio server with the fresh env.
-            await this._fireMcpChanged();
-            await this.pushState();
-          });
-        } else {
-          // No daemon manager wired → still re-provision for a stdio server.
-          void this._fireMcpChanged();
-        }
+      // Transport settings (authMode / httpClient / browserIdleParkMinutes) are injected
+      // into the daemon env at spawn time, so a running daemon must be restarted for the
+      // change to take effect. Same flow serves settings.json / Settings-UI edits via
+      // extension.ts's onDidChangeConfiguration → applyTransportSettingChange().
+      if (msg.key === 'mcp.authMode' || msg.key === 'mcp.httpClient' || msg.key === 'mcp.browserIdleParkMinutes') {
+        void this.applyTransportSettingChange();
       }
       await this.pushState();
       // No postResult here — setting:change has no id field and the webview
