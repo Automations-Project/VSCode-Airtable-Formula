@@ -7,8 +7,19 @@
  *   2. POST /auth/getLoginTypeForEmail — detect SSO vs password accounts
  *   3. POST /auth/login/               — email + password → 302 (to /2fa/… or /)
  *   4. POST /auth/verify2faCode        — TOTP, only when a 2FA challenge is returned
- *   → re-scrape csrfToken from an authed GET / (the login session rotates the
- *     csrfSecret, so the /login token is stale for subsequent API calls).
+ *   → re-scrape csrfToken from an authed GET / so the returned credential matches the
+ *     page Airtable renders for this session (defensive refresh, not a staleness fix).
+ *
+ * CSRF across the 2FA step — the step-1 token is reused for steps 2-4, and that is
+ * CORRECT. Airtable uses the stateless csurf scheme (token = salt + '-' +
+ * b64url(sha1(salt + '-' + csrfSecret))), and the HAR shows the session cookie is
+ * RE-ISSUED at both /auth/login/ and /auth/verify2faCode with the csrfSecret
+ * deliberately PRESERVED — it survives even the unauthenticated → authenticated
+ * transition. So the /login token still verifies at 2FA time; login does NOT rotate it.
+ * A real browser posts the /2fa page's token only because it follows the 302 and
+ * re-renders that page with a fresh SALT — new salt, same secret. Pinned by the
+ * "CSRF token across the 2FA step" suite in test/test-direct-login.test.js, whose
+ * negative control fails if Airtable ever does start rotating.
  *
  * Transport DEFAULTS to Node's built-in `fetch` (no dependency), so direct-login works out of the
  * box. impit (Chrome TLS impersonation) is used ONLY when AIRTABLE_HTTP_CLIENT=impit — for the
@@ -362,9 +373,10 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
     throw new Error('DIRECT_LOGIN_NO_SESSION: login flow completed without a session cookie');
   }
 
-  // Re-scrape a fresh csrfToken from an authed GET / (the login rotates the
-  // session's csrfSecret, so the /login token is stale for API calls). Best-
-  // effort: keep the login-flow token if the re-scrape fails.
+  // Refresh the csrfToken from an authed GET / so the returned credential matches
+  // the page Airtable renders for this session. NOT a staleness fix: login preserves
+  // the csrfSecret (see the CSRF note in the module header), so the login-flow token
+  // is still valid — hence best-effort, keeping that token if the re-scrape fails.
   try {
     const home = await request(client, 'GET', '/', { jar });
     const fresh = scrapeCsrf(await home.text());

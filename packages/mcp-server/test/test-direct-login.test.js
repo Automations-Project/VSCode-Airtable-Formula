@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { directLogin } from '../src/direct-login.js';
 import { setInjectedCredentials, clearInjectedCredentials } from '../src/daemon/cred-store.js';
 
@@ -292,5 +293,231 @@ describe('directLogin — injected in-memory store (daemon runtime channel)', ()
     assert.equal(bodyParams(impit.calls[1]).get('email'), 'env@example.com');
     assert.equal(bodyParams(impit.calls[2]).get('password'), 'envpw');
     assert.ok(out.cookieHeader.includes('__Host-airtable-session=S'));
+  });
+});
+
+// ── CSRF-token-rotation pin (Sentry Seer finding, PR #19) ─────────────────────
+//
+// The finding claimed: directLogin reuses the csrfToken scraped from GET /login
+// for POST /auth/verify2faCode; if Airtable rotates CSRF on successful password
+// auth, 2FA verification fails and is misreported as DIRECT_LOGIN_2FA_REJECTED.
+//
+// Verified against artifacts/AirtableLoginElectronAppSimulation.har (a real
+// Electron-app cold login through the same 2FA flow, gitignored, live secrets):
+//   * Airtable's CSRF is the standard csurf/`csrf` tokenizer — every observed
+//     token is 36 chars of the form <8-char salt>-<27-char base64url sha1>,
+//     and `salt + '-' + b64url(sha1(salt + '-' + csrfSecret))` reproduces each
+//     one exactly.
+//   * `csrfSecret` lives inside the `__Host-airtable-session` cookie (base64
+//     JSON) and is BYTE-IDENTICAL at every step of the capture: before login,
+//     after POST /auth/login/ (which only ADDS userIdPending2fa +
+//     twoFactorStartTime), after POST /auth/verify2faCode (which only ADDS
+//     userId + didJustLogIn), and on the post-login GET /.
+//   * Consequence: the GET /login token cryptographically verifies against the
+//     exact secret the session holds at verify2faCode time. Reusing it is safe.
+//     The real browser posts the /2fa page's token only because it follows the
+//     302 and re-renders that page with a fresh salt — same secret, not a
+//     rotation.
+//
+// These two tests use a CSRF-AWARE fake Airtable that actually validates _csrf
+// against the secret carried in the presented session cookie, so they exercise
+// the rotation path instead of restating the implementation.
+
+/** csurf/`csrf` tokenizer: token = salt + '-' + b64url(sha1(salt + '-' + secret)). */
+function csrfTokenize(secret, salt) {
+  const hash = crypto.createHash('sha1').update(`${salt}-${secret}`, 'ascii').digest('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return `${salt}-${hash}`;
+}
+
+/** Server-side check: does `token` derive from `secret`? */
+function csrfVerify(secret, token) {
+  if (typeof secret !== 'string' || typeof token !== 'string') return false;
+  const dash = token.indexOf('-');
+  if (dash < 0) return false;
+  return csrfTokenize(secret, token.slice(0, dash)) === token;
+}
+
+const SESSION_COOKIE = '__Host-airtable-session';
+
+/** Encode a session cookie the way Airtable does: base64(JSON) incl. csrfSecret. */
+function sessionCookie(payload) {
+  const value = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+  return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; Secure`;
+}
+
+/** Read the csrfSecret out of the session cookie the client presented. */
+function presentedSecret(cookieHeader) {
+  for (const part of String(cookieHeader || '').split(';')) {
+    const s = part.trim();
+    if (!s.startsWith(`${SESSION_COOKIE}=`)) continue;
+    try {
+      const json = Buffer.from(s.slice(SESSION_COOKIE.length + 1), 'base64').toString('utf8');
+      return JSON.parse(json).csrfSecret ?? null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+function fakeResponse({ status = 200, body = '', location = null, setCookies = [] } = {}) {
+  return {
+    status,
+    headers: {
+      getSetCookie: () => setCookies,
+      get: (name) => {
+        const n = String(name).toLowerCase();
+        if (n === 'set-cookie') return setCookies.length ? setCookies : null;
+        if (n === 'location') return location;
+        return null;
+      },
+    },
+    text: async () => body,
+  };
+}
+
+/**
+ * A route-driven fake Airtable that enforces CSRF exactly like the real one:
+ * every POST's `_csrf` is validated against the csrfSecret inside the session
+ * cookie the client presents, and each HTML page embeds a freshly SALTED token
+ * derived from the secret that session currently holds.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.rotateSecretAtPasswordAuth=false]
+ *   false → HAR-observed reality: POST /auth/login/ keeps the same csrfSecret.
+ *   true  → the counterfactual world the Seer finding assumes.
+ */
+function makeCsrfAwareAirtable({ rotateSecretAtPasswordAuth = false } = {}) {
+  const ANON_SECRET = 'anon-session-csrf-secret';
+  const POST_LOGIN_SECRET = rotateSecretAtPasswordAuth ? 'rotated-csrf-secret' : ANON_SECRET;
+  const tokens = {
+    loginPage: csrfTokenize(ANON_SECRET, 'saltLOGN'),
+    twoFaPage: csrfTokenize(POST_LOGIN_SECRET, 'salt2FAP'),
+    home: csrfTokenize(POST_LOGIN_SECRET, 'saltHOME'),
+  };
+  const page = (token) => `<html><script>window.__init={"csrfToken":"${token}"}</script></html>`;
+  const calls = [];
+
+  return {
+    calls,
+    tokens,
+    secrets: { anon: ANON_SECRET, postLogin: POST_LOGIN_SECRET },
+    async fetch(url, options) {
+      const { pathname } = new URL(url);
+      const form = options.body ? new URLSearchParams(options.body) : new URLSearchParams();
+      const posted = form.get('_csrf');
+      const secret = presentedSecret(options.headers?.Cookie);
+      calls.push({ pathname, method: options.method, posted, presentedSecret: secret });
+      const csrfOk = () => csrfVerify(secret, posted);
+
+      switch (pathname) {
+        case '/login':
+          // Anonymous session carrying the secret that backs the page's token.
+          return fakeResponse({
+            body: page(tokens.loginPage),
+            setCookies: ['brw=BRW1; Path=/', sessionCookie({ sessionId: 'sess-1', csrfSecret: ANON_SECRET })],
+          });
+        case '/auth/getLoginTypeForEmail':
+          if (!csrfOk()) return fakeResponse({ status: 403, body: 'invalid csrf token' });
+          return fakeResponse({ body: JSON.stringify({ loginType: 'password' }) });
+        case '/auth/login/':
+          if (!csrfOk()) return fakeResponse({ status: 403, body: 'invalid csrf token' });
+          // HAR: the session cookie VALUE changes here (userIdPending2fa +
+          // twoFactorStartTime are added) while sessionId and csrfSecret stay put.
+          return fakeResponse({
+            status: 302,
+            location: '/2fa/tfaSEER1',
+            setCookies: [sessionCookie({
+              sessionId: 'sess-1',
+              csrfSecret: POST_LOGIN_SECRET,
+              userIdPending2fa: 'usrTEST',
+              twoFactorStartTime: 1,
+            })],
+          });
+        case '/2fa/tfaSEER1':
+          // The page a real BROWSER renders after following the 302. directLogin
+          // does not follow redirects, so it never fetches this.
+          return fakeResponse({ body: page(tokens.twoFaPage) });
+        case '/auth/verify2faCode':
+          if (!csrfOk()) return fakeResponse({ status: 403, body: 'invalid csrf token' });
+          if (form.get('code') !== '654321') return fakeResponse({ body: 'Invalid two-factor code' });
+          return fakeResponse({
+            status: 302,
+            location: '/',
+            setCookies: [sessionCookie({
+              sessionId: 'sess-1',
+              csrfSecret: POST_LOGIN_SECRET,
+              userId: 'usrTEST',
+              didJustLogIn: true,
+            })],
+          });
+        case '/':
+          return fakeResponse({ body: page(tokens.home) });
+        default:
+          throw new Error(`fake Airtable: unexpected request ${options.method} ${pathname}`);
+      }
+    },
+  };
+}
+
+describe('directLogin — CSRF token across the 2FA step (Sentry Seer PR #19 finding)', () => {
+  it('reuses the GET /login token for POST /auth/verify2faCode and Airtable ACCEPTS it, because password auth does not rotate csrfSecret (HAR-verified)', async () => {
+    const airtable = makeCsrfAwareAirtable({ rotateSecretAtPasswordAuth: false });
+
+    // Resolves ⇒ the CSRF-enforcing fake returned 302 for verify2faCode ⇒ the
+    // reused /login token passed a REAL salt-hash check against the secret the
+    // session holds at 2FA time. This is the protocol assertion and it survives
+    // any future defensive re-scrape.
+    const out = await directLogin({
+      ...CREDS,
+      totpSecret: 'JBSWY3DPEHPK3PXP',
+      impitFactory: () => airtable,
+      otpFactory: () => '654321',
+    });
+
+    const verify = airtable.calls.find((c) => c.pathname === '/auth/verify2faCode');
+    assert.ok(verify, 'verify2faCode must have been called');
+
+    // Behavioural pin: today the token posted to 2FA is the one scraped from
+    // GET /login — NOT one re-scraped after the login POST. If a defensive
+    // re-scrape is ever added, update this pin deliberately (see
+    // .superpowers/sdd/PLAN/task-6-report.md).
+    assert.equal(verify.posted, airtable.tokens.loginPage,
+      'verify2faCode should carry the GET /login token (current, HAR-safe behavior)');
+    assert.notEqual(verify.posted, airtable.tokens.twoFaPage,
+      'the /2fa page token is never fetched — directLogin does not follow the 302');
+
+    // …and that reused token really is valid for the post-login session secret.
+    assert.equal(csrfVerify(airtable.secrets.postLogin, verify.posted), true,
+      'the /login token must verify against the csrfSecret held after password auth');
+    assert.equal(airtable.secrets.anon, airtable.secrets.postLogin,
+      'no rotation: this is the HAR-observed protocol');
+
+    // Redirects are manual (fetch redirect:"manual" / impit followRedirects:false),
+    // so the 2FA page is never GET-ed and its token is never available to scrape.
+    assert.ok(!airtable.calls.some((c) => c.pathname.startsWith('/2fa/')),
+      'directLogin must not follow the login 302 into the 2FA page');
+
+    // Final credential still comes from the authed GET / re-scrape.
+    assert.equal(out.csrfToken, airtable.tokens.home);
+  });
+
+  it('negative control: if Airtable DID rotate csrfSecret at password auth, the reused /login token is rejected and surfaces as DIRECT_LOGIN_2FA_REJECTED', async () => {
+    const airtable = makeCsrfAwareAirtable({ rotateSecretAtPasswordAuth: true });
+
+    // Sanity: the failure below must be caused by token staleness, not a broken
+    // mock — the token a browser WOULD have scraped from /2fa is still valid.
+    assert.equal(csrfVerify(airtable.secrets.postLogin, airtable.tokens.twoFaPage), true);
+    assert.equal(csrfVerify(airtable.secrets.postLogin, airtable.tokens.loginPage), false);
+
+    await assert.rejects(
+      () => directLogin({
+        ...CREDS,
+        totpSecret: 'JBSWY3DPEHPK3PXP',
+        impitFactory: () => airtable,
+        otpFactory: () => '654321',
+      }),
+      /DIRECT_LOGIN_2FA_REJECTED.*403/,
+      'a rotating server would produce exactly the misleading error the Seer finding described',
+    );
   });
 });
