@@ -605,7 +605,7 @@
         "airtableFormula.mcp.categories.sync": {
           "type": "boolean",
           "default": false,
-          "description": "Sync tools: sync_base (base-to-base schema plan — read-only plan mode)."
+          "description": "Sync tools: sync_base (base-to-base schema + record sync). mode=plan/diff/status are read-only; mode=apply mutates the destination and, with policy=mirror plus the confirmation flags, can delete tables, fields, views, sections and records; mode=reconcile updates local mapping state."
         },
         "airtableFormula.mcp.tools": {
           "type": "object",

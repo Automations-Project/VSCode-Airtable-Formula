@@ -115,7 +115,7 @@ export const TOOL_CATEGORIES = {
   // Record Destructive (batch record deletion)
   delete_records:         'record-destructive',
 
-  // Sync (base-to-base schema sync — read-only plan mode)
+  // Sync (base-to-base schema + record sync — mode=apply mutates the dest and can delete under policy=mirror)
   sync_base:              'sync',
 };
 
