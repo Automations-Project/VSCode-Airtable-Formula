@@ -267,4 +267,44 @@ if (storeSrc) {
   }
 }
 
-ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}.`);
+// 7. Validate the human-facing counts in CLAUDE.md so the guide can't drift from
+//    reality (check:tool-sync used to skip it — that's how it fell out of date).
+//    Only the NUMBERS are guarded; free-form prose (the category name list) is not,
+//    so keep the canonical phrasings below intact when editing the doc.
+const claudeMd = await readFile(resolve(ROOT, 'CLAUDE.md'), 'utf8').catch(() => null);
+if (claudeMd) {
+  const totalTools = Object.keys(mcpCategories).length;
+  const totalCats = mcpLabelKeys.size;
+  const docChecks = [
+    {
+      re: /\*\*(\d+) tools\*\* across (\d+) categories/,
+      want: [totalTools, totalCats],
+      label: 'architecture "**N tools** across M categories"',
+    },
+    {
+      re: /`read-only`\s*\((\d+) tools?\)\s*\/\s*`safe-write`\s*\((\d+) tools?\)\s*\/\s*`full`\s*\((\d+) tools?\)/,
+      want: [expected['read-only'], expected['safe-write'], expected.full],
+      label: 'mcp.toolProfile "read-only / safe-write / full" tool counts',
+    },
+  ];
+  const docMismatches = [];
+  for (const { re, want, label } of docChecks) {
+    const m = claudeMd.match(re);
+    if (!m) {
+      docMismatches.push(`could not find ${label} — keep the canonical phrasing so the guard can validate it`);
+      continue;
+    }
+    const got = m.slice(1, 1 + want.length).map(Number);
+    if (got.join('/') !== want.join('/')) {
+      docMismatches.push(`${label}: found (${got.join('/')}) but expected (${want.join('/')})`);
+    }
+  }
+  if (docMismatches.length) {
+    console.error('\n\x1b[31mCLAUDE.md tool/category counts are stale:\x1b[0m');
+    for (const msg of docMismatches) console.error(`  - ${msg}`);
+    console.error('\nFix: update the counts in CLAUDE.md (architecture blurb + Key Settings mcp.toolProfile line).');
+    process.exit(1);
+  }
+}
+
+ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''}.`);
