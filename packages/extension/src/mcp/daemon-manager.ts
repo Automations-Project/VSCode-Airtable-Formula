@@ -37,10 +37,31 @@ const EMPTY_STATUS: DaemonStatus = {
   port_lsp: null, bearerToken: null, tunnelUrl: null, uptime: null, uuid: null,
 };
 
+/** A process observed by the orphan sweep, with the command line used for ownership attribution. */
+export interface SweptProcess {
+  pid: number;
+  commandLine: string;
+}
+
+export interface OrphanSweepResult {
+  /** PIDs positively attributed to THIS extension install and force-killed. */
+  killed: number[];
+  /**
+   * Processes that look like a stray Airtable daemon but could NOT be positively attributed to
+   * this extension install. Deliberately LEFT RUNNING (fail-safe) and reported so the user can
+   * decide. Never killed.
+   */
+  skipped: SweptProcess[];
+}
+
 export interface StopResult {
   stopped: boolean;
   forced: boolean;
   reason?: string;
+  /** PIDs force-killed by forceStop()'s ownership-scoped orphan sweep (absent for plain stopDaemon). */
+  killedOrphans?: number[];
+  /** Daemon-looking processes forceStop() left alive because ownership could not be established. */
+  skippedUnowned?: SweptProcess[];
 }
 
 export class DaemonManager implements vscode.Disposable {
@@ -308,64 +329,231 @@ export class DaemonManager implements vscode.Disposable {
    * "Stop" button calls — graceful stop alone is a no-op when the lock is gone,
    * which leaves a browser holding the profile (Chrome exit code 21 for
    * everything after).
+   *
+   * The sweep is OWNERSHIP-SCOPED: only processes provably belonging to this extension install
+   * are killed. Daemon-looking processes that cannot be attributed are left running and returned
+   * in `skippedUnowned` so the caller can tell the user "N left running, ownership unverified".
    */
   async forceStop(): Promise<StopResult> {
     const result = await this.stopDaemon();
-    const killed = this._sweepOrphans();
+    const sweep = this._sweepOrphans();
     this._reclaimLockfile();
-    if (killed > 0) {
-      return {
-        stopped: true,
-        forced: true,
-        reason: `${result.reason ? result.reason + ' ' : ''}Force-killed ${killed} stray process(es).`,
-      };
+
+    const notes: string[] = [];
+    if (result.reason) notes.push(result.reason);
+    if (sweep.killed.length > 0) notes.push(`Force-killed ${sweep.killed.length} stray process(es).`);
+    if (sweep.skipped.length > 0) {
+      notes.push(
+        `${sweep.skipped.length} process(es) left running — could not verify they belong to this ` +
+        `extension (PID ${sweep.skipped.map(p => p.pid).join(', ')}).`,
+      );
     }
-    return result;
+    const reason = notes.length > 0 ? notes.join(' ') : undefined;
+
+    return {
+      stopped: result.stopped || sweep.killed.length > 0,
+      forced: result.forced || sweep.killed.length > 0,
+      ...(reason !== undefined ? { reason } : {}),
+      killedOrphans: sweep.killed,
+      skippedUnowned: sweep.skipped,
+    };
+  }
+
+  // ─── Ownership-scoped orphan sweep ─────────────────────────────────────────
+  //
+  // A process is killed ONLY when its command line carries an identifier that can belong to
+  // nothing but THIS extension install. Anything that merely *looks* like an Airtable daemon is
+  // left alive and reported. There is no generic `index.mjs … daemon … start` kill criterion —
+  // that unscoped substring match used to force-kill (with `/T`, i.e. the whole process tree)
+  // any unrelated Node process whose argv happened to contain those three fragments.
+
+  /** Characters that may legally abut a path inside an argv string (separator or quoting). */
+  private static readonly ARGV_BOUNDARY = /[\s"'=]/;
+  /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative extensionPath. */
+  private static readonly ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
+
+  /**
+   * Canonical form for command-line comparison: `\` → `/`, lower-cased.
+   *
+   * Case folding is what makes Windows path matching correct (`C:\Users\…` vs `c:\users\…`);
+   * applying it on POSIX too is a negligible widening (it would take two real installs whose
+   * absolute paths differ only in letter case to collide) and keeps ONE code path.
+   *
+   * Quotes are deliberately NOT stripped — they are treated as argv boundaries instead, so
+   * `"C:\p\dist\mcp\index.mjs"` matches while `C:\p\dist\mcp\index.mjs.bak` does not.
+   */
+  private static _canon(s: string): string {
+    return String(s).replace(/\\/g, '/').toLowerCase();
   }
 
   /**
-   * Kill orphaned airtable-mcp daemons and stray profile-holding Chromes by
-   * scanning command lines — independent of the lockfile. Best-effort.
-   *
-   * ponytail: matches by our own `~/.airtable-user-mcp/.chrome-profile` path /
-   * `index.mjs … daemon start`, so it still nukes daemons+Chromes from other installs
-   * that share ~/.airtable-user-mcp (the intent of a "force stop"), but the profile
-   * filter is scoped to our unique config-dir fragment so it can NEVER kill an
-   * unrelated app's Chrome that merely happens to have `.chrome-profile` in its args.
+   * Does `haystack` contain `needle` as a whole argv token? The characters immediately before
+   * and after the match must be a boundary (start/end of string, whitespace, quote or `=`), so a
+   * longer neighbouring path (`…/index.mjs.bak`, `…/index.mjson`) can never satisfy it.
+   * Both arguments must already be in `_canon` form.
    */
-  private _sweepOrphans(): number {
-    const pids = new Set<number>();
-    try {
-      if (process.platform === 'win32') {
-        for (const filter of ["CommandLine like '%.airtable-user-mcp%.chrome-profile%'", "CommandLine like '%index.mjs%daemon%start%'"]) {
-          try {
-            const out = execFileSync('wmic', ['process', 'where', filter, 'get', 'ProcessId', '/format:list'], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
-            for (const pid of this._parsePids(out)) if (pid !== process.pid) pids.add(pid);
-          } catch { /* no matches → wmic exits non-zero */ }
-        }
-        for (const pid of pids) {
-          try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 5000 }); } catch { /* already gone */ }
-        }
-        return pids.size;
-      }
-      // POSIX: pkill kills directly; we can't easily count, so report 0.
-      for (const pat of ['\\.airtable-user-mcp.*\\.chrome-profile', 'index\\.mjs.*daemon.*start']) {
-        try { execFileSync('pkill', ['-9', '-f', pat], { stdio: 'ignore', timeout: 5000 }); } catch { /* none matched */ }
-      }
-      return 0;
-    } catch {
-      return pids.size;
+  private static _containsPathToken(haystack: string, needle: string): boolean {
+    if (!needle) return false;
+    for (let from = 0; ; ) {
+      const i = haystack.indexOf(needle, from);
+      if (i < 0) return false;
+      const before = i === 0 ? '' : haystack[i - 1];
+      const afterIdx = i + needle.length;
+      const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
+      if ((before === '' || DaemonManager.ARGV_BOUNDARY.test(before))
+        && (after === '' || DaemonManager.ARGV_BOUNDARY.test(after))) return true;
+      from = i + 1;
     }
   }
 
-  /** Extract unique positive PIDs from `wmic … get ProcessId /format:list` output. */
-  private _parsePids(wmicOutput: string): number[] {
-    const out: number[] = [];
-    for (const m of wmicOutput.matchAll(/ProcessId=(\d+)/g)) {
-      const n = Number(m[1]);
-      if (Number.isInteger(n) && n > 0 && !out.includes(n)) out.push(n);
+  /**
+   * The exact bundled entry `_spawnDetached()` launches — the strongest ownership proof there is.
+   * Returns null when `extensionPath` is empty or relative, because `path.join('', 'dist', …)`
+   * would yield the relative fragment `dist/mcp/index.mjs` and match half the machine.
+   */
+  private _bundledEntryPath(): string | null {
+    const root = this.extensionPath;
+    if (typeof root !== 'string' || root.trim().length === 0) return null;
+    if (!DaemonManager.ABSOLUTE_LIKE.test(root)) return null;
+    return path.join(root, 'dist', 'mcp', 'index.mjs');
+  }
+
+  /**
+   * Positive ownership test — the ONLY kill criterion.
+   *
+   * (a) the exact bundled `<extensionPath>/dist/mcp/index.mjs` this install spawns, matched as a
+   *     whole argv token; or
+   * (b) a Chromium still squatting our persistent profile — `.airtable-user-mcp` followed by
+   *     `.chrome-profile`. Semantics are UNCHANGED from the original (already correctly scoped)
+   *     `%.airtable-user-mcp%.chrome-profile%` filter: both fragments, in that order. It is
+   *     scoped to our unique config-dir fragment so it can never hit an unrelated app's Chrome
+   *     that merely happens to have `.chrome-profile` in its args.
+   */
+  private _isOwnedCommandLine(commandLine: string): boolean {
+    const cmd = DaemonManager._canon(commandLine);
+    const entry = this._bundledEntryPath();
+    if (entry && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))) return true;
+    const i = cmd.indexOf('.airtable-user-mcp');
+    return i >= 0 && cmd.indexOf('.chrome-profile', i + '.airtable-user-mcp'.length) > i;
+  }
+
+  /**
+   * The OLD, unscoped kill criterion (`index.mjs` … `daemon` … `start`, in order, anywhere in
+   * argv). It is NO LONGER a kill criterion. It only decides what gets *reported* as
+   * "looked like a stray daemon, but ownership could not be established" so the user still learns
+   * about a leftover process from a different install instead of it being silently executed.
+   */
+  private static _looksLikeStrayDaemon(commandLine: string): boolean {
+    const cmd = DaemonManager._canon(commandLine);
+    const a = cmd.indexOf('index.mjs');
+    if (a < 0) return false;
+    const b = cmd.indexOf('daemon', a + 'index.mjs'.length);
+    if (b < 0) return false;
+    return cmd.indexOf('start', b + 'daemon'.length) > b;
+  }
+
+  /**
+   * Kill orphaned daemons of THIS install and stray Chromes holding our profile, independent of
+   * the lockfile. Best-effort; never throws. Ambiguity always resolves to *not* killing.
+   */
+  private _sweepOrphans(platform: NodeJS.Platform = process.platform): OrphanSweepResult {
+    const killed: number[] = [];
+    const skipped: SweptProcess[] = [];
+    let processes: SweptProcess[];
+    try {
+      processes = this._listProcesses(platform);
+    } catch {
+      return { killed, skipped };
+    }
+    for (const proc of processes) {
+      if (proc.pid === process.pid) continue;
+      if (this._isOwnedCommandLine(proc.commandLine)) {
+        this._killTree(proc.pid, platform);
+        killed.push(proc.pid);
+      } else if (DaemonManager._looksLikeStrayDaemon(proc.commandLine)) {
+        skipped.push(proc);
+      }
+    }
+    for (const proc of skipped) {
+      console.warn(`[DaemonManager] orphan sweep left pid ${proc.pid} alive — not attributable to this extension install: ${proc.commandLine}`);
+    }
+    return { killed, skipped };
+  }
+
+  /**
+   * Enumerate candidate processes as `{pid, commandLine}`; the ownership decision is then made in
+   * JS by `_isOwnedCommandLine`, never by the query language.
+   *
+   * Windows: PowerShell + `Get-CimInstance Win32_Process` (`wmic` is deprecated and absent on
+   * recent Windows builds; this mirrors `mcp-server/src/process-tree.js`). The two pre-filter
+   * markers travel via the ENVIRONMENT and are never interpolated into the script, so no path can
+   * inject script or alter match semantics — and the markers are separator-free literals, so no
+   * WQL/`LIKE` escaping question arises at all. The pre-filter is a strict SUPERSET of the
+   * ownership test (it can only ever return too much, never too little).
+   *
+   * POSIX: `ps -A -ww -o pid= -o args=` — a fixed argv with nothing interpolated.
+   */
+  private _listProcesses(platform: NodeJS.Platform = process.platform): SweptProcess[] {
+    if (platform === 'win32') {
+      const script =
+        '$a=$env:AIRTABLE_SWEEP_MARK_A; $b=$env:AIRTABLE_SWEEP_MARK_B; ' +
+        'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { ' +
+        '$c = $_.CommandLine.ToLowerInvariant(); ' +
+        'if ($c.Contains($a) -or $c.Contains($b)) { "$($_.ProcessId)`t$($_.CommandLine)" } }';
+      const out = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 15_000,
+          maxBuffer: 16 * 1024 * 1024,
+          env: {
+            ...process.env,
+            // Lower-case, separator-free literals — matched against a lower-cased command line.
+            AIRTABLE_SWEEP_MARK_A: 'index.mjs',
+            AIRTABLE_SWEEP_MARK_B: '.chrome-profile',
+          },
+        },
+      );
+      return this._parseProcessList(out);
+    }
+    const out = execFileSync('ps', ['-A', '-ww', '-o', 'pid=', '-o', 'args='], {
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return this._parseProcessList(out);
+  }
+
+  /**
+   * Parse `<pid><TAB-or-space><command line>` lines (PowerShell and `ps` output alike) into unique
+   * positive PIDs. Our own pid is always dropped.
+   */
+  private _parseProcessList(output: string): SweptProcess[] {
+    const out: SweptProcess[] = [];
+    const seen = new Set<number>();
+    for (const line of String(output).split(/\r?\n/)) {
+      const m = /^\s*(\d+)[ \t]+(\S.*)$/.exec(line);
+      if (!m) continue;
+      const pid = Number(m[1]);
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid || seen.has(pid)) continue;
+      seen.add(pid);
+      out.push({ pid, commandLine: m[2].trim() });
     }
     return out;
+  }
+
+  /** Force-kill a positively-owned process (and, on Windows, its tree). Never throws. */
+  private _killTree(pid: number, platform: NodeJS.Platform = process.platform): void {
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
+    try {
+      if (platform === 'win32') {
+        execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 5000 });
+      } else {
+        process.kill(pid, 'SIGKILL');
+      }
+    } catch { /* already gone */ }
   }
 
   /**

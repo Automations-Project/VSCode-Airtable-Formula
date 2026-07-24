@@ -3,6 +3,17 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// `execFileSync` is the ONLY process-control primitive the orphan sweep reaches for
+// (process listing on both platforms + taskkill on Windows). Mock just that binding and
+// leave the rest of child_process real — `spawn` is still used by _spawnDetached.
+const { execFileSyncMock } = vi.hoisted(() => ({
+  execFileSyncMock: vi.fn((..._args: unknown[]): string => ''),
+}));
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, execFileSync: execFileSyncMock };
+});
+
 // Mock vscode before importing modules that depend on it
 vi.mock('vscode', () => ({
   EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),
@@ -308,7 +319,7 @@ describe('DaemonManager.forceStop', () => {
   it('sweeps orphaned processes after the lock-based stop and reports the count', async () => {
     const dm = new DaemonManager('/tmp/x', '/tmp/y');
     (dm as any).stopDaemon = vi.fn(async () => ({ stopped: true, forced: false }));
-    (dm as any)._sweepOrphans = vi.fn(() => 3);
+    (dm as any)._sweepOrphans = vi.fn(() => ({ killed: [11, 22, 33], skipped: [] }));
     (dm as any)._reclaimLockfile = vi.fn();
 
     const r = await dm.forceStop();
@@ -316,29 +327,347 @@ describe('DaemonManager.forceStop', () => {
     expect(r.stopped).toBe(true);
     expect(r.forced).toBe(true);
     expect(r.reason).toMatch(/3/);
+    expect(r.killedOrphans).toEqual([11, 22, 33]);
+    expect(r.skippedUnowned).toEqual([]);
   });
 
   it('returns the lock-based result unchanged when nothing stray is found', async () => {
     const dm = new DaemonManager('/tmp/x', '/tmp/y');
     (dm as any).stopDaemon = vi.fn(async () => ({ stopped: true, forced: false }));
-    (dm as any)._sweepOrphans = vi.fn(() => 0);
+    (dm as any)._sweepOrphans = vi.fn(() => ({ killed: [], skipped: [] }));
     (dm as any)._reclaimLockfile = vi.fn();
 
     const r = await dm.forceStop();
     expect(r.forced).toBe(false);
+    expect(r.reason).toBeUndefined();
+    expect(r.killedOrphans).toEqual([]);
+    expect(r.skippedUnowned).toEqual([]);
+  });
+
+  it('surfaces unowned-but-daemon-looking processes through StopResult without claiming they were killed', async () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    (dm as any).stopDaemon = vi.fn(async () => ({ stopped: true, forced: false }));
+    (dm as any)._sweepOrphans = vi.fn(() => ({
+      killed: [],
+      skipped: [{ pid: 4242, commandLine: 'node /opt/other/index.mjs daemon start' }],
+    }));
+    (dm as any)._reclaimLockfile = vi.fn();
+
+    const r = await dm.forceStop();
+    // Nothing was killed → not "forced".
+    expect(r.forced).toBe(false);
+    expect(r.killedOrphans).toEqual([]);
+    expect(r.skippedUnowned).toEqual([{ pid: 4242, commandLine: 'node /opt/other/index.mjs daemon start' }]);
+    expect(r.reason).toMatch(/left running/i);
+    expect(r.reason).toMatch(/4242/);
   });
 });
 
-describe('DaemonManager._parsePids', () => {
-  it('extracts unique positive pids from wmic /format:list output', () => {
+describe('DaemonManager._parseProcessList', () => {
+  it('extracts unique positive pids + command lines from PowerShell tab-separated output', () => {
     const dm = new DaemonManager('/tmp/x', '/tmp/y');
-    const out = 'ProcessId=1234\r\n\r\nProcessId=5678\r\n\r\nProcessId=1234\r\n';
-    expect((dm as any)._parsePids(out)).toEqual([1234, 5678]);
+    const out = '1234\tC:\\a\\index.mjs daemon start\r\n5678\tchrome.exe --x\r\n1234\tdupe\r\n';
+    expect((dm as any)._parseProcessList(out)).toEqual([
+      { pid: 1234, commandLine: 'C:\\a\\index.mjs daemon start' },
+      { pid: 5678, commandLine: 'chrome.exe --x' },
+    ]);
+  });
+
+  it('extracts pids + args from `ps -A -o pid= -o args=` space-separated output', () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    const out = '  901 node /opt/a/index.mjs daemon start\n 1002 /usr/bin/chrome --user-data-dir=/x\n';
+    expect((dm as any)._parseProcessList(out)).toEqual([
+      { pid: 901, commandLine: 'node /opt/a/index.mjs daemon start' },
+      { pid: 1002, commandLine: '/usr/bin/chrome --user-data-dir=/x' },
+    ]);
   });
 
   it('returns empty array when there are no matches', () => {
     const dm = new DaemonManager('/tmp/x', '/tmp/y');
-    expect((dm as any)._parsePids('No Instance(s) Available.')).toEqual([]);
+    expect((dm as any)._parseProcessList('No Instance(s) Available.')).toEqual([]);
+    expect((dm as any)._parseProcessList('')).toEqual([]);
+  });
+
+  it('never yields our own pid (self-kill guard at the parse boundary)', () => {
+    const dm = new DaemonManager('/tmp/x', '/tmp/y');
+    const out = `${process.pid}\tnode /tmp/y/dist/mcp/index.mjs daemon start\n77\tother\n`;
+    expect((dm as any)._parseProcessList(out)).toEqual([{ pid: 77, commandLine: 'other' }]);
+  });
+});
+
+/**
+ * B4 — ownership-scoped orphan sweep.
+ *
+ * The sweep used to kill by an UNSCOPED command-line substring match
+ * (`%index.mjs%daemon%start%` / `index\.mjs.*daemon.*start`) and escalate with
+ * `taskkill /T /F` — force-killing an unrelated Node process *and its whole process tree*
+ * whenever its argv merely contained those fragments. These tests pin the replacement:
+ * kill ONLY on positive attribution to this extension install; report everything else.
+ */
+describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
+  const WIN_ROOT = 'C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.32';
+  const POSIX_ROOT = '/home/u/.vscode/extensions/nskha.airtable-formula-2.1.32';
+
+  /**
+   * Build a manager whose process listing is fixed and whose kill primitive is recorded.
+   * `_listProcesses` and `_killTree` are the two process primitives — everything else is
+   * pure matching logic running for real.
+   */
+  const sweep = (
+    extensionPath: string,
+    processes: Array<{ pid: number; commandLine: string }>,
+    platform: NodeJS.Platform = 'win32',
+  ) => {
+    const dm = new DaemonManager('/tmp/cfg', extensionPath);
+    const listed = vi.fn(() => processes);
+    const killTree = vi.fn();
+    (dm as any)._listProcesses = listed;
+    (dm as any)._killTree = killTree;
+    const result = (dm as any)._sweepOrphans(platform) as {
+      killed: number[];
+      skipped: Array<{ pid: number; commandLine: string }>;
+    };
+    return { result, killTree, killedPids: killTree.mock.calls.map(c => c[0] as number) };
+  };
+
+  // ── Positive: the real bundled path this install spawns ────────────────────
+
+  it('POSITIVE (Windows): kills the process running THIS install\'s bundled dist\\mcp\\index.mjs', () => {
+    const { result, killedPids } = sweep(WIN_ROOT, [
+      { pid: 4001, commandLine: `"C:\\Program Files\\Microsoft VS Code\\Code.exe" "${WIN_ROOT}\\dist\\mcp\\index.mjs" daemon start` },
+    ]);
+    expect(killedPids).toEqual([4001]);
+    expect(result.killed).toEqual([4001]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('POSITIVE (POSIX): kills the `/`-separated equivalent', () => {
+    const { result, killedPids } = sweep(
+      POSIX_ROOT,
+      [{ pid: 4002, commandLine: `node ${POSIX_ROOT}/dist/mcp/index.mjs daemon start` }],
+      'linux',
+    );
+    expect(killedPids).toEqual([4002]);
+    expect(result.killed).toEqual([4002]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('POSITIVE (Windows): matches case-insensitively and across \\ vs / separators', () => {
+    const { killedPids } = sweep(WIN_ROOT, [
+      // Windows argv can arrive with either separator and any casing — both are the same file.
+      { pid: 4003, commandLine: `code.exe C:/USERS/ADMIN/.VSCODE/EXTENSIONS/NSKHA.AIRTABLE-FORMULA-2.1.32/DIST/MCP/INDEX.MJS daemon start` },
+    ]);
+    expect(killedPids).toEqual([4003]);
+  });
+
+  it('POSITIVE: a quoted argv path (spaces in the install root) still matches', () => {
+    const spaced = 'C:\\Users\\a b\\.vscode\\extensions\\nskha.airtable-formula-2.1.32';
+    const { killedPids } = sweep(spaced, [
+      { pid: 4004, commandLine: `"C:\\Code.exe" "${spaced}\\dist\\mcp\\index.mjs" daemon start` },
+    ]);
+    expect(killedPids).toEqual([4004]);
+  });
+
+  // ── Negative: the exact cases the old unscoped pattern force-killed ─────────
+
+  it('NEGATIVE (Windows): an unrelated project\'s `index.mjs --daemon start` is NOT killed and IS reported as unowned', () => {
+    const cmd = 'node C:\\other\\project\\dist\\index.mjs --daemon start';
+    const { result, killTree } = sweep(WIN_ROOT, [{ pid: 5001, commandLine: cmd }]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped).toEqual([{ pid: 5001, commandLine: cmd }]);
+  });
+
+  it('NEGATIVE (POSIX): `node /opt/other/index.mjs daemon start` is NOT killed and IS reported as unowned', () => {
+    const cmd = 'node /opt/other/index.mjs daemon start';
+    const { result, killTree } = sweep(POSIX_ROOT, [{ pid: 5002, commandLine: cmd }], 'linux');
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped).toEqual([{ pid: 5002, commandLine: cmd }]);
+  });
+
+  it('NEGATIVE (adjacent name): `…/dist/mcp/index.mjs.bak` and a sibling install root are NOT killed', () => {
+    const sibling = 'C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.31';
+    const { result, killTree } = sweep(WIN_ROOT, [
+      // Longer filename that merely STARTS with our entry path.
+      { pid: 5003, commandLine: `node ${WIN_ROOT}\\dist\\mcp\\index.mjs.bak daemon start` },
+      { pid: 5004, commandLine: `node ${WIN_ROOT}\\dist\\mcp\\index.mjson daemon start` },
+      // A different extension install root (previous version) — not ours to kill.
+      { pid: 5005, commandLine: `node ${sibling}\\dist\\mcp\\index.mjs daemon start` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped.map(p => p.pid)).toEqual([5003, 5004, 5005]);
+  });
+
+  it('FAIL-SAFE: a matched-but-unverifiable process is left ALIVE and appears in the skipped report', () => {
+    // Looks exactly like our daemon (Electron host + dist/mcp/index.mjs + daemon start) but the
+    // install root is somebody else's. Ambiguity must resolve to NOT killing.
+    const cmd = 'Code.exe D:\\somewhere\\else\\dist\\mcp\\index.mjs daemon start';
+    const { result, killTree } = sweep(WIN_ROOT, [{ pid: 5006, commandLine: cmd }]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped).toEqual([{ pid: 5006, commandLine: cmd }]);
+  });
+
+  it('FAIL-SAFE: an empty / relative extensionPath yields NO bundled-path kills (no bare `dist/mcp/index.mjs` match)', () => {
+    for (const root of ['', '   ', 'dist-relative', './rel']) {
+      const { result, killTree } = sweep(root, [
+        { pid: 5007, commandLine: 'node dist/mcp/index.mjs daemon start' },
+        { pid: 5008, commandLine: 'node /srv/app/dist/mcp/index.mjs daemon start' },
+      ], 'linux');
+      expect(killTree).not.toHaveBeenCalled();
+      expect(result.killed).toEqual([]);
+      expect(result.skipped.map(p => p.pid)).toEqual([5007, 5008]);
+    }
+  });
+
+  it('never kills our own pid even if its command line would match', () => {
+    const { result, killTree } = sweep(WIN_ROOT, [
+      { pid: process.pid, commandLine: `node ${WIN_ROOT}\\dist\\mcp\\index.mjs daemon start` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+  });
+
+  it('reports nothing for ordinary processes (no false "unowned" noise)', () => {
+    const { result, killTree } = sweep(WIN_ROOT, [
+      { pid: 6001, commandLine: 'C:\\Windows\\explorer.exe' },
+      { pid: 6002, commandLine: 'node C:\\proj\\server.js --start' },
+      { pid: 6003, commandLine: '"C:\\Program Files\\Google\\Chrome\\chrome.exe" --user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome' },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('returns an empty result (killing nothing) when process enumeration fails', () => {
+    const dm = new DaemonManager('/tmp/cfg', WIN_ROOT);
+    (dm as any)._listProcesses = vi.fn(() => { throw new Error('powershell.exe not found'); });
+    const killTree = vi.fn();
+    (dm as any)._killTree = killTree;
+    expect((dm as any)._sweepOrphans('win32')).toEqual({ killed: [], skipped: [] });
+    expect(killTree).not.toHaveBeenCalled();
+  });
+
+  // ── Chrome-profile pattern — already correctly scoped, must NOT regress ─────
+
+  it('CHROME PROFILE: still kills a Chromium squatting ~/.airtable-user-mcp/.chrome-profile (Windows)', () => {
+    const { result, killedPids } = sweep(WIN_ROOT, [
+      { pid: 7001, commandLine: '"C:\\Program Files\\Google\\Chrome\\chrome.exe" --user-data-dir=C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile --headless' },
+    ]);
+    expect(killedPids).toEqual([7001]);
+    expect(result.killed).toEqual([7001]);
+  });
+
+  it('CHROME PROFILE: still kills the POSIX equivalent, including helper processes', () => {
+    const { killedPids } = sweep(POSIX_ROOT, [
+      { pid: 7002, commandLine: '/opt/chromium --user-data-dir=/home/u/.airtable-user-mcp/.chrome-profile' },
+      { pid: 7003, commandLine: '/opt/chromium --type=renderer --user-data-dir=/home/u/.airtable-user-mcp/.chrome-profile' },
+    ], 'linux');
+    expect(killedPids).toEqual([7002, 7003]);
+  });
+
+  it('CHROME PROFILE: NOT widened — `.chrome-profile` alone, or `.airtable-user-mcp` alone, never kills', () => {
+    const { result, killTree } = sweep(WIN_ROOT, [
+      // Some other app's Chrome profile dir.
+      { pid: 7004, commandLine: 'chrome.exe --user-data-dir=C:\\Users\\admin\\.other-app\\.chrome-profile' },
+      // The user simply has our CONFIG file open in an editor / tailing a log.
+      { pid: 7005, commandLine: 'Code.exe C:\\Users\\admin\\.airtable-user-mcp\\tools-config.json' },
+      // Right fragments, WRONG ORDER — the original filter was ordered, keep it ordered.
+      { pid: 7006, commandLine: 'chrome.exe --user-data-dir=C:\\x\\.chrome-profile\\.airtable-user-mcp' },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  // ── Metacharacters in the install path must not change match semantics ──────
+
+  it('ESCAPING: a path containing % _ [ ] . and a space matches literally and nothing else', () => {
+    // Every character here is a metacharacter in at least one of the languages the old
+    // implementation interpolated the path into: WQL LIKE (`%`, `_`, `[`) or a pkill ERE
+    // (`.`, `[`, `\`). If any of them were still interpreted, the near-misses below would match.
+    const root = 'C:\\Users\\a b\\.vscode\\extensions\\pub.name-1.0_x[1]%';
+    const { result, killedPids } = sweep(root, [
+      { pid: 8001, commandLine: `"C:\\Code.exe" "${root}\\dist\\mcp\\index.mjs" daemon start` },
+      // `.` interpreted as regex "any char"
+      { pid: 8002, commandLine: `node C:\\Users\\a b\\.vscode\\extensions\\pubXname-1.0_x[1]%\\dist\\mcp\\index.mjs daemon start` },
+      // `[1]` interpreted as a regex/WQL character class matching `1`
+      { pid: 8003, commandLine: `node C:\\Users\\a b\\.vscode\\extensions\\pub.name-1.0_x1%\\dist\\mcp\\index.mjs daemon start` },
+      // `_` interpreted as the WQL single-character wildcard
+      { pid: 8004, commandLine: `node C:\\Users\\a b\\.vscode\\extensions\\pub.name-1.0Zx[1]%\\dist\\mcp\\index.mjs daemon start` },
+      // `%` interpreted as the WQL multi-character wildcard
+      { pid: 8005, commandLine: `node C:\\Users\\a b\\.vscode\\extensions\\pub.name-1.0_x[1]-AND-MORE\\dist\\mcp\\index.mjs daemon start` },
+    ]);
+    expect(killedPids).toEqual([8001]);
+    expect(result.killed).toEqual([8001]);
+    expect(result.skipped.map(p => p.pid)).toEqual([8002, 8003, 8004, 8005]);
+  });
+});
+
+describe('DaemonManager._listProcesses / _killTree — process primitives', () => {
+  const ROOT = 'C:\\Users\\admin\\.vscode\\extensions\\pub.name-1.0_x[1]%';
+
+  beforeEach(() => {
+    execFileSyncMock.mockReset();
+    execFileSyncMock.mockReturnValue('');
+  });
+
+  it('Windows: enumerates via Get-CimInstance and never interpolates the install path into the script', () => {
+    const dm = new DaemonManager('/tmp/cfg', ROOT);
+    execFileSyncMock.mockReturnValue('4001\tCode.exe x\\dist\\mcp\\index.mjs daemon start\r\n');
+
+    const listed = (dm as any)._listProcesses('win32');
+    expect(listed).toEqual([{ pid: 4001, commandLine: 'Code.exe x\\dist\\mcp\\index.mjs daemon start' }]);
+
+    const [file, args, opts] = execFileSyncMock.mock.calls[0] as [string, string[], any];
+    expect(file).toBe('powershell.exe');
+    // wmic is deprecated/absent on recent Windows — the codebase's process-tree.js uses CIM.
+    expect(args).toContain('-NoProfile');
+    expect(args).toContain('-NonInteractive');
+    const script = args[args.indexOf('-Command') + 1];
+    expect(script).toContain('Get-CimInstance Win32_Process');
+    expect(script).not.toContain('wmic');
+    // THE escaping guarantee: no part of the install path reaches the script text, so
+    // `%`, `_`, `[`, `.`, `\` and spaces cannot alter match semantics or inject script.
+    expect(script).not.toContain(ROOT);
+    expect(script).not.toContain('pub.name');
+    expect(script).not.toContain('[1]');
+    expect(script).not.toContain('%');
+    // Pre-filter markers travel via the environment as fixed lower-case literals.
+    expect(opts.env.AIRTABLE_SWEEP_MARK_A).toBe('index.mjs');
+    expect(opts.env.AIRTABLE_SWEEP_MARK_B).toBe('.chrome-profile');
+    expect(opts.windowsHide).toBe(true);
+  });
+
+  it('POSIX: enumerates via `ps` with a fixed argv (nothing interpolated, no pkill pattern)', () => {
+    const dm = new DaemonManager('/tmp/cfg', '/opt/ext');
+    execFileSyncMock.mockReturnValue(' 901 node /opt/ext/dist/mcp/index.mjs daemon start\n');
+
+    const listed = (dm as any)._listProcesses('linux');
+    expect(listed).toEqual([{ pid: 901, commandLine: 'node /opt/ext/dist/mcp/index.mjs daemon start' }]);
+
+    const [file, args] = execFileSyncMock.mock.calls[0] as [string, string[]];
+    expect(file).toBe('ps');
+    expect(args).toEqual(['-A', '-ww', '-o', 'pid=', '-o', 'args=']);
+    // The old implementation shelled out to `pkill -9 -f '<pattern>'`, which both killed by
+    // regex and could not report what it hit. It must be gone.
+    expect(execFileSyncMock.mock.calls.some(c => c[0] === 'pkill')).toBe(false);
+  });
+
+  it('Windows: kills a positively-owned pid with taskkill /T /F', () => {
+    const dm = new DaemonManager('/tmp/cfg', ROOT);
+    (dm as any)._killTree(4321, 'win32');
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      'taskkill', ['/PID', '4321', '/T', '/F'], expect.objectContaining({ windowsHide: true }),
+    );
+  });
+
+  it('refuses to kill our own pid or a non-positive pid', () => {
+    const dm = new DaemonManager('/tmp/cfg', ROOT);
+    (dm as any)._killTree(process.pid, 'win32');
+    (dm as any)._killTree(0, 'win32');
+    (dm as any)._killTree(-1, 'win32');
+    expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 });
 

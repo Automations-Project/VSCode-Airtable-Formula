@@ -571,6 +571,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             } else {
                 vscode.window.showErrorMessage(`Airtable Formula: Daemon stop failed — ${result.reason ?? 'daemon did not exit'}.`);
             }
+            // Ownership-scoped sweep: anything that looked like a stray daemon but could not be
+            // proven to belong to this install was deliberately LEFT RUNNING. Surface it — the
+            // alternative (killing on a guess) is what this warning exists to prevent.
+            if (result.skippedUnowned && result.skippedUnowned.length > 0) {
+                vscode.window.showWarningMessage(
+                    `Airtable Formula: ${result.skippedUnowned.length} daemon-like process(es) left running — ` +
+                    `ownership could not be verified (PID ${result.skippedUnowned.map(p => p.pid).join(', ')}). ` +
+                    `Stop them manually if they are yours.`,
+                );
+            }
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.restartDaemon', async () => {

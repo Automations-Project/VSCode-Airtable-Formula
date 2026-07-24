@@ -251,8 +251,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         // drop them but it failed — force-stop so the stale in-memory session dies.
         console.warn('[DashboardProvider] daemon restart after credential clear failed:', restartErr instanceof Error ? restartErr.message : 'unknown error');
         try {
-          await dm.forceStop();
-          vscode.window.showErrorMessage('Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.');
+          const forced = await dm.forceStop();
+          // The sweep never kills a process it cannot attribute to this install; if one was left
+          // alive it may still be serving the cleared session, so say so rather than implying
+          // everything is down.
+          const leftAlive = forced?.skippedUnowned?.length
+            ? ` ${forced.skippedUnowned.length} daemon-like process(es) were left running because ownership could not be verified (PID ${forced.skippedUnowned.map(p => p.pid).join(', ')}) — stop them manually if they are yours.`
+            : '';
+          vscode.window.showErrorMessage(`Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.${leftAlive}`);
         } catch (stopErr) {
           console.warn('[DashboardProvider] daemon force-stop after failed restart also failed:', stopErr instanceof Error ? stopErr.message : 'unknown error');
           vscode.window.showErrorMessage('Credentials cleared, but the daemon may still hold your session in memory — stop/restart it manually to fully clear it.');
@@ -852,11 +858,20 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // like it did nothing / acted like a restart.
       this._daemonStarting = false;
       try {
-        // forceStop: graceful stop + sweep of orphaned daemons / stray profile
+        // forceStop: graceful stop + OWNERSHIP-SCOPED sweep of orphaned daemons / stray profile
         // browsers the lockfile can't see (otherwise "Stop" is a no-op when the
-        // lock is missing and a browser keeps holding the profile).
+        // lock is missing and a browser keeps holding the profile). Processes that
+        // cannot be attributed to this install are left alive and reported.
         const result = await this._daemonManager?.forceStop();
         await this.pushState();
+        // Fail-safe reporting: whatever the stop outcome, tell the user which daemon-like
+        // processes were deliberately NOT killed because ownership was unverifiable.
+        if (result?.skippedUnowned && result.skippedUnowned.length > 0) {
+          vscode.window.showWarningMessage(
+            `${result.skippedUnowned.length} daemon-like process(es) left running — ownership could not be verified ` +
+            `(PID ${result.skippedUnowned.map(p => p.pid).join(', ')}). Stop them manually if they are yours.`,
+          );
+        }
         if (result && !result.stopped) {
           const reason = result.reason ?? 'Daemon did not exit.';
           vscode.window.showErrorMessage(`Daemon stop failed: ${reason}`);
