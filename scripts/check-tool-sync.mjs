@@ -307,4 +307,95 @@ if (claudeMd) {
   }
 }
 
-ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''}.`);
+// 8. Validate the tool-count convention ("71 Airtable tools + `manage_tools`" — see
+//    CLAUDE.md "Keeping tool categories in sync") in the published READMEs (the
+//    Marketplace/npm listings, copied verbatim into the packaged extension and the
+//    npm tarball) and the AI-skill templates baked into the extension and installed
+//    into user workspaces. These are user-visible surfaces CLAUDE.md's guard (#7)
+//    doesn't reach, and they're exactly where the "66 tools" count had gone stale.
+//
+//    Deliberately narrow: only the canonical anchor phrases below are guarded, one
+//    or two per file. The rest of each README's prose (comparison tables, per-tool
+//    highlights, etc.) legitimately varies in wording and isn't a reliable regex
+//    target — see the pre-merge task-4 report for why a broader guard would produce
+//    false failures on ordinary copy edits.
+const totalTools = Object.keys(mcpCategories).length;
+const totalCats = mcpLabelKeys.size;
+const profileCountsRe =
+  /`read-only`\s*\((\d+) tools?\)\s*\/\s*`safe-write`\s*\((\d+) tools?\)\s*\/\s*`full`\s*\((\d+) tools?\)/;
+const profileCountsWant = [expected['read-only'], expected['safe-write'], expected.full];
+
+async function checkCanonicalCounts(relPath, checks) {
+  const src = await readFile(resolve(ROOT, relPath), 'utf8').catch(() => null);
+  if (src === null) return [`${relPath}: file not found`];
+  const problems = [];
+  for (const { re, want, label, allOccurrences } of checks) {
+    const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+    const rx = new RegExp(re.source, flags);
+    let m;
+    let found = 0;
+    while ((m = rx.exec(src)) !== null) {
+      found++;
+      const got = m.slice(1, 1 + want.length).map(Number);
+      if (got.join('/') !== want.join('/')) {
+        problems.push(
+          `${relPath}: ${label}${allOccurrences ? ` (occurrence ${found})` : ''} — found (${got.join('/')}) but expected (${want.join('/')})`
+        );
+      }
+      if (!allOccurrences) break;
+    }
+    if (found === 0) {
+      problems.push(`${relPath}: could not find ${label} — keep the canonical phrasing so the guard can validate it`);
+    }
+  }
+  return problems;
+}
+
+const docCountProblems = [
+  ...(await checkCanonicalCounts('README.md', [
+    {
+      re: /### MCP Server \((\d+) Tools \+ `manage_tools`\)/,
+      want: [totalTools],
+      label: '"### MCP Server (N Tools + `manage_tools`)" heading',
+    },
+    {
+      re: profileCountsRe,
+      want: profileCountsWant,
+      label: 'tool-profile counts "`read-only` (N tools) / `safe-write` (N tools) / `full` (N tools)"',
+    },
+  ])),
+  ...(await checkCanonicalCounts('packages/mcp-server/README.md', [
+    {
+      re: /## Tools \((\d+) \+ `manage_tools`\)/,
+      want: [totalTools],
+      label: '"## Tools (N + `manage_tools`)" heading',
+    },
+    {
+      re: profileCountsRe,
+      want: profileCountsWant,
+      label: 'tool-profile counts "`read-only` (N tools) / `safe-write` (N tools) / `full` (N tools)"',
+    },
+  ])),
+  ...(await checkCanonicalCounts('packages/extension/src/skills/templates/skillTemplates.ts', [
+    {
+      re: /\*\*Tools\*\*:\s*(\d+) tools across (\d+) categories/,
+      want: [totalTools, totalCats],
+      label: '"**Tools**: N tools across M categories" header (SKILL guide + always-on rules)',
+      allOccurrences: true,
+    },
+  ])),
+];
+
+if (docCountProblems.length) {
+  console.error('\n\x1b[31mTool-count convention ("71 Airtable tools + `manage_tools`") is stale in published docs:\x1b[0m');
+  for (const msg of docCountProblems) console.error(`  - ${msg}`);
+  console.error(
+    '\nFix: update the counts in README.md, packages/mcp-server/README.md, and\n' +
+    'packages/extension/src/skills/templates/skillTemplates.ts. Where a sentence describes\n' +
+    'what an MCP client actually lists (tools/list), 72 is correct (71 + manage_tools) — see\n' +
+    'CLAUDE.md "Keeping tool categories in sync" for the convention.'
+  );
+  process.exit(1);
+}
+
+ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''} + published READMEs + skill templates.`);

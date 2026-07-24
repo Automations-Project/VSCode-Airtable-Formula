@@ -304,7 +304,7 @@ When user wants to convert an Excel formula to Airtable.
 export const MCP_TOOLS_GUIDE = `# Airtable MCP — Tools Guide
 
 > **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
-> **Tools**: 66 tools across 13 categories + \`manage_tools\`
+> **Tools**: 71 tools across 15 categories + \`manage_tools\`
 
 ---
 
@@ -622,11 +622,34 @@ Configure legacy form views (public-facing, so gated separately from other view-
 
 ---
 
-### Category 13: Record Write (1 tool)
+### Category 13: Record Write (4 tools)
 
 | Tool | When to Use |
 |------|-------------|
 | \`duplicate_records\` | Duplicate one or more existing records within the same table. Pass \`sourceRowIds\` array. Returns new record IDs. |
+| \`create_records\` | Create one or more records via \`cellValuesByColumnId\` (computed fields are read-only — omit them). Prefer this over the Official MCP when a source field needs a value the Official MCP can't write. |
+| \`update_records\` | Update primitive / single-select cells via \`cellValuesByColumnId\`. Does NOT set array cells (multi-select, links, attachments) — those need \`upload_attachment\` or an Official MCP record update. |
+| \`upload_attachment\` | Set a \`multipleAttachments\` cell by URL — Airtable fetches the URL server-side. The only tool that can write attachment cells; \`update_records\` cannot. |
+
+---
+
+### Category 14: Record Destructive (1 tool)
+
+⚠️ Always confirm with the user before calling.
+
+| Tool | When to Use |
+|------|-------------|
+| \`delete_records\` | Batch-delete one or more records from a table in a single call. |
+
+---
+
+### Category 15: Sync (1 tool)
+
+⚠️ \`mode=apply\` mutates the destination base and can be destructive — always confirm with the user first, especially with \`policy=mirror\`.
+
+| Tool | When to Use |
+|------|-------------|
+| \`sync_base\` | Copy a base's schema, views, and records to another base. \`mode=plan\`/\`diff\`/\`status\` are read-only; \`mode=apply\` mutates the destination and, with \`policy=mirror\` plus the confirmation flags (\`confirmDeletions\`, \`confirmTableDeletions\`, \`confirmRetypes\`), can delete tables, fields, views, sections and records; \`mode=reconcile\` updates local mapping state. Typical flow: \`mode=diff\` to review, \`mode=plan\` to generate a curatable changeset, \`mode=apply\` to execute it. |
 
 ---
 
@@ -738,7 +761,7 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 
 - **Name**: airtable-user-mcp  |  **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (JSON-RPC 2.0)
-- **Tools**: 66 tools across 13 categories + \`manage_tools\`
+- **Tools**: 71 tools across 15 categories + \`manage_tools\`
 - **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ## Mandatory Workflows
@@ -772,7 +795,8 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 
 ## Safety Rules
 
-- **NEVER** call any delete tool (\`delete_field\`, \`delete_view\`, \`delete_table\`, \`delete_record_template\`, \`delete_view_section\`, \`remove_extension\`) without explicit user confirmation
+- **NEVER** call any delete tool (\`delete_field\`, \`delete_view\`, \`delete_table\`, \`delete_record_template\`, \`delete_view_section\`, \`remove_extension\`, \`delete_records\`) without explicit user confirmation
+- **NEVER** call \`sync_base\` with \`mode=apply\` — especially with \`policy=mirror\` plus the confirmation flags — without explicit user confirmation; it mutates (and can delete from) the destination base
 - **NEVER** set \`force: true\` on \`delete_field\` before showing the user the returned dependencies
 - **ALWAYS** validate formulas before creating or updating formula fields
 - **ALWAYS** use read tools to discover IDs — never guess or fabricate Airtable IDs

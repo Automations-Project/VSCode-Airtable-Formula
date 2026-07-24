@@ -494,7 +494,9 @@ export function recordsStatus({ sourceBaseId, destBaseId, planId }) {
  * @param {object} opts.client          - AirtableClient instance
  * @param {string} opts.sourceBaseId
  * @param {string} opts.destBaseId
- * @param {object} [opts.naturalKeys]   - { [tableName]: fieldName } for re-match (stub)
+ * @param {object} [opts.naturalKeys]   - { [tableName]: fieldName } — matches dest↔source
+ *   records by the key field's value; add-only, ambiguity-safe (never overwrites an
+ *   existing mapping or claims an already-mapped dest row)
  * @returns {Promise<object>}           - { created, updated, skipped, failed, warnings, idmap }
  */
 export async function reconcile({ client, sourceBaseId, destBaseId, naturalKeys = {} }) {

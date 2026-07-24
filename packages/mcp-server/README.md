@@ -3,12 +3,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 66 tools your AI assistant can't get from the official Airtable REST API" width="900" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 71 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
 </picture>
 
 # airtable-user-mcp
 
-**Community add-on to the official Airtable MCP — 66 tools your AI assistant can't get from the public REST API**
+**Community add-on to the official Airtable MCP — 71 tools + `manage_tools` your AI assistant can't get from the public REST API**
 
 <table align="center">
 <tr>
@@ -85,7 +85,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| Total tools | ~17 | **66** |
+| Total tools | ~17 | **72** (71 + `manage_tools`) |
 | Auth | PAT or OAuth, per-scope | **Log in once with your normal account** (SSO/2FA supported) |
 | Transport | HTTP (remote) | stdio (local, private) |
 | Data routing | Through `mcp.airtable.com` | **Direct from your machine** |
@@ -110,7 +110,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Record templates (create, pre-fill, duplicate, apply, delete) | ❌ | ✅ |
 | Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
-| Tool profiles & per-tool toggles | ❌ | ✅ read-only / safe-write / full / custom |
+| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (12 tools) / `safe-write` (54 tools) / `full` (71 tools) / `custom` |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
 
@@ -136,7 +136,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 66 tools.
+That's it. Your MCP client connects via **stdio** and gets access to all 72 tools (71 Airtable tools + `manage_tools`).
 
 When the daemon is running (started automatically by the VS Code extension, or via `npx airtable-user-mcp daemon start`),
 subsequent `npx airtable-user-mcp` invocations transparently proxy their stdio to the shared daemon —
@@ -257,7 +257,7 @@ Add the `airtable` entry to `mcpServers`:
 }
 ```
 
-Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see the 66 tools.
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see all 72 tools.
 
 </details>
 
@@ -280,7 +280,7 @@ Verify:
 claude mcp list
 ```
 
-You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and the 66 tools are available.
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and all 72 tools are available.
 
 </details>
 
@@ -385,7 +385,9 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 ---
 
-## Tools (66)
+## Tools (71 + `manage_tools`)
+
+71 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 72 tools total under the default `full` profile.
 
 ### Schema Read (11)
 
@@ -423,11 +425,20 @@ filterByFormula: "FIND('John Smith', {Name Lookup})"   // returns 0 results
 { "search": "john smith", "limit": 500 }   // matches any field containing "john smith"
 ```
 
-### Record Write (1)
+### Record Write (4)
 
 | Tool | Description |
 |:-----|:------------|
 | `duplicate_records` | Duplicate one or more existing records within the same table. Pass `sourceRowIds` array; returns the new record IDs. |
+| `create_records` | Create one or more records in a table. Each item supplies `cellValuesByColumnId` (computed fields are read-only and must be omitted). Returns created record IDs; a failing row is reported, not fatal. |
+| `update_records` | Update primitive / single-select cells of existing records via `cellValuesByColumnId`. Array cells (multi-select, links, attachments) are not set here. Per-row isolation. |
+| `upload_attachment` | Upload attachments into an attachment cell by URL — Airtable's servers fetch each URL directly (bytes are never proxied through this server). The only way to set `multipleAttachments` fields; `update_records` cannot. Appends to the cell (calling twice adds two). |
+
+### Record Destructive (1)
+
+| Tool | Description |
+|:-----|:------------|
+| `delete_records` | Delete one or more records from a table in a single batch call. The returned deleted count equals `rowIds.length` (optimistic) — already-deleted rows are silently skipped by the server. |
 
 ### Table Management (3)
 
@@ -523,7 +534,7 @@ Saved row scaffolds Airtable surfaces under "+ Add record" and the row-create ex
 
 | Tool | Description |
 |:-----|:------------|
-| `sync_base` | Copy a base's schema, views, and records to another base. `mode=diff` (read-only) compares two bases and classifies every difference as **drift** (sync enforces), **best-effort** (sync applies, not guaranteed), or **not-synced** (view sections). Returns a token-budgeted digest (verdicts + class counts + driftSample); drill in with `detail="<table>"`. Verdicts: `identical` or `converged`. `mode=plan` snapshots both bases and produces a curatable **changeset** — each action has a stable `changeId` (`<op>\|<table>\|<target>`), a `class`, and an `apply:true` flag. New `direction` param (`to-dest` default \| `to-source`) selects which base is written. `mode=apply` executes a saved plan — creates tables, reconciles the primary field, creates scalar/link/computed fields with source→dest reference remapping and formula validation, applies non-destructive field updates, syncs collaborative views (idempotent; personal views skipped; orphan views reported), then launches **background** record sync and returns a `jobId` immediately. Accepts a `skip:[changeId]` list (or `apply:false` entries in the changeset) to exclude specific changes; skipped dependencies degrade to UNRESOLVABLE_REF. Record sync: Pass 1 writes scalar + select cells (computed fields never written) and builds a persisted rec→rec id map; Pass 2 writes linked-record cells (unresolved targets reported); then attachments (download→re-upload, deduped by filename+size); then restores record-referencing view filters. Throttling via per-request 429 backoff; resumable (records journal, per-chunk persist); continue-on-failure. `mode=status` polls the background job by planId (running/done/failed + live count). `mode=reconcile` **prunes** the record id map (existence-prune; natural-key re-match planned; does not de-duplicate). Drift-guarded and resumable via an on-disk journal. Out of scope: type-changing retypes, deletions. **New params:** `policy` (`mirror`\|`overlay`\|`preserve`, default `overlay`) — reconciliation preset: `mirror` deletes dest-only records and lets source win conflicts; `overlay` keeps dest-only records and lets source win (default); `preserve` keeps dest-only records and never overwrites dest edits. `policyOverrides` (`{ [tableName]: preset }`) overrides the global preset per table. `confirmDeletions` (boolean) — safety gate for `mirror`/remove-extras: without it, orphan deletions are reported as `DELETION_GATED` and nothing is deleted; set `true` to apply. `fieldMappings` (`{ [tableName]: { sourceField: destField } }`) — inject a source field's value (including computed sources like `autoNumber`) into a different writable scalar dest field; validated pre-flight with fail-fast abort on error (`FIELD_MAP_INVALID`); `mode=plan`/`mode=diff` run as dry-check and return `fieldMappingErrors`. Example: `{ "Games": { "Code": "InjectID" } }` injects a source autoNumber into a dest text field so a dest formula can reconstruct original identity. |
+| `sync_base` | Copy a base's schema, views, and records to another base. `mode=plan`/`diff`/`status` are read-only; `mode=apply` mutates the destination and, with `policy=mirror` plus the confirmation flags, can delete tables, fields, views, sections and records; `mode=reconcile` updates local mapping state. `mode=diff` compares two bases and classifies every difference as **drift** (sync enforces), **best-effort** (sync applies, not guaranteed), or **not-synced** (view sections). Returns a token-budgeted digest (verdicts + class counts + driftSample); drill in with `detail="<table>"`. Verdicts: `identical` or `converged`. `mode=plan` snapshots both bases and produces a curatable **changeset** — each action has a stable `changeId` (`<op>\|<table>\|<target>`), a `class`, and an `apply:true` flag. New `direction` param (`to-dest` default \| `to-source`) selects which base is written. `mode=apply` executes a saved plan — creates tables, reconciles the primary field, creates scalar/link/computed fields with source→dest reference remapping and formula validation, applies non-destructive field updates, retypes a matched scalar field whose type diverges from source when `confirmRetypes:true` (non-scalar retypes — computed/link/attachment on either side — stay out of scope, reported as `RETYPE_DEFERRED`), syncs collaborative views (idempotent; personal views skipped; orphan views reported), then launches **background** record sync and returns a `jobId` immediately. Accepts a `skip:[changeId]` list (or `apply:false` entries in the changeset) to exclude specific changes; skipped dependencies degrade to UNRESOLVABLE_REF. Record sync: Pass 1 writes scalar + select cells (computed fields never written) and builds a persisted rec→rec id map; Pass 2 writes linked-record cells (unresolved targets reported); then attachments (download→re-upload, deduped by filename+size); then restores record-referencing view filters. Throttling via per-request 429 backoff; resumable (records journal, per-chunk persist); continue-on-failure. `mode=status` polls the background job by planId (running/done/failed + live count). `mode=reconcile` **prunes** dead record-id-map entries (existence-prune) and grows the map via **natural-key re-match** — matches dest↔source records by the `naturalKeys` key field's value, add-only and ambiguity-safe (never overwrites an existing mapping or claims an already-mapped dest row); does not de-duplicate. Schema orphans (dest-only tables/fields/views/sidebar sections) are deleted after `mode=apply`'s field/view sync, gated separately from record deletion. Drift-guarded and resumable via an on-disk journal. **New params:** `policy` (`mirror`\|`overlay`\|`preserve`, default `overlay`) — reconciliation preset: `mirror` deletes dest-only records/fields/views/sections and lets source win conflicts; `overlay` keeps dest-only data and lets source win (default); `preserve` keeps dest-only data and never overwrites dest edits. `policyOverrides` (`{ [tableName]: preset }`) overrides the global preset per table. `confirmDeletions` (boolean) — safety gate for record and field/view/section deletion under `mirror`: without it, deletions are reported as `DELETION_GATED` and nothing is deleted; set `true` to apply. `confirmTableDeletions` (boolean) — separate gate required to drop a whole dest-only table (`confirmDeletions` alone never does). `confirmRetypes` (boolean) — safety gate to retype a matched scalar field; without it the field is kept and reported as `RETYPE_GATED`. `naturalKeys` (`{ [tableName]: fieldName }`) — match dest↔source records by a stable key field's value instead of only by row-creation identity; use a field that never changes across bases (name, email, an injected ID) — **not** an `autoNumber`, which renumbers per base. `fieldMappings` (`{ [tableName]: { sourceField: destField } }`) — inject a source field's value (including computed sources like `autoNumber`) into a different writable scalar dest field; validated pre-flight with fail-fast abort on error (`FIELD_MAP_INVALID`); `mode=plan`/`mode=diff` run as dry-check and return `fieldMappingErrors`. Example: `{ "Games": { "Code": "InjectID" } }` injects a source autoNumber into a dest text field so a dest formula can reconstruct original identity. |
 
 **Typical diff → curate → apply workflow:**
 1. `mode=diff` — compare bases, review the digest. Verdict `converged` means no drift; `identical` means nothing to do.
