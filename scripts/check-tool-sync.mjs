@@ -310,15 +310,23 @@ if (claudeMd) {
 // 8. Validate the tool-count convention ("71 Airtable tools + `manage_tools`" — see
 //    CLAUDE.md "Keeping tool categories in sync") in the published READMEs (the
 //    Marketplace/npm listings, copied verbatim into the packaged extension and the
-//    npm tarball) and the AI-skill templates baked into the extension and installed
-//    into user workspaces. These are user-visible surfaces CLAUDE.md's guard (#7)
-//    doesn't reach, and they're exactly where the "66 tools" count had gone stale.
+//    npm tarball), the AI-skill templates baked into the extension and installed
+//    into user workspaces, and the hand-authored banner/architecture SVGs embedded
+//    as the first element of both READMEs (referenced by raw-GitHub URLs pinned to
+//    `main`, so they go live the moment a merge lands). These are user-visible
+//    surfaces CLAUDE.md's guard (#7) doesn't reach, and they're exactly where the
+//    "66 tools" / "13 categories" counts had gone stale — including, previously, in
+//    the SVG artwork itself even after the surrounding <img alt="…"> text was fixed.
 //
 //    Deliberately narrow: only the canonical anchor phrases below are guarded, one
 //    or two per file. The rest of each README's prose (comparison tables, per-tool
 //    highlights, etc.) legitimately varies in wording and isn't a reliable regex
 //    target — see the pre-merge task-4 report for why a broader guard would produce
-//    false failures on ordinary copy edits.
+//    false failures on ordinary copy edits. The SVG anchors (`>N tools<` / `>N
+//    categories<`) are safe to match anywhere in the file precisely because these
+//    are short, fixed-label text nodes with no surrounding free-form prose to
+//    collide with — unlike the READMEs, there's nothing else in these files that
+//    would produce a false match.
 const totalTools = Object.keys(mcpCategories).length;
 const totalCats = mcpLabelKeys.size;
 const profileCountsRe =
@@ -384,6 +392,34 @@ const docCountProblems = [
       allOccurrences: true,
     },
   ])),
+  // The banner/architecture SVGs are hand-authored marketing graphics — the first
+  // element of both published READMEs (raw-GitHub URLs pinned to `main`, so they go
+  // live the moment a merge lands). They embed the same counts as plain <tspan>/<text>
+  // node content, so `>N tools<` / `>N categories<` is a reliable, narrow anchor:
+  // real prose never appears immediately after `>` and before ` tools<`/` categories<`
+  // in these files (unlike the READMEs, there's no free-form surrounding text to
+  // collide with — every text node is a short, fixed label).
+  ...(await checkCanonicalCounts('packages/mcp-server/assets/banner.svg', [
+    { re: />(\d+) tools</, want: [totalTools], label: '">N tools<" text node (stats line + MCP SERVER card)', allOccurrences: true },
+    { re: />(\d+) categories</, want: [totalCats], label: '">N categories<" text node (stats line)' },
+  ])),
+  ...(await checkCanonicalCounts('packages/mcp-server/assets/banner-dark.svg', [
+    { re: />(\d+) tools</, want: [totalTools], label: '">N tools<" text node (stats line + MCP SERVER card)', allOccurrences: true },
+    { re: />(\d+) categories</, want: [totalCats], label: '">N categories<" text node (stats line)' },
+  ])),
+  ...(await checkCanonicalCounts('packages/mcp-server/assets/banner-light.svg', [
+    { re: />(\d+) tools</, want: [totalTools], label: '">N tools<" text node (stats line + MCP SERVER card)', allOccurrences: true },
+    { re: />(\d+) categories</, want: [totalCats], label: '">N categories<" text node (stats line)' },
+  ])),
+  ...(await checkCanonicalCounts('packages/mcp-server/assets/architecture.svg', [
+    { re: />(\d+) tools</, want: [totalTools], label: '">N tools<" pill label (airtable-user-mcp tier)' },
+  ])),
+  ...(await checkCanonicalCounts('packages/mcp-server/assets/architecture-dark.svg', [
+    { re: />(\d+) tools</, want: [totalTools], label: '">N tools<" pill label (airtable-user-mcp tier)' },
+  ])),
+  ...(await checkCanonicalCounts('packages/mcp-server/assets/architecture-light.svg', [
+    { re: />(\d+) tools</, want: [totalTools], label: '">N tools<" pill label (airtable-user-mcp tier)' },
+  ])),
 ];
 
 if (docCountProblems.length) {
@@ -398,4 +434,4 @@ if (docCountProblems.length) {
   process.exit(1);
 }
 
-ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''} + published READMEs + skill templates.`);
+ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''} + published READMEs + skill templates + banner/architecture SVGs.`);
