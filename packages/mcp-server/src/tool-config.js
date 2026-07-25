@@ -153,6 +153,19 @@ export const CATEGORY_LABELS = {
  * custom profile" invariant is self-maintaining and can't be forgotten by a
  * future change the way a hand-maintained "which categories are new" list
  * could be. See CLAUDE.md's "Keeping tool categories in sync" checklist.
+ *
+ * ponytail: this allowlist is CATEGORY-granular, not tool-name-granular — its
+ * ceiling. A new tool added to an already-legacy category (e.g. `upload_attachment`
+ * / `create_records` / `update_records` joining `record-write`) is indistinguishable
+ * here from a tool that predates the config; both resolve an absent key to enabled.
+ * So a standalone npm user with an on-disk `custom` profile who explicitly turned
+ * a legacy category off can silently regain a *new* tool in that category on
+ * upgrade (never a new category — that's what this allowlist does guard). Affects
+ * `airtable-user-mcp` CLI users only: the VS Code extension's `syncSettingsToFile`
+ * always writes an explicit key for every tool, so it never hits the absent-key
+ * path. See packages/mcp-server/CHANGELOG.md for the specific case this shipped
+ * with. Real fix: freeze a tool-NAME allowlist instead of (or in addition to) this
+ * category allowlist — deferred as a deliberate scope cut, not an oversight.
  */
 const LEGACY_CATEGORIES_DEFAULT_ON = Object.freeze(new Set([
   'read', 'record-read',

@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Known limitations (2026-07-25 tool profile safety — standalone CLI users)
+
+- **`LEGACY_CATEGORIES_DEFAULT_ON` is category-granular, not tool-name-granular —
+  a *new tool in an already-adopted category* can still be silently regained.**
+  This only affects **standalone `airtable-user-mcp` npm/CLI users** with a
+  hand-edited or pre-existing `~/.airtable-user-mcp/tools-config.json` on
+  `activeProfile: "custom"` — **not** the VS Code extension, whose
+  `syncSettingsToFile()` always writes an explicit `true`/`false` for all 71
+  tools, so it never hits the absent-key resolution path described below.
+  - **Who's affected:** a standalone user who set `activeProfile: "custom"` and
+    explicitly turned the **Record Write** category off (`table-write`,
+    `field-write`, `view-write`, etc. are equally affected — Record Write is
+    just the concrete case that shipped on this branch) before this branch's
+    new tools existed in their on-disk config.
+  - **What they gain:** on upgrade, `upload_attachment` (new tool) — and
+    `create_records`/`update_records` if those also postdate their config —
+    resolve their absent `customTools` key to *enabled*, because
+    `LEGACY_CATEGORIES_DEFAULT_ON` allowlists the whole `record-write`
+    *category* (frozen at the 13 categories that existed when per-tool
+    overrides were introduced), not the individual tool names within it. A
+    tool with no key at all is judged solely by whether its *category* is
+    legacy — it has no way to know the user's config predates the *tool*
+    specifically, only the *category*.
+  - **What they do NOT gain:** `delete_records` — `record-destructive` is a
+    brand-new category on this branch and is correctly excluded from the
+    allowlist, so it resolves absent keys to disabled as intended. Only
+    record-**write** tools are affected, never destructive ones.
+  - **Net effect vs. pre-hardening-pass behavior:** strictly better. Before this
+    pass, ALL new tools (including `sync_base` and `delete_records`) resolved
+    absent keys to enabled with no category gate at all; this pass closed that
+    for every *new category*. The residual is narrower: only new *tools* inside
+    a category the user had already adopted (and then explicitly disabled) can
+    still slip through.
+  - **Remedy:** re-run `manage_tools` (`get_tool_status` to see what's enabled,
+    `toggle_tool`/`toggle_category` to turn `upload_attachment` back off if
+    unwanted) or hand-edit `~/.airtable-user-mcp/tools-config.json` to add an
+    explicit `"upload_attachment": false` entry. The real fix — a frozen
+    tool-**name** allowlist alongside (or instead of) the category allowlist —
+    is deliberately deferred: it is a semantic change to credential-adjacent
+    tool-gating logic and does not belong in the closing commits of a
+    pre-merge hardening pass. See the `ponytail:` comment on
+    `LEGACY_CATEGORIES_DEFAULT_ON` in `src/tool-config.js`.
+
 ### Changed (2026-07-25 tool profile safety, pre-merge hardening pass)
 
 - **`safe-write` no longer includes `sync_base`.** `sync_base` reaches

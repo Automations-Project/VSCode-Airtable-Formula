@@ -270,7 +270,7 @@ export class ToolProfileManager implements vscode.Disposable {
       tableDestructive:       cfg.get('mcp.categories.tableDestructive',       true),
       fieldWrite:             cfg.get('mcp.categories.fieldWrite',             true),
       fieldDestructive:       cfg.get('mcp.categories.fieldDestructive',       true),
-      recordDestructive:      cfg.get('mcp.categories.recordDestructive',      true),
+      recordDestructive:      cfg.get('mcp.categories.recordDestructive',      false),
       viewWrite:              cfg.get('mcp.categories.viewWrite',              true),
       viewDestructive:        cfg.get('mcp.categories.viewDestructive',        true),
       viewSection:            cfg.get('mcp.categories.viewSection',            true),
@@ -278,7 +278,7 @@ export class ToolProfileManager implements vscode.Disposable {
       formWrite:              cfg.get('mcp.categories.formWrite',              true),
       extension:              cfg.get('mcp.categories.extension',              true),
       recordWrite:            cfg.get('mcp.categories.recordWrite',            true),
-      sync:                   cfg.get('mcp.categories.sync',                   true),
+      sync:                   cfg.get('mcp.categories.sync',                   false),
     };
     return {
       profile,
