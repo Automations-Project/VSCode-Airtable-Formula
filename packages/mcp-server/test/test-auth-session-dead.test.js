@@ -106,6 +106,30 @@ describe('AirtableAuth — dead-session breaker resets on re-authentication', ()
     assert.equal(a.getLastTrip(), null);
   });
 
+  it('an alternating "recovery fails → next init succeeds → API still fails" run STILL latches', async () => {
+    // The reset must not zero a PARTIAL streak. When _recoverSession throws (90s
+    // watchdog / locked profile) it leaves the session torn down, so the NEXT call
+    // re-initializes through the EXTERNAL path (ensureLoggedIn -> init). If that
+    // success reset the streak, the count would restart every cycle and the
+    // breaker would never latch — an unbounded relaunch loop.
+    const a = closable();
+    a._sessionDeadAfter = 3;
+    a._rawApiCall = async () => ({ status: 401, body: '' });
+    a._recoverSession = async () => {
+      a.context = null; a.isLoggedIn = false;   // torn down, as a failed recovery leaves it
+      throw new Error('session init/recovery exceeded 90s — the browser profile may be locked');
+    };
+
+    let calls = 0;
+    while (calls < 10 && !a.isSessionDead()) {
+      calls++;
+      await a.get('/v0.3/x', 'app1').catch(() => {});
+    }
+    assert.equal(a.isSessionDead(), true, 'the breaker must still latch despite successful re-inits between failures');
+    assert.ok(calls <= 3, `should latch within the threshold, took ${calls} calls`);
+    assert.ok(a._doInitCalls >= 1, 'the external re-init path really did run between failures');
+  });
+
   it('an init driven by the INTERNAL recovery loop does NOT clear it (breaker can still latch)', async () => {
     const a = closable();
     a._sessionDead = true; a._recoveryStreak = 9;

@@ -249,11 +249,19 @@ export class AirtableAuth {
       // /daemon/release-browser → close() → this re-init) keeps hitting the
       // _apiCall short-circuit until the daemon is restarted.
       //
-      // GUARDED on _recovering: an init driven by the INTERNAL recovery loop
-      // (_recoverSession) must NOT reset, or the breaker could never latch — its
-      // whole job is to count failures that persist ACROSS successful recoveries
-      // (the observed "403/401 → recover → same failure" storm).
-      if (!this._recovering) this.resetSessionHealth();
+      // GUARDED twice, because resetSessionHealth() also zeroes _recoveryStreak:
+      //  - _recovering: an init driven by the INTERNAL recovery loop
+      //    (_recoverSession) must NOT reset, or the breaker could never latch —
+      //    its whole job is to count failures that persist ACROSS successful
+      //    recoveries (the observed "403/401 → recover → same failure" storm).
+      //  - _sessionDead: only a LATCHED breaker is cleared. A PARTIAL streak must
+      //    survive, otherwise an alternating "recovery throws (watchdog timeout /
+      //    profile contention) → next call's ensureLoggedIn re-inits fine → API
+      //    still 401s" pattern resets the count every cycle and never reaches the
+      //    threshold — an unbounded Chromium relaunch loop, i.e. exactly what the
+      //    breaker exists to stop. Un-sticking a latched breaker is the whole
+      //    user-facing win here and it survives this narrowing.
+      if (!this._recovering && this._sessionDead) this.resetSessionHealth();
       return settled;
     } finally {
       clearTimeout(timer);
