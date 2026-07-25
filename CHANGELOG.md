@@ -6,9 +6,92 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
-### Pre-merge hardening — proxies, session recovery, logout (2026-07-25)
+### Pre-merge hardening pass — tool profiles, sync safety, packaging, transport, proxies, session recovery, logout (2026-07-25)
+
+Pre-merge hardening pass on `feat/base-to-base-sync` before merging base-to-base
+sync into `main`. Covers tool-profile safety, packaging, and — retroactively,
+since it was never documented — the direct-HTTP transport rework this branch
+already shipped.
+
+#### Changed
+- **`safe-write` no longer includes `sync_base`, and two new tool categories
+  now default to *off* for existing `custom`-profile users.** `sync_base`
+  reaches destructive operations (`mode=apply` under `policy=mirror` can
+  delete tables, fields, views, sections and records), so it never belonged
+  in a profile whose own description promises "no deletes" — and `safe-write`
+  is the extension's default profile. It now lives in `full` only;
+  `safe-write` drops from 55 to **54** tools (`read-only` stays 12, `full`
+  stays 71). Separately, `sync` and `recordDestructive` are new categories on
+  this branch, and every `airtableFormula.mcp.categories.*` setting defaulted
+  to `true` — so a user already running the `custom` profile would have
+  silently gained `sync_base` and `delete_records` on upgrade, with no action
+  on their part. Both defaults are now `false`; the other 13 categories are
+  unchanged. The same gap existed server-side: a pre-existing
+  `~/.airtable-user-mcp/tools-config.json` with `activeProfile: "custom"` and
+  no key at all for these newly-introduced tools resolved them to *enabled*
+  (absent key → enabled). An absent key for `sync`/`recordDestructive` now
+  resolves to disabled; a frozen `LEGACY_CATEGORIES_DEFAULT_ON` allowlist of
+  the 13 pre-existing categories keeps their legacy enabled-by-default
+  behavior for absent keys, so this doesn't silently regress the *next*
+  category either. If you want `sync_base`, switch to the `full` profile or
+  opt in explicitly under `custom`.
+- **`sync_base` is now correctly annotated as destructive (`destructiveHint:
+  true`)**, and the "read-only plan mode" wording that described only two of
+  its five modes has been replaced everywhere it appeared (tool description,
+  Settings UI, `CLAUDE.md`) with an accurate summary: `plan`/`diff`/`status`
+  are read-only; `apply` mutates the destination and, with `policy=mirror`
+  plus the confirmation flags, can delete tables, fields, views, sections and
+  records; `reconcile` updates local mapping state only. MCP clients that gate
+  tool calls on `destructiveHint` (auto-approve UIs, etc.) now correctly
+  prompt for `sync_base`. (The Settings UI's "Record Write" row was also
+  under-counting itself — "3 tools" instead of 4 — and missing
+  `upload_attachment` from its list; both are fixed.)
+
+#### Added
+- **Direct-HTTP transport (shipped earlier on this branch — 2026-07-04 —
+  never previously mentioned here).** This is the single biggest behavioral
+  change on this branch for anyone who never touches sync: every Airtable API
+  call used to run inside a headless Chrome page (`page.evaluate(fetch)`);
+  it now goes over a direct Node HTTP client (`fetch` by default, opt-in
+  Chrome-TLS-impersonation via `mcp.httpClient: "impit"`), with the browser
+  demoted to login/credential-capture only. This is why a proxy-only network
+  used to look like a healthy login with every tool call failing as
+  `SESSION_INVALID` (see the proxy fix below) — Chrome used the OS proxy for
+  the browser session, but Node's `fetch` did not for the actual API traffic.
+  It also unlocked two browser-free credential modes exposed via
+  `mcp.authMode`: `byo` (cookie-only, no browser) and `direct-login`
+  (email+password+TOTP replaying Airtable's HTTP login flow). Users on the
+  default `browser` auth mode see no behavior change beyond faster/steadier
+  API calls and the proxy-visibility fix; this entry exists purely to close a
+  documentation gap ahead of merge.
 
 #### Fixed
+- **The daemon's orphan-process sweep (Stop button / `stopDaemon` command) no
+  longer kills unrelated Node processes on a loose command-line match.** The
+  previous kill criteria were an unanchored substring match against
+  `index.mjs … daemon … start`, so any process whose argv merely *contained*
+  those words — another vendor's MCP server, a build watcher, even a text
+  editor with our bundled file open — could be force-killed along with its
+  whole process tree. Kill criteria are now positive-attribution only: the
+  exact bundled `dist/mcp/index.mjs` path **and** the daemon-start argv shape
+  this install actually spawns, or the paired `.airtable-user-mcp` /
+  `.chrome-profile` directories. A process that merely resembles a stray
+  daemon but can't be attributed to this install is left alive and reported
+  in the new `StopResult.skippedUnowned` instead of being killed on a guess.
+- **The packaged VSIX now actually includes the `impit` and `@ngrok/ngrok`
+  native (napi) binaries.** Both packages were correctly kept external by
+  esbuild and their pure-JS loader was vendored into `dist/node_modules/`,
+  but each ships its compiled binding in a *separate* per-platform
+  optionalDependency (e.g. `impit-win32-x64-msvc`,
+  `@ngrok/ngrok-win32-x64-msvc`) that was never copied — so
+  `mcp.httpClient: "impit"` or the ngrok tunnel provider threw "Cannot find
+  native binding" the first time either was used from an installed `.vsix`,
+  even though the setting was selectable and looked present. Fixed
+  data-driven rather than with a hardcoded package list:
+  `prepare-package-deps.mjs` now reads each vendored package's own
+  `optionalDependencies` and copies whatever platform binary actually
+  resolved on the build machine, so this closes the whole class of bug for
+  any future napi-based optional dependency too.
 - **Logging out now actually stops the daemon serving your session.** The Command-Palette "Airtable: Log out" cleared the OS keychain and tried to delete the browser profile, but never told the running daemon — which keeps the live browser session (browser mode) or the injected cookie/credentials (byo / direct-login) in memory — so tool calls kept working after the user believed they had logged out. Only the dashboard's logout button did part of this. Both entry points now run one path that also releases the daemon's browser and restarts it to drop in-memory credentials. Releasing the browser first also frees the profile directory, so the profile wipe no longer silently fails on Windows. If the daemon cannot be confirmed stopped — it can be alive but slow enough to miss its health probe — logout escalates to a daemon restart/force-stop, and when even that fails it now says so instead of reporting success. The profile wipe is retried after that restart (a profile the daemon's Chromium had locked can only be removed once it is gone), and a profile still on disk is never reported as a cleared session: it holds live Airtable cookies, and the next daemon would authenticate straight from it.
 - **`npx airtable-user-mcp logout` (standalone CLI) got the same treatment**: it stops a running daemon before wiping the profile, and a wipe that genuinely fails is reported as a failure ("Could not clear the browser session at …") instead of the previous, exactly-backwards "No session to clear."
 - **A dead session can be recovered without restarting the daemon.** After repeated rejected requests the server latches a dead-session circuit-breaker that fails every subsequent call fast. In browser mode nothing cleared it: re-logging in from the dashboard left the daemon in the same state, and only a daemon restart helped. It is now cleared whenever a freshly verified session is established — including the browser release the dashboard performs right before an interactive login — while still latching on failures that persist across the server's own internal recovery attempts.

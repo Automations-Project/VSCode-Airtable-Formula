@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Changed (2026-07-25 tool profile safety, pre-merge hardening pass)
+
+- **`safe-write` no longer includes `sync_base`.** `sync_base` reaches
+  destructive operations (`mode=apply` under `policy=mirror` can delete
+  tables, fields, views, sections and records), so it never belonged in a
+  profile whose own description promises "no deletes". It now lives in
+  `full` only; `safe-write` drops from 55 to **54** tools (`read-only` stays
+  12, `full` stays 71).
+- **`sync` and `recordDestructive` — both new categories on this branch — no
+  longer silently widen an existing `custom` profile on upgrade.** A
+  pre-existing `~/.airtable-user-mcp/tools-config.json` with
+  `activeProfile: "custom"` and no key at all for `sync_base`/`delete_records`
+  (because those tools didn't exist when the file was written) previously
+  resolved the absent key to *enabled* — so an upgrade alone handed an
+  existing custom-profile user two destructive/gated tools they never opted
+  into. `enabledToolNames()`'s absent-key resolution is now driven by a
+  frozen `LEGACY_CATEGORIES_DEFAULT_ON` allowlist of the 13 categories that
+  predate this change: an absent key for `sync`/`record-destructive` now
+  resolves to disabled, while every pre-existing category keeps its legacy
+  enabled-by-default behavior for absent keys (so a new *tool* added to an
+  already-adopted category still "just works"). A future category is safe by
+  construction — nothing to remember to update. `toggleTool`/`toggleCategory`
+  also now derive their "did this actually change" check from
+  `enabledToolNames()` itself (previously a separate, disagreeing rule could
+  silently skip the `tools/list_changed` notification when toggling an
+  absent-key tool on a legacy config).
+- **`sync_base`'s `destructiveHint` is now `true`.** It was `false`, and the
+  tool-category comment described `sync_base` as "read-only plan mode" —
+  true for 3 of its 5 modes (`plan`/`diff`/`status`) but not for `apply`
+  (which mutates the destination and can delete under `policy=mirror` + the
+  confirmation flags) or `reconcile` (which updates local mapping state).
+  MCP clients that gate tool calls on `destructiveHint` now correctly prompt
+  for `sync_base`.
+
 ### Fixed (2026-07-25 corporate proxy / TLS)
 
 - **The dead-session circuit-breaker resets on re-authentication.** Once `_sessionDead` latched, `_apiCall` short-circuited every request, and the only production `resetSessionHealth()` callers were the daemon's byo/direct-login credential endpoint and the sync records engine — so a browser-mode session stayed dead until the process restarted. It is now cleared by `close()` (the `/daemon/release-browser` teardown the extension runs before an interactive login) and by a completed initialization that is neither driven by the internal `_recoverSession()` loop nor merely mid-streak — only an already-latched breaker is un-stuck, so a partial failure count still accumulates to the threshold and the breaker keeps bounding recovery storms.
