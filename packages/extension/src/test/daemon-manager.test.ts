@@ -525,6 +525,18 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
     expect(result).toEqual({ killed: [], skipped: [] });
   });
 
+  it('NEGATIVE (trailing `=`): `…/index.mjs=1` is a DIFFERENT file and is NOT killed', () => {
+    // Criterion (a)'s half of the same boundary bug: `=` was accepted as a trailing boundary, so
+    // any longer path formed by appending `=<anything>` matched our bundled entry.
+    const { result, killTree } = sweep(WIN_ROOT, [
+      { pid: 9110, commandLine: `node ${WIN_ROOT}\\dist\\mcp\\index.mjs=1 daemon start` },
+      { pid: 9111, commandLine: `node ${WIN_ROOT}\\dist\\mcp\\index.mjs=backup daemon start` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped.map(p => p.pid)).toEqual([9110, 9111]);
+  });
+
   it('NEGATIVE (path-suffix): a LONGER path that merely ENDS with our bundled path is NOT killed', () => {
     // Pins the leading-boundary half of _containsPathToken. Extended-length (`\\?\C:\…`) and
     // mounted-copy forms are the same bytes with a prefix — matching them would mean any path
@@ -895,6 +907,21 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
       /* bare image            */ { pid: 9503, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}` },
     ]);
     expect(w.killedPids).toEqual([9500, 9501, 9502, 9503]);
+  });
+
+  it('ARGUMENT CONJUNCT: a trailing `=` is not an argv boundary — `<profile>=2` is a different directory', () => {
+    // `=` is legal inside a path on both platforms, so accepting it as a TRAILING boundary meant
+    // `--user-data-dir=<profile>=2` matched `<profile>` and killed a browser on another directory.
+    const p = posix([
+      { pid: 9700, commandLine: `/usr/bin/chromium --user-data-dir=${POSIX_PROFILE}=2` },
+      { pid: 9701, commandLine: `/usr/bin/chromium --user-data-dir="${POSIX_PROFILE}=2"` },
+    ]);
+    expect(p.killTree).not.toHaveBeenCalled();
+    expect(p.result).toEqual({ killed: [], skipped: [] });
+
+    const w = win([{ pid: 9702, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}=2` }]);
+    expect(w.killTree).not.toHaveBeenCalled();
+    expect(w.result).toEqual({ killed: [], skipped: [] });
   });
 
   it('ARGUMENT CONJUNCT: a NESTED --user-data-dir spelling never counts as the flag', () => {

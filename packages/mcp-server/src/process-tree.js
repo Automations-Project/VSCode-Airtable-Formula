@@ -139,9 +139,10 @@ async function collectDescendantPids(rootPid, exec) {
 // ─── Positive-attribution primitives ──────────────────────────────────────────
 //
 // CROSS-REFERENCE: these are a LINE-FOR-LINE port of `_canon`, `_containsPathToken`,
-// `ARGV_BOUNDARY`, `ARG_START_BOUNDARY`, `ABSOLUTE_LIKE`, `_stripTrailingSep`,
+// `ARG_BOUNDARY`, `PATH_LEAD_BOUNDARY`, `ABSOLUTE_LIKE`, `_stripTrailingSep`,
 // `CHROME_FAMILY_IMAGES`, `CHROME_FAMILY_HELPER`, `WRAPPER_IMAGES`, `ROOTED`, `NEW_ARG_LIKE`,
-// `MAC_BUNDLE_MARKER`, `_imageName`, `_basename`, `_isChromeFamilyImage` and
+// `MAC_BUNDLE_MARKER`, `_isWindowsSpelling`, `_macBundleExec`, `_imageName`, `_basename`,
+// `_isChromeFamilyImage` and
 // `_hasUserDataDirArg` in `packages/extension/src/mcp/daemon-manager.ts` (`_sweepOrphans`
 // ownership criterion (b)). They are REIMPLEMENTED rather than imported because
 // `packages/mcp-server` is a standalone npm package (`airtable-user-mcp`) that must not depend
@@ -161,17 +162,24 @@ async function collectDescendantPids(rootPid, exec) {
 // AND it claims OUR exact profile as a whole argv token) — and fail safe: anything not
 // positively attributable is left alive.
 
-/** Characters that may legally abut a path inside an argv string (separator or quoting). */
-const ARGV_BOUNDARY = /[\s"'=]/;
 /**
- * Characters that may legally PRECEDE a whole argv entry — whitespace or an opening quote, but
- * NOT `=`. A PATH may legitimately sit after `=` (`--script=<path>`), but a FLAG never does, so
- * `--user-data-dir=` is matched with this stricter left boundary. That is what rejects the
- * nested spellings `--foo=--user-data-dir=<p>` and `--user-data-dir=/other=--user-data-dir=<p>`
- * — the latter being a browser pointed at a DIFFERENT profile, which it would have been a false
- * kill to accept.
+ * Characters that may abut an argv entry: whitespace, or quoting. Used on BOTH sides of every
+ * match. `=` is deliberately absent — it is legal INSIDE a path on every platform, so treating it
+ * as a boundary means `<needle>=2` matches `<needle>`: `--user-data-dir=<profile>=2` is a browser
+ * on a DIFFERENT directory, and accepting it was a false kill (fixture
+ * `near-miss-trailing-equals`).
  */
-const ARG_START_BOUNDARY = /[\s"']/;
+const ARG_BOUNDARY = /[\s"']/;
+/**
+ * The ONE asymmetry, and it is leading-side only: a PATH may legitimately sit after `=`
+ * (`--script=<path>`), but a FLAG never does. `--user-data-dir=` is therefore matched with
+ * `ARG_BOUNDARY` on both sides, which rejects the nested spellings `--foo=--user-data-dir=<p>`
+ * and `--user-data-dir=/other=--user-data-dir=<p>` — the latter being a browser pointed at a
+ * DIFFERENT profile. Nothing accepts `=` on the TRAILING side. Kept as a named export-scope
+ * constant because the extension's `daemon-manager.ts` criterion (a) needs the relaxed leading
+ * form; this module has no criterion (a), so nothing here passes it today.
+ */
+const PATH_LEAD_BOUNDARY = /[\s"'=]/;
 /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative userDataDir. */
 const ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
 
@@ -191,14 +199,19 @@ function stripTrailingSep(p) {
 }
 
 /**
- * Does `haystack` contain `needle` as a whole argv token? The characters immediately before
- * and after the match must be a boundary (start/end of string, whitespace, quote or `=`), so
- * a longer neighbouring path can never satisfy it. Both args must be in `canon` form.
+ * Does `haystack` contain `needle` as a whole argv token?
  *
- * `leadingBoundary` selects how strict the LEFT side is: `ARGV_BOUNDARY` (default — a path may
- * follow `=`) or `ARG_START_BOUNDARY` (a flag may not). One implementation, one parameter.
+ * TRAILING side: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`.
+ * LEADING side: the same, unless the caller passes `PATH_LEAD_BOUNDARY` to also allow `=`.
+ *
+ * Probed, not asserted: `<profile>-backup`, `<profile>.old`, `<profile>/Default` and
+ * `<profile>=2` are all misses, because `-`, `.`, `/` and `=` are none of them boundary
+ * characters. The claim this used to make — "a longer neighbouring path can never satisfy it" —
+ * was false for exactly one character, `=`, which was in the boundary set on both sides.
+ *
+ * Both args must be in `canon` form. One implementation, one parameter.
  */
-function containsPathToken(haystack, needle, leadingBoundary = ARGV_BOUNDARY) {
+function containsPathToken(haystack, needle, leadingBoundary = ARG_BOUNDARY) {
   if (!needle) return false;
   for (let from = 0; ; ) {
     const i = haystack.indexOf(needle, from);
@@ -206,7 +219,7 @@ function containsPathToken(haystack, needle, leadingBoundary = ARGV_BOUNDARY) {
     const before = i === 0 ? '' : haystack[i - 1];
     const afterIdx = i + needle.length;
     const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
-    if ((before === '' || leadingBoundary.test(before)) && (after === '' || ARGV_BOUNDARY.test(after))) {
+    if ((before === '' || leadingBoundary.test(before)) && (after === '' || ARG_BOUNDARY.test(after))) {
       return true;
     }
     from = i + 1;
@@ -293,8 +306,45 @@ const NEW_ARG_LIKE = /^(?:[a-z]:\/|\/|\.|["'-])/;
  * program plus arguments: the macOS app-bundle layout. Every Chrome-family image whose real path
  * contains a space is a bundle executable — `…/Google Chrome.app/Contents/MacOS/Google Chrome`,
  * `…/Google Chrome Helper.app/…`, `…/Google Chrome for Testing.app/…`, Edge, Brave, Chromium.
+ *
+ * The marker ALONE proves nothing — `git add x.app/contents/macos/chrome` carries it too — so
+ * `macBundleExec` additionally enforces the bundle's own naming rule, and a Windows-spelled
+ * command line is refused the multi-token path entirely (Windows has no `.app` executables).
  */
 const MAC_BUNDLE_MARKER = '.app/contents/macos/';
+
+/**
+ * Is this command line written in a WINDOWS path spelling? Decided from the RAW string, before
+ * `canon` erases the distinction by folding `\` into `/`: a backslash anywhere, or a drive-rooted
+ * token. Spelling, NOT host platform — the same command line must attribute the same way on every
+ * machine, which is what lets the shared vector assert both forms in both packages regardless of
+ * the runner's OS. (An escaped-space POSIX path, `/home/u/my\ apps/chrome`, reads as Windows-
+ * spelled here and simply fails to attribute — the safe direction.)
+ */
+function isWindowsSpelling(raw, canonCmd) {
+  return String(raw).includes('\\') || /(?:^|[\s"'])[a-z]:\//.test(canonCmd);
+}
+
+/**
+ * The executable name of a macOS app-bundle path, or `''` if the string is not one.
+ *
+ * A real bundle names its executable after the bundle: `Google Chrome.app/Contents/MacOS/Google
+ * Chrome`, `Google Chrome Helper.app/…/Google Chrome Helper (Renderer)`, `Brave Browser.app/…/
+ * Brave Browser`. So the segment before `.app` must equal the executable, or be its prefix
+ * followed by ` (` (the helper variants). That naming rule is what the marker alone was missing:
+ * it rejects `x.app/contents/macos/chrome`, `Foo.App/Contents/MacOS/Chrome` and every other
+ * "a browser-named file that happens to sit under some .app" spelling. The LAST marker occurrence
+ * is used because helpers nest inside the outer browser bundle.
+ */
+function macBundleExec(joined) {
+  const at = joined.lastIndexOf(MAC_BUNDLE_MARKER);
+  if (at < 0) return '';
+  const bundle = joined.slice(joined.lastIndexOf('/', at) + 1, at);
+  const exec = joined.slice(at + MAC_BUNDLE_MARKER.length);
+  if (!bundle || !exec || exec.includes('/')) return '';
+  if (exec !== bundle && !exec.startsWith(`${bundle} (`)) return '';
+  return exec;
+}
 
 /**
  * argv[0]'s basename, lower-cased and `.exe`-stripped, from a `canon`-form command line — or
@@ -303,21 +353,30 @@ const MAC_BUNDLE_MARKER = '.app/contents/macos/';
  * Process enumeration hands us a FLAT STRING, and an unquoted argv[0] may itself contain spaces,
  * so argv[0]'s extent has to be recovered. The rules, and the reason each one exists:
  *
- *   1. A quoted leading token IS argv[0] — the launcher's own quoting settles the extent. One
- *      guard: if that token contains whitespace it must be `ROOTED`, so a fabricated
- *      `"vim /home/u/chrome" …` cannot present a browser basename.
+ *   1. A quoted leading token IS argv[0] — the launcher's own quoting is its statement of the
+ *      extent, which is why quoted Windows paths with spaces still work. Two guards against a
+ *      MIS-PARSE presenting somebody's argument as the image: a token containing whitespace must
+ *      be `ROOTED`, and none of its later sub-tokens may be `NEW_ARG_LIKE`. Those reject
+ *      `"vim /home/u/chrome" …` and `"C:\Program Files\vim\vim.exe C:\x\chrome" …` while leaving
+ *      `"C:\Program Files\Google\Chrome\Application\chrome.exe"` intact.
  *   2. Otherwise: take the text before the first flag-shaped token (`\s["']?-{1,2}\S`), skip a
  *      leading run of `WRAPPER_IMAGES`, and then
  *        - ONE token left  → that is argv[0] (`chrome.exe`, `/opt/chromium`, `./chrome`, `vim`);
- *        - MORE than one   → argv[0] may span them ONLY when all three hold:
+ *        - MORE than one   → argv[0] may span them ONLY when all four hold:
  *            (a) the first token is `ROOTED`,
- *            (b) no later token is `NEW_ARG_LIKE`, and
- *            (c) the joined string contains `MAC_BUNDLE_MARKER`.
- *          (c) is what makes this exhaustive rather than a list of patched examples: a bare
+ *            (b) no later token is `NEW_ARG_LIKE`,
+ *            (c) the command line is not Windows-spelled (`isWindowsSpelling`), and
+ *            (d) the join is a macOS bundle path whose executable obeys the bundle's naming rule
+ *                (`macBundleExec`).
+ *          (c)+(d) are what make this exhaustive rather than a list of patched examples. A bare
  *          relative argument (`vim x/chrome`, `git add sub/msedge`) is SYNTACTICALLY IDENTICAL
  *          to a legitimate space-containing path (`/applications/google chrome.app/…`), so no
- *          rule over tokens alone can separate them. Only the bundle layout can, and every real
- *          space-containing Chrome-family image has it.
+ *          rule over tokens alone can separate them; only the bundle LAYOUT can, and the layout is
+ *          meaningless on Windows and meaningless when the executable is not named after its
+ *          bundle. The marker alone — which is all this used to require — accepted
+ *          `/usr/bin/git add x.app/contents/macos/chrome`,
+ *          `notepad.exe x.app\contents\macos\chrome.exe` and
+ *          `7z.exe e Foo.App\Contents\MacOS\Chrome`.
  *
  * THIS IS THE PRE-FIX LOGIC'S REPLACEMENT. What stood here took "everything before the first
  * flag" as the image and returned its basename unconditionally, with no wrapper allowlist, no
@@ -333,17 +392,22 @@ const MAC_BUNDLE_MARKER = '.app/contents/macos/';
  * are the same shape. Every launcher that matters (Node's `child_process`, shell shortcuts, the
  * Start menu) quotes an argv[0] containing spaces, so the quoted branch still covers Windows.
  *
- * IRREDUCIBLE RESIDUAL, stated rather than papered over: `/usr/bin/vim x.app/contents/macos/
- * google chrome --user-data-dir=<our profile>` would attribute. It is the one shape that is
- * byte-for-byte indistinguishable from a real macOS bundle invocation, and it still requires the
- * caller to pass our exact profile flag.
+ * RESIDUAL, stated rather than papered over — POSIX-only and narrow after (c)+(d): a POSIX-spelled
+ * command line that hands another program a CORRECTLY-NAMED bundle executable path, e.g.
+ * `/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=<our profile>`.
+ * That string is byte-for-byte a real macOS browser invocation; nothing short of asking the
+ * filesystem can separate them, and it still requires the caller to pass our exact profile flag.
+ * Pinned as `residual-posix-named-bundle-arg` in the shared vector so it cannot drift silently.
  */
-function imageName(cmd) {
+function imageName(cmd, winSpelling) {
   const quote = cmd[0];
   if (quote === '"' || quote === "'") {
     const end = cmd.indexOf(quote, 1);
-    const token = end > 0 ? cmd.slice(1, end) : cmd.slice(1);
-    if (/\s/.test(token.trim()) && !ROOTED.test(token.trim())) return '';
+    const token = (end > 0 ? cmd.slice(1, end) : cmd.slice(1)).trim();
+    if (/\s/.test(token)) {
+      if (!ROOTED.test(token)) return '';
+      if (token.split(/\s+/).slice(1).some((t) => NEW_ARG_LIKE.test(t))) return '';
+    }
     return basename(token);
   }
   const flag = /\s["']?-{1,2}\S/.exec(cmd);
@@ -356,9 +420,8 @@ function imageName(cmd) {
   if (tokens.length === 1) return basename(tokens[0]);
   if (!ROOTED.test(tokens[0])) return '';
   if (tokens.slice(1).some((t) => NEW_ARG_LIKE.test(t))) return '';
-  const joined = tokens.join(' ');
-  if (!joined.includes(MAC_BUNDLE_MARKER)) return '';
-  return basename(joined);
+  if (winSpelling) return '';
+  return basename(macBundleExec(tokens.join(' ')));
 }
 
 /** Basename of a `canon`-form path: quotes trimmed, text after the last `/`, `.exe` dropped. */
@@ -369,8 +432,8 @@ function basename(p) {
 }
 
 /** Is this command line's process image a Chrome-family browser we could have launched? */
-function isChromeFamilyImage(cmd) {
-  const image = imageName(cmd);
+function isChromeFamilyImage(cmd, winSpelling) {
+  const image = imageName(cmd, winSpelling);
   return CHROME_FAMILY_IMAGES.has(image) || CHROME_FAMILY_HELPER.test(image);
 }
 
@@ -390,7 +453,9 @@ const USER_DATA_DIR_FLAG = '--user-data-dir=';
  *   - a NESTED spelling — `--foo=--user-data-dir=<dir>`, or
  *     `--user-data-dir=/other=--user-data-dir=<dir>` (a browser pointed at a DIFFERENT profile,
  *     which it would have been a false kill to accept) → the flag must BEGIN an argv entry, and
- *     `ARG_START_BOUNDARY` excludes `=` from the characters that may precede it → MISS.
+ *     `ARG_BOUNDARY` excludes `=` from the characters that may abut an argv entry → MISS.
+ *   - a trailing `=` — `--user-data-dir=<dir>=2` is a DIFFERENT directory → MISS, because `=`
+ *     is not a boundary on the trailing side either.
  * The three needle spellings cover the quotings argv arrives in: bare, `"--user-data-dir=…"`
  * (whole argument quoted — the opening quote is itself a boundary) and `--user-data-dir="…"`.
  * The bare form also covers POSIX `ps -o args=` / `/proc/<pid>/cmdline`, which join argv with
@@ -402,11 +467,10 @@ const USER_DATA_DIR_FLAG = '--user-data-dir=';
  */
 function hasUserDataDirArg(cmd, profileDir) {
   if (!profileDir) return false;
-  const start = ARG_START_BOUNDARY;
   for (const dir of [profileDir, `${profileDir}/`]) {
-    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}${dir}`, start)) return true;
-    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}"${dir}"`, start)) return true;
-    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}'${dir}'`, start)) return true;
+    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}${dir}`)) return true;
+    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}"${dir}"`)) return true;
+    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}'${dir}'`)) return true;
   }
   return false;
 }
@@ -433,15 +497,24 @@ export function isOwnedBrowserCommandLine(commandLine, profileDir) {
   const cmd = typeof commandLine === 'string' ? commandLine : '';
   const dir = typeof profileDir === 'string' ? profileDir.trim() : '';
   if (!cmd.trim() || !dir || !ABSOLUTE_LIKE.test(dir)) return false;
-  return isOwnedCanonCommandLine(canon(cmd), stripTrailingSep(canon(dir)));
+  const canonCmd = canon(cmd);
+  return isOwnedCanonCommandLine(
+    canonCmd,
+    stripTrailingSep(canon(dir)),
+    isWindowsSpelling(cmd, canonCmd),
+  );
 }
 
-/** `isOwnedBrowserCommandLine` for arguments already in `canon` (+ trailing-sep-stripped) form. */
-function isOwnedCanonCommandLine(cmd, canonProfileDir) {
+/**
+ * `isOwnedBrowserCommandLine` for arguments already in `canon` (+ trailing-sep-stripped) form.
+ * `winSpelling` must be derived from the RAW command line (see `isWindowsSpelling`) — `canon` has
+ * already folded `\` into `/` by this point, so it cannot be recovered here.
+ */
+function isOwnedCanonCommandLine(cmd, canonProfileDir, winSpelling) {
   // Conjunct 1: is it a browser this project could have launched? This is the check POSIX was
   // missing entirely, and it is what keeps `vim`/`grep`/`rg`/`find`/`rsync`/a file manager
   // holding a path under the profile out of `terminateProcessTree`.
-  if (!isChromeFamilyImage(cmd)) return false;
+  if (!isChromeFamilyImage(cmd, winSpelling)) return false;
   // Conjunct 2: does it claim OUR exact profile, as a whole argv token? Rejects a browser on a
   // DIFFERENT `--user-data-dir`, `<profile>-backup`, `<profile>/Default`, `/mnt/backup<profile>`
   // and another OS user's identically-named path.
@@ -457,7 +530,7 @@ function isSelectableBrowserCommandLine(args, canonProfileDir) {
   if (typeof args !== 'string' || !args.trim()) return false;
   const cmd = canon(args);
   if (cmd.includes('--type=')) return false;
-  return isOwnedCanonCommandLine(cmd, canonProfileDir);
+  return isOwnedCanonCommandLine(cmd, canonProfileDir, isWindowsSpelling(args, cmd));
 }
 
 /**

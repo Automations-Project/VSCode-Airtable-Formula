@@ -1017,6 +1017,135 @@
       "cmd": "   ",
       "expect": "not-owned",
       "why": "blank command line is never attributable"
+    },
+    {
+      "id": "near-miss-trailing-equals",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir={PROFILE}=2",
+      "expect": "not-owned",
+      "why": "`=` is legal INSIDE a path, so this is a DIFFERENT directory — treating `=` as a trailing boundary was a false kill"
+    },
+    {
+      "id": "win-near-miss-trailing-equals",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={PROFILE}=2",
+      "expect": "not-owned",
+      "why": "the same directory-with-`=` near miss in Windows spelling"
+    },
+    {
+      "id": "near-miss-trailing-equals-quoted",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir=\"{PROFILE}=2\"",
+      "expect": "not-owned",
+      "why": "the value-quoted spelling of the same near miss"
+    },
+    {
+      "id": "arg-bundle-marker-git",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/git add x.app/contents/macos/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "git is the image; a bundle whose executable is not named after it is not a bundle invocation"
+    },
+    {
+      "id": "arg-bundle-marker-tar",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/tar cf a x.app/contents/macos/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the same, with two intervening argument tokens"
+    },
+    {
+      "id": "arg-bundle-marker-named-mismatch",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/vim Foo.app/Contents/MacOS/Google Chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "bundle `Foo` vs executable `Google Chrome` — a real bundle names its executable after itself"
+    },
+    {
+      "id": "win-arg-bundle-marker-notepad",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe x.app\\contents\\macos\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "Windows has no .app/Contents/MacOS executables, so the marker can never prove argv[0] extent there"
+    },
+    {
+      "id": "win-arg-bundle-marker-7z",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "7z.exe e Foo.App\\Contents\\MacOS\\Chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "an archiver extracting a bundle path is not a browser"
+    },
+    {
+      "id": "win-arg-bundle-marker-unc",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "\\\\srv\\share\\notepad.exe x.app\\contents\\macos\\chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "a UNC-rooted editor with a bundle-shaped argument"
+    },
+    {
+      "id": "win-arg-bundle-marker-named-match",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe chrome.app\\contents\\macos\\chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "even a correctly-NAMED bundle path is somebody else's argument on Windows, where no such executable exists"
+    },
+    {
+      "id": "arg-quoted-rooted-two-paths",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "\"/usr/bin/vim /home/u/chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "a quoted argv[0] holding TWO rooted paths is a mis-parse, not an image"
+    },
+    {
+      "id": "win-arg-quoted-rooted-two-paths",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\vim\\vim.exe C:\\x\\chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the same mis-parse in Windows spelling — the second drive-rooted sub-token gives it away"
+    },
+    {
+      "id": "posix-mac-bundle-helper-gpu-named",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/140/Helpers/Google Chrome Helper (GPU).app/Contents/MacOS/Google Chrome Helper (GPU) --type=gpu-process --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "helper": true,
+      "why": "the bundle-naming rule must still accept the parenthesised helper variants"
+    },
+    {
+      "id": "posix-mac-bundle-edge",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "the Edge bundle — same layout, must not be lost to the bundle-naming rule"
+    },
+    {
+      "id": "posix-quoted-mac-bundle",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "a QUOTED bundle path is settled by its quoting and must survive the sub-token guard"
+    },
+    {
+      "id": "residual-posix-named-bundle-arg",
+      "group": "known-limit-attributes-but-should-not",
+      "form": "posix",
+      "cmd": "/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "KNOWN IRREDUCIBLE LIMIT, pinned deliberately — this is NOT a shape we want to kill. A POSIX command line that hands another program a CORRECTLY-NAMED macOS bundle executable path is byte-for-byte identical to a real bundle invocation (`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`), so no rule over the string can separate them; only the filesystem could. It is pinned as `owned` so that BOTH implementations keep agreeing about it and neither can widen or narrow the limit unnoticed. If a future change makes this `not-owned` WITHOUT losing the real bundle cases (`posix-mac-bundle-*`), that is an improvement — change this case then, deliberately. Mitigation today: it still requires the caller to pass our exact `--user-data-dir=<profile>`, which no ordinary vim/git/tar invocation carries."
     }
   ]
 }

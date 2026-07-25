@@ -367,17 +367,22 @@ export class DaemonManager implements vscode.Disposable {
   // that unscoped substring match used to force-kill (with `/T`, i.e. the whole process tree)
   // any unrelated Node process whose argv happened to contain those three fragments.
 
-  /** Characters that may legally abut a path inside an argv string (separator or quoting). */
-  private static readonly ARGV_BOUNDARY = /[\s"'=]/;
   /**
-   * Characters that may legally PRECEDE a whole argv entry — whitespace or an opening quote, but
-   * NOT `=`. Criterion (a) matches a path that may legitimately sit after `=` (`--script=<path>`),
-   * so it keeps `ARGV_BOUNDARY`; criterion (b) matches a FLAG, which never legitimately follows
-   * `=`, so it uses this stricter set. That difference is what rejects `--foo=--user-data-dir=<p>`
-   * and `--user-data-dir=/other=--user-data-dir=<p>` (the latter is a browser pointed at a
-   * DIFFERENT profile — accepting it would have been a false kill).
+   * Characters that may abut an argv entry: whitespace, or quoting. Used on BOTH sides of every
+   * match. `=` is deliberately absent — it is legal INSIDE a path on every platform, so treating
+   * it as a boundary means `<needle>=2` matches `<needle>`. That cost a false kill on each side
+   * in turn: `--user-data-dir=<profile>=2` (a browser on a DIFFERENT directory) for criterion (b),
+   * and `…/dist/mcp/index.mjs=1 daemon start` (a DIFFERENT file) for criterion (a).
    */
-  private static readonly ARG_START_BOUNDARY = /[\s"']/;
+  private static readonly ARG_BOUNDARY = /[\s"']/;
+  /**
+   * The ONE asymmetry, and it is leading-side only: a PATH may legitimately follow `=`
+   * (`--script=<path>`), so criterion (a) — which matches a path — accepts `=` before its match.
+   * Criterion (b) matches a FLAG, which never legitimately follows `=`, so it uses
+   * `ARG_BOUNDARY` on both sides and thereby rejects `--foo=--user-data-dir=<p>` and
+   * `--user-data-dir=/other=--user-data-dir=<p>`. Nothing accepts `=` on the TRAILING side.
+   */
+  private static readonly PATH_LEAD_BOUNDARY = /[\s"'=]/;
   /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative extensionPath. */
   private static readonly ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
 
@@ -396,20 +401,26 @@ export class DaemonManager implements vscode.Disposable {
   }
 
   /**
-   * Does `haystack` contain `needle` as a whole argv token? The characters immediately before
-   * and after the match must be a boundary (start/end of string, whitespace, quote or `=`), so a
-   * longer neighbouring path (`…/index.mjs.bak`, `…/index.mjson`) can never satisfy it.
-   * Both arguments must already be in `_canon` form.
+   * Does `haystack` contain `needle` as a whole argv token?
    *
-   * `leadingBoundary` selects how strict the LEFT side is: `ARGV_BOUNDARY` (default, criterion a —
-   * a path may follow `=`) or `ARG_START_BOUNDARY` (criterion b — a flag may not). One
-   * implementation, one parameter: the two criteria share this matcher deliberately, because a
-   * second hand-rolled predicate is how they drifted apart in the first place.
+   * TRAILING side: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`.
+   * LEADING side: the same, unless the caller passes `PATH_LEAD_BOUNDARY` to also allow `=`
+   * (criterion (a) only; see that constant for why the two differ).
+   *
+   * Probed rather than asserted: `…/index.mjs.bak`, `…/index.mjson`, `…/index.mjs=1`,
+   * `<profile>-backup`, `<profile>.old`, `<profile>/Default` and `<profile>=2` are all misses,
+   * because `.`, `-`, `/`, `s` and `=` are none of them boundary characters. The claim this
+   * docblock used to make — "a longer neighbouring path can NEVER satisfy it" — was false for
+   * exactly one character, `=`, which was in the boundary set on both sides.
+   *
+   * Both arguments must already be in `_canon` form. One implementation, one parameter: the two
+   * criteria share this matcher deliberately, because a second hand-rolled predicate is how they
+   * drifted apart in the first place.
    */
   private static _containsPathToken(
     haystack: string,
     needle: string,
-    leadingBoundary: RegExp = DaemonManager.ARGV_BOUNDARY,
+    leadingBoundary: RegExp = DaemonManager.ARG_BOUNDARY,
   ): boolean {
     if (!needle) return false;
     for (let from = 0; ; ) {
@@ -419,7 +430,7 @@ export class DaemonManager implements vscode.Disposable {
       const afterIdx = i + needle.length;
       const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
       if ((before === '' || leadingBoundary.test(before))
-        && (after === '' || DaemonManager.ARGV_BOUNDARY.test(after))) return true;
+        && (after === '' || DaemonManager.ARG_BOUNDARY.test(after))) return true;
       from = i + 1;
     }
   }
@@ -544,8 +555,50 @@ export class DaemonManager implements vscode.Disposable {
    * program plus arguments: the macOS app-bundle layout. Every Chrome-family image whose real path
    * contains a space is a bundle executable — `…/Google Chrome.app/Contents/MacOS/Google Chrome`,
    * `…/Google Chrome Helper.app/…`, `…/Google Chrome for Testing.app/…`, Edge, Brave, Chromium.
+   *
+   * The marker ALONE proves nothing — `git add x.app/contents/macos/chrome` contains it too — so
+   * `_macBundleExec()` additionally enforces the bundle's own naming rule, and a Windows-spelled
+   * command line is refused the multi-token path entirely (Windows has no `.app` executables).
    */
   private static readonly MAC_BUNDLE_MARKER = '.app/contents/macos/';
+
+  /**
+   * Is this command line written in a WINDOWS path spelling? Decided from the RAW string, before
+   * `_canon` erases the distinction by folding `\` into `/`: a backslash anywhere, or a
+   * drive-rooted token. Used to refuse the macOS-bundle branch of `_imageName` on Windows, where
+   * `.app/Contents/MacOS/…` is not an executable layout and therefore proves nothing about
+   * argv[0]'s extent. Spelling, NOT host platform: the same command line must attribute the same
+   * way on every machine — that is what lets `packages/shared/test-fixtures/
+   * process-attribution-cases.json` assert both forms on both packages regardless of the runner's
+   * OS. (An escaped-space POSIX path, `/home/u/my\ apps/chrome`, reads as Windows-spelled here and
+   * simply fails to attribute — the safe direction.)
+   */
+  private static _isWindowsSpelling(raw: string, canonCmd: string): boolean {
+    return raw.includes('\\') || /(?:^|[\s"'])[a-z]:\//.test(canonCmd);
+  }
+
+  /**
+   * The executable name of a macOS app-bundle path, or `''` if the string is not one.
+   *
+   * A real bundle names its executable after the bundle: `Google Chrome.app/Contents/MacOS/Google
+   * Chrome`, `Google Chrome Helper.app/…/Google Chrome Helper (Renderer)`, `Google Chrome for
+   * Testing.app/…/Google Chrome for Testing`, `Brave Browser.app/…/Brave Browser`. So the segment
+   * before `.app` must equal the executable, or be its prefix followed by ` (` (the helper
+   * variants). That naming rule is what the marker alone was missing: it rejects
+   * `x.app/contents/macos/chrome`, `Foo.App/Contents/MacOS/Chrome` and every other
+   * "a browser-named file that happens to sit under some .app" spelling, on either platform.
+   *
+   * The LAST marker occurrence is used because helpers nest inside the outer browser bundle.
+   */
+  private static _macBundleExec(joined: string): string {
+    const at = joined.lastIndexOf(DaemonManager.MAC_BUNDLE_MARKER);
+    if (at < 0) return '';
+    const bundle = joined.slice(joined.lastIndexOf('/', at) + 1, at);
+    const exec = joined.slice(at + DaemonManager.MAC_BUNDLE_MARKER.length);
+    if (!bundle || !exec || exec.includes('/')) return '';
+    if (exec !== bundle && !exec.startsWith(`${bundle} (`)) return '';
+    return exec;
+  }
 
   /**
    * argv[0]'s basename, lower-cased and `.exe`-stripped, from a `_canon`-form command line — or
@@ -554,47 +607,60 @@ export class DaemonManager implements vscode.Disposable {
    * Process enumeration hands us a FLAT STRING, and an unquoted argv[0] may itself contain spaces,
    * so argv[0]'s extent has to be recovered. The rules, and the reason each one exists:
    *
-   *   1. A quoted leading token IS argv[0] — the launcher's own quoting settles the extent. One
-   *      guard: if that token contains whitespace it must be `ROOTED`, so a fabricated
-   *      `"vim /home/u/chrome" …` cannot present a browser basename. (Neither `ps` nor CIM emits
-   *      that shape; the guard costs nothing and removes the question.)
+   *   1. A quoted leading token IS argv[0] — the launcher's own quoting is its statement of the
+   *      extent, which is exactly why quoted Windows paths with spaces still work. Two guards
+   *      against a MIS-PARSE presenting somebody's argument as the image: a token containing
+   *      whitespace must be `ROOTED`, and none of its later sub-tokens may be `NEW_ARG_LIKE`.
+   *      Those reject `"vim /home/u/chrome" …` and `"C:\Program Files\vim\vim.exe C:\x\chrome" …`
+   *      while leaving `"C:\Program Files\Google\Chrome\Application\chrome.exe"` intact. What they
+   *      do NOT do is second-guess a quoted single path: if a command line claims argv[0] is
+   *      `"/usr/bin/vim x/chrome"`, the image really is a file named `chrome`, and only a process
+   *      naming ITSELF that way could produce it.
    *   2. Otherwise: take the text before the first flag-shaped token (`\s["']?-{1,2}\S`), skip a
    *      leading run of `WRAPPER_IMAGES`, and then
    *        - ONE token left  → that is argv[0] (`chrome.exe`, `/opt/chromium`, `./chrome`, `vim`);
-   *        - MORE than one   → argv[0] may span them ONLY when all three hold:
+   *        - MORE than one   → argv[0] may span them ONLY when all four hold:
    *            (a) the first token is `ROOTED`,
-   *            (b) no later token is `NEW_ARG_LIKE`, and
-   *            (c) the joined string contains `MAC_BUNDLE_MARKER`.
-   *          (c) is what makes this exhaustive rather than a list of patched examples: a bare
+   *            (b) no later token is `NEW_ARG_LIKE`,
+   *            (c) the command line is not Windows-spelled (`_isWindowsSpelling`), and
+   *            (d) the join is a macOS bundle path whose executable obeys the bundle's naming
+   *                rule (`_macBundleExec`).
+   *          (c)+(d) are what make this exhaustive rather than a list of patched examples. A bare
    *          relative argument (`vim x/chrome`, `git add sub/msedge`) is SYNTACTICALLY IDENTICAL
    *          to a legitimate space-containing path (`/applications/google chrome.app/…`), so no
-   *          rule over tokens alone can separate them. Only the bundle layout can, and every real
-   *          space-containing Chrome-family image has it.
+   *          rule over tokens alone can separate them; only the bundle LAYOUT can, and the layout
+   *          is meaningless on Windows and meaningless when the executable is not named after its
+   *          bundle. The marker alone — which is all this used to require — accepted
+   *          `/usr/bin/git add x.app/contents/macos/chrome`,
+   *          `/usr/bin/tar cf a x.app/contents/macos/chrome`,
+   *          `notepad.exe x.app\contents\macos\chrome.exe`, `7z.exe e Foo.App\Contents\MacOS\Chrome`
+   *          and `\\srv\share\notepad.exe x.app\contents\macos\chrome`.
    *
    * CONSEQUENCE, stated because it is a real narrowing: an UNQUOTED Windows image path containing
-   * spaces (`C:\Program Files\Google\Chrome\Application\chrome.exe --user-data-dir=…`) no longer
-   * attributes — it is reported, not killed. Keeping it would mean accepting
+   * spaces (`C:\Program Files\Google\Chrome\Application\chrome.exe --user-data-dir=…`) does not
+   * attribute — it is reported, not killed. Keeping it would mean accepting
    * `C:\Windows\System32\notepad.exe x\chrome.exe --user-data-dir=…` as a browser, since the two
-   * are the same shape. Every launcher that matters (Node's `child_process`, shell shortcuts, the
-   * Start menu) quotes an argv[0] containing spaces, so the quoted branch still covers Windows.
+   * are the same shape. Verified against live `Win32_Process` during review: every Chrome-family
+   * entry, root and `--type=` children alike, emits a QUOTED argv[0], so rule 1 covers Windows.
    *
-   * IRREDUCIBLE RESIDUAL, stated rather than papered over: `/usr/bin/vim x.app/contents/macos/
-   * google chrome --user-data-dir=<our profile>` would attribute. It is the one shape that is
-   * byte-for-byte indistinguishable from a real macOS bundle invocation, and it still requires the
-   * caller to pass our exact profile flag. Everything else in the enumeration below resolves to
-   * `''`, i.e. reported, never killed: bare relative (`vim x/chrome`, `node tools/chrome`,
-   * `git add sub/msedge`), `./`- and `../`-relative (`vim ./chrome`), rooted arguments
-   * (`vim /home/u/chrome`, `/usr/bin/vim /home/u/chrome`), Windows `\`/`/` mixes
-   * (`NOTEPAD.EXE x\chrome`, `c:/windows/system32/notepad.exe x/chrome.exe`), drive-relative
-   * (`c:tools/vim x/chrome`), UNC arguments, multi-token argv without a bundle marker
-   * (`/usr/bin/vim x/google chrome`), and ambiguous wrapper remainders (`env DISPLAY=:0 chrome`).
+   * RESIDUAL, stated rather than papered over — and it is now POSIX-only and narrow: a
+   * POSIX-spelled command line that hands another program a CORRECTLY-NAMED bundle executable
+   * path, e.g. `/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome
+   * --user-data-dir=<our profile>`. That string is byte-for-byte a real macOS browser invocation;
+   * nothing short of asking the filesystem can separate them, and it still requires the caller to
+   * pass our exact profile flag. Everything else enumerated in the `IMAGE CONJUNCT` tests and in
+   * `packages/shared/test-fixtures/process-attribution-cases.json` resolves to `''`.
    */
-  private static _imageName(cmd: string): string {
+  private static _imageName(cmd: string, winSpelling: boolean): string {
     const quote = cmd[0];
     if (quote === '"' || quote === '\'') {
       const end = cmd.indexOf(quote, 1);
-      const token = end > 0 ? cmd.slice(1, end) : cmd.slice(1);
-      if (/\s/.test(token.trim()) && !DaemonManager.ROOTED.test(token.trim())) return '';
+      const token = (end > 0 ? cmd.slice(1, end) : cmd.slice(1)).trim();
+      if (/\s/.test(token)) {
+        if (!DaemonManager.ROOTED.test(token)) return '';
+        const sub = token.split(/\s+/);
+        if (sub.slice(1).some(t => DaemonManager.NEW_ARG_LIKE.test(t))) return '';
+      }
       return DaemonManager._basename(token);
     }
     const flag = /\s["']?-{1,2}\S/.exec(cmd);
@@ -608,9 +674,8 @@ export class DaemonManager implements vscode.Disposable {
     if (tokens.length === 1) return DaemonManager._basename(tokens[0]);
     if (!DaemonManager.ROOTED.test(tokens[0])) return '';
     if (tokens.slice(1).some(t => DaemonManager.NEW_ARG_LIKE.test(t))) return '';
-    const joined = tokens.join(' ');
-    if (!joined.includes(DaemonManager.MAC_BUNDLE_MARKER)) return '';
-    return DaemonManager._basename(joined);
+    if (winSpelling) return '';
+    return DaemonManager._basename(DaemonManager._macBundleExec(tokens.join(' ')));
   }
 
   /** Basename of a `_canon`-form path: quotes trimmed, text after the last `/`, `.exe` dropped. */
@@ -621,8 +686,8 @@ export class DaemonManager implements vscode.Disposable {
   }
 
   /** Is this command line's process image a Chrome-family browser we could have launched? */
-  private static _isChromeFamilyImage(cmd: string): boolean {
-    const image = DaemonManager._imageName(cmd);
+  private static _isChromeFamilyImage(cmd: string, winSpelling: boolean): boolean {
+    const image = DaemonManager._imageName(cmd, winSpelling);
     return DaemonManager.CHROME_FAMILY_IMAGES.has(image)
       || DaemonManager.CHROME_FAMILY_HELPER.test(image);
   }
@@ -645,7 +710,7 @@ export class DaemonManager implements vscode.Disposable {
    *   - a NESTED spelling — `--foo=--user-data-dir=<dir>`, or
    *     `--user-data-dir=/other=--user-data-dir=<dir>` (a browser pointed at a DIFFERENT profile,
    *     which it would have been a false kill to accept) → the flag must begin an argv entry, and
-   *     `ARG_START_BOUNDARY` excludes `=` from the characters that may precede it → MISS.
+   *     `ARG_BOUNDARY` excludes `=` from the characters that may abut an argv entry → MISS.
    * The three needle spellings cover the quotings argv actually arrives in: bare,
    * `"--user-data-dir=C:/Users/a b/…"` (Node quotes the WHOLE argument when it contains a space —
    * the opening quote is itself a boundary), and `--user-data-dir="…"` / `'…'`. The bare form
@@ -658,11 +723,10 @@ export class DaemonManager implements vscode.Disposable {
   private static _hasUserDataDirArg(cmd: string, profileDir: string): boolean {
     if (!profileDir) return false;
     const flag = DaemonManager.USER_DATA_DIR_FLAG;
-    const start = DaemonManager.ARG_START_BOUNDARY;
     for (const dir of [profileDir, `${profileDir}/`]) {
-      if (DaemonManager._containsPathToken(cmd, `${flag}${dir}`, start)) return true;
-      if (DaemonManager._containsPathToken(cmd, `${flag}"${dir}"`, start)) return true;
-      if (DaemonManager._containsPathToken(cmd, `${flag}'${dir}'`, start)) return true;
+      if (DaemonManager._containsPathToken(cmd, `${flag}${dir}`)) return true;
+      if (DaemonManager._containsPathToken(cmd, `${flag}"${dir}"`)) return true;
+      if (DaemonManager._containsPathToken(cmd, `${flag}'${dir}'`)) return true;
     }
     return false;
   }
@@ -694,18 +758,18 @@ export class DaemonManager implements vscode.Disposable {
    *       1. the process image is one of the Chrome-family binaries this project can launch
    *          (`CHROME_FAMILY_IMAGES` / `CHROME_FAMILY_HELPER`, derived from patchright's channel +
    *          download registries and `browser-detect.ts`). "Image" means argv[0]'s basename as
-   *          recovered by `_imageName()` from a flat command-line string: a quoted argv[0]
-   *          (rooted, if it contains a space), a single-token argv[0], or — only with the macOS
-   *          bundle marker to prove the extent — a space-containing one; with a leading run of
-   *          exec wrappers (`env`, `xvfb-run`, …) skipped. Anything `_imageName()` cannot pin down
-   *          yields no image and cannot satisfy this conjunct. That covers every browser-named
-   *          FILE-as-argument spelling enumerated in `_imageName()`'s docblock and in the
-   *          `image conjunct` tests, with ONE stated residual (a bare relative path that itself
-   *          carries the macOS bundle marker) which is documented there rather than implied away,
-   *          AND
+   *          recovered by `_imageName()` from a flat command-line string: a quoted argv[0], a
+   *          single-token argv[0], or — only on a POSIX-spelled command line, and only when the
+   *          join is a correctly-named macOS bundle executable — a space-containing one; with a
+   *          leading run of exec wrappers (`env`, `xvfb-run`, …) skipped. Anything `_imageName()`
+   *          cannot pin down yields no image and cannot satisfy this conjunct. The spellings this
+   *          rejects, and the one POSIX-only residual it does not, are enumerated in
+   *          `_imageName()`'s docblock, in the `IMAGE CONJUNCT` tests, and in the cross-package
+   *          vector `packages/shared/test-fixtures/process-attribution-cases.json`, AND
    *       2. argv carries `--user-data-dir=<profileDir>` for the EXACT resolved
-   *          `<configDir>/.chrome-profile` (`_profileDir()`), matched as a whole argv token with
-   *          the same canonicalization and boundary rules criterion (a) uses.
+   *          `<configDir>/.chrome-profile` (`_profileDir()`), matched as a whole argv token —
+   *          same canonicalization as criterion (a), and `ARG_BOUNDARY` on BOTH sides, so
+   *          `<profile>=2` (a different directory) is a miss just as `<profile>-backup` is.
    *
    *     CORRECTION — the docblock this replaces asserted criterion (b) was "already correctly
    *     scoped" and "UNCHANGED from the original". That claim was FALSE, and it is why two review
@@ -725,9 +789,10 @@ export class DaemonManager implements vscode.Disposable {
     const cmd = DaemonManager._canon(commandLine);
     const entry = this._bundledEntryPath();
     if (entry
-      && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))
+      && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry), DaemonManager.PATH_LEAD_BOUNDARY)
       && DaemonManager._hasDaemonStartShape(commandLine)) return true;
-    return this._claimsOurProfile(cmd) && DaemonManager._isChromeFamilyImage(cmd);
+    return this._claimsOurProfile(cmd)
+      && DaemonManager._isChromeFamilyImage(cmd, DaemonManager._isWindowsSpelling(commandLine, cmd));
   }
 
   /**
