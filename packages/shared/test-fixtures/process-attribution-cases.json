@@ -5,21 +5,26 @@
     "expect=\"owned\"     → the command line IS a Chrome-family browser process running EXACTLY our profile, and may be force-killed.",
     "expect=\"not-owned\" → it may NOT be killed, whatever else it is. Both sides must agree.",
     "helper=true        → additionally a Chromium helper (--type=...). ATTRIBUTION is still \"owned\" on both sides; only the SELECTION policy differs, and that difference is deliberate: packages/mcp-server kills process TREES, so a helper is skipped because its root browser's tree-kill already takes it; the extension kills pids individually and therefore keeps helpers. This is the ONE documented semantic difference between the two call sites.",
-    "form=\"posix\"|\"win32\" → which path spelling the command line is written in; it selects which profile/config path the placeholders expand to. It is NOT a platform gate: both suites run both forms, because canonicalisation (\\ → /, lower-case) is what makes the predicate platform-independent."
+    "form=\"posix\"|\"win32\" → which path spelling the command line is written in; it selects which profile/config path the placeholders expand to. It is NOT a platform gate: both suites run both forms, because canonicalisation (\\ → /, lower-case) is what makes the predicate platform-independent.",
+    "The `cases` array is the ATTRIBUTION vector — both implementations must return the same verdict for every entry. The other three arrays exist because two of the things worth pinning are not shared: `argvSplits` pins the argv PARSER both sides now depend on, `daemonEntryCases` pins the extension-only bundled-entry criterion (a) (the server has no such criterion, so it must answer not-owned to all of them), and `neighbourEnumeration` is a GENERATOR spec both suites expand into the same cross-product.",
+    "AGREEMENT BETWEEN THE TWO IMPLEMENTATIONS PROVES MIRROR PARITY, NOT CORRECTNESS. They are line-for-line ports, so a defect in one is a defect in the other and this vector will faithfully record both agreeing on the wrong answer — that is exactly what happened with the nested-quoted-value defect (`nested-value-*`), which both sides answered \"owned\" for five rounds. Correctness lives in the `why` of each case being argued on its own merits. Agreement is a regression guard."
   ],
   "placeholders": {
     "{PROFILE}": "the owned browser profile directory, in this case's path spelling",
     "{PROFILE_URL}": "the same directory, always forward-slashed (for file:/// URLs)",
-    "{CFG}": "the config directory — the profile's PARENT — used for near-miss cases"
+    "{CFG}": "the config directory — the profile's PARENT — used for near-miss cases",
+    "{ENTRY}": "the bundled daemon entry `<ext>/dist/mcp/index.mjs`, in this case's path spelling. Only meaningful in `daemonEntryCases`."
   },
   "paths": {
     "posix": {
       "cfg": "/home/u/.airtable-user-mcp",
-      "profile": "/home/u/.airtable-user-mcp/.chrome-profile"
+      "profile": "/home/u/.airtable-user-mcp/.chrome-profile",
+      "ext": "/home/u/.vscode/extensions/nskha.airtable-formula-2.1.32"
     },
     "win32": {
       "cfg": "C:\\Users\\admin\\.airtable-user-mcp",
-      "profile": "C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile"
+      "profile": "C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile",
+      "ext": "C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.32"
     }
   },
   "cases": [
@@ -1202,6 +1207,523 @@
       "cmd": "\"C:\\x\\vim x\\chrome\" --user-data-dir={PROFILE}",
       "expect": "owned",
       "why": "KNOWN LIMIT, pinned deliberately — this is NOT a shape we want to kill. A Windows-spelled QUOTED argv[0] holding two relative paths with NO executable extension gives `WIN_EXEC_EXT` nothing to bite on, and the alternative — refusing every space-containing quoted Windows token — would drop `\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\"`, the one shape Windows browsers actually emit (verified against live Win32_Process). Pinned so both implementations keep agreeing and the limit cannot widen unnoticed. It still requires the caller to pass our exact --user-data-dir=<profile>, and a quoted argv[0] that is neither an executable path nor a real program is a launcher-fabricated string."
+    },
+    {
+      "id": "nested-value-win-user-agent",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --user-agent=\"--user-data-dir={PROFILE}\"",
+      "expect": "not-owned",
+      "why": "REPRODUCED FALSE POSITIVE. `--user-agent` takes a UA STRING; Chrome is not using our profile. The old matcher treated the value's own quotes as argv boundaries, answered OWNED, and the win32 path would have `taskkill /T /F`ed the user's browser. Quote-aware parsing makes this ONE entry whose text is `--user-agent=--user-data-dir=<P>`."
+    },
+    {
+      "id": "nested-value-win-proxy-pac-url",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --proxy-pac-url=\"--user-data-dir={PROFILE}\"",
+      "expect": "not-owned",
+      "why": "REPRODUCED FALSE POSITIVE — same shape, a PAC URL."
+    },
+    {
+      "id": "nested-value-win-app",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --app=\"--user-data-dir={PROFILE}\"",
+      "expect": "not-owned",
+      "why": "REPRODUCED FALSE POSITIVE — same shape, an app URL."
+    },
+    {
+      "id": "nested-value-posix-user-agent",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-agent=\"--user-data-dir={PROFILE}\"",
+      "expect": "not-owned",
+      "why": "REPRODUCED FALSE POSITIVE — the POSIX spelling of the first one."
+    },
+    {
+      "id": "nested-value-posix-user-agent-squoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-agent='--user-data-dir={PROFILE}'",
+      "expect": "not-owned",
+      "why": "the neighbour of the reported spelling: single quotes. Every previous round fixed the reported quote character and missed the other."
+    },
+    {
+      "id": "nested-value-posix-proxy-pac-url-squoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --proxy-pac-url='--user-data-dir={PROFILE}'",
+      "expect": "not-owned",
+      "why": "single-quoted PAC URL."
+    },
+    {
+      "id": "nested-value-posix-app-squoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --app='--user-data-dir={PROFILE}'",
+      "expect": "not-owned",
+      "why": "single-quoted app URL."
+    },
+    {
+      "id": "nested-value-win-user-agent-squoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --user-agent='--user-data-dir={PROFILE}'",
+      "expect": "not-owned",
+      "why": "single-quoted UA string, Windows spelling."
+    },
+    {
+      "id": "nested-value-win-proxy-pac-url-squoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --proxy-pac-url='--user-data-dir={PROFILE}'",
+      "expect": "not-owned",
+      "why": "single-quoted PAC URL, Windows spelling."
+    },
+    {
+      "id": "nested-value-win-app-squoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --app='--user-data-dir={PROFILE}'",
+      "expect": "not-owned",
+      "why": "single-quoted app URL, Windows spelling."
+    },
+    {
+      "id": "nested-value-posix-double",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --app=\"--proxy-pac-url='--user-data-dir={PROFILE}'\"",
+      "expect": "not-owned",
+      "why": "doubly nested: a single-quoted value inside a double-quoted value. Still one argv entry."
+    },
+    {
+      "id": "nested-value-win-double",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --app='--proxy-pac-url=\"--user-data-dir={PROFILE}\"'",
+      "expect": "not-owned",
+      "why": "doubly nested the other way round: a double-quoted value inside a single-quoted one."
+    },
+    {
+      "id": "nested-value-posix-unquoted",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-agent=--user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the nesting with no quotes at all — one argv entry, so the flag is a VALUE, not an argument."
+    },
+    {
+      "id": "nested-value-win-value-with-spaces",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --user-agent=\"Mozilla/5.0 --user-data-dir={PROFILE} Safari\"",
+      "expect": "not-owned",
+      "why": "THE CASE THAT RULES OUT THE CHEAP FIX. Our flag sits WHITESPACE-BOUNDED inside a quoted value, so \"boundaries are whitespace only\" — the obvious way to drop quotes from the boundary set — would still answer OWNED. Only a real parse rejects it."
+    },
+    {
+      "id": "nested-value-posix-value-with-spaces",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --app=\"open --user-data-dir={PROFILE} now\"",
+      "expect": "not-owned",
+      "why": "the POSIX twin of the whitespace-bounded-inside-a-value case."
+    },
+    {
+      "id": "nested-value-win-escaped-quotes",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --app=\"--user-data-dir=\\\"{PROFILE}\\\"\"",
+      "expect": "not-owned",
+      "why": "escaped quotes inside a nested value. `_canon` turns `\\\"` into `/\"`, which can only ever SPLIT an entry that would otherwise be whole — the fail-safe direction."
+    },
+    {
+      "id": "nested-value-posix-unbalanced",
+      "group": "not-owned-nested-quoted-value",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-agent=\"--user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "an UNBALANCED quote: the value runs to end of string, exactly as CommandLineToArgvW would read it, and is still one entry."
+    },
+    {
+      "id": "nested-value-win-empty-plus-nested",
+      "group": "not-owned-nested-quoted-value",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=\"\" --user-agent=\"--user-data-dir={PROFILE}\"",
+      "expect": "not-owned",
+      "why": "a REAL but empty `--user-data-dir` next to a nested one. The empty flag names no directory (and the predicate refuses a non-absolute dir outright), and the nested one is a value."
+    },
+    {
+      "id": "empty-value-user-data-dir",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir=",
+      "expect": "not-owned",
+      "why": "the empty-value form names no directory at all."
+    },
+    {
+      "id": "win-empty-value-user-data-dir-quoted",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=\"\"",
+      "expect": "not-owned",
+      "why": "the quoted empty-value form, which unquotes to the same nothing."
+    },
+    {
+      "id": "space-separated-user-data-dir",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir {PROFILE}",
+      "expect": "not-owned",
+      "why": "Chromium's `base::CommandLine` only understands `--switch=value`; `--user-data-dir <path>` is an empty-valued switch plus a positional URL and does NOT claim the profile. Two separate argv entries, neither of which is the flag."
+    },
+    {
+      "id": "genuine-bare-flag-posix",
+      "group": "owned-genuine-profile-flag",
+      "form": "posix",
+      "cmd": "chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "THE genuine squatter: a bare Chrome-family image with our exact profile as a bare argv entry. If this ever stops being owned, the eviction path is dead and the profile stays wedged."
+    },
+    {
+      "id": "genuine-value-dquoted-win",
+      "group": "owned-genuine-profile-flag",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=\"{PROFILE}\"",
+      "expect": "owned",
+      "why": "the value-quoted form is legitimate — a launcher quoting the VALUE. The parser removes the quoting, so it is the same argv entry as the bare form."
+    },
+    {
+      "id": "genuine-value-squoted-win",
+      "group": "owned-genuine-profile-flag",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir='{PROFILE}'",
+      "expect": "owned",
+      "why": "the single-quoted value form, kept for the same reason."
+    },
+    {
+      "id": "genuine-whole-arg-dquoted-posix",
+      "group": "owned-genuine-profile-flag",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome \"--user-data-dir={PROFILE}\"",
+      "expect": "owned",
+      "why": "the whole argument quoted — what Node emits when the path contains a space."
+    },
+    {
+      "id": "genuine-whole-arg-squoted-posix",
+      "group": "owned-genuine-profile-flag",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome '--user-data-dir={PROFILE}'",
+      "expect": "owned",
+      "why": "the single-quoted whole-argument form."
+    },
+    {
+      "id": "genuine-unbalanced-quote-win",
+      "group": "owned-genuine-profile-flag",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=\"{PROFILE}",
+      "expect": "owned",
+      "why": "DELIBERATE, and a widening over the character-boundary matcher (which answered not-owned). An unterminated quote runs to end of string under `CommandLineToArgvW`, so this argv really is `--user-data-dir=<P>` and this really is a browser on our profile. Attributing it the way the OS parses it is the defensible reading; it still requires a Chrome-family image AND our exact absolute path."
     }
-  ]
+  ],
+  "argvSplits": {
+    "purpose": "Pins the quote-aware argv splitter itself. `cmd` is already in `_canon`/`canon` form (lower-cased, forward slashes) so no canonicalisation is needed before splitting. `singleQuotes` selects which of the two readings to apply — see the `argvParses`/`_argvParses` docblock for why both exist. `argv` is the expected entry TEXT list (quoting removed).",
+    "cases": [
+      {
+        "id": "split-plain",
+        "cmd": "chrome --user-data-dir=/p",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/p"
+        ]
+      },
+      {
+        "id": "split-value-dquoted",
+        "cmd": "chrome --user-data-dir=\"/p\"",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/p"
+        ]
+      },
+      {
+        "id": "split-whole-arg-dquoted",
+        "cmd": "chrome \"--user-data-dir=/p\"",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/p"
+        ]
+      },
+      {
+        "id": "split-nested-value-dquoted",
+        "cmd": "chrome --user-agent=\"--user-data-dir=/p\"",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-agent=--user-data-dir=/p"
+        ],
+        "why": "DEFECT A IN ONE LINE: a nested value is ONE entry, and that entry is not the profile flag."
+      },
+      {
+        "id": "split-single-argument-daemon-start",
+        "cmd": "code.exe \"/e/dist/mcp/index.mjs\" \"daemon start\"",
+        "singleQuotes": true,
+        "argv": [
+          "code.exe",
+          "/e/dist/mcp/index.mjs",
+          "daemon start"
+        ],
+        "why": "DEFECT B IN ONE LINE: `daemon start` is ONE entry. The scanner this replaces split on whitespace first and saw two."
+      },
+      {
+        "id": "split-image-with-spaces",
+        "cmd": "\"c:/program files/google/chrome/application/chrome.exe\" --user-data-dir=/p",
+        "singleQuotes": true,
+        "argv": [
+          "c:/program files/google/chrome/application/chrome.exe",
+          "--user-data-dir=/p"
+        ]
+      },
+      {
+        "id": "split-sq-as-quote",
+        "cmd": "chrome --user-data-dir='/p'",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/p"
+        ]
+      },
+      {
+        "id": "split-sq-as-literal",
+        "cmd": "chrome --user-data-dir='/p'",
+        "singleQuotes": false,
+        "argv": [
+          "chrome",
+          "--user-data-dir='/p'"
+        ]
+      },
+      {
+        "id": "split-apostrophe-in-path-literal",
+        "cmd": "chrome --user-data-dir=/home/o'brien/.airtable-user-mcp/.chrome-profile",
+        "singleQuotes": false,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/home/o'brien/.airtable-user-mcp/.chrome-profile"
+        ],
+        "why": "why the `singleQuotes:false` reading has to exist: real argv never quotes with `'`, and an account named O'Brien puts one inside our own profile path."
+      },
+      {
+        "id": "split-apostrophe-in-path-as-quote",
+        "cmd": "chrome --user-data-dir=/home/o'brien/p",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/home/obrien/p"
+        ],
+        "why": "the same string under the other reading — which is exactly why one reading alone is not enough."
+      },
+      {
+        "id": "split-unterminated-quote",
+        "cmd": "chrome --user-data-dir=\"/p",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/p"
+        ],
+        "why": "an unterminated quote runs to end of string, matching CommandLineToArgvW."
+      },
+      {
+        "id": "split-empty-quoted-argument",
+        "cmd": "chrome \"\" --user-data-dir=/p",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "",
+          "--user-data-dir=/p"
+        ],
+        "why": "an empty quoted argument is a real argv entry and must not vanish (it would shift every index after it)."
+      },
+      {
+        "id": "split-whitespace-runs",
+        "cmd": "chrome \t --a\t\t--b\n--c",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--a",
+          "--b",
+          "--c"
+        ]
+      },
+      {
+        "id": "split-quote-inside-token",
+        "cmd": "chrome --app=a\"b c\"d",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--app=ab cd"
+        ],
+        "why": "quoting is per-SECTION, not per-token: the quotes bound a region inside one entry."
+      },
+      {
+        "id": "split-leading-whitespace",
+        "cmd": "  chrome --user-data-dir=/p",
+        "singleQuotes": true,
+        "argv": [
+          "chrome",
+          "--user-data-dir=/p"
+        ]
+      },
+      {
+        "id": "split-empty",
+        "cmd": "",
+        "singleQuotes": true,
+        "argv": []
+      },
+      {
+        "id": "split-only-whitespace",
+        "cmd": "   \t ",
+        "singleQuotes": true,
+        "argv": []
+      }
+    ]
+  },
+  "daemonEntryCases": {
+    "purpose": "The EXTENSION-ONLY half of ownership: `<extensionPath>/dist/mcp/index.mjs` as a whole argv entry IMMEDIATELY FOLLOWED by the separate entries `daemon` and `start` — the shape `_spawnDetached()` and `daemon/launcher.js` emit. `packages/extension` asserts `expect` against `DaemonManager._isOwnedCommandLine` with `extensionPath = paths[form].ext`. `packages/mcp-server` has NO such criterion, so it asserts that `isOwnedBrowserCommandLine` answers not-owned to EVERY one of these — which is what pins the deliberate site difference instead of leaving it to a comment.",
+    "cases": [
+      {
+        "id": "entry-quoted-daemon-start-one-argument",
+        "form": "win32",
+        "cmd": "code.exe \"{ENTRY}\" \"daemon start\"",
+        "expect": "not-owned",
+        "why": "REPRODUCED FALSE POSITIVE. The scanner this replaces did `.split(/\\s+/)` and stripped quotes AFTERWARDS, so this editor invocation yielded the tokens `daemon` and `start` and shape-matched: the user's editor and its whole process tree force-killed, taking unsaved work and the extension host running the sweep. `daemon start` is ONE argv entry and is not the entry `daemon`."
+      },
+      {
+        "id": "entry-squoted-daemon-start-one-argument",
+        "form": "posix",
+        "cmd": "/usr/bin/code \"{ENTRY}\" 'daemon start'",
+        "expect": "not-owned",
+        "why": "the single-quoted twin of the reproduced case — the neighbour every previous round missed."
+      },
+      {
+        "id": "entry-dquoted-daemon-start-one-argument-posix",
+        "form": "posix",
+        "cmd": "/usr/bin/code \"{ENTRY}\" \"daemon start\"",
+        "expect": "not-owned",
+        "why": "the POSIX spelling of the reproduced case."
+      },
+      {
+        "id": "entry-real-spawn-posix",
+        "form": "posix",
+        "cmd": "node {ENTRY} daemon start",
+        "expect": "owned",
+        "why": "THE REAL EMITTED SHAPE — `spawn(process.execPath, [serverPath, 'daemon', 'start'])`. Three separate argv entries. If this stops being owned the sweep stops reaping our own orphan daemons."
+      },
+      {
+        "id": "entry-real-spawn-win-quoted",
+        "form": "win32",
+        "cmd": "\"C:\\Program Files\\Microsoft VS Code\\Code.exe\" \"{ENTRY}\" daemon start",
+        "expect": "owned",
+        "why": "the real emitted shape as Windows writes it — argv[0] and the entry path quoted because they contain spaces."
+      },
+      {
+        "id": "entry-real-spawn-with-port",
+        "form": "posix",
+        "cmd": "node {ENTRY} daemon start --port 8723",
+        "expect": "owned",
+        "why": "the `--port` variant `_spawnDetached()` emits when `mcp.daemonPort` is set."
+      },
+      {
+        "id": "entry-separately-quoted-subcommands",
+        "form": "win32",
+        "cmd": "code.exe \"{ENTRY}\" \"daemon\" \"start\"",
+        "expect": "owned",
+        "why": "quoting each subcommand SEPARATELY still yields three argv entries — which is what the criterion is about. Contrast `\"daemon start\"`, one entry, above."
+      },
+      {
+        "id": "entry-non-adjacent",
+        "form": "posix",
+        "cmd": "node {ENTRY} --inspect daemon start",
+        "expect": "not-owned",
+        "why": "adjacency is required because adjacency is what we emit. Nothing this project spawns puts a flag between the entry path and `daemon`."
+      },
+      {
+        "id": "entry-reversed-subcommands",
+        "form": "posix",
+        "cmd": "node {ENTRY} start daemon",
+        "expect": "not-owned",
+        "why": "order matters."
+      },
+      {
+        "id": "entry-substring-subcommands",
+        "form": "posix",
+        "cmd": "node {ENTRY} daemonize restart",
+        "expect": "not-owned",
+        "why": "`daemonize`/`restart` are not `daemon`/`start`; whole entries only."
+      },
+      {
+        "id": "entry-as-flag-value",
+        "form": "posix",
+        "cmd": "rsync -a --exclude={ENTRY} /home/u/daemon/ /mnt/start",
+        "expect": "not-owned",
+        "why": "our entry as a FLAG VALUE — one entry, `--exclude=<path>`, which is not the entry `<path>`."
+      },
+      {
+        "id": "entry-opened-in-editor",
+        "form": "win32",
+        "cmd": "code.exe \"{ENTRY}\"",
+        "expect": "not-owned",
+        "why": "the file merely MENTIONED in another process's argv, with no subcommand shape at all."
+      },
+      {
+        "id": "entry-inside-quoted-flag-value",
+        "form": "posix",
+        "cmd": "node --require=\"{ENTRY} daemon start\" ./x.js",
+        "expect": "not-owned",
+        "why": "the whole `<entry> daemon start` string as a single quoted VALUE of somebody else's flag — the criterion-(a) analogue of defect A."
+      },
+      {
+        "id": "entry-other-install",
+        "form": "win32",
+        "cmd": "node C:\\other\\install\\dist\\mcp\\index.mjs daemon start",
+        "expect": "not-owned",
+        "why": "a DIFFERENT install's daemon: right shape, wrong path. Not ours to kill."
+      }
+    ]
+  },
+  "neighbourEnumeration": {
+    "purpose": "A committed, deterministic generator both suites expand into the same cross-product and assert independently. It exists because this predicate has produced eight holes across five rounds and every round fixed the REPORTED spelling and missed its neighbour: enumerating the space mechanically is the only way to stop choosing which neighbours to think of. Every `valueFlags` entry is a real Chrome switch that takes a caller-supplied VALUE, so every one of them can carry our profile flag as text. Expansion is specified in `expansion` below.",
+    "expansion": [
+      "NOT-OWNED: `<image> <flag>=<wrap(style, \"--user-data-dir=<PROFILE>\")>` for every form x valueFlags x quoteStyles.",
+      "OWNED: `<image> --user-data-dir=<wrap(style, \"<PROFILE>\")>` and `<image> <wrap(style, \"--user-data-dir=<PROFILE>\")>` for every form x quoteStyles.",
+      "wrap(\"bare\", v) = v ; wrap(\"double\", v) = \"\\\"\" + v + \"\\\"\" ; wrap(\"single\", v) = \"'\" + v + \"'\"."
+    ],
+    "images": {
+      "posix": "/opt/google/chrome/chrome",
+      "win32": "chrome.exe"
+    },
+    "quoteStyles": [
+      "bare",
+      "double",
+      "single"
+    ],
+    "valueFlags": [
+      "--user-agent",
+      "--proxy-pac-url",
+      "--app",
+      "--load-extension",
+      "--host-resolver-rules",
+      "--disk-cache-dir",
+      "--proxy-server",
+      "--lang",
+      "--enable-features",
+      "--profile-directory",
+      "--remote-debugging-address",
+      "--homepage",
+      "--auth-server-allowlist",
+      "--log-file",
+      "--crash-dumps-dir",
+      "--unsafely-treat-insecure-origin-as-secure"
+    ]
+  }
 }

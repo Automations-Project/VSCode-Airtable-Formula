@@ -10,6 +10,7 @@ import {
   evictProfileSquatters,
   killProfileBrowserTree,
   isOwnedBrowserCommandLine,
+  splitArgv,
 } from "../src/process-tree.js";
 
 function spyExec() {
@@ -657,11 +658,14 @@ const FIXTURE = JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
 /** Expand a fixture case's placeholders into its form's concrete paths. */
 function expandCase(testCase) {
   const paths = FIXTURE.paths[testCase.form];
+  const sep = testCase.form === "win32" ? "\\" : "/";
+  const entry = [paths.ext, "dist", "mcp", "index.mjs"].join(sep);
   const cmd = testCase.cmd
     .split("{PROFILE_URL}").join(paths.profile.replace(/\\/g, "/"))
     .split("{PROFILE}").join(paths.profile)
+    .split("{ENTRY}").join(entry)
     .split("{CFG}").join(paths.cfg);
-  return { cmd, profile: paths.profile, cfg: paths.cfg };
+  return { cmd, profile: paths.profile, cfg: paths.cfg, entry };
 }
 
 describe("shared attribution vector — isOwnedBrowserCommandLine", () => {
@@ -673,6 +677,7 @@ describe("shared attribution vector — isOwnedBrowserCommandLine", () => {
       ids.add(c.id);
       assert.ok(["owned", "not-owned"].includes(c.expect), `bad expect on ${c.id}`);
       assert.ok(FIXTURE.paths[c.form], `unknown form on ${c.id}`);
+      assert.ok(FIXTURE.paths[c.form].ext, `form ${c.form} must carry an install root for {ENTRY}`);
       // Guards the ONE thing a shared vector cannot itself catch: a suite that expands the
       // placeholders differently (or not at all) would silently assert on the wrong strings.
       const { cmd } = expandCase(c);
@@ -731,6 +736,144 @@ describe("shared attribution vector — isOwnedBrowserCommandLine", () => {
       const { pids } = await findPosix({ 21000: cmd }, { profile });
       assert.deepEqual(pids, [], `${c.id} must NOT be selected — it dies with its root's tree`);
     }
+  });
+});
+
+// ─── THE ARGV PARSER ──────────────────────────────────────────────────────────
+//
+// `splitArgv` is the primitive the whole predicate now rests on, so it is pinned directly rather
+// than only through its consumers. Same committed vector on both sides.
+
+describe("shared argv-split vector — splitArgv", () => {
+  it("the vector is well-formed", () => {
+    assert.ok(Array.isArray(FIXTURE.argvSplits?.cases) && FIXTURE.argvSplits.cases.length >= 15);
+    const ids = new Set();
+    for (const c of FIXTURE.argvSplits.cases) {
+      assert.ok(!ids.has(c.id), `duplicate argv-split id ${c.id}`);
+      ids.add(c.id);
+      assert.equal(typeof c.cmd, "string");
+      assert.equal(typeof c.singleQuotes, "boolean");
+      assert.ok(Array.isArray(c.argv));
+    }
+  });
+
+  for (const c of FIXTURE.argvSplits.cases) {
+    it(`splits — ${c.id}`, () => {
+      assert.deepEqual(
+        splitArgv(c.cmd, c.singleQuotes).map((e) => e.text),
+        c.argv,
+        `${c.why ?? ""}\n    ${c.cmd}`,
+      );
+    });
+  }
+
+  it("reports quoting and the preceding separator, which is what the run join depends on", () => {
+    // A run join (an unquoted, space-containing path arriving from `ps -o args=`) is only allowed
+    // across entries that carry NO quoting and are separated by exactly one space. Both facts have
+    // to survive the split or the join would either miss real browsers or re-admit nested values.
+    const entries = splitArgv('a "b" c\td', true);
+    assert.deepEqual(entries.map((e) => e.text), ["a", "b", "c", "d"]);
+    assert.deepEqual(entries.map((e) => e.quoted), [false, true, false, false]);
+    assert.deepEqual(entries.map((e) => e.sep), ["", " ", " ", "\t"]);
+  });
+});
+
+// ─── CRITERION (a) IS THE EXTENSION'S, NOT OURS ───────────────────────────────
+//
+// The extension additionally kills a process running ITS bundled `dist/mcp/index.mjs` with the
+// `daemon start` subcommand shape. This module has no such criterion — it only ever attributes
+// browsers. Asserting the whole `daemonEntryCases` vector answers not-owned here is what pins that
+// site difference in a test instead of in a comment, and it means the extension-only fix cannot
+// silently leak a kill criterion into the standalone npm package.
+
+describe("shared vector — the extension's bundled-entry criterion never attributes here", () => {
+  it("the vector is well-formed and covers both the reproduced defect and the real spawn shape", () => {
+    const cases = FIXTURE.daemonEntryCases?.cases;
+    assert.ok(Array.isArray(cases) && cases.length >= 10);
+    assert.ok(cases.some((c) => c.expect === "owned"), "must pin the real emitted shape as owned");
+    assert.ok(
+      cases.some((c) => c.id === "entry-quoted-daemon-start-one-argument" && c.expect === "not-owned"),
+      "must pin the reproduced `\"daemon start\"`-as-one-argument false positive",
+    );
+  });
+
+  for (const testCase of FIXTURE.daemonEntryCases.cases) {
+    it(`server never attributes — ${testCase.id}`, () => {
+      const { cmd, profile } = expandCase(testCase);
+      assert.equal(
+        isOwnedBrowserCommandLine(cmd, profile),
+        false,
+        `process-tree.js has no bundled-entry criterion; it must never attribute\n    ${cmd}`,
+      );
+    });
+  }
+});
+
+// ─── THE NEIGHBOUR ENUMERATION ────────────────────────────────────────────────
+//
+// A COMMITTED, RE-RUNNABLE harness, generated from `neighbourEnumeration` in the shared fixture.
+// It exists because the failure mode of this predicate has never been "the reported case was not
+// fixed" — it has always been "the neighbour of the reported case was not thought of". Choosing
+// which neighbours to imagine is exactly the step that failed five times, so the cross-product is
+// enumerated mechanically instead.
+//
+// Run it with: `node --test packages/mcp-server/test/test-process-tree.test.js
+//   --test-name-pattern="NEIGHBOUR ENUMERATION"`.
+//
+// Measured against the pre-fix implementation (`git show fbd9487:…/process-tree.js`), 82 of the
+// 150 command lines in the wider enumeration this was distilled from were answered WRONG, all in
+// the dangerous direction (a false OWNED). It is 0 now. That is per-implementation evidence: the
+// extension suite generates the same cross-product and asserts it against ITS predicate
+// separately, because agreement between two ports proves parity, not correctness.
+
+describe("NEIGHBOUR ENUMERATION — every value-taking flag x quote style x path spelling", () => {
+  const N = FIXTURE.neighbourEnumeration;
+  const wrap = (style, v) => (style === "bare" ? v : style === "double" ? `"${v}"` : `'${v}'`);
+  const FORMS = ["posix", "win32"];
+
+  it("the generator spec is well-formed", () => {
+    assert.ok(Array.isArray(N?.valueFlags) && N.valueFlags.length >= 10);
+    assert.deepEqual(N.quoteStyles, ["bare", "double", "single"]);
+    for (const form of FORMS) assert.equal(typeof N.images[form], "string");
+  });
+
+  it("a nested VALUE never satisfies the profile flag", () => {
+    let generated = 0;
+    for (const form of FORMS) {
+      const image = N.images[form];
+      const profile = FIXTURE.paths[form].profile;
+      for (const flag of N.valueFlags) {
+        for (const style of N.quoteStyles) {
+          const cmd = `${image} ${flag}=${wrap(style, `--user-data-dir=${profile}`)}`;
+          generated += 1;
+          assert.equal(
+            isOwnedBrowserCommandLine(cmd, profile),
+            false,
+            `a value of ${flag} is not an argv entry\n    ${cmd}`,
+          );
+        }
+      }
+    }
+    assert.equal(generated, FORMS.length * N.valueFlags.length * N.quoteStyles.length);
+    assert.ok(generated >= 90, `the harness must actually enumerate something (got ${generated})`);
+  });
+
+  it("the genuine spellings stay owned — the tightening must not overshoot", () => {
+    let generated = 0;
+    for (const form of FORMS) {
+      const image = N.images[form];
+      const profile = FIXTURE.paths[form].profile;
+      for (const style of N.quoteStyles) {
+        for (const cmd of [
+          `${image} --user-data-dir=${wrap(style, profile)}`,
+          `${image} ${wrap(style, `--user-data-dir=${profile}`)}`,
+        ]) {
+          generated += 1;
+          assert.equal(isOwnedBrowserCommandLine(cmd, profile), true, `must stay owned\n    ${cmd}`);
+        }
+      }
+    }
+    assert.equal(generated, FORMS.length * N.quoteStyles.length * 2);
   });
 });
 

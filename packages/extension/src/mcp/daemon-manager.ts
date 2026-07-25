@@ -37,6 +37,19 @@ const EMPTY_STATUS: DaemonStatus = {
   port_lsp: null, bearerToken: null, tunnelUrl: null, uptime: null, uuid: null,
 };
 
+/**
+ * One argv entry recovered from a flat command-line string by `DaemonManager._splitArgv()`.
+ * See that method for why the predicate parses argv instead of pattern-matching a string.
+ */
+interface ArgvEntry {
+  /** The entry with its quoting removed — what the OS's own parser would hand `argv[n]`. */
+  text: string;
+  /** The entry contained at least one quoted section, so it is not a fragment of a spaced path. */
+  quoted: boolean;
+  /** The raw whitespace run that preceded this entry. */
+  sep: string;
+}
+
 /** A process observed by the orphan sweep, with the command line used for ownership attribution. */
 export interface SweptProcess {
   pid: number;
@@ -367,22 +380,6 @@ export class DaemonManager implements vscode.Disposable {
   // that unscoped substring match used to force-kill (with `/T`, i.e. the whole process tree)
   // any unrelated Node process whose argv happened to contain those three fragments.
 
-  /**
-   * Characters that may abut an argv entry: whitespace, or quoting. Used on BOTH sides of every
-   * match. `=` is deliberately absent — it is legal INSIDE a path on every platform, so treating
-   * it as a boundary means `<needle>=2` matches `<needle>`. That cost a false kill on each side
-   * in turn: `--user-data-dir=<profile>=2` (a browser on a DIFFERENT directory) for criterion (b),
-   * and `…/dist/mcp/index.mjs=1 daemon start` (a DIFFERENT file) for criterion (a).
-   */
-  private static readonly ARG_BOUNDARY = /[\s"']/;
-  // There is NO `=`-accepting variant any more. Criterion (a) used to allow `=` before its path
-  // match on the theory that "a path may legitimately follow `=`" — true in general, but not for
-  // anything WE emit: `_spawnDetached()` (and `daemon/launcher.js`) always spawn
-  // `[serverPath, 'daemon', 'start']`, so the bundled entry is never an `=`-attached value. The
-  // widening protected no real invocation and force-killed real tools whose argv referenced our
-  // entry as a flag value: `rsync --exclude=<entry> …`, `tar --exclude=<entry> …`,
-  // `rg --file=<entry> …`, `node --require=<entry> …`, `grep --include=<entry> …`,
-  // `code --extensions-dir=<entry> …`. Both criteria now use `ARG_BOUNDARY` on both sides.
   /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative extensionPath. */
   private static readonly ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
 
@@ -393,42 +390,148 @@ export class DaemonManager implements vscode.Disposable {
    * applying it on POSIX too is a negligible widening (it would take two real installs whose
    * absolute paths differ only in letter case to collide) and keeps ONE code path.
    *
-   * Quotes are deliberately NOT stripped — they are treated as argv boundaries instead, so
-   * `"C:\p\dist\mcp\index.mjs"` matches while `C:\p\dist\mcp\index.mjs.bak` does not.
+   * Quotes are deliberately left in place here — removing them is `_splitArgv()`'s job, and it can
+   * only be done correctly while the entry structure is still known.
+   *
+   * NOTE the one thing `\` → `/` costs: a Windows-style escaped quote (`\"`) becomes `/"`, i.e. a
+   * REAL quote to `_splitArgv()`. That can only ever split an entry that would otherwise have
+   * stayed whole, so it can only ever make a command line LESS attributable — the fail-safe
+   * direction.
    */
   private static _canon(s: string): string {
     return String(s).replace(/\\/g, '/').toLowerCase();
   }
 
   /**
-   * Does `haystack` contain `needle` as a whole argv token?
+   * ── THE ARGV SPLITTER ──────────────────────────────────────────────────────────────────────
    *
-   * BOTH sides: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`, on
-   * either side, for either criterion. (An earlier version accepted `=` before criterion (a)'s
-   * match; see `ARG_BOUNDARY` for why that was removed rather than kept.)
+   * WHAT THIS REPLACES, AND WHY. Both criteria used to ask "does `needle` appear in the command
+   * line with a boundary character (`[\s"']`) on each side?". Treating a QUOTE as a generic
+   * boundary is what let a value NESTED INSIDE ANOTHER ARGUMENT satisfy the match, because the
+   * nested value's own quotes are boundaries. Reproduced against the shipped predicate — all four
+   * answered OWNED, and on win32 `_killTree()` would have `taskkill /T /F`ed the user's browser:
    *
-   * Probed rather than asserted: `…/index.mjs.bak`, `…/index.mjson`, `…/index.mjs=1`,
-   * `<profile>-backup`, `<profile>.old`, `<profile>/Default` and `<profile>=2` are all misses,
-   * because `.`, `-`, `/`, `s` and `=` are none of them boundary characters. The claim this
-   * docblock used to make — "a longer neighbouring path can NEVER satisfy it" — was false for
-   * exactly one character, `=`, which was in the boundary set on both sides.
+   *     chrome.exe --user-agent="--user-data-dir=<P>"      ← a USER-AGENT STRING
+   *     chrome.exe --proxy-pac-url="--user-data-dir=<P>"   ← a PAC URL
+   *     chrome.exe --app="--user-data-dir=<P>"             ← an app URL
+   *     /opt/google/chrome/chrome --user-agent="--user-data-dir=<P>"
    *
-   * Both arguments must already be in `_canon` form. ONE implementation with no per-caller knobs:
-   * the two criteria share this matcher deliberately, because a second hand-rolled predicate — and
-   * then a per-criterion boundary parameter — is how they drifted apart twice.
+   * The same class hit criterion (a) through a different door: `_hasDaemonStartShape()` split on
+   * whitespace and stripped quotes AFTERWARDS, so `code.exe "<entry>" "daemon start"` — an editor
+   * with our bundled file open — produced the tokens `daemon` and `start` and shape-matched.
+   *
+   * The cure for both is to stop pattern-matching a flat string and PARSE it into argv entries:
+   * whitespace separates entries; a quoted section is part of the entry it sits in and its quotes
+   * are removed, exactly as `CommandLineToArgvW` and POSIX shells do. So
+   * `--user-agent="--user-data-dir=<P>"` is ONE entry (`--user-agent=--user-data-dir=<P>`) and
+   * `"daemon start"` is ONE entry, and neither is the thing the criteria require.
+   *
+   * @param singleQuotes whether `'` opens/closes a quoted section — see `_argvParses()`
+   * @returns entries with `text` (quoting removed), `quoted` (contained a quoted section, so it is
+   *   not a fragment of an unquoted space-containing path and may not join a run) and `sep` (the
+   *   raw whitespace run before it; a run join requires exactly `' '`).
    */
-  private static _containsPathToken(haystack: string, needle: string): boolean {
-    if (!needle) return false;
-    for (let from = 0; ; ) {
-      const i = haystack.indexOf(needle, from);
-      if (i < 0) return false;
-      const before = i === 0 ? '' : haystack[i - 1];
-      const afterIdx = i + needle.length;
-      const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
-      if ((before === '' || DaemonManager.ARG_BOUNDARY.test(before))
-        && (after === '' || DaemonManager.ARG_BOUNDARY.test(after))) return true;
-      from = i + 1;
+  private static _splitArgv(cmd: string, singleQuotes: boolean): ArgvEntry[] {
+    const out: ArgvEntry[] = [];
+    let text = '';
+    let quoted = false;
+    let started = false;
+    let sep = '';
+    let open = '';
+    for (let i = 0; i < cmd.length; i += 1) {
+      const ch = cmd[i];
+      if (open) {
+        if (ch === open) { open = ''; continue; }
+        text += ch;
+        started = true;
+        continue;
+      }
+      if (ch === '"' || (singleQuotes && ch === '\'')) {
+        open = ch;
+        quoted = true;
+        started = true;
+        continue;
+      }
+      if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v') {
+        if (started) {
+          out.push({ text, quoted, sep });
+          text = '';
+          quoted = false;
+          started = false;
+          sep = '';
+        }
+        sep += ch;
+        continue;
+      }
+      text += ch;
+      started = true;
     }
+    // An unterminated quote runs to end of string — which is exactly what `CommandLineToArgvW`
+    // does, so a malformed command line attributes the same way the OS would parse it.
+    if (started) out.push({ text, quoted, sep });
+    return out;
+  }
+
+  /**
+   * BOTH readings of the command line: `'` as a quote, and `'` as a literal character.
+   *
+   * Neither reading alone is right, because the two sources this predicate consumes disagree
+   * about what a single quote means:
+   *   - `Win32_Process.CommandLine` quotes with `"` only (`CommandLineToArgvW` gives `'` no
+   *     meaning at all), and `ps -o args=` / `/proc/<pid>/cmdline` do not re-quote anything. So in
+   *     real argv a single quote is a LITERAL character — and an account named `O'Brien` puts one
+   *     inside our own paths (`c:/users/o'brien/.airtable-user-mcp/.chrome-profile`). Reading it
+   *     as a quote would make the owner's own daemon and browser unattributable: the sweep stops
+   *     reaping our orphans and the profile stays wedged.
+   *   - but the predicate has always accepted the shell-ish spellings `--user-data-dir='<P>'` and
+   *     `'--user-data-dir=<P>'`, which only parse under the other reading.
+   * A match under EITHER reading is a match. The union is safe against the defect this fixes:
+   * a nested value fails BOTH readings (`--proxy-pac-url='--user-data-dir=<P>'` is one entry
+   * either way). What it must NOT be replaced by is "whitespace-only boundaries" — the same thing
+   * minus quote handling — which re-admits `--user-agent="x --user-data-dir=<P> y"`, where our
+   * flag sits whitespace-bounded INSIDE a quoted value.
+   */
+  private static _argvParses(canonCmd: string): ArgvEntry[][] {
+    return [DaemonManager._splitArgv(canonCmd, true), DaemonManager._splitArgv(canonCmd, false)];
+  }
+
+  /**
+   * Every index at which `needle` occurs as a WHOLE argv entry, returned as the index of the entry
+   * AFTER the match (so a caller can assert what follows it). Empty array = no match.
+   *
+   * Two ways to match, and the second one is load-bearing:
+   *   1. a single entry whose text equals the needle. This covers bare (`--user-data-dir=<P>`),
+   *      value-quoted (`--user-data-dir="<P>"`) and whole-argument-quoted (`"--user-data-dir=<P>"`)
+   *      spellings identically, because `_splitArgv()` has already removed the quoting.
+   *   2. a RUN of consecutive entries, each written with NO quoting and each separated from the
+   *      last by exactly one space, whose single-space join equals the needle. Not a widening —
+   *      it is the only way to keep matching the source that has no quoting to begin with:
+   *      `ps -o args=` and `/proc/<pid>/cmdline` join argv with single spaces, so an install root
+   *      or profile under `C:\Users\a b\` arrives as two "entries". A run join can only ever
+   *      produce a string CONTAINING a space, so when the needle has no space (the common case)
+   *      this branch cannot match at all. Quoted entries are excluded from runs, which is what
+   *      stops it from re-opening the nested-value defect.
+   *
+   * ONE matching primitive for both criteria, deliberately: a second hand-rolled matcher — and
+   * then a per-criterion knob on it — is how the two criteria drifted apart twice.
+   */
+  private static _argvEntryEnds(entries: ArgvEntry[], needle: string): number[] {
+    const ends: number[] = [];
+    if (!needle) return ends;
+    for (let i = 0; i < entries.length; i += 1) {
+      if (entries[i].text === needle) { ends.push(i + 1); continue; }
+      if (entries[i].quoted) continue;
+      let joined = entries[i].text;
+      if (joined.length >= needle.length) continue;
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const e = entries[j];
+        if (e.quoted || e.sep !== ' ') break;
+        joined += ` ${e.text}`;
+        if (joined === needle) { ends.push(j + 1); break; }
+        if (joined.length >= needle.length) break;
+      }
+    }
+    return ends;
   }
 
   /**
@@ -721,36 +824,38 @@ export class DaemonManager implements vscode.Disposable {
   /**
    * Does argv carry `--user-data-dir=<profileDir>` for EXACTLY this directory?
    *
-   * Deliberately built on the SAME `_containsPathToken` boundary check criterion (a) uses — one
-   * matching primitive for both criteria is what stops them drifting apart again. `flag+dir` is
-   * matched as a whole argv token, so:
-   *   - `…/.chrome-profile-backup`, `…/.chrome-profile.old` → the following `-`/`.` is not an
-   *     argv boundary → MISS;
-   *   - `…/.chrome-profile/Default` (a subdirectory) → following `/` → MISS;
-   *   - `--user-data-dir=/mnt/backup/home/u/…/.chrome-profile` → `flag+dir` never appears
-   *     contiguously → MISS;
-   *   - a longer flag ending in `user-data-dir=` → the preceding character is not a boundary
-   *     → MISS.
-   *   - a NESTED spelling — `--foo=--user-data-dir=<dir>`, or
-   *     `--user-data-dir=/other=--user-data-dir=<dir>` (a browser pointed at a DIFFERENT profile,
-   *     which it would have been a false kill to accept) → the flag must begin an argv entry, and
-   *     `ARG_BOUNDARY` excludes `=` from the characters that may abut an argv entry → MISS.
-   * The three needle spellings cover the quotings argv actually arrives in: bare,
-   * `"--user-data-dir=C:/Users/a b/…"` (Node quotes the WHOLE argument when it contains a space —
-   * the opening quote is itself a boundary), and `--user-data-dir="…"` / `'…'`. The bare form
-   * also covers POSIX `ps -o args=`, which joins argv with spaces and quotes nothing, so a home
-   * directory containing a space still matches. A trailing separator is the same directory.
+   * Built on the SAME `_argvEntryEnds()` primitive criterion (a) uses — one matcher for both
+   * criteria is what stops them drifting apart again. `flag+dir` must BE an argv entry, not merely
+   * occur inside one, so:
+   *   - `…/.chrome-profile-backup`, `…/.chrome-profile.old`, `…/.chrome-profile/Default` (a
+   *     subdirectory), `…/.chrome-profile=2` → a different entry text → MISS;
+   *   - `--user-data-dir=/mnt/backup/home/u/…/.chrome-profile`, another OS user's identically
+   *     named path → different absolute string → MISS;
+   *   - a longer flag ending in `user-data-dir=` → different entry text → MISS;
+   *   - a NESTED spelling — `--foo=--user-data-dir=<dir>`, `--user-data-dir=/other=--user-data-dir=
+   *     <dir>` (a browser pointed at a DIFFERENT profile) → one entry, text ≠ flag → MISS;
+   *   - a nested QUOTED VALUE — `--user-agent="--user-data-dir=<dir>"`, `--proxy-pac-url=`,
+   *     `--app=` and every other Chrome switch that takes a quoted value, in both quote characters
+   *     and both path spellings → the quotes belong to the ENCLOSING entry, so the entry text is
+   *     `--user-agent=--user-data-dir=<dir>` → MISS. This is the defect `_splitArgv()` exists to
+   *     fix; the boundary-character matcher it replaces answered OWNED to every one of them.
+   * Quoting is handled by the parser rather than by extra needles, so bare,
+   * `"--user-data-dir=C:/Users/a b/…"` (Node quotes the WHOLE argument when it contains a space)
+   * and `--user-data-dir="…"` / `'…'` all reduce to the same entry text; the unquoted
+   * space-containing form `ps -o args=` emits is matched by the run join in `_argvEntryEnds()`.
+   * A trailing separator is the same directory.
    *
    * Both arguments must already be in `_canon` form — that is what makes the comparison
    * case-insensitive and `\` vs `/` tolerant.
    */
   private static _hasUserDataDirArg(cmd: string, profileDir: string): boolean {
     if (!profileDir) return false;
-    const flag = DaemonManager.USER_DATA_DIR_FLAG;
+    const parses = DaemonManager._argvParses(cmd);
     for (const dir of [profileDir, `${profileDir}/`]) {
-      if (DaemonManager._containsPathToken(cmd, `${flag}${dir}`)) return true;
-      if (DaemonManager._containsPathToken(cmd, `${flag}"${dir}"`)) return true;
-      if (DaemonManager._containsPathToken(cmd, `${flag}'${dir}'`)) return true;
+      const needle = `${DaemonManager.USER_DATA_DIR_FLAG}${dir}`;
+      for (const entries of parses) {
+        if (DaemonManager._argvEntryEnds(entries, needle).length > 0) return true;
+      }
     }
     return false;
   }
@@ -769,8 +874,9 @@ export class DaemonManager implements vscode.Disposable {
    * Positive ownership test — the ONLY kill criterion.
    *
    * (a) the exact bundled `<extensionPath>/dist/mcp/index.mjs` this install spawns, matched as a
-   *     whole argv token, AND the `daemon`/`start` subcommand shape `_spawnDetached()` always
-   *     emits. BOTH conjuncts are required: the path alone only proves the file is *mentioned*
+   *     whole ARGV ENTRY, IMMEDIATELY FOLLOWED by the separate argv entries `daemon` and `start`
+   *     — the shape `_spawnDetached()` always emits (`_hasBundledEntryDaemonStart()`). BOTH
+   *     conjuncts are required: the path alone only proves the file is *mentioned*
    *     in the argv, not that the process is *running* it. `code <bundled path>` (the user
    *     opening our file in an editor), an Explorer double-click, `node --check <path>` or a
    *     build tool listing it would otherwise be force-killed WITH THEIR PROCESS TREE — for the
@@ -791,15 +897,17 @@ export class DaemonManager implements vscode.Disposable {
    *          `_imageName()`'s docblock, in the `IMAGE CONJUNCT` tests, and in the cross-package
    *          vector `packages/shared/test-fixtures/process-attribution-cases.json`, AND
    *       2. argv carries `--user-data-dir=<profileDir>` for the EXACT resolved
-   *          `<configDir>/.chrome-profile` (`_profileDir()`), matched as a whole argv token —
-   *          same canonicalization as criterion (a), and `ARG_BOUNDARY` on BOTH sides, so
-   *          `<profile>=2` (a different directory) is a miss just as `<profile>-backup` is.
+   *          `<configDir>/.chrome-profile` (`_profileDir()`), matched as a WHOLE ARGV ENTRY of a
+   *          real quote-aware parse (`_splitArgv()` / `_argvEntryEnds()`) — same canonicalization
+   *          and the same primitive criterion (a) uses, so `<profile>=2` (a different directory)
+   *          and `--user-agent="--user-data-dir=<profile>"` (a nested VALUE, not an argument) are
+   *          misses just as `<profile>-backup` is.
    *
    *     WHY (a) HAS NO IMAGE CONJUNCT, decided explicitly rather than left implicit. (b) requires
    *     one because its path — the browser profile — is SHARED: every install of this extension,
    *     and every tool the user points at it, names the same directory. (a)'s path is
    *     `<extensionPath>/dist/mcp/index.mjs`: absolute, install-specific, and carried as a whole
-   *     argv token next to the whole tokens `daemon` and `start`. After F7 the residual is
+   *     argv ENTRY immediately followed by the entries `daemon` and `start`. After F7 the residual is
    *     "some tool invoked as `<tool> <our exact entry path> daemon start`", and I could not
    *     construct a plausible instance — the six real victims all depended on the `=` boundary or
    *     on `daemonize`/`restart`, both now closed. The conjunct I could derive is
@@ -826,40 +934,52 @@ export class DaemonManager implements vscode.Disposable {
   private _isOwnedCommandLine(commandLine: string): boolean {
     const cmd = DaemonManager._canon(commandLine);
     const entry = this._bundledEntryPath();
-    if (entry
-      && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))
-      && DaemonManager._hasDaemonStartShape(commandLine)) return true;
+    if (entry && DaemonManager._hasBundledEntryDaemonStart(cmd, DaemonManager._canon(entry))) {
+      return true;
+    }
     return this._claimsOurProfile(cmd)
       && DaemonManager._isChromeFamilyImage(cmd, DaemonManager._isWindowsSpelling(commandLine, cmd));
   }
 
   /**
-   * An `index.mjs` token, then the WHOLE TOKENS `daemon` and `start`, in that order — the shape
-   * `_spawnDetached()` always emits (`[serverPath, 'daemon', 'start', …]`).
+   * Criterion (a) in one pass: THIS install's bundled entry as a whole argv entry, IMMEDIATELY
+   * FOLLOWED by the separate argv entries `daemon` and `start` — the exact shape
+   * `_spawnDetached()` and `daemon/launcher.js` emit (`[serverPath, 'daemon', 'start', …]`, so
+   * `argv` is `[<host binary>, <serverPath>, 'daemon', 'start', …]`).
    *
-   * WHOLE TOKENS, because this used to be an ordered `indexOf` scan over the raw string, in which
-   * `daemonize` satisfied `daemon` and `restart` satisfied `start`. Combined with the `=` that
-   * criterion (a) then accepted before a path match, that turned ordinary tooling into kill
-   * targets: `rsync -a --exclude=<entry> /home/u/daemonize/restart/ /mnt/b`,
-   * `tar --exclude=<entry> -cf b.tar /srv/daemonize/restart`, `rg --file=<entry> "daemon" /srv/startup`.
-   * Both halves are fixed; this is the half that stops a SUBSTRING of an unrelated word from
-   * standing in for our subcommand.
+   * THREE SEPARATE ARGV ENTRIES, and that is the point. The scanner this replaces did
+   * `_canon(cmd).split(/\s+/)` and stripped quotes from each token AFTERWARDS, so quoting was
+   * erased before it could mean anything:
+   *
+   *     code.exe "<entry>" "daemon start"
+   *
+   * — the user opening our bundled file in an editor, with a single argument that happens to read
+   * `daemon start` — produced the tokens `daemon` and `start` and SHAPE-MATCHED. Combined with the
+   * path half it force-killed the editor and its process tree (on win32 `taskkill /T /F`), taking
+   * the user's unsaved work and the extension host running this sweep. Reproduced, then pinned in
+   * the shared vector. Parsing first (`_splitArgv()`) makes `daemon start` ONE entry, which is not
+   * the entry `daemon`, so the shape is not satisfied.
+   *
+   * ADJACENCY is required for the same reason: it is what we actually emit, and it is cheap
+   * strictness. `<entry> start daemon`, `<entry> daemonize restart`, and `<entry> --foo daemon
+   * start` are all misses. The path and the subcommands are checked TOGETHER rather than as two
+   * independent scans of the whole string, so a command line that mentions our entry in one place
+   * and the words `daemon`/`start` somewhere else entirely cannot combine them into a kill.
    *
    * This is the KILL conjunct only. Reporting uses `_looksLikeStrayDaemon()`, which is
-   * deliberately more generous — see there for why the two are now separate predicates.
+   * deliberately more generous — see there for why the two are separate predicates.
+   *
+   * @param cmd        command line in `_canon` form
+   * @param canonEntry `<extensionPath>/dist/mcp/index.mjs` in `_canon` form
    */
-  private static _hasDaemonStartShape(commandLine: string): boolean {
-    const tokens = DaemonManager._canon(commandLine)
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(t => t.replace(/^["']+/, '').replace(/["']+$/, ''));
-    // The entry token may be an unquoted path containing spaces, in which case only its LAST
-    // fragment is a token — `…/index.mjs` still ends it, which is all this needs to establish.
-    const entry = tokens.findIndex(t => t === 'index.mjs' || t.endsWith('/index.mjs'));
-    if (entry < 0) return false;
-    const daemon = tokens.indexOf('daemon', entry + 1);
-    if (daemon < 0) return false;
-    return tokens.indexOf('start', daemon + 1) > daemon;
+  private static _hasBundledEntryDaemonStart(cmd: string, canonEntry: string): boolean {
+    if (!canonEntry) return false;
+    for (const entries of DaemonManager._argvParses(cmd)) {
+      for (const after of DaemonManager._argvEntryEnds(entries, canonEntry)) {
+        if (entries[after]?.text === 'daemon' && entries[after + 1]?.text === 'start') return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -870,7 +990,7 @@ export class DaemonManager implements vscode.Disposable {
    * Deliberately more generous than the kill conjunct, and deliberately NOT the same function:
    * for reporting we want another install's `…/index.mjs.bak`, a sibling version, or a
    * `--daemon start` spelling to show up, none of which may be killed. Splitting them is what
-   * lets `_hasDaemonStartShape` be strict without silently dropping those heads-ups.
+   * lets `_hasBundledEntryDaemonStart()` be strict without silently dropping those heads-ups.
    *
    * The one thing it does NOT do is name innocent tooling: the `index.mjs` token must be a BARE
    * argv entry, so the six F7 victims — `rsync --exclude=<entry> …`, `tar --exclude=<entry> …`,
@@ -879,17 +999,20 @@ export class DaemonManager implements vscode.Disposable {
    * killed nor reported. Probed: each of the six returns false here.
    */
   private static _looksLikeStrayDaemon(commandLine: string): boolean {
-    const tokens = DaemonManager._canon(commandLine)
-      .split(/\s+/)
-      .filter(Boolean)
-      .map(t => t.replace(/^["']+/, '').replace(/["']+$/, ''));
-    const entry = tokens.findIndex(t => !t.startsWith('-') && t.includes('index.mjs'));
-    if (entry < 0) return false;
-    // `-{0,2}` — bare `daemon start` (what we spawn) OR another project's `--daemon --start`
-    // spelling. Whole tokens either way: `daemonize`/`restart` still do not qualify.
-    const daemon = tokens.findIndex((t, i) => i > entry && /^-{0,2}daemon$/.test(t));
-    if (daemon < 0) return false;
-    return tokens.findIndex((t, i) => i > daemon && /^-{0,2}start$/.test(t)) > daemon;
+    // Same parser as the kill criteria — reporting must not see a DIFFERENT argv than the thing
+    // deciding whether to kill, which is precisely how `"daemon start"` came to read as two
+    // tokens. Generosity here comes from the loose token TESTS below, not from looser parsing.
+    for (const entries of DaemonManager._argvParses(DaemonManager._canon(commandLine))) {
+      const tokens = entries.map(e => e.text);
+      const entry = tokens.findIndex(t => !t.startsWith('-') && t.includes('index.mjs'));
+      if (entry < 0) continue;
+      // `-{0,2}` — bare `daemon start` (what we spawn) OR another project's `--daemon --start`
+      // spelling. Whole entries either way: `daemonize`/`restart` still do not qualify.
+      const daemon = tokens.findIndex((t, i) => i > entry && /^-{0,2}daemon$/.test(t));
+      if (daemon < 0) continue;
+      if (tokens.findIndex((t, i) => i > daemon && /^-{0,2}start$/.test(t)) > daemon) return true;
+    }
+    return false;
   }
 
   /**

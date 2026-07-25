@@ -138,8 +138,8 @@ async function collectDescendantPids(rootPid, exec) {
 
 // ─── Positive-attribution primitives ──────────────────────────────────────────
 //
-// CROSS-REFERENCE: these are a LINE-FOR-LINE port of `_canon`, `_containsPathToken`,
-// `ARG_BOUNDARY`, `WIN_EXEC_EXT`, `ABSOLUTE_LIKE`, `_stripTrailingSep`,
+// CROSS-REFERENCE: these are a LINE-FOR-LINE port of `_canon`, `_splitArgv`, `_argvParses`,
+// `_argvEntryEnds`, `WIN_EXEC_EXT`, `ABSOLUTE_LIKE`, `_stripTrailingSep`,
 // `CHROME_FAMILY_IMAGES`, `CHROME_FAMILY_HELPER`, `WRAPPER_IMAGES`, `ROOTED`, `NEW_ARG_LIKE`,
 // `MAC_BUNDLE_MARKER`, `_isWindowsSpelling`, `_macBundleExec`, `_imageName`, `_basename`,
 // `_isChromeFamilyImage` and
@@ -156,26 +156,20 @@ async function collectDescendantPids(rootPid, exec) {
 // reported example" passes each missed a neighbouring spelling; the fixture is the thing that
 // stops the sixth.
 //
+// WHAT THAT VECTOR DOES AND DOES NOT PROVE, stated because it has been over-claimed before:
+// these two files are line-for-line ports, so when they AGREE that proves MIRROR PARITY and
+// nothing more — a defect present in the reference is present in the port, and the vector will
+// happily record both sides agreeing on the wrong answer (that is exactly what happened with the
+// nested-quoted-value defect, which both sides answered OWNED). Correctness comes from the
+// EXPECTATIONS in the vector being argued case by case, per implementation. Agreement is a
+// regression guard, not evidence.
+//
 // The defect class: "a process whose command line merely MENTIONS our profile path is force-
 // killed WITH ITS PROCESS TREE". The cure is always the same shape — kill only on POSITIVE
 // attribution, built from two independent conjuncts (it IS a browser we could have launched,
-// AND it claims OUR exact profile as a whole argv token) — and fail safe: anything not
+// AND it claims OUR exact profile as a whole argv entry) — and fail safe: anything not
 // positively attributable is left alive.
 
-/**
- * Characters that may abut an argv entry: whitespace, or quoting. Used on BOTH sides of every
- * match. `=` is deliberately absent — it is legal INSIDE a path on every platform, so treating it
- * as a boundary means `<needle>=2` matches `<needle>`: `--user-data-dir=<profile>=2` is a browser
- * on a DIFFERENT directory, and accepting it was a false kill (fixture
- * `near-miss-trailing-equals`).
- */
-const ARG_BOUNDARY = /[\s"']/;
-// There is deliberately NO `=`-accepting boundary variant. The extension's criterion (a) kept one
-// on the leading side ("a path may legitimately follow `=`"); it protected no invocation this
-// project emits — `_spawnDetached`/`spawnDetachedDaemon` both emit `[entry, 'daemon', 'start']` —
-// and it force-killed ordinary tooling whose argv referenced our entry as a flag VALUE
-// (`rsync --exclude=<entry> …`, `rg --file=<entry> …`, `code --extensions-dir=<entry> …`).
-// It is gone there too: `=` is a boundary on neither side, for neither criterion.
 /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative userDataDir. */
 const ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
 
@@ -183,7 +177,12 @@ const ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
  * Canonical form for command-line comparison: `\` → `/`, lower-cased.
  * Case folding is what makes Windows path matching correct; on POSIX it is a negligible
  * widening (two real profile dirs differing only in letter case would have to collide) and
- * keeps ONE code path. Quotes are deliberately NOT stripped — they are argv boundaries.
+ * keeps ONE code path. Quotes are deliberately left in place here — removing them is
+ * `splitArgv`'s job, and it can only be done correctly while the entry structure is still known.
+ *
+ * NOTE the one thing `\` → `/` costs: a Windows-style escaped quote (`\"`) becomes `/"`, i.e. a
+ * REAL quote to `splitArgv`. That can only ever split an entry that would otherwise have stayed
+ * whole, so it can only ever make a command line LESS attributable — the fail-safe direction.
  */
 function canon(s) {
   return String(s).replace(/\\/g, '/').toLowerCase();
@@ -195,31 +194,138 @@ function stripTrailingSep(p) {
 }
 
 /**
- * Does `haystack` contain `needle` as a whole argv token?
+ * ── THE ARGV SPLITTER ────────────────────────────────────────────────────────────────────────
  *
- * TRAILING side: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`.
- * LEADING side: the same. `=` is a boundary on neither side, for neither criterion.
+ * WHAT THIS REPLACES, AND WHY. The predicate used to ask "does `needle` appear in the command
+ * line with a boundary character (`[\s"']`) on each side?". Treating a QUOTE as a generic
+ * boundary is what made a value NESTED INSIDE ANOTHER ARGUMENT satisfy the flag match, because
+ * the nested value's own quotes are boundaries:
  *
- * Probed, not asserted: `<profile>-backup`, `<profile>.old`, `<profile>/Default` and
- * `<profile>=2` are all misses, because `-`, `.`, `/` and `=` are none of them boundary
- * characters. The claim this used to make — "a longer neighbouring path can never satisfy it" —
- * was false for exactly one character, `=`, which was in the boundary set on both sides.
+ *     chrome.exe --user-agent="--user-data-dir=<P>"      ← a USER-AGENT STRING
+ *     chrome.exe --proxy-pac-url="--user-data-dir=<P>"   ← a PAC URL
+ *     chrome.exe --app="--user-data-dir=<P>"             ← an app URL
+ *     /opt/google/chrome/chrome --user-agent="--user-data-dir=<P>"
  *
- * Both args must be in `canon` form. One implementation, one parameter.
+ * All four returned OWNED against the shipped predicate (reproduced, then pinned as fixture
+ * cases `nested-value-*`). Chrome is NOT using our profile in any of them — the string is one
+ * argument whose VALUE merely contains our flag — and on win32 the eviction path would have
+ * `taskkill /T /F`ed the user's whole browser.
+ *
+ * The cure is to stop pattern-matching a flat string and instead PARSE it into argv entries, then
+ * require the flag to BE an entry. `splitArgv` is that parser: whitespace separates entries; a
+ * quoted section is part of the entry it sits in and its quotes are removed, exactly as
+ * `CommandLineToArgvW` and POSIX shells do. `--user-agent="--user-data-dir=<P>"` is therefore ONE
+ * entry whose text is `--user-agent=--user-data-dir=<P>` — not equal to the flag, so: not owned.
+ *
+ * @param {string} cmd            command line, already in `canon` form
+ * @param {boolean} singleQuotes  whether `'` opens/closes a quoted section — see `argvParses`
+ * @returns {{text: string, quoted: boolean, sep: string}[]}
+ *   `text`   the entry with its quoting removed;
+ *   `quoted` the entry contained at least one quoted section (so it is NOT a fragment of an
+ *            unquoted space-containing path, and may not take part in a run join);
+ *   `sep`    the raw whitespace run that preceded the entry (a run join requires exactly `' '`,
+ *            which is what `ps -o args=` / `/proc/<pid>/cmdline` emit between argv entries).
  */
-function containsPathToken(haystack, needle) {
-  if (!needle) return false;
-  for (let from = 0; ; ) {
-    const i = haystack.indexOf(needle, from);
-    if (i < 0) return false;
-    const before = i === 0 ? '' : haystack[i - 1];
-    const afterIdx = i + needle.length;
-    const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
-    if ((before === '' || ARG_BOUNDARY.test(before)) && (after === '' || ARG_BOUNDARY.test(after))) {
-      return true;
+export function splitArgv(cmd, singleQuotes) {
+  const out = [];
+  let text = '';
+  let quoted = false;
+  let started = false;
+  let sep = '';
+  let open = '';
+  for (let i = 0; i < cmd.length; i += 1) {
+    const ch = cmd[i];
+    if (open) {
+      if (ch === open) { open = ''; continue; }
+      text += ch;
+      started = true;
+      continue;
     }
-    from = i + 1;
+    if (ch === '"' || (singleQuotes && ch === "'")) {
+      open = ch;
+      quoted = true;
+      started = true;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v') {
+      if (started) {
+        out.push({ text, quoted, sep });
+        text = '';
+        quoted = false;
+        started = false;
+        sep = '';
+      }
+      sep += ch;
+      continue;
+    }
+    text += ch;
+    started = true;
   }
+  // An unterminated quote runs to end of string — which is exactly what `CommandLineToArgvW` does,
+  // so a malformed command line attributes the same way the OS would parse it.
+  if (started) out.push({ text, quoted, sep });
+  return out;
+}
+
+/**
+ * BOTH readings of the command line: `'` as a quote, and `'` as a literal character.
+ *
+ * Neither reading alone is right, because the two sources this predicate consumes disagree about
+ * what a single quote means:
+ *   - `ps -o args=` and `/proc/<pid>/cmdline` do NOT re-quote anything, and `Win32_Process`
+ *     quotes with `"` only — `CommandLineToArgvW` gives `'` no meaning at all. So in real argv a
+ *     single quote is a LITERAL character, and a Windows/POSIX account named `O'Brien` puts one
+ *     inside our own profile path (`c:/users/o'brien/.airtable-user-mcp/.chrome-profile`).
+ *     Reading it as a quote would make the owner's own browser unattributable — the profile stays
+ *     wedged and the browser cannot launch.
+ *   - but the predicate has always accepted the shell-ish spellings `--user-data-dir='<P>'` and
+ *     `'--user-data-dir=<P>'`, which only parse under the other reading.
+ * A match under EITHER reading is a match. That union is safe against the defect this fixes:
+ * a nested value fails BOTH readings (`--proxy-pac-url='--user-data-dir=<P>'` is one entry either
+ * way — `--proxy-pac-url=--user-data-dir=<P>` or `--proxy-pac-url='--user-data-dir=<P>'`, and
+ * neither equals the flag). What the union must NOT be replaced by is "whitespace-only
+ * boundaries", which is the same thing minus the quote handling: that re-admits
+ * `--user-agent="x --user-data-dir=<P> y"`, where our flag sits whitespace-bounded INSIDE a
+ * quoted value.
+ */
+function argvParses(cmd) {
+  return [splitArgv(cmd, true), splitArgv(cmd, false)];
+}
+
+/**
+ * Every index at which `needle` occurs as a WHOLE argv entry, returned as the index of the entry
+ * AFTER the match (so a caller can assert what follows it). Empty array = no match.
+ *
+ * Two ways to match, and the second one is load-bearing:
+ *   1. a single entry whose text equals the needle. This covers bare (`--user-data-dir=<P>`),
+ *      value-quoted (`--user-data-dir="<P>"`) and whole-argument-quoted (`"--user-data-dir=<P>"`)
+ *      spellings identically, because `splitArgv` has already removed the quoting.
+ *   2. a RUN of consecutive entries, each written with NO quoting and each separated from the last
+ *      by exactly one space, whose single-space join equals the needle. This is not a widening —
+ *      it is the only way to keep matching the source that has no quoting to begin with:
+ *      `ps -o args=` and `/proc/<pid>/cmdline` join argv with single spaces, so a profile under
+ *      `/home/a b/` arrives as the two "entries" `--user-data-dir=/home/a` and `b/…`. A run join
+ *      can only ever produce a string CONTAINING a space, so when the profile path has no space
+ *      (the overwhelmingly common case) this branch cannot match anything at all. Quoted entries
+ *      are excluded from runs, which is what stops it from re-opening the nested-value defect.
+ */
+function argvEntryEnds(entries, needle) {
+  const ends = [];
+  if (!needle) return ends;
+  for (let i = 0; i < entries.length; i += 1) {
+    if (entries[i].text === needle) { ends.push(i + 1); continue; }
+    if (entries[i].quoted) continue;
+    let joined = entries[i].text;
+    if (joined.length >= needle.length) continue;
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const e = entries[j];
+      if (e.quoted || e.sep !== ' ') break;
+      joined += ` ${e.text}`;
+      if (joined === needle) { ends.push(j + 1); break; }
+      if (joined.length >= needle.length) break;
+    }
+  }
+  return ends;
 }
 
 /**
@@ -462,35 +568,34 @@ const USER_DATA_DIR_FLAG = '--user-data-dir=';
 /**
  * Does argv carry `--user-data-dir=<profileDir>` for EXACTLY this directory?
  *
- * `flag+dir` is matched as a whole argv token, so:
- *   - `<profile>-backup`, `<profile>.old` → the following `-`/`.` is not a boundary → MISS;
- *   - `<profile>/Default` (a subdirectory) → the following `/` (or, for the `<dir>/` needle,
- *     the following `D`) is not a boundary → MISS;
- *   - `--user-data-dir=/mnt/backup<profile>` → `flag+dir` never appears contiguously → MISS;
- *   - another OS user's identically-named `/home/other/.chrome-profile` → different absolute
- *     string → MISS;
- *   - a longer flag ending in `user-data-dir=` → the preceding char is not a boundary → MISS;
- *   - a NESTED spelling — `--foo=--user-data-dir=<dir>`, or
- *     `--user-data-dir=/other=--user-data-dir=<dir>` (a browser pointed at a DIFFERENT profile,
- *     which it would have been a false kill to accept) → the flag must BEGIN an argv entry, and
- *     `ARG_BOUNDARY` excludes `=` from the characters that may abut an argv entry → MISS.
- *   - a trailing `=` — `--user-data-dir=<dir>=2` is a DIFFERENT directory → MISS, because `=`
- *     is not a boundary on the trailing side either.
- * The three needle spellings cover the quotings argv arrives in: bare, `"--user-data-dir=…"`
- * (whole argument quoted — the opening quote is itself a boundary) and `--user-data-dir="…"`.
- * The bare form also covers POSIX `ps -o args=` / `/proc/<pid>/cmdline`, which join argv with
- * spaces and quote nothing, so a home directory containing a space still matches. A trailing
- * separator is the same directory.
+ * `flag+dir` must BE an argv entry (`argvEntryEnds`), not merely occur inside one, so:
+ *   - `<profile>-backup`, `<profile>.old`, `<profile>/Default` (a subdirectory),
+ *     `--user-data-dir=<dir>=2` → a different entry text → MISS;
+ *   - `--user-data-dir=/mnt/backup<profile>`, another OS user's identically-named
+ *     `/home/other/.chrome-profile` → different absolute string → MISS;
+ *   - a longer flag ending in `user-data-dir=` → different entry text → MISS;
+ *   - a NESTED spelling — `--foo=--user-data-dir=<dir>`, `--user-data-dir=/other=--user-data-dir=
+ *     <dir>` (a browser pointed at a DIFFERENT profile) → one entry, text ≠ flag → MISS;
+ *   - a nested QUOTED VALUE — `--user-agent="--user-data-dir=<dir>"`, `--proxy-pac-url=`, `--app=`
+ *     and every other Chrome switch that takes a quoted value, in both spellings and both quote
+ *     characters → the quotes belong to the ENCLOSING entry, so the entry text is
+ *     `--user-agent=--user-data-dir=<dir>` → MISS. This is the defect `splitArgv` exists to fix;
+ *     the boundary-character matcher it replaces answered OWNED to all of them.
+ * Quoting is handled by the parser rather than by extra needles, so bare,
+ * `"--user-data-dir=<dir>"` and `--user-data-dir="<dir>"`/`'<dir>'` all reduce to the same entry
+ * text. A trailing separator is the same directory.
  *
  * Both args must be in `canon` form — that is what makes the comparison case-insensitive and
  * `\` vs `/` tolerant.
  */
 function hasUserDataDirArg(cmd, profileDir) {
   if (!profileDir) return false;
+  const parses = argvParses(cmd);
   for (const dir of [profileDir, `${profileDir}/`]) {
-    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}${dir}`)) return true;
-    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}"${dir}"`)) return true;
-    if (containsPathToken(cmd, `${USER_DATA_DIR_FLAG}'${dir}'`)) return true;
+    const needle = `${USER_DATA_DIR_FLAG}${dir}`;
+    for (const entries of parses) {
+      if (argvEntryEnds(entries, needle).length > 0) return true;
+    }
   }
   return false;
 }
@@ -535,7 +640,7 @@ function isOwnedCanonCommandLine(cmd, canonProfileDir, winSpelling) {
   // missing entirely, and it is what keeps `vim`/`grep`/`rg`/`find`/`rsync`/a file manager
   // holding a path under the profile out of `terminateProcessTree`.
   if (!isChromeFamilyImage(cmd, winSpelling)) return false;
-  // Conjunct 2: does it claim OUR exact profile, as a whole argv token? Rejects a browser on a
+  // Conjunct 2: does it claim OUR exact profile, as a whole argv entry? Rejects a browser on a
   // DIFFERENT `--user-data-dir`, `<profile>-backup`, `<profile>/Default`, `/mnt/backup<profile>`
   // and another OS user's identically-named path.
   return hasUserDataDirArg(cmd, canonProfileDir);
@@ -561,7 +666,7 @@ function isSelectableBrowserCommandLine(args, canonProfileDir) {
  *   1. the process image (argv[0]'s basename) is a Chrome-family binary this project can
  *      launch (`CHROME_FAMILY_IMAGES`), AND
  *   2. argv carries `--user-data-dir=<userDataDir>` for the EXACT directory, matched as a
- *      whole argv token (`hasUserDataDirArg`), AND
+ *      whole argv entry (`hasUserDataDirArg`), AND
  *   3. it is not a Chromium helper (`--type=…`) — those die with their root's tree.
  * Anything whose command line cannot be read at all is left ALIVE.
  *
@@ -603,7 +708,7 @@ function isSelectableBrowserCommandLine(args, canonProfileDir) {
  * so the bare-dir clause can only ADD processes that lack the flag — none of which may be
  * killed. It is gone. PowerShell is now CANDIDATE GENERATION ONLY, exactly like `pgrep -f`:
  * a cheap Name + canonical-substring pre-filter whose output is re-checked in JS by the shared
- * `isOwnedBrowserCommandLine` predicate, as a whole argv token. The chrome/msedge/chromium
+ * `isOwnedBrowserCommandLine` predicate, as a whole argv entry. The chrome/msedge/chromium
  * process-Name filter is kept (it can only under-select, which is the safe direction).
  */
 export async function findProfileBrowserPids(
@@ -660,7 +765,7 @@ export async function findProfileBrowserPids(
     // CANDIDATE GENERATION ONLY — never the authority on what gets killed. `pgrep -f` treats
     // its pattern as an ERE (so `.` in `.chrome-profile` is a wildcard) and matches
     // substrings; `filterOwnedBrowserPids` below re-checks every candidate literally, as a
-    // whole argv token, against a Chrome-family image. `pgrep` exits 1 on "no match" — there
+    // whole argv entry, against a Chrome-family image. `pgrep` exits 1 on "no match" — there
     // is deliberately no bare-directory fallback (see the docblock above).
     const { stdout } = await exec('pgrep', ['-f', '--', marker], { timeout: 10_000, maxBuffer: EXEC_MAX_BUFFER });
     pids = parsePids(stdout);

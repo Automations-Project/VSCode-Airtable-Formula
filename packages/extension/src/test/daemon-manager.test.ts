@@ -907,8 +907,17 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
     const { result, killTree } = posix(cmds.map((commandLine, i) => ({ pid: 9200 + i, commandLine })));
     expect(killTree).not.toHaveBeenCalled();
     expect(result.killed).toEqual([]);
-    // All are profile holders we cannot attribute → reported, never killed.
-    expect(result.skipped.length).toBe(cmds.length);
+    // All but ONE are profile holders we cannot attribute → reported, never killed. The exception
+    // is the last row, `bash -c "chrome --user-data-dir=<P>"`: under the quote-aware argv parse the
+    // whole script is a SINGLE argv entry, so bash does not carry `--user-data-dir=<P>` as an
+    // argument at all — it is text inside a string bash has not interpreted yet. Dropping it from
+    // the report loses nothing: the chrome that bash SPAWNS is a separate process with its own
+    // command line, and that one attributes as ours and is killed. Pinned by exact pid (stricter
+    // than the previous `.length` check) so the boundary of this change cannot move unnoticed.
+    const shellCPid = 9200 + cmds.length - 1;
+    expect(result.skipped.map(p => p.pid)).toEqual(
+      cmds.map((_, i) => 9200 + i).filter(pid => pid !== shellCPid),
+    );
   });
 
   it('IMAGE CONJUNCT (Windows): every path spelling of "browser-named file as an argument" is rejected', () => {
@@ -930,7 +939,9 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
     const { result, killTree } = win(cmds.map((commandLine, i) => ({ pid: 9300 + i, commandLine })));
     expect(killTree).not.toHaveBeenCalled();
     expect(result.killed).toEqual([]);
-    expect(result.skipped.length).toBe(cmds.length);
+    // Pinned by exact pid rather than by count — a count cannot tell "all reported" from
+    // "a different one dropped and a different one added".
+    expect(result.skipped.map(p => p.pid)).toEqual(cmds.map((_, i) => 9300 + i));
   });
 
   it('IMAGE CONJUNCT: the legitimate path spellings of a REAL browser still attribute', () => {
@@ -1156,21 +1167,29 @@ describe('process-attribution — the vector shared with mcp-server/process-tree
     '../../../shared/test-fixtures/process-attribution-cases.json',
   );
   const FIXTURE = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')) as {
-    paths: Record<string, { cfg: string; profile: string }>;
+    paths: Record<string, { cfg: string; profile: string; ext: string }>;
     cases: Array<{
       id: string; group: string; form: string; cmd: string;
       expect: 'owned' | 'not-owned'; helper?: boolean; why: string;
     }>;
+    argvSplits: { cases: Array<{ id: string; cmd: string; singleQuotes: boolean; argv: string[]; why?: string }> };
+    daemonEntryCases: { cases: Array<{ id: string; form: string; cmd: string; expect: 'owned' | 'not-owned'; why: string }> };
+    neighbourEnumeration: {
+      images: Record<string, string>; quoteStyles: string[]; valueFlags: string[];
+    };
   };
 
   /** Expand a case's placeholders into its form's concrete paths. */
-  const expandCase = (c: (typeof FIXTURE)['cases'][number]) => {
+  const expandCase = (c: { form: string; cmd: string }) => {
     const paths = FIXTURE.paths[c.form];
+    const sep = c.form === 'win32' ? '\\' : '/';
+    const entry = [paths.ext, 'dist', 'mcp', 'index.mjs'].join(sep);
     const cmd = c.cmd
       .split('{PROFILE_URL}').join(paths.profile.replace(/\\/g, '/'))
       .split('{PROFILE}').join(paths.profile)
+      .split('{ENTRY}').join(entry)
       .split('{CFG}').join(paths.cfg);
-    return { cmd, cfg: paths.cfg };
+    return { cmd, cfg: paths.cfg, ext: paths.ext };
   };
 
   // An extensionPath that appears in NO fixture command line, so ownership criterion (a)
@@ -1187,6 +1206,7 @@ describe('process-attribution — the vector shared with mcp-server/process-tree
       ids.add(c.id);
       expect(['owned', 'not-owned']).toContain(c.expect);
       expect(FIXTURE.paths[c.form], `unknown form on ${c.id}`).toBeDefined();
+      expect(FIXTURE.paths[c.form].ext, `form ${c.form} must carry an install root`).toBeTruthy();
       // Guards the ONE thing a shared vector cannot itself catch: a suite that expands the
       // placeholders differently (or not at all) would silently assert on the wrong strings.
       expect(/\{[A-Z_]+\}/.test(expandCase(c).cmd), `unexpanded placeholder in ${c.id}`).toBe(false);
@@ -1226,6 +1246,135 @@ describe('process-attribution — the vector shared with mcp-server/process-tree
         .filter(pid => pid > 0);
       for (const pid of helperPids) expect(result.killed).toContain(pid);
     }
+  });
+
+  // ── THE ARGV PARSER ──────────────────────────────────────────────────────
+  //
+  // `_splitArgv()` is the primitive both criteria now rest on, so it is pinned directly rather
+  // than only through its consumers. Same committed vector as the server's suite.
+
+  describe('argv split vector — _splitArgv', () => {
+    it('the vector is well-formed', () => {
+      expect(Array.isArray(FIXTURE.argvSplits?.cases)).toBe(true);
+      expect(FIXTURE.argvSplits.cases.length).toBeGreaterThanOrEqual(15);
+      const ids = new Set<string>();
+      for (const c of FIXTURE.argvSplits.cases) {
+        expect(ids.has(c.id), `duplicate argv-split id ${c.id}`).toBe(false);
+        ids.add(c.id);
+        expect(typeof c.singleQuotes).toBe('boolean');
+        expect(Array.isArray(c.argv)).toBe(true);
+      }
+    });
+
+    for (const c of FIXTURE.argvSplits.cases) {
+      it(`splits — ${c.id}`, () => {
+        const got = ((DaemonManager as any)._splitArgv(c.cmd, c.singleQuotes) as Array<{ text: string }>)
+          .map(e => e.text);
+        expect(got, `${c.why ?? ''}\n    ${c.cmd}`).toEqual(c.argv);
+      });
+    }
+
+    it('reports quoting and the preceding separator, which is what the run join depends on', () => {
+      // A run join (an unquoted, space-containing path arriving from `ps -o args=`) is only allowed
+      // across entries carrying NO quoting and separated by exactly one space. Both facts have to
+      // survive the split or the join would either miss real browsers or re-admit nested values.
+      const entries = (DaemonManager as any)._splitArgv('a "b" c\td', true) as
+        Array<{ text: string; quoted: boolean; sep: string }>;
+      expect(entries.map(e => e.text)).toEqual(['a', 'b', 'c', 'd']);
+      expect(entries.map(e => e.quoted)).toEqual([false, true, false, false]);
+      expect(entries.map(e => e.sep)).toEqual(['', ' ', ' ', '\t']);
+    });
+  });
+
+  // ── CRITERION (a) — the bundled-entry criterion, which is OURS alone ──────
+  //
+  // `mcp-server/src/process-tree.js` has no equivalent; its suite asserts the same vector answers
+  // not-owned there, which pins the site difference in a test rather than in a comment.
+
+  describe('bundled-entry vector — criterion (a)', () => {
+    it('the vector is well-formed and covers both the reproduced defect and the real spawn shape', () => {
+      const cases = FIXTURE.daemonEntryCases?.cases;
+      expect(Array.isArray(cases)).toBe(true);
+      expect(cases.length).toBeGreaterThanOrEqual(10);
+      expect(cases.some(c => c.expect === 'owned')).toBe(true);
+      expect(cases.some(c =>
+        c.id === 'entry-quoted-daemon-start-one-argument' && c.expect === 'not-owned')).toBe(true);
+    });
+
+    for (const testCase of FIXTURE.daemonEntryCases.cases) {
+      it(`${testCase.expect} — ${testCase.id}`, () => {
+        const { cmd, cfg, ext } = expandCase(testCase);
+        const dm = new DaemonManager(cfg, ext);
+        const verdict = (dm as any)._isOwnedCommandLine(cmd) ? 'owned' : 'not-owned';
+        expect(verdict, `${testCase.why}\n    ${cmd}`).toBe(testCase.expect);
+      });
+    }
+  });
+
+  // ── THE NEIGHBOUR ENUMERATION ────────────────────────────────────────────
+  //
+  // A COMMITTED, RE-RUNNABLE harness generated from `neighbourEnumeration` in the shared fixture.
+  // It exists because the failure mode of this predicate has never been "the reported case was not
+  // fixed" — it has always been "the neighbour of the reported case was not thought of". Choosing
+  // which neighbours to imagine is exactly the step that failed five times, so the cross-product
+  // is enumerated mechanically instead.
+  //
+  // Run it with: `pnpm -F airtable-formula vitest run -t "NEIGHBOUR ENUMERATION"`.
+  //
+  // This is EVIDENCE FOR THIS IMPLEMENTATION ONLY. The server's suite generates the identical
+  // cross-product and asserts it against its own predicate separately, on purpose: the two files
+  // are line-for-line ports, so their agreeing would prove parity, not correctness.
+
+  describe('NEIGHBOUR ENUMERATION — every value-taking flag x quote style x path spelling', () => {
+    const N = FIXTURE.neighbourEnumeration;
+    const wrap = (style: string, v: string) =>
+      (style === 'bare' ? v : style === 'double' ? `"${v}"` : `'${v}'`);
+    const FORMS = ['posix', 'win32'] as const;
+    const EXT = 'C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.32';
+
+    it('the generator spec is well-formed', () => {
+      expect(N.valueFlags.length).toBeGreaterThanOrEqual(10);
+      expect(N.quoteStyles).toEqual(['bare', 'double', 'single']);
+      for (const form of FORMS) expect(typeof N.images[form]).toBe('string');
+    });
+
+    it('a nested VALUE never satisfies the profile flag', () => {
+      let generated = 0;
+      for (const form of FORMS) {
+        const dm = new DaemonManager(FIXTURE.paths[form].cfg, EXT);
+        const image = N.images[form];
+        const profile = FIXTURE.paths[form].profile;
+        for (const flag of N.valueFlags) {
+          for (const style of N.quoteStyles) {
+            const cmd = `${image} ${flag}=${wrap(style, `--user-data-dir=${profile}`)}`;
+            generated += 1;
+            expect((dm as any)._isOwnedCommandLine(cmd), `a value of ${flag} is not an argv entry\n    ${cmd}`)
+              .toBe(false);
+          }
+        }
+      }
+      expect(generated).toBe(FORMS.length * N.valueFlags.length * N.quoteStyles.length);
+      expect(generated).toBeGreaterThanOrEqual(90);
+    });
+
+    it('the genuine spellings stay owned — the tightening must not overshoot', () => {
+      let generated = 0;
+      for (const form of FORMS) {
+        const dm = new DaemonManager(FIXTURE.paths[form].cfg, EXT);
+        const image = N.images[form];
+        const profile = FIXTURE.paths[form].profile;
+        for (const style of N.quoteStyles) {
+          for (const cmd of [
+            `${image} --user-data-dir=${wrap(style, profile)}`,
+            `${image} ${wrap(style, `--user-data-dir=${profile}`)}`,
+          ]) {
+            generated += 1;
+            expect((dm as any)._isOwnedCommandLine(cmd), `must stay owned\n    ${cmd}`).toBe(true);
+          }
+        }
+      }
+      expect(generated).toBe(FORMS.length * N.quoteStyles.length * 2);
+    });
   });
 });
 
