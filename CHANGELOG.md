@@ -86,12 +86,43 @@ already shipped.
   `@ngrok/ngrok-win32-x64-msvc`) that was never copied — so
   `mcp.httpClient: "impit"` or the ngrok tunnel provider threw "Cannot find
   native binding" the first time either was used from an installed `.vsix`,
-  even though the setting was selectable and looked present. Fixed
-  data-driven rather than with a hardcoded package list:
-  `prepare-package-deps.mjs` now reads each vendored package's own
-  `optionalDependencies` and copies whatever platform binary actually
-  resolved on the build machine, so this closes the whole class of bug for
-  any future napi-based optional dependency too.
+  even though the setting was selectable and looked present. The extension
+  now ships **one VSIX per platform**, each vendoring exactly its own
+  target's binaries — see the next entry.
+- **The extension is now published as platform-specific VSIXes, one per
+  supported desktop target.** Vendoring the build machine's own native
+  binaries fixes the "Cannot find native binding" crash only for users on
+  the same platform as the release runner — CI builds on `ubuntu-latest`, so
+  a single untargeted VSIX would carry Linux-x64 binaries and leave
+  `mcp.httpClient: "impit"` and the ngrok tunnel provider broken on Windows
+  and macOS. The release workflow now builds and publishes eight targeted
+  artifacts (`win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`,
+  `linux-x64`, `linux-arm64`, `alpine-x64`, `alpine-arm64`) to both the VS
+  Code Marketplace and Open VSX; VS Code installs the one matching each
+  user's machine. The matrix lives in one place
+  (`scripts/vsix-targets.mjs`), foreign-platform packages are fetched as
+  plain tarballs and verified against the **version and integrity hash
+  already recorded in `pnpm-lock.yaml`** (so a published VSIX can never carry
+  an impit/ngrok build other than the tested one), and every artifact is
+  checked by `scripts/assert-vsix-binaries.mjs` before it can be published —
+  which asserts both that the target's expected `.node` files are present and
+  that no other platform's are, since a wrong-platform binary fails exactly
+  like a missing one but looks correct on the build machine.
+  - **No untargeted fallback is published.** An untargeted VSIX is only ever
+    correct on the machine that built it, so shipping one as a catch-all
+    would reintroduce the original bug for everyone else.
+  - **`linux-armhf` (32-bit ARM) is deliberately not published.** `impit`
+    publishes no `arm-gnueabihf` binary, so an armhf build would advertise
+    the `impit` HTTP client in its settings UI and then fail the moment it
+    was selected. VS Code reporting the extension as unavailable on armhf is
+    the honest outcome; the target can be added the day impit ships that
+    artifact.
+  - The standalone npm package `airtable-user-mcp` is **unchanged and stays
+    universal** — npm resolves the correct optional dependency on the user's
+    own machine at install time, so it needs no per-platform publishing.
+  - Local packaging (`pnpm packx`) now also produces a targeted VSIX for the
+    host platform rather than an untargeted one, so what a developer
+    sideloads has the same shape as what users receive.
 - **Logging out now actually stops the daemon serving your session.** The Command-Palette "Airtable: Log out" cleared the OS keychain and tried to delete the browser profile, but never told the running daemon — which keeps the live browser session (browser mode) or the injected cookie/credentials (byo / direct-login) in memory — so tool calls kept working after the user believed they had logged out. Only the dashboard's logout button did part of this. Both entry points now run one path that also releases the daemon's browser and restarts it to drop in-memory credentials. Releasing the browser first also frees the profile directory, so the profile wipe no longer silently fails on Windows. If the daemon cannot be confirmed stopped — it can be alive but slow enough to miss its health probe — logout escalates to a daemon restart/force-stop, and when even that fails it now says so instead of reporting success. The profile wipe is retried after that restart (a profile the daemon's Chromium had locked can only be removed once it is gone), and a profile still on disk is never reported as a cleared session: it holds live Airtable cookies, and the next daemon would authenticate straight from it.
 - **`npx airtable-user-mcp logout` (standalone CLI) got the same treatment**: it stops a running daemon before wiping the profile, and a wipe that genuinely fails is reported as a failure ("Could not clear the browser session at …") instead of the previous, exactly-backwards "No session to clear."
 - **A dead session can be recovered without restarting the daemon.** After repeated rejected requests the server latches a dead-session circuit-breaker that fails every subsequent call fast. In browser mode nothing cleared it: re-logging in from the dashboard left the daemon in the same state, and only a daemon restart helped. It is now cleared whenever a freshly verified session is established — including the browser release the dashboard performs right before an interactive login — while still latching on failures that persist across the server's own internal recovery attempts.

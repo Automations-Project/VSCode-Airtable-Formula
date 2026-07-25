@@ -298,7 +298,26 @@ pnpm test             # run all unit tests
 pnpm dev              # start webview dev server (browser preview)
 ```
 
-**How the MCP server is bundled:** `scripts/bundle-mcp.mjs` esbuilds `packages/mcp-server/src/` into `packages/extension/dist/mcp/`. Then `scripts/prepare-package-deps.mjs` vendors `patchright`, `patchright-core`, and `otpauth` into `dist/node_modules/` before `vsce package` runs. The VSIX is fully self-contained.
+**How the MCP server is bundled:** `scripts/bundle-mcp.mjs` esbuilds `packages/mcp-server/src/` into `packages/extension/dist/mcp/`. Then `scripts/prepare-package-deps.mjs` vendors `patchright`, `patchright-core`, `otpauth`, `impit` and `@ngrok/ngrok` into `dist/node_modules/` before `vsce package` runs, so an installed extension needs no `npm install` at runtime.
+
+**Platform-specific VSIXes.** `impit` (the Chrome-TLS HTTP client) and `@ngrok/ngrok` (the ngrok tunnel provider) keep their compiled native binary in separate per-platform npm packages, and only the one matching the build machine is ever installed. A single VSIX therefore *cannot* carry working native binaries for every platform. Instead we publish **one VSIX per platform**, each vendoring only its own binaries — VS Code and Open VSX hand each user the build matching their machine. Supported targets:
+
+| Target | `impit` | `@ngrok/ngrok` |
+| --- | --- | --- |
+| `win32-x64` | `impit-win32-x64-msvc` | `@ngrok/ngrok-win32-x64-msvc` |
+| `win32-arm64` | `impit-win32-arm64-msvc` | `@ngrok/ngrok-win32-arm64-msvc` |
+| `darwin-x64` | `impit-darwin-x64` | `@ngrok/ngrok-darwin-x64` |
+| `darwin-arm64` | `impit-darwin-arm64` | `@ngrok/ngrok-darwin-arm64` |
+| `linux-x64` | `impit-linux-x64-gnu` | `@ngrok/ngrok-linux-x64-gnu` |
+| `linux-arm64` | `impit-linux-arm64-gnu` | `@ngrok/ngrok-linux-arm64-gnu` |
+| `alpine-x64` | `impit-linux-x64-musl` | `@ngrok/ngrok-linux-x64-musl` |
+| `alpine-arm64` | `impit-linux-arm64-musl` | `@ngrok/ngrok-linux-arm64-musl` |
+
+`linux-armhf` (32-bit ARM) is **not published**: `impit` ships no `arm-gnueabihf` build, so an armhf VSIX would advertise `airtableFormula.mcp.httpClient: "impit"` and then fail with "Cannot find native binding". No untargeted fallback is published either, for the same reason.
+
+The matrix is defined once in [`scripts/vsix-targets.mjs`](scripts/vsix-targets.mjs); versions and tarball hashes are pinned to `pnpm-lock.yaml`. `scripts/package-targets.mjs` builds every target and `scripts/assert-vsix-binaries.mjs` verifies each artifact contains exactly its own platform's `.node` files and no other's.
+
+The standalone npm package [`airtable-user-mcp`](https://www.npmjs.com/package/airtable-user-mcp) is unaffected and stays **universal** — npm resolves the right optional dependency on your own machine at install time.
 
 ---
 

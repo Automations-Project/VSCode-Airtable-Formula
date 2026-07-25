@@ -15,8 +15,10 @@ pnpm dev                  # webview dev server (Vite, browser preview)
 pnpm test                 # tool-sync check + shared + mcp-server + webview + extension tests
 pnpm check:tool-sync      # verify mcp-server ↔ extension tool-category mirror is in sync
 pnpm package              # create .vsix (build must be run first)
-pnpm packx                # full build + version bump + package .vsix
-pnpm packx:no-bump        # full build + package .vsix without version bump
+pnpm packx                # full build + version bump + package host-target .vsix
+pnpm packx:no-bump        # full build + package host-target .vsix without version bump
+pnpm package:targets      # package + verify ALL 8 platform-specific .vsix (release rehearsal)
+pnpm assert:vsix          # verify the .node binaries inside artifacts/*.vsix
 ```
 
 ### Per-package
@@ -162,8 +164,19 @@ Build order matters (drift check first, then shared → webview → MCP → exte
 2. `tsup` builds shared types to ESM
 3. `vite build` compiles React webview into `packages/extension/dist/webview/`
 4. `scripts/bundle-mcp.mjs` uses esbuild to bundle the MCP server (from `packages/mcp-server/src/`) into `packages/extension/dist/mcp/{index,login-runner,health-check,manual-login-runner}.mjs`. Patchright and otpauth are kept external and vendored separately. It also emits `dist/mcp/version.json` containing the bundled server version, package name, build timestamp, and git SHA — the extension dashboard reads this at runtime to display the active MCP server version.
-5. `scripts/prepare-package-deps.mjs` copies `patchright`, `patchright-core`, and `otpauth` from the workspace's hoisted `node_modules/` into `packages/extension/dist/node_modules/` using `dereference: true` to follow pnpm symlinks (invoked during `package:vsix`).
+5. `scripts/prepare-package-deps.mjs` copies `patchright`, `patchright-core`, `otpauth`, `impit` and `@ngrok/ngrok` from the workspace's hoisted `node_modules/` into `packages/extension/dist/node_modules/` using `dereference: true` to follow pnpm symlinks (invoked during `package:vsix`). **It is per-target**: `--target=<vsce target>` (default = host) selects which `impit-*` / `@ngrok/ngrok-*` native package is vendored, so it must be re-run before each `vsce package --target`.
 6. `tsup` builds extension to CJS, then copies `src/vendor/` to `dist/vendor/`
+
+### Platform-specific VSIX packaging
+
+`impit` and `@ngrok/ngrok` keep their compiled `.node` binary in **separate per-platform npm packages** (their own `optionalDependencies`), and only the build host's variant is ever installed — so one untargeted VSIX cannot work everywhere. The extension is therefore published as **one VSIX per target**.
+
+- `scripts/vsix-targets.mjs` — **single source of truth**: 8 targets (`win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`, `alpine-x64`, `alpine-arm64`) → their exact platform packages, plus expected `os`/`cpu`/`libc`. Versions are **never hardcoded**; they are read from `pnpm-lock.yaml` together with the integrity hash. `linux-armhf` is an explicit, documented exclusion (`EXCLUDED_TARGETS`) — impit ships no 32-bit-ARM build. Adding a target = adding one row here.
+- `scripts/vendor-platform-packages.mjs` — fetches a foreign target's platform packages as plain npm tarballs, verifies SHA-512 against `pnpm-lock.yaml`, unpacks into `.cache/vsix-platform-packages/`. The host's own packages are reused from `node_modules` when the version matches. No native runners, no `supportedArchitectures`.
+- `scripts/package-targets.mjs` — `pnpm package:targets`. Per target: vendor → `vsce package --target` → assert. Aborts on the first failure. `--targets=host` builds only this machine's (what `pnpm packx` and `pnpm package` do).
+- `scripts/assert-vsix-binaries.mjs` — `pnpm assert:vsix`. Reads the `.vsix` zip directly and asserts the target's expected `.node` files are **present** at the lockfile-pinned version **and** that no other platform's are. Also rejects an untargeted VSIX and a `--dir` set missing any target.
+
+**No untargeted VSIX may be published** — it is only ever correct on the machine that built it. The standalone npm package `airtable-user-mcp` stays **universal** and must not gain per-platform publishing; npm resolves the right optional dependency on the user's machine.
 
 **DaemonManager integration:** The extension's `src/mcp/daemon-manager.ts` reads `~/.airtable-user-mcp/daemon.lock` at startup and on file-watch events to check daemon health and expose `port` and `bearerToken` to `src/mcp/registration.ts` for direct HTTP transport.
 
@@ -177,8 +190,8 @@ Single unified workflow (`release.yml`) triggered manually via GitHub Actions UI
 2. **Choose:** `target` (extension / mcp-server / both), `bump` (patch / minor / major), `dry_run`
 3. **Workflow:** computes next version → builds → tests → publishes → commits bump → tags → creates GitHub Release
 
-- **Extension** publishes to VS Code Marketplace + Open VSX
-- **MCP server** publishes to npm with provenance
+- **Extension** publishes to VS Code Marketplace + Open VSX — **8 platform-specific VSIXes, no untargeted fallback** (see "Platform-specific VSIX packaging" above). Every artifact must pass `assert-vsix-binaries.mjs` before any publish step runs.
+- **MCP server** publishes to npm with provenance — **universal, single artifact** (not per-platform)
 - Version numbers are independent. The extension bundles whatever MCP server version was in `packages/mcp-server/` at build time.
 - Version bump is only committed **after** successful publish — no stale tags.
 
