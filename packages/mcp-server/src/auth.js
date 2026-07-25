@@ -234,7 +234,7 @@ export class AirtableAuth {
     const inner = this._doInitInner;
     let timer;
     try {
-      return await Promise.race([
+      const settled = await Promise.race([
         inner,
         new Promise((_, reject) => {
           timer = setTimeout(() => {
@@ -242,6 +242,19 @@ export class AirtableAuth {
           }, ms);
         }),
       ]);
+      // A completed _doInit means the session was FRESHLY verified (browser mode
+      // ends in _verifySession; byo/direct-login end in their own live check), so
+      // a dead-session breaker latched by the previous session is stale — clear it.
+      // Without this, a browser-mode user who re-authenticates (dashboard "Log in" →
+      // /daemon/release-browser → close() → this re-init) keeps hitting the
+      // _apiCall short-circuit until the daemon is restarted.
+      //
+      // GUARDED on _recovering: an init driven by the INTERNAL recovery loop
+      // (_recoverSession) must NOT reset, or the breaker could never latch — its
+      // whole job is to count failures that persist ACROSS successful recoveries
+      // (the observed "403/401 → recover → same failure" storm).
+      if (!this._recovering) this.resetSessionHealth();
+      return settled;
     } finally {
       clearTimeout(timer);
     }
@@ -1121,6 +1134,13 @@ export class AirtableAuth {
       this._networkHandler = null;
       this.isLoggedIn = false;
       this._credentials = null;
+      // A full teardown ENDS the recovery loop the breaker exists to bound, so a
+      // latched breaker must not survive it. close() is the daemon's
+      // /daemon/release-browser path (run right before an interactive re-login) —
+      // leaving _sessionDead latched here is what forced a daemon restart to
+      // recover. Idle-park deliberately does NOT go through close(), so a parked
+      // (still logged-in) session keeps its breaker state.
+      this.resetSessionHealth();
       // Hard-kill orphan chrome.exe left after context.close() (esp. Windows).
       // Barrier serializes against init so we cannot kill a concurrent relaunch.
       await this._killBrowserTree(this.profileDir).catch(() => {});

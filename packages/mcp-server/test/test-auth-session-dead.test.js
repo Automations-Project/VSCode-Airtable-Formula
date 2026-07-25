@@ -52,3 +52,66 @@ describe('AirtableAuth — throttle backoff vs. recovery', () => {
     assert.equal(a._recoveryStreak, 0);
   });
 });
+
+// A latched breaker used to be unrecoverable in browser mode: _apiCall short-circuits on
+// _sessionDead, and the only production resetSessionHealth() callers were the daemon's
+// byo/direct-login credential endpoint and the sync records engine. A browser-mode user had
+// to restart the daemon. Re-authentication must clear it — while STILL letting the breaker
+// latch on failures that persist across the internal recovery loop.
+describe('AirtableAuth — dead-session breaker resets on re-authentication', () => {
+  function closable() {
+    const a = fakeAuth();
+    a.context = { close: async () => {} };
+    a._killBrowserTree = async () => {};
+    return a;
+  }
+
+  it('short-circuits every call once latched (pre-condition)', async () => {
+    const a = closable();
+    a._rawApiCall = async () => ({ status: 403, body: '' });
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), /SESSION_INVALID/);
+    assert.equal(a.isSessionDead(), true);
+
+    let attempts = 0;
+    a._rawApiCall = async () => { attempts++; return { status: 200, body: '{}' }; };
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), /SESSION_INVALID/);
+    assert.equal(attempts, 0, 'a latched breaker must not even attempt the request');
+  });
+
+  it('close() (the /daemon/release-browser + re-login path) clears it and the next call is ATTEMPTED', async () => {
+    const a = closable();
+    a._rawApiCall = async () => ({ status: 403, body: '' });
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), /SESSION_INVALID/);
+    assert.equal(a.isSessionDead(), true);
+
+    // The extension releases the daemon's browser before an interactive login.
+    await a.close();
+    assert.equal(a.isSessionDead(), false, 'a full teardown must not carry the breaker forward');
+
+    let attempts = 0;
+    a._rawApiCall = async () => { attempts++; return { status: 200, body: '{}' }; };
+    const res = await a.get('/v0.3/x', 'app1');
+    assert.equal(res.status, 200);
+    assert.equal(attempts, 1, 'the re-authenticated session must actually issue the request');
+    assert.ok(a._doInitCalls >= 1, 're-init ran after the teardown');
+  });
+
+  it('a successful EXTERNAL init clears a stale breaker', async () => {
+    const a = closable();
+    a._sessionDead = true; a._recoveryStreak = 9; a._lastTripStatus = 403;
+    a.context = null; a.isLoggedIn = false;
+    await a.init();
+    assert.equal(a.isSessionDead(), false);
+    assert.equal(a._recoveryStreak, 0);
+    assert.equal(a.getLastTrip(), null);
+  });
+
+  it('an init driven by the INTERNAL recovery loop does NOT clear it (breaker can still latch)', async () => {
+    const a = closable();
+    a._sessionDead = true; a._recoveryStreak = 9;
+    a._recovering = true;                 // exactly what _recoverSession sets
+    await a._doInitBounded();
+    assert.equal(a.isSessionDead(), true, 'recovery-driven re-init must not defuse the breaker');
+    assert.equal(a._recoveryStreak, 9);
+  });
+});
