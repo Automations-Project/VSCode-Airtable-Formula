@@ -159,6 +159,35 @@ describe('AuthManager.logout drops the daemon session as well as the keychain', 
     expect(shownErrors.join(' ')).toMatch(/force-stopped/i);
   });
 
+  // Regression guard for `daemonSessionDropped: (release.released || dropped) &&
+  // profileWiped` → `(release.released && dropped) && profileWiped`. In byo/
+  // direct-login, release-browser can report success trivially (there is no live
+  // browser session to release), so `release.released` alone must never stand in
+  // for a genuinely failed credential drop. With the old `||`, this exact
+  // scenario reported `daemonSessionDropped: true` even though neither the
+  // restart nor the force-stop actually dropped the daemon's in-memory session —
+  // reverting the operator to `||` makes both assertions below fail.
+  it('byo mode: release succeeds but the credential drop fails — must NOT report success', async () => {
+    authMode = 'byo';
+    const { am } = makeAuthManager({ restartThrows: true, forceStopThrows: true });
+    const result = await am.logout();
+
+    expect(hits).toContain('POST /daemon/release-browser'); // release.released === true
+    expect(restarts).toBe(1);
+    expect(forceStops).toBe(1);
+    expect(result.daemonSessionDropped).toBe(false);
+    expect(shownErrors.join(' ')).toMatch(/may still hold your session/i);
+  });
+
+  it('direct-login mode: release succeeds but the credential drop fails — must NOT report success', async () => {
+    authMode = 'direct-login';
+    const { am } = makeAuthManager({ restartThrows: true, forceStopThrows: true });
+    const result = await am.logout();
+
+    expect(hits).toContain('POST /daemon/release-browser');
+    expect(result.daemonSessionDropped).toBe(false);
+  });
+
   it('no daemon running: logout still clears the keychain and never throws', async () => {
     const { am, secrets } = makeAuthManager({ running: false, healthy: false });
     await expect(am.logout()).resolves.toEqual({ daemonSessionDropped: true });

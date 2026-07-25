@@ -306,9 +306,27 @@ export class AuthManager implements vscode.Disposable {
     if (!profileWiped) profileWiped = await this._wipeBrowserProfile();
 
     this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
+
+    // `release.released` is meaningful evidence ONLY in browser mode: the
+    // /daemon/release-browser handler calls `auth.close()` unconditionally and
+    // reports 2xx whenever the request round-trips, but in byo/direct-login
+    // there is no browser session for it to release — auth.close() there is a
+    // near no-op and never touches the daemon's in-memory credential store.
+    // So `release.released === true` there confirms nothing about whether the
+    // credentials were actually dropped; only `dropped` (which byo/direct-login
+    // ALWAYS drives through a real restart/force-stop, see dropDaemonCredentials)
+    // does. Treating a vacuous release as sufficient — as a plain `release.released
+    // || dropped` would — let a failed restart-plus-force-stop still report a
+    // successful logout. Browser mode is unaffected: there, `release.released`
+    // is a real confirmation the live session is gone, so it keeps standing on
+    // its own exactly as before (including the escalation-succeeds-without-a-
+    // confirmed-release case: a forced restart there also drops a real session).
+    const authMode = getSettings().mcp.authMode;
+    const releaseIsMeaningful = authMode !== 'byo' && authMode !== 'direct-login';
+    const daemonConfirmed = (releaseIsMeaningful && release.released) || dropped;
     // An un-wiped profile is a live session on disk, so it can never count as
     // dropped no matter how cleanly the daemon side went.
-    return { daemonSessionDropped: (release.released || dropped) && profileWiped };
+    return { daemonSessionDropped: daemonConfirmed && profileWiped };
   }
 
   /** Remove the persistent Chrome profile. Returns false if it is still on disk. */
