@@ -105,6 +105,71 @@ describe('auth._rawApiCall → HttpTransport', () => {
     assert.deepEqual(sent, ['a', 'b']);
   });
 
+  it('json POST: a Date body is sent through UNCHANGED (not reduced to {"_csrf":...})', async () => {
+    // Date has no own enumerable properties, so {...new Date(), _csrf} used to
+    // silently discard the entire date, shipping only {"_csrf":"..."} on the
+    // wire. The real body must be JSON.stringify'd untouched — i.e. the ISO
+    // string JSON.stringify(Date) naturally produces via Date#toJSON, with no
+    // _csrf key smuggled in (a Date can never even hold a sibling key: its
+    // wire form is a JSON string primitive, not an object).
+    transport.next = { status: 200, body: '{}' };
+    const date = new Date('2024-01-01T00:00:00.000Z');
+    await auth._rawApiCall('POST', '/v0.3/some/endpoint', date, 'appABC123', 'json');
+    assert.equal(transport.calls[0].body, JSON.stringify(date));
+    assert.equal(transport.calls[0].body, '"2024-01-01T00:00:00.000Z"');
+  });
+
+  it('json POST: a Map body is sent through UNCHANGED, not coerced into {"_csrf":...}', async () => {
+    // Map has no own enumerable properties either, so the old spread-based
+    // check (which called Map "plain") produced {"_csrf":"..."} on the wire —
+    // a bogus object where the caller sent a Map. The fix must leave it as
+    // plain JSON.stringify(map) (== "{}", same as stringifying it always did)
+    // with no _csrf key added.
+    transport.next = { status: 200, body: '{}' };
+    const map = new Map([['a', 1]]);
+    await auth._rawApiCall('POST', '/v0.3/some/endpoint', map, 'appABC123', 'json');
+    assert.equal(transport.calls[0].body, JSON.stringify(map));
+    assert.equal(transport.calls[0].body, '{}');
+  });
+
+  it('json POST: a Set body is sent through UNCHANGED, not coerced into {"_csrf":...}', async () => {
+    transport.next = { status: 200, body: '{}' };
+    const set = new Set(['a', 'b']);
+    await auth._rawApiCall('POST', '/v0.3/some/endpoint', set, 'appABC123', 'json');
+    assert.equal(transport.calls[0].body, JSON.stringify(set));
+    assert.equal(transport.calls[0].body, '{}');
+  });
+
+  it('json POST: a class instance is sent through UNCHANGED, without a _csrf key added', async () => {
+    // A class instance's own enumerable data properties DO survive a spread
+    // (methods live on the prototype either way), so the visible corruption
+    // here is the smuggled _csrf key riding along on an object the caller
+    // never asked to have one added to — and, for classes with a custom
+    // toJSON (like Date), the spread bypasses toJSON entirely. Assert the
+    // wire body is byte-identical to plain JSON.stringify(instance): same
+    // own properties, no _csrf.
+    class Widget {
+      constructor() { this.id = 'w1'; this.count = 2; }
+    }
+    transport.next = { status: 200, body: '{}' };
+    const instance = new Widget();
+    await auth._rawApiCall('POST', '/v0.3/some/endpoint', instance, 'appABC123', 'json');
+    assert.equal(transport.calls[0].body, JSON.stringify(instance));
+    assert.equal(transport.calls[0].body, '{"id":"w1","count":2}');
+  });
+
+  it('json POST: an Object.create(null) bag IS treated as plain and receives _csrf', async () => {
+    // Object.create(null) has prototype `null` — a legitimate plain-data bag
+    // (no Object.prototype methods, but no exotic type either) and must still
+    // get the same _csrf injection an object literal gets.
+    transport.next = { status: 200, body: '{}' };
+    const bag = Object.create(null);
+    bag.name = 'Foo Bar';
+    await auth._rawApiCall('POST', '/v0.3/some/endpoint', bag, 'appABC123', 'json');
+    const sent = JSON.parse(transport.calls[0].body);
+    assert.deepEqual(sent, { name: 'Foo Bar', _csrf: 'CSRF-XYZ' });
+  });
+
   it('builds an absolute URL only for path inputs, leaving full URLs intact', async () => {
     transport.next = { status: 200, body: '{}' };
     await auth._rawApiCall('GET', 'https://airtable.com/v0.3/already/full');

@@ -17,6 +17,30 @@ function genPageLoadId() {
   return 'pgl' + BigInt('0x' + hex).toString(36).slice(0, 13).padStart(13, '0');
 }
 
+/**
+ * True only for object literals (`{...}`) and `Object.create(null)` bags —
+ * the shapes safe to spread `_csrf` into without silently destroying data.
+ * False for `null`/`undefined`, arrays, and any object whose prototype isn't
+ * exactly `Object.prototype` or `null` — this excludes `Date`, `Map`, `Set`,
+ * `RegExp`, `URL`, `Buffer`, and instances of any class. Spreading one of
+ * those (`{...new Date(), _csrf}`) silently discards every bit of the
+ * original value, shipping a near-empty body with no error.
+ *
+ * Prototype identity, not duck-typing, is deliberate: it's the only check
+ * that reliably excludes class instances (a `[object Object]` toString-tag
+ * check would NOT — a plain class instance reports the same generic tag as
+ * a literal). Cross-realm objects (a literal built in another vm context or
+ * iframe, whose `Object.prototype` is a distinct object) would therefore
+ * misreport as non-plain here; that's accepted, not overlooked — this
+ * server's request bodies are always constructed in-process, same Node
+ * realm, with no vm sandbox or cross-frame boundary in play.
+ */
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let _chromium = null;
@@ -809,11 +833,14 @@ export class AirtableAuth {
         // csrfToken in that window. Overwriting unconditionally means no JSON
         // caller — now or in the future — can ship a token staler than "current
         // at send time", the same guarantee form POSTs already have.
-        // Only spread plain objects — an array/string/number body (no current
-        // caller does this, but nothing stops a future one) would otherwise be
-        // silently coerced into `{"0":...,"_csrf":...}` by the spread.
-        const isPlainObject = body && typeof body === 'object' && !Array.isArray(body);
-        requestBody = JSON.stringify(isPlainObject && csrfToken ? { ...body, _csrf: csrfToken } : body);
+        // Only spread genuine plain objects (object literals / Object.create(null)
+        // bags) into the _csrf injection. Arrays, and non-plain objects like
+        // Date/Map/Set/RegExp/URL/Buffer/class instances, are passed through
+        // UNCHANGED instead — spreading any of those (`{...new Date(), _csrf}`)
+        // silently discards the original value, shipping a near-empty body
+        // with no error. See isPlainObject() above for exactly what counts.
+        const bodyIsPlainObject = isPlainObject(body);
+        requestBody = JSON.stringify(bodyIsPlainObject && csrfToken ? { ...body, _csrf: csrfToken } : body);
       }
     } else {
       headers = {
