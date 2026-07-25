@@ -137,6 +137,9 @@ importers:
       patchright:
         specifier: ^1.58.2
         version: 1.59.4
+      undici:
+        specifier: ^7.0.0
+        version: 7.24.5
 
   packages/shared:
     devDependencies:

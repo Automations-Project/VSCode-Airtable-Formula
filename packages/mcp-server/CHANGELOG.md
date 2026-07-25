@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-25 corporate proxy / TLS)
+
+- **The dead-session circuit-breaker resets on re-authentication.** Once `_sessionDead` latched, `_apiCall` short-circuited every request, and the only production `resetSessionHealth()` callers were the daemon's byo/direct-login credential endpoint and the sync records engine — so a browser-mode session stayed dead until the process restarted. It is now cleared by `close()` (the `/daemon/release-browser` teardown the extension runs before an interactive login) and by any completed initialization that is not driven by the internal `_recoverSession()` loop, so the breaker still latches on failures that persist across recoveries.
+- **`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` are now honoured** by the direct-HTTP transport (`src/http-transport.js` + new `src/proxy.js`). Node's global `fetch` ignores them by design (Node ≥24 needs an explicit `NODE_USE_ENV_PROXY=1`; this package targets Node ≥22), so on a proxy-only network every API call failed while the browser login — which uses the OS proxy — still succeeded, and the auth layer reported the result as `SESSION_INVALID`. undici's `EnvHttpProxyAgent` is now attached as the fetch dispatcher whenever those variables are set, with `NO_PROXY` bypass matching handled by the agent itself. `undici` is an **optionalDependency**, lazy-loaded like `patchright`/`otpauth`/`impit`: if it is missing, the transport logs one actionable warning and behaves exactly as before. Browser-free login (`AIRTABLE_AUTH_MODE=direct-login`) uses the same dispatcher.
+- **Network errors are diagnosable.** undici reports every network/TLS failure as `fetch failed` with the real reason buried in `err.cause`; the cause chain is now unwrapped into the returned error, and certificate failures ("TLS certificate rejected …") name `NODE_EXTRA_CA_CERTS` while an unreachable network with no proxy configured names `HTTPS_PROXY`.
+
+#### Known limitations (tracked and accepted)
+
+- **TLS interception needs `NODE_EXTRA_CA_CERTS`.** Node uses its own bundled CA list, not the OS trust store, so a proxy that re-signs HTTPS with a private root is rejected even when routing works. **Workaround:** `NODE_EXTRA_CA_CERTS=/path/to/corp-root.pem` in the environment that starts the server (the VS Code extension spawns the daemon with the full inherited environment, so setting it before launching VS Code is enough). Not fixed in code: Node exposes no supported OS-trust-store API.
+- **`AIRTABLE_HTTP_CLIENT=impit` ignores the proxy environment.** impit takes an explicit `proxyUrl` and has no `NO_PROXY` support, so a partial implementation would be misleading. **Workaround:** use the default `fetch` client behind a proxy.
+- **`ALL_PROXY` is not honoured** (undici's env contract does not include it). Setting it alone logs a warning pointing at `HTTPS_PROXY`.
+
 ### Fixed (2026-07-09 field-ref & upload bug report)
 
 - **`download_base_formulas` / `download_formula_field` now emit real field names.** Airtable's internal API stores formulas with opaque `{column_value_fldXXX}` refs; downloads previously wrote them verbatim, producing unreadable files that Airtable rejected on re-upload ("Unknown field names: column_value_…"). Field refs are now resolved to `{Field Name}` (Airtable's native syntax) via a base-wide id→name map (`src/formula-refs.js`); an unknown id — or a name that cannot round-trip (contains braces, or is itself shaped like a ref token, e.g. a field literally named `fldXXX…`) — falls back to the `{fldXXX}` id form, which the write API accepts. Non-field placeholder tokens (e.g. n8n's `{ACCOUNT_TITLE_PLACEHOLDER}`) never match the fld-id pattern and pass through verbatim.

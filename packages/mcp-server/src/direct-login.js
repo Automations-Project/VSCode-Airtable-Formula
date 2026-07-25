@@ -34,6 +34,7 @@ import path from 'node:path';
 import { getHomeDir } from './paths.js';
 import { scrapeCsrf } from './byo-credentials.js';
 import { getInjectedCredentials } from './daemon/cred-store.js';
+import { getProxyDispatcher } from './proxy.js';
 
 const BASE = 'https://airtable.com';
 
@@ -94,7 +95,17 @@ async function makeHttpClient(impitFactory) {
     return new Impit({ browser: 'chrome', followRedirects: false });
   }
   // Node fetch client — redirect:'manual' so a 302 is returned, not followed.
-  return { fetch: (url, options) => fetch(url, { ...options, redirect: 'manual' }) };
+  // Node's fetch ignores HTTP_PROXY/HTTPS_PROXY; attach the proxy dispatcher so
+  // browser-free login works on a network that only reaches the internet through
+  // a proxy (null when none is configured → unchanged behaviour).
+  const dispatcher = await getProxyDispatcher();
+  return {
+    fetch: (url, options) => fetch(url, {
+      ...options,
+      redirect: 'manual',
+      ...(dispatcher ? { dispatcher } : {}),
+    }),
+  };
 }
 
 async function generateTotp(secret, otpFactory) {

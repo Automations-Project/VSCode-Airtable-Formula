@@ -20,7 +20,15 @@
  *                        AIRTABLE_HTTP_CLIENT=impit. impit is an OPTIONAL
  *                        dependency, lazy-loaded like patchright/otpauth; if it
  *                        is not installed we throw a clear, actionable error.
+ *
+ * Proxies: Node's fetch ignores HTTP_PROXY/HTTPS_PROXY, so the fetch client
+ * attaches undici's EnvHttpProxyAgent when those are set (see src/proxy.js).
+ * The impit client does NOT — impit takes an explicit `proxyUrl` and defaults
+ * to no proxy, and it has no NO_PROXY support to honour — so behind a proxy use
+ * the default fetch client (documented as a known limitation in CHANGELOG.md).
  */
+
+import { getProxyDispatcher, describeFetchError } from './proxy.js';
 
 let _ImpitClass = null;
 async function loadImpit() {
@@ -46,13 +54,25 @@ export class HttpTransport {
    * @param {'fetch'|'impit'} [opts.client='fetch'] transport backend
    * @param {Function}        [opts.fetchImpl]      test seam — overrides global fetch
    * @param {Function}        [opts.impitFactory]   test seam — async () => ({ fetch })
+   * @param {object}          [opts.env]            test seam — env read for proxy config
+   * @param {Function}        [opts.proxyAgentFactory] test seam — async () => dispatcher
    */
-  constructor({ client = 'fetch', fetchImpl, impitFactory } = {}) {
+  constructor({ client = 'fetch', fetchImpl, impitFactory, env, proxyAgentFactory } = {}) {
     // Only 'impit' opts into the fallback; anything else (undefined, '', a typo)
     // falls back to plain fetch.
     this.client = client === 'impit' ? 'impit' : 'fetch';
     this._fetchImpl = fetchImpl || null;
     this._impitFactory = impitFactory || null;
+    this._env = env || null;
+    this._proxyAgentFactory = proxyAgentFactory || null;
+  }
+
+  /** Proxy dispatcher for this call, or null when no proxy is configured. */
+  async _dispatcher() {
+    return getProxyDispatcher({
+      ...(this._env ? { env: this._env } : {}),
+      ...(this._proxyAgentFactory ? { agentFactory: this._proxyAgentFactory } : {}),
+    });
   }
 
   /**
@@ -69,11 +89,17 @@ export class HttpTransport {
     if (body !== null && body !== undefined && method !== 'GET') {
       options.body = body;
     }
+    // Node's built-in fetch accepts an undici dispatcher and shares the same
+    // dispatcher contract as the npm copy (verified against a CONNECT proxy).
+    const dispatcher = await this._dispatcher();
+    if (dispatcher) options.dispatcher = dispatcher;
     try {
       const res = await fetchFn(url, options);
       return { status: res.status, body: await res.text() };
     } catch (e) {
-      return { status: 0, body: '', error: e.message };
+      // "fetch failed" alone is undiagnosable: the real reason (certificate
+      // rejected, proxy unreachable, DNS) lives in e.cause.
+      return { status: 0, body: '', error: describeFetchError(e, this._env ? { env: this._env } : {}) };
     }
   }
 
