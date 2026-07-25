@@ -234,13 +234,12 @@ export class AuthManager implements vscode.Disposable {
     this._updateState({ hasCredentials: true });
   }
 
-  async clearCredentials(): Promise<void> {
-    await this.secrets.delete(SECRET_EMAIL);
-    await this.secrets.delete(SECRET_PASSWORD);
-    await this.secrets.delete(SECRET_OTP_SECRET);
-    await this.secrets.delete(SECRET_COOKIE);
-    this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
-  }
+  // NOTE: a `clearCredentials()` helper used to live here — it deleted the same
+  // four secrets as logout() but never dropped the daemon's copy, and it had zero
+  // call sites. It was removed rather than repaired: a second, subtly weaker
+  // credential-clearing entry point is exactly how the daemon kept serving a
+  // "logged out" session. Use `logout()` (clears secrets AND the daemon session)
+  // or `clearCookie()` (which pairs with dropDaemonCredentials at its call site).
 
   /**
    * THE logout path. Every entry point (Command Palette `airtable-formula.logout`
@@ -256,8 +255,17 @@ export class AuthManager implements vscode.Disposable {
    *      so the directory removal below can actually succeed on Windows,
    *   4. the on-disk Chrome profile,
    *   5. the daemon's in-memory byo/direct-login credentials (daemon restart).
+   *
+   * Step 3 can fail while the daemon is very much alive (its `healthy` flag comes
+   * from a 2 s probe). That must NOT read as a successful logout, so an
+   * unconfirmed release escalates to a daemon restart/force-stop — which drops the
+   * session either way, since daemon shutdown runs `auth.close()` — and the
+   * outcome is returned so the caller can tell the user the truth.
+   *
+   * @returns `daemonSessionDropped:false` when the daemon may still be serving the
+   *          session the user just logged out of.
    */
-  async logout(): Promise<void> {
+  async logout(): Promise<{ daemonSessionDropped: boolean }> {
     // Stop the refresh timer first so it can't race against the profile wipe
     // and immediately re-launch the browser with stale (now-deleted) state.
     this.stopAutoRefresh();
@@ -271,7 +279,10 @@ export class AuthManager implements vscode.Disposable {
     // memory, profile dir held open). Releasing it drops that session and frees
     // the profile lock — without this, `fs.rm` below fails on Windows and the
     // daemon happily keeps answering tool calls with the "logged out" session.
-    await this._releaseDaemonBrowser();
+    const release = await this._releaseDaemonBrowser();
+    if (!release.released) {
+      console.warn(`[AuthManager] daemon browser release not confirmed (${release.reason}) — escalating to a daemon restart`);
+    }
 
     const fs = await import('fs/promises');
     try {
@@ -282,10 +293,13 @@ export class AuthManager implements vscode.Disposable {
     }
 
     // byo / direct-login creds live in the daemon's memory (cred-store), not on
-    // disk — only a restart drops them.
-    await this.dropDaemonCredentials();
+    // disk — only a restart drops them. `force` extends that to browser mode when
+    // the release above could not be confirmed: restarting is then the only way
+    // to be sure the old session is gone.
+    const dropped = await this.dropDaemonCredentials({ force: !release.released });
 
     this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
+    return { daemonSessionDropped: release.released || dropped };
   }
 
   /**
@@ -297,19 +311,29 @@ export class AuthManager implements vscode.Disposable {
    *
    * Called by `logout()` and by the dashboard's narrower "clear cookie" /
    * "clear credentials" actions (via DashboardProvider).
+   *
+   * @param opts.force restart regardless of auth mode. Browser mode normally has
+   *        nothing here to drop (the session lives in the daemon's Chromium, which
+   *        `_releaseDaemonBrowser` handles) — but when that release could not be
+   *        confirmed, killing the process is the only remaining guarantee.
+   * @returns true when the daemon is confirmed to no longer hold the session
+   *          (including "there was nothing to drop"); false when it may still.
    */
-  async dropDaemonCredentials(): Promise<void> {
+  async dropDaemonCredentials(opts?: { force?: boolean }): Promise<boolean> {
     try {
       const settings = getSettings();
       const authMode = settings.mcp.authMode;
-      if (!settings.mcp.useDaemon) return;
-      if (authMode !== 'byo' && authMode !== 'direct-login') return;
+      if (!settings.mcp.useDaemon) return true;
+      if (!opts?.force && authMode !== 'byo' && authMode !== 'direct-login') return true;
       const dm = this._daemonManager;
-      if (!dm) return;
+      if (!dm) return true;
       const status = await dm.getDaemonStatus();
-      if (!status?.running) return;
+      if (!status?.running) return true;
       try {
         await dm.restartDaemon();
+        // The restarted daemon runs auth.close() on shutdown, so the old
+        // process's browser session and in-memory credentials are both gone.
+        return true;
       } catch (restartErr) {
         // The daemon still holds the (now-cleared) creds in memory. A restart would
         // drop them but it failed — force-stop so the stale in-memory session dies.
@@ -323,13 +347,18 @@ export class AuthManager implements vscode.Disposable {
             ? ` ${forced.skippedUnowned.length} daemon-like process(es) were left running because ownership could not be verified (PID ${forced.skippedUnowned.map(p => p.pid).join(', ')}) — stop them manually if they are yours.`
             : '';
           vscode.window.showErrorMessage(`Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.${leftAlive}`);
+          // Force-stop killed the process (and with it the browser session) — but a
+          // process the sweep could not attribute is still out there serving.
+          return !forced?.skippedUnowned?.length;
         } catch (stopErr) {
           console.warn('[AuthManager] daemon force-stop after failed restart also failed:', stopErr instanceof Error ? stopErr.message : 'unknown error');
           vscode.window.showErrorMessage('Credentials cleared, but the daemon may still hold your session in memory — stop/restart it manually to fully clear it.');
+          return false;
         }
       }
     } catch (err) {
       console.warn('[AuthManager] daemon restart after credential clear failed:', err instanceof Error ? err.message : 'unknown error');
+      return false;
     }
   }
 
@@ -562,33 +591,48 @@ export class AuthManager implements vscode.Disposable {
 
   /**
    * Ask the daemon to close its shared browser so an interactive (headful)
-   * login can open the persistent profile exclusively. Best-effort: if it
-   * fails, the login runner's own exit-21 retry still covers the common case.
-   * The daemon re-opens the browser on its next session check / tool call,
-   * picking up the freshly-written session cookies.
+   * login can open the persistent profile exclusively, or — from logout — so it
+   * stops serving the session the user just destroyed.
+   *
+   * For LOGIN this is best-effort: a failure is covered by the login runner's own
+   * exit-21 retry. For LOGOUT the outcome matters, so the result is reported
+   * rather than swallowed: `released:false` means the daemon may still be holding
+   * a live session and the caller must escalate (restart/force-stop) instead of
+   * telling the user they are logged out.
+   *
+   * `released:true` means "confirmed nothing is holding a session" — either the
+   * daemon answered 2xx, or there is no daemon to ask.
    */
-  private async _releaseDaemonBrowser(): Promise<void> {
+  private async _releaseDaemonBrowser(): Promise<{ released: boolean; reason?: string }> {
     const dm = this._daemonManager;
-    if (!dm || !getSettings().mcp.useDaemon) return;
+    if (!dm || !getSettings().mcp.useDaemon) return { released: true };
 
     let status: Awaited<ReturnType<DaemonManager['getDaemonStatus']>>;
     try {
       status = await dm.getDaemonStatus();
-    } catch {
-      return;
+    } catch (err) {
+      // We cannot even tell whether a daemon is running — assume the worst.
+      return { released: false, reason: err instanceof Error ? err.message : 'daemon status unavailable' };
     }
-    if (!status.running || !status.healthy || status.port == null || !status.bearerToken) return;
+    if (!status.running) return { released: true };
+    // Running but unreachable: `healthy` comes from a 2s HTTP probe, so a slow or
+    // busy daemon lands here while still very much alive and serving.
+    if (!status.healthy || status.port == null || !status.bearerToken) {
+      return { released: false, reason: 'the daemon is running but did not answer its health probe' };
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5_000);
     try {
-      await fetch(`http://127.0.0.1:${status.port}/daemon/release-browser`, {
+      const res = await fetch(`http://127.0.0.1:${status.port}/daemon/release-browser`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${status.bearerToken}` },
         signal: controller.signal,
       });
-    } catch {
-      // best-effort
+      if (!res.ok) return { released: false, reason: `release-browser returned HTTP ${res.status}` };
+      return { released: true };
+    } catch (err) {
+      return { released: false, reason: err instanceof Error ? err.message : 'release-browser request failed' };
     } finally {
       clearTimeout(timeout);
     }

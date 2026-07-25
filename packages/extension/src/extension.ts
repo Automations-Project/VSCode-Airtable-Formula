@@ -477,9 +477,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             'Logout',
           );
           if (confirm !== 'Logout') return;
-          await authManager.logout();
+          const result = await authManager.logout();
           dashboardProvider.refresh();
-          vscode.window.showInformationMessage('Airtable: Logged out and session cleared.');
+          // Never claim the session is cleared when the daemon could not be
+          // confirmed stopped — it may still be serving Airtable with it.
+          if (result.daemonSessionDropped) {
+            vscode.window.showInformationMessage('Airtable: Logged out and session cleared.');
+          } else {
+            vscode.window.showWarningMessage(
+              'Airtable: Logged out locally, but the background MCP service could not be confirmed stopped — it may still be serving your Airtable session. Stop or restart the daemon from the Airtable dashboard.',
+            );
+          }
         }),
         vscode.commands.registerCommand('airtable-formula.status', async () => {
             vscode.window.withProgress(

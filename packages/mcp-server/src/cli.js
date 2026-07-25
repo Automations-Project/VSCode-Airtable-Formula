@@ -105,11 +105,39 @@ export async function runCli(args) {
   if (cmd === 'logout') {
     const fs = await import('node:fs/promises');
     const profileDir = getProfileDir();
+
+    // Stop a running daemon FIRST. It keeps the session in memory (browser mode:
+    // a live Chromium; byo/direct-login: the in-memory cred-store), so leaving it
+    // up means the user is told they logged out while every MCP tool call still
+    // works — and its Chromium holds the profile directory open, which makes the
+    // removal below fail with EBUSY on Windows. force:true so a stale/unhealthy
+    // lock is reclaimed too. Daemon shutdown runs auth.close(), which tears down
+    // the browser tree.
+    try {
+      const { stopDaemon } = await import('./daemon/launcher.js');
+      const result = await stopDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME, force: true });
+      if (result?.stopped) process.stdout.write('Stopped the running daemon (it was holding the session).\n');
+    } catch (err) {
+      process.stdout.write(
+        `Warning: a daemon may still be running and serving your Airtable session (${err.message}). ` +
+        'Run "npx airtable-user-mcp daemon stop" to be sure.\n',
+      );
+      process.exitCode = 1;
+    }
+
     try {
       await fs.rm(profileDir, { recursive: true, force: true });
       process.stdout.write('Browser session cleared.\n');
-    } catch {
-      process.stdout.write('No session to clear.\n');
+    } catch (err) {
+      // `force: true` already swallows "directory does not exist", so reaching
+      // this catch means the removal genuinely FAILED (typically a process still
+      // holding the profile). Reporting "No session to clear" there told the user
+      // the opposite of the truth — the session is still on disk.
+      process.stdout.write(
+        `Could not clear the browser session at ${profileDir}: ${err.message}\n` +
+        'The Airtable session is still on disk — close anything using it and retry.\n',
+      );
+      process.exitCode = 1;
     }
     // Also remove legacy session.json if it exists
     try {

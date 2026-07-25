@@ -95,21 +95,31 @@ describe('AuthManager.logout drops the daemon session as well as the keychain', 
     if (server) { await new Promise<void>(r => server!.close(() => r())); server = undefined; }
   });
 
-  const makeAuthManager = (opts?: { running?: boolean; healthy?: boolean; restartThrows?: boolean }) => {
+  const makeAuthManager = (opts?: {
+    running?: boolean; healthy?: boolean; restartThrows?: boolean;
+    statusThrows?: boolean; forceStopThrows?: boolean; skippedUnowned?: Array<{ pid: number }>;
+  }) => {
     const daemonManager = {
-      getDaemonStatus: async () => ({
-        running: opts?.running ?? true,
-        healthy: opts?.healthy ?? true,
-        port,
-        bearerToken: 'tok',
-      }),
+      getDaemonStatus: async () => {
+        if (opts?.statusThrows) throw new Error('lockfile unreadable');
+        return {
+          running: opts?.running ?? true,
+          healthy: opts?.healthy ?? true,
+          port,
+          bearerToken: 'tok',
+        };
+      },
       restartDaemon: async () => {
         restarts++;
         order.push('restart-daemon');
         if (opts?.restartThrows) throw new Error('spawn failed');
         return {};
       },
-      forceStop: async () => { forceStops++; return { skippedUnowned: [] }; },
+      forceStop: async () => {
+        forceStops++;
+        if (opts?.forceStopThrows) throw new Error('sweep failed');
+        return { skippedUnowned: opts?.skippedUnowned ?? [] };
+      },
     } as any;
     const secrets = fakeSecrets();
     return { am: new AuthManager(secrets as any, '/tmp/ext', daemonManager), secrets };
@@ -117,8 +127,9 @@ describe('AuthManager.logout drops the daemon session as well as the keychain', 
 
   it('browser mode: releases the daemon browser BEFORE wiping the profile', async () => {
     const { am, secrets } = makeAuthManager();
-    await am.logout();
+    const result = await am.logout();
 
+    expect(result.daemonSessionDropped).toBe(true);
     expect(hits).toContain('POST /daemon/release-browser');
     expect(auths).toContain('Bearer tok');
     // Windows cannot delete a profile directory Chrome still holds open, and a
@@ -150,7 +161,7 @@ describe('AuthManager.logout drops the daemon session as well as the keychain', 
 
   it('no daemon running: logout still clears the keychain and never throws', async () => {
     const { am, secrets } = makeAuthManager({ running: false, healthy: false });
-    await expect(am.logout()).resolves.toBeUndefined();
+    await expect(am.logout()).resolves.toEqual({ daemonSessionDropped: true });
     expect(hits).toHaveLength(0);
     expect(restarts).toBe(0);
     expect(secrets.deleted).toHaveLength(4);
@@ -160,9 +171,114 @@ describe('AuthManager.logout drops the daemon session as well as the keychain', 
     useDaemon = false;
     authMode = 'byo';
     const { am } = makeAuthManager();
-    await am.logout();
+    const result = await am.logout();
     expect(hits).toHaveLength(0);
     expect(restarts).toBe(0);
+    expect(result.daemonSessionDropped).toBe(true);   // nothing was holding it
+  });
+});
+
+/**
+ * The release can fail while the daemon is very much ALIVE — `healthy` comes from
+ * a 2 s probe, and the POST can 5xx or time out. Silently skipping the release
+ * there put us back in the original bug with a smaller window: Chromium keeps
+ * serving, `fs.rm` fails EBUSY into a console.warn, and the user is told
+ * "Logged out and session cleared." So an unconfirmed release must escalate to a
+ * daemon restart (whose shutdown runs auth.close()) and, failing that, must be
+ * reported to the caller.
+ */
+describe('AuthManager.logout escalates when the browser release is not confirmed', () => {
+  let server: http.Server | undefined;
+  let port = 0;
+  let restarts: number;
+  let forceStops: number;
+  let releaseStatus: number;
+
+  beforeEach(async () => {
+    useDaemon = true;
+    authMode = 'browser';
+    restarts = 0; forceStops = 0; releaseStatus = 200;
+    shownErrors.length = 0;
+    rmMock.mockClear();
+    rmMock.mockImplementation(async () => {});
+    server = http.createServer((_req, res) => {
+      res.writeHead(releaseStatus, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: releaseStatus < 400 }));
+    });
+    await new Promise<void>(r => server!.listen(0, '127.0.0.1', r));
+    port = (server!.address() as import('net').AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    if (server) { await new Promise<void>(r => server!.close(() => r())); server = undefined; }
+  });
+
+  const make = (status: { running: boolean; healthy: boolean }, o?: { restartThrows?: boolean; forceStopThrows?: boolean; skippedUnowned?: Array<{ pid: number }> }) => {
+    const daemonManager = {
+      getDaemonStatus: async () => ({ ...status, port, bearerToken: 'tok' }),
+      restartDaemon: async () => {
+        restarts++;
+        if (o?.restartThrows) throw new Error('spawn failed');
+        return {};
+      },
+      forceStop: async () => {
+        forceStops++;
+        if (o?.forceStopThrows) throw new Error('sweep failed');
+        return { skippedUnowned: o?.skippedUnowned ?? [] };
+      },
+    } as any;
+    return new AuthManager(fakeSecrets() as any, '/tmp/ext', daemonManager);
+  };
+
+  it('daemon alive but health probe failed (browser mode): restarts it and reports success', async () => {
+    const am = make({ running: true, healthy: false });
+    const result = await am.logout();
+    expect(restarts).toBe(1);                       // browser mode would NOT restart without the escalation
+    expect(result.daemonSessionDropped).toBe(true); // the restart dropped it
+  });
+
+  it('release-browser returns a non-2xx: still escalates', async () => {
+    releaseStatus = 503;
+    const am = make({ running: true, healthy: true });
+    const result = await am.logout();
+    expect(restarts).toBe(1);
+    expect(result.daemonSessionDropped).toBe(true);
+  });
+
+  it('escalation itself fails: logout reports the session was NOT dropped', async () => {
+    const am = make({ running: true, healthy: false }, { restartThrows: true, forceStopThrows: true });
+    const result = await am.logout();
+    expect(restarts).toBe(1);
+    expect(forceStops).toBe(1);
+    expect(result.daemonSessionDropped).toBe(false);
+    expect(shownErrors.join(' ')).toMatch(/may still hold your session/i);
+  });
+
+  it('force-stop that left an unattributable process alive is NOT reported as dropped', async () => {
+    const am = make({ running: true, healthy: false }, { restartThrows: true, skippedUnowned: [{ pid: 4242 }] });
+    const result = await am.logout();
+    expect(forceStops).toBe(1);
+    expect(result.daemonSessionDropped).toBe(false);
+  });
+
+  it('daemon status unreadable: assumes the worst and escalates', async () => {
+    const daemonManager = {
+      getDaemonStatus: async () => { throw new Error('lockfile unreadable'); },
+      restartDaemon: async () => { restarts++; return {}; },
+      forceStop: async () => { forceStops++; return { skippedUnowned: [] }; },
+    } as any;
+    const am = new AuthManager(fakeSecrets() as any, '/tmp/ext', daemonManager);
+    const result = await am.logout();
+    // getDaemonStatus throws inside dropDaemonCredentials too → nothing confirmed.
+    expect(result.daemonSessionDropped).toBe(false);
+  });
+
+  it('no daemon running: nothing to escalate, reported as dropped', async () => {
+    const am = make({ running: false, healthy: false });
+    const result = await am.logout();
+    expect(restarts).toBe(0);
+    expect(forceStops).toBe(0);
+    expect(result.daemonSessionDropped).toBe(true);
   });
 });
 
@@ -180,6 +296,20 @@ describe('every logout entry point routes through AuthManager.logout()', () => {
     const handler = body.slice(0, body.indexOf('registerCommand('));
     expect(handler).toMatch(/authManager\.logout\(\)/);
     expect(handler).not.toMatch(/secrets\.delete|fs\.rm|restartDaemon/);
+    // "Logged out and session cleared" must be conditional on the daemon drop —
+    // an unconditional success toast is the lie this whole task exists to remove.
+    expect(handler).toMatch(/daemonSessionDropped/);
+    expect(handler).toMatch(/showWarningMessage/);
+  });
+
+  it('no credential-clearing path bypasses logout()', () => {
+    // A second, weaker "clear the secrets" helper is how the daemon kept serving a
+    // logged-out session in the first place. logout() is the only method that may
+    // delete the credential triplet.
+    const am = src('mcp/auth-manager.ts');
+    const deletions = am.match(/secrets\.delete\(SECRET_EMAIL\)/g) ?? [];
+    expect(deletions).toHaveLength(1);   // only logout() deletes the triplet
+    expect(am).not.toMatch(/async clearCredentials\s*\(/);
   });
 
   it('the dashboard action delegates (and no longer needs its own drop)', () => {

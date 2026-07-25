@@ -410,8 +410,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         if (confirm === 'Logout') {
           // logout() itself releases the daemon's browser session and drops its
           // in-memory creds — the single logout path both entry points share.
-          await this.authManager!.logout();
+          const result = await this.authManager!.logout();
           await this.pushState();
+          if (!result.daemonSessionDropped) {
+            vscode.window.showWarningMessage(
+              'Logged out locally, but the background MCP service could not be confirmed stopped — it may still be serving your Airtable session. Stop or restart the daemon from the Setup tab.',
+            );
+          }
           this.postResult(msg.id, true);
         } else {
           // User dismissed the modal — surface that so the webview doesn't
