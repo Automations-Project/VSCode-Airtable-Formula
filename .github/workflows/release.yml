@@ -72,6 +72,12 @@ jobs:
       # Placed here deliberately: the first publish is far below and the version
       # bump/commit/tag lower still, so a failure here ships nothing and tags
       # nothing. Kept OUT of `pnpm test` — it needs the network and pulls ~150 MB.
+      #
+      # THIS STEP IS THE GATE. `.github/workflows/verify-binary-pins.yml` runs
+      # the same check on pull requests, but it is path-filtered and therefore
+      # SKIPPED on most PRs — and a skipped run is not a verification. That
+      # workflow is early warning for the contributor; this step is the safety
+      # boundary. Do not remove it on the grounds that the PR job covers it.
       - name: Verify native-binary digest pins
         if: inputs.target == 'extension' || inputs.target == 'both'
         run: pnpm check:binary-digests
