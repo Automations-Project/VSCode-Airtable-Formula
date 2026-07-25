@@ -20,6 +20,55 @@ describe('sync index.plan', () => {
     const b = { tables: [{ id: 't2', name: 'B', fields: [] }, { id: 't1', name: 'A', fields: [{ id: 'f1', name: 'x', type: 'text' }] }] };
     assert.equal(fingerprintSchema(a), fingerprintSchema(b));
   });
+  // Regression test (Sentry finding, Task 27): fields were NOT sorted before hashing while
+  // tables and views were — a field-order-only difference between two snapshots of an
+  // otherwise-identical schema (Airtable's field-listing order is not a stable/guaranteed
+  // contract; CLAUDE.md classifies field/view/column order as "best-effort", i.e. non-drift)
+  // flipped the fingerprint, which the apply() drift guard (index.js) treats as a real
+  // schema change — aborting mode=apply (or, on a resume, emitting a scary but false
+  // RESUME_DRIFT_BYPASS "someone else changed the dest" warning) on an unchanged schema.
+  it('fingerprintSchema: reordering a table\'s fields (no content change) does NOT change the fingerprint', () => {
+    const mkTable = (fields) => ({ id: 't1', name: 'T', fields, views: [{ id: 'v1', name: 'Grid view', type: 'grid' }] });
+    const fA = { id: 'f1', name: 'Name', type: 'text' };
+    const fB = { id: 'f2', name: 'Count', type: 'number' };
+    const fC = { id: 'f3', name: 'Status', type: 'singleSelect' };
+    const a = { tables: [mkTable([fA, fB, fC])] };
+    const b = { tables: [mkTable([fC, fA, fB])] };
+    const c = { tables: [mkTable([fB, fC, fA])] };
+    assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'permutation 1 must match');
+    assert.equal(fingerprintSchema(a), fingerprintSchema(c), 'permutation 2 must match');
+  });
+  it('fingerprintSchema: a genuine field change (add/remove/rename/retype) still changes the fingerprint', () => {
+    const base = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text' },
+      { id: 'f2', name: 'Count', type: 'number' },
+    ] }] };
+    const fpBase = fingerprintSchema(base);
+
+    const added = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text' },
+      { id: 'f2', name: 'Count', type: 'number' },
+      { id: 'f3', name: 'Extra', type: 'text' },
+    ] }] };
+    assert.notEqual(fingerprintSchema(added), fpBase, 'added field must change the fingerprint');
+
+    const removed = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text' },
+    ] }] };
+    assert.notEqual(fingerprintSchema(removed), fpBase, 'removed field must change the fingerprint');
+
+    const renamed = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text' },
+      { id: 'f2', name: 'Renamed', type: 'number' },
+    ] }] };
+    assert.notEqual(fingerprintSchema(renamed), fpBase, 'renamed field must change the fingerprint');
+
+    const retyped = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text' },
+      { id: 'f2', name: 'Count', type: 'singleLineText' },
+    ] }] };
+    assert.notEqual(fingerprintSchema(retyped), fpBase, 'retyped field must change the fingerprint');
+  });
 });
 
 describe('sync index.plan — direction param (Task 10)', () => {

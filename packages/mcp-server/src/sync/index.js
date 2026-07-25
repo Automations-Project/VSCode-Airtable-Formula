@@ -16,14 +16,20 @@ const ENGINE_VERSION = '2b';
 
 /**
  * Produce a deterministic SHA-256 fingerprint of a schema snapshot.
- * Order-independent: tables are sorted before hashing.
+ * Order-independent: tables, fields, and views are all sorted before hashing — field/view/
+ * column order is explicitly a "best-effort" (non-drift) concern elsewhere in the sync engine
+ * (see compare.js), and Airtable's field-listing order is not guaranteed stable between two
+ * reads of an otherwise-unchanged schema. Sorting the composed `id=name=type` strings is
+ * equivalent to sorting by `id` (a unique, stable-per-field identifier that always appears
+ * first in the string, before any content that legitimately changes the fingerprint like a
+ * rename or retype) while keeping the same shape as the views line below.
  *
  * @param {{ tables: Array<{id:string, name:string, fields:Array<{id:string,name:string,type:string}>}> }} snap
  * @returns {string}  hex digest
  */
 export function fingerprintSchema(snap) {
   const basis = snap.tables
-    .map((t) => `${t.id}:${t.name}:` + t.fields.map((f) => `${f.id}=${f.name}=${f.type}`).join(',')
+    .map((t) => `${t.id}:${t.name}:` + t.fields.map((f) => `${f.id}=${f.name}=${f.type}`).sort().join(',')
       + ';V:' + (t.views || []).map((v) => `${v.id}=${v.name}=${v.type}`).sort().join(','))
     .sort()
     .join('|');
