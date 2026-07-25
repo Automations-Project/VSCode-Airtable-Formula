@@ -22,4 +22,19 @@ describe('setViewColumns: _showColumnsWithRetry', () => {
     const n = await c._showColumnsWithRetry('app', 'viw', ['fA', 'fB'], 2);
     assert.equal(n, 1); // only fA confirmed; bounded by maxAttempts
   });
+
+  it('treats a column with no visibility key as visible — matches getView semantics, resolves in one round-trip', async () => {
+    // getView's own filter is `c && c.visibility !== false`, so an absent
+    // `visibility` key means visible. The retry helper's confirmation check must
+    // agree, or a column the API reports back WITHOUT a visibility key (common
+    // for a freshly-shown column) never reads as confirmed and the helper burns
+    // every attempt (5 * 400ms) before giving up with a wrong best-effort count.
+    const c = new AirtableClient({});
+    let calls = 0;
+    c.showOrHideColumns = async () => { calls++; return {}; };
+    c.getView = async () => ({ columnOrder: [{ columnId: 'fA' }, { columnId: 'fB' }] }); // no `visibility` key at all
+    const n = await c._showColumnsWithRetry('app', 'viw', ['fA', 'fB']);
+    assert.equal(n, 2);      // both confirmed visible
+    assert.equal(calls, 1);  // must not retry — confirmed on the first read-back
+  });
 });

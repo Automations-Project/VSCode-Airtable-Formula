@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { AirtableAuth } from '../src/auth.js';
+import { AirtableClient } from '../src/client.js';
 
 /**
  * Phase 1 transport core — auth side.
@@ -68,13 +69,30 @@ describe('auth._rawApiCall → HttpTransport', () => {
     assert.equal('Content-Type' in req.headers, false);
   });
 
-  it('json POST: application/json Content-Type, JSON body, and Cookie', async () => {
+  it('json POST: application/json Content-Type, JSON body, Cookie, and the current _csrf injected', async () => {
     transport.next = { status: 200, body: '{}' };
     await auth._rawApiCall('POST', '/v0.3/attachments/urlUpload', { a: 1, b: 'x' }, 'appABC123', 'json');
     const req = transport.calls[0];
     assert.equal(req.headers['Content-Type'], 'application/json');
     assert.equal(req.headers.Cookie, 'brw=1; sess=2');
-    assert.deepEqual(JSON.parse(req.body), { a: 1, b: 'x' });
+    // _rawApiCall injects _csrf into every JSON body at send time (mirrors the
+    // form-encoded branch), so callers never need to (and can't accidentally
+    // ship a stale one — see the dedicated race test below).
+    assert.deepEqual(JSON.parse(req.body), { a: 1, b: 'x', _csrf: 'CSRF-XYZ' });
+  });
+
+  it('json POST: overwrites a stale _csrf baked into the body with the CURRENT token at send time', async () => {
+    transport.next = { status: 200, body: '{}' };
+    // Simulate a caller (e.g. addAttachmentByUrl) that built its body earlier,
+    // baking in whatever csrfToken existed then...
+    const bodyBuiltEarlier = { url: 'https://example.com/f.png', _csrf: 'STALE-CSRF-FROM-BEFORE' };
+    // ...then a concurrent session recovery re-mints the token before this
+    // request actually reaches the wire.
+    auth._credentials.csrfToken = 'FRESH-CSRF-AFTER-RECOVERY';
+    auth.csrfToken = 'FRESH-CSRF-AFTER-RECOVERY';
+    await auth._rawApiCall('POST', '/v0.3/attachments/urlUpload', bodyBuiltEarlier, 'appABC123', 'json');
+    const sent = JSON.parse(transport.calls[0].body);
+    assert.equal(sent._csrf, 'FRESH-CSRF-AFTER-RECOVERY');
   });
 
   it('builds an absolute URL only for path inputs, leaving full URLs intact', async () => {
@@ -382,5 +400,59 @@ describe('auth passive secretSocketId injection (postForm)', () => {
     assert.equal(res.status, 200);
     assert.equal('secretSocketId' in params, false);
     assert.equal(gotoCalled, false);
+  });
+});
+
+describe('AirtableClient.addAttachmentByUrl — csrf freshness end-to-end', () => {
+  it('never ships a csrf token captured before a concurrent session recovery rotated it', async () => {
+    const transport = fakeTransport();
+    const auth = new AirtableAuth();
+    auth._httpTransport = transport;
+    auth._credentials = { cookieHeader: 'c=1', csrfToken: 'OLD-CSRF' };
+    auth.csrfToken = 'OLD-CSRF';
+    auth.userId = 'usr1';
+    auth.context = {};
+    auth.isLoggedIn = true;
+    auth.page = { url: () => 'https://airtable.com/' };
+    auth._rlSleep = async () => {};
+
+    // Every _apiCall awaits ensureLoggedIn() before the request is actually
+    // dequeued and sent (_apiCall → ensureLoggedIn → _rawApiCall). Rotating the
+    // token here simulates a concurrent session recovery landing in exactly that
+    // window — AFTER addAttachmentByUrl has already built its request body.
+    const realEnsureLoggedIn = auth.ensureLoggedIn.bind(auth);
+    auth.ensureLoggedIn = async () => {
+      await realEnsureLoggedIn();
+      auth.csrfToken = 'NEW-CSRF';
+      auth._credentials.csrfToken = 'NEW-CSRF';
+    };
+
+    transport.next = (req) => {
+      if (req.url.includes('urlUpload')) {
+        return {
+          status: 200,
+          body: JSON.stringify({
+            success: true,
+            fileUploadResult: {
+              propsToAddToAttachmentObj: { url: 'https://cdn/f.png' },
+              filename: 'f.png',
+              expiringInitialPreviewUrl: 'https://cdn/f.png?exp=1',
+            },
+          }),
+        };
+      }
+      return { status: 200, body: '{"ok":true}' };
+    };
+
+    const client = new AirtableClient(auth);
+    const result = await client.addAttachmentByUrl('appABC123', 'recXYZ0000000', 'fldQQQ0000000', {
+      url: 'https://example.com/f.png',
+    });
+    assert.equal(result.ok, true, result.error);
+
+    const uploadReq = transport.calls.find((c) => c.url.includes('urlUpload'));
+    assert.ok(uploadReq, 'urlUpload request was never sent');
+    const sentBody = JSON.parse(uploadReq.body);
+    assert.equal(sentBody._csrf, 'NEW-CSRF');
   });
 });

@@ -1789,7 +1789,12 @@ export class AirtableClient {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await this.showOrHideColumns(appId, viewId, remaining, true);
       const view = await this.getView(appId, viewId);
-      const visible = new Set((view.columnOrder || []).filter((c) => c.visibility).map((c) => c.columnId));
+      // Must match getView's own visibility semantics (client.js ~1146): a column
+      // with no `visibility` key is VISIBLE by default. Filtering on truthy
+      // `c.visibility` instead treats an absent key as hidden, so a freshly-shown
+      // column (which the API often returns without a `visibility` key at all)
+      // never reads back as confirmed — burning every retry attempt for nothing.
+      const visible = new Set((view.columnOrder || []).filter((c) => c && c.visibility !== false).map((c) => c.columnId));
       remaining = wanted.filter((id) => !visible.has(id));
       if (remaining.length === 0) return wanted.length;
       // Let eventual consistency settle before retrying the columns that didn't take.
@@ -2791,7 +2796,12 @@ export class AirtableClient {
         applicationId: appId,
         enterpriseAccountId: null,
         directUploadUserContentPurpose: 'directUploadAttachment',
-        _csrf: this.auth.csrfToken,
+        // No _csrf here: auth._rawApiCall injects the CURRENT token into every
+        // JSON body at send time (mirrors how form POSTs get theirs from
+        // _mutationParams, which also never sets _csrf). Baking it in this early
+        // would risk shipping a token a concurrent session recovery has since
+        // rotated — the request can sit queued (ensureLoggedIn/backoff) between
+        // this line running and the actual network call.
       };
       const upRes = await this.auth.postJSON('https://airtable.com/v0.3/attachments/urlUpload', uploadBody, appId);
       if (!upRes.ok) {

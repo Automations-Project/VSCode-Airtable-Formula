@@ -802,7 +802,14 @@ export class AirtableAuth {
       if (cookieHeader) headers['Cookie'] = cookieHeader;
       // Honor caller's method — a body only rides on non-GET requests.
       if (body !== null && body !== undefined && method !== 'GET') {
-        requestBody = JSON.stringify(body);
+        // Inject _csrf fresh, HERE, at send time — mirrors the form-encoded
+        // branch below (params.set('_csrf', csrfToken)). A caller may have built
+        // its body earlier (sometimes well before this call is dequeued behind
+        // ensureLoggedIn()/backoff), and a concurrent session recovery can rotate
+        // csrfToken in that window. Overwriting unconditionally means no JSON
+        // caller — now or in the future — can ship a token staler than "current
+        // at send time", the same guarantee form POSTs already have.
+        requestBody = JSON.stringify(csrfToken ? { ...body, _csrf: csrfToken } : body);
       }
     } else {
       headers = {
