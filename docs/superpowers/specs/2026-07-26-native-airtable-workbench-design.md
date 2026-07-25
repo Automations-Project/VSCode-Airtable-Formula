@@ -1,7 +1,7 @@
 # Native Airtable Workbench — Webview UI/UX and Hardening Design
 
 **Date:** 2026-07-26
-**Status:** Direction approved; written-spec review pending
+**Status:** Approved
 **Packages:** `packages/webview`, `packages/extension`, `packages/shared`
 **Author:** Project owner + Codex
 
