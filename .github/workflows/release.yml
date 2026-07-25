@@ -58,6 +58,24 @@ jobs:
       # scope, so a compromised latest release must not be auto-pulled here.
       - run: pnpm install -wD @vscode/vsce@3.9.2 ovsx@1.0.1
 
+      # Re-derive every native-binary digest from the registry and diff it
+      # against the committed pin file, BEFORE anything is packaged.
+      #
+      # What this uniquely catches: a pin file that is internally consistent —
+      # correct version, correct integrity — but carries WRONG DIGESTS. The two
+      # neighbouring failure modes are already covered offline and would never
+      # reach this step: a stale or missing pin fails closed in `binaryPin()`
+      # during vendoring, and a re-published tarball fails the lockfile SHA-512
+      # on download. A poisoned pin file is the residual trust root, and it is
+      # the one thing only a fresh re-derivation can expose.
+      #
+      # Placed here deliberately: the first publish is far below and the version
+      # bump/commit/tag lower still, so a failure here ships nothing and tags
+      # nothing. Kept OUT of `pnpm test` — it needs the network and pulls ~150 MB.
+      - name: Verify native-binary digest pins
+        if: inputs.target == 'extension' || inputs.target == 'both'
+        run: pnpm check:binary-digests
+
       # ── Compute versions ───────────────────────────────────────
       # For each target, we check both package.json AND the registry.
       # We bump from whichever is higher, so we never collide with

@@ -1,0 +1,52 @@
+name: Verify native-binary pins
+
+# Re-derive every platform package's `.node` digests from the registry and diff
+# them against the committed pin file.
+#
+# WHY A SEPARATE, PATH-FILTERED WORKFLOW
+#
+# This is the only check in the repo that needs network access and pulls ~150 MB
+# of tarballs, so it is deliberately kept out of `pnpm test` and out of ci.yml's
+# per-OS matrix. It only has anything to say when the pins or the lockfile move,
+# which is exactly what `paths` expresses — and GitHub applies `paths` at the
+# trigger level, hence its own file rather than a job in ci.yml.
+#
+# WHY IT RUNS ON THE PR RATHER THAN ONLY AT RELEASE
+#
+# `pnpm-lock.yaml` changing is how an impit / @ngrok/ngrok bump arrives. Without
+# this, the stale pin surfaces to whoever runs the release — long after the
+# person who bumped the dependency has moved on. Here it surfaces to the author,
+# in the PR that caused it, with the command to fix it.
+#
+# WHAT IT UNIQUELY CATCHES
+#
+# A pin file that is internally consistent — correct version, correct integrity
+# — but carries WRONG DIGESTS. The neighbouring failure modes are already
+# covered offline and never reach here: a stale or missing pin fails closed in
+# `binaryPin()` during vendoring, and a re-published tarball fails the lockfile
+# SHA-512 on download. A poisoned pin file is the residual trust root, and only
+# a fresh re-derivation from the registry can expose it.
+
+on:
+  pull_request:
+    paths:
+      - 'pnpm-lock.yaml'
+      - 'scripts/native-binary-digests.json'
+
+jobs:
+  verify-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No `pnpm install` on purpose: the checker uses only Node builtins, the
+      # repo's own scripts, `pnpm-lock.yaml` and `tar`. Skipping the install
+      # keeps this job to a fetch and a hash.
+      - name: Re-derive digests from the registry and diff against the pins
+        run: pnpm check:binary-digests
