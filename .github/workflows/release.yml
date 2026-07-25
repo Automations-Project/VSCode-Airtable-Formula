@@ -256,13 +256,23 @@ jobs:
             fs.writeFileSync('packages/extension/README.md', readme);
           "
 
-          # Build + assert one VSIX per published target. package-targets.mjs
-          # aborts on the first target whose artifact fails its native-binary
-          # assertions, so a bad artifact can never reach a publish step.
+          # Eight target artifact packaging/assertion smokes: build one VSIX per
+          # published target and verify the CONTENTS of each — every .node
+          # matched byte-for-byte against scripts/native-binary-digests.json,
+          # which was recorded from tarballs verified against pnpm-lock.yaml.
+          # package-targets.mjs aborts on the first target that fails, so a bad
+          # artifact can never reach a publish step.
+          #
+          # These are packaging smokes, not runtime smokes. A single runner can
+          # only ever `require()` the binding built for itself, so only the host
+          # target's binding could receive a genuine runtime load; the other
+          # seven are verified by exact content, which is what the digests are
+          # for. Nothing here should be described as runtime-loading eight
+          # native bindings.
           node scripts/package-targets.mjs --out-dir=artifacts
 
           # Re-assert the finished set: every published target present, no
-          # untargeted artifact, right binaries in each.
+          # untargeted artifact, right binaries — byte-exact — in each.
           node scripts/assert-vsix-binaries.mjs --dir=artifacts
 
           ls -la artifacts/

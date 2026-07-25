@@ -315,7 +315,9 @@ pnpm dev              # start webview dev server (browser preview)
 
 `linux-armhf` (32-bit ARM) is **not published**: `impit` ships no `arm-gnueabihf` build, so an armhf VSIX would advertise `airtableFormula.mcp.httpClient: "impit"` and then fail with "Cannot find native binding". No untargeted fallback is published either, for the same reason.
 
-The matrix is defined once in [`scripts/vsix-targets.mjs`](scripts/vsix-targets.mjs); versions and tarball hashes are pinned to `pnpm-lock.yaml`. `scripts/package-targets.mjs` builds every target and `scripts/assert-vsix-binaries.mjs` verifies each artifact contains exactly its own platform's `.node` files and no other's.
+The matrix is defined once in [`scripts/vsix-targets.mjs`](scripts/vsix-targets.mjs); versions and tarball hashes are pinned to `pnpm-lock.yaml`. `scripts/package-targets.mjs` builds every target and `scripts/assert-vsix-binaries.mjs` verifies each artifact contains exactly its own platform's `.node` files and no other's — **byte-for-byte**, against the SHA-256 digests in [`scripts/native-binary-digests.json`](scripts/native-binary-digests.json), which are recorded from tarballs verified against `pnpm-lock.yaml`'s integrity hashes. Filenames, `package.json` `os`/`cpu`, and a magic number are all labels an artifact carries about itself and cannot distinguish an x64 binary from an ARM64 one, or a glibc build from a musl one; an exact digest can.
+
+Together these are **eight target artifact packaging/assertion smokes** — eight `.vsix` files built and their contents verified on one machine. They are not runtime smokes of eight native bindings: any single host can only load the binding compiled for itself, so **only the host target's binding receives a genuine runtime load**. Verifying the other seven by exact content is the strongest claim a single-host build can make about them.
 
 The standalone npm package [`airtable-user-mcp`](https://www.npmjs.com/package/airtable-user-mcp) is unaffected and stays **universal** — npm resolves the right optional dependency on your own machine at install time.
 

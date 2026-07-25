@@ -66,6 +66,45 @@ already shipped.
   documentation gap ahead of merge.
 
 #### Fixed
+- **The VSIX native-binary assertion now verifies the actual machine code, not
+  just its labels.** The previous check validated package name, `package.json`
+  `os`/`cpu`/`version`, filename, and a 4-byte magic number. Only the magic
+  reads the bytes at all, and it distinguishes PE from ELF from Mach-O — that
+  is, the operating system and nothing else. The `cpu` field was read from the
+  vendored package's own manifest, never from the binary. So two whole classes
+  of mis-vendored artifact passed clean, with a green tick: an **x64 binary
+  swapped for an ARM64 one on the same OS**, and a **glibc build swapped for a
+  musl build**. Both were reproduced as controls and both passed before this
+  change. Every `.node` is now hashed and compared against
+  `scripts/native-binary-digests.json`, which records the exact SHA-256 of
+  every binary each platform package ships. Those digests are recorded from
+  tarballs whose SHA-512 was verified against `pnpm-lock.yaml` **before**
+  anything inside was hashed, so the expected values derive from the lockfile
+  and never from the artifact being checked. A mismatch now also names the
+  impostor ("these are the bytes of `impit-darwin-x64`… the binary for
+  `darwin-x64`, not `darwin-arm64`"). A missing or stale pin fails packaging
+  and assertion **closed** rather than falling back to the weaker check.
+- **Vendored native binaries are re-validated on every reuse.** Cached
+  platform packages under `.cache/vsix-platform-packages/` were verified once
+  at download and thereafter trusted via a `.vendored.json` marker — a file
+  living inside the very directory it vouches for, so anything able to alter
+  the binaries could equally rewrite the marker. Cached contents are now
+  re-hashed against the pinned digests before reuse, and a copy that fails is
+  discarded and re-fetched.
+- **The symlink-escape guard now covers foreign platform packages too.**
+  `assertSafeSymlinks` protected the workspace vendoring path but not the
+  registry-tarball path, even though that path unpacks with `tar` (which
+  creates whatever symlinks the archive asks for) and then copies with
+  `dereference: true`. A tarball could therefore have pulled a file from
+  outside the tree into a published VSIX. Both paths now share one guard
+  (`scripts/safe-symlinks.mjs`).
+- **Wording: these are eight target artifact packaging/assertion smokes.**
+  Earlier notes could be read as claiming all eight platform builds are
+  runtime-tested. They are not, and cannot be from one machine: a single host
+  can only `require()` the binding compiled for itself, so **only the host
+  target's binding receives a genuine runtime smoke**. The other seven are
+  verified by exact content — which is the strongest claim available, and why
+  the digests above matter.
 - **`sync_base`'s column-visibility comparison no longer produces a false
   negative.** Airtable's internal API omits the `visibility` key entirely for
   a visible column in some responses (absent = visible, explicit `false` =
