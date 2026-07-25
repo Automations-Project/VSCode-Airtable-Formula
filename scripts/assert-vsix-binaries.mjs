@@ -9,6 +9,22 @@
  * bug only surfaces on a user's machine. So the check is two-sided —
  * present-and-correct, and absent-if-not-ours.
  *
+ * "Correct" means BYTE-EXACT. Package name, package.json `os`/`cpu`/`version`
+ * and filename are labels the artifact carries about itself; a magic number
+ * proves only PE vs ELF vs Mach-O, i.e. the OS. Neither can tell an x64 build
+ * from an ARM64 one on the same OS, or a glibc build from a musl one. So each
+ * `.node` is hashed and compared against `native-binary-digests.json`, whose
+ * values were recorded from tarballs verified against pnpm-lock.yaml's
+ * integrity hashes — the expected values come from the lockfile, never from the
+ * artifact under test.
+ *
+ * SCOPE, precisely: this is an artifact packaging/assertion smoke over all
+ * eight targets — it inspects the contents of eight `.vsix` files. It is NOT a
+ * runtime smoke of eight native bindings. One host can only `require()` the
+ * binding built for itself, so only the host target's binding can ever receive
+ * a genuine runtime load; the other seven are verified by content, which is
+ * exactly what a byte-exact digest is for.
+ *
  * Usage:
  *   node scripts/assert-vsix-binaries.mjs [--target=<t>] <file.vsix> [...]
  *   node scripts/assert-vsix-binaries.mjs --dir=artifacts        (all targets)
@@ -17,12 +33,15 @@
  * (`airtable-formula-<target>-<version>.vsix`).
  */
 
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import {
   ALL_TARGETS,
+  binaryPin,
   expectedBinaryMagics,
+  identifyBinaryDigest,
   isPlatformPackage,
   lockedPackage,
   targetConfig,
@@ -227,39 +246,90 @@ export function assertVsix(file, target) {
       problems.push(`${pkg} declares cpu=[${manifest.cpu}] but target ${target} is ${config.cpu}`);
     }
 
+    // Everything above this line checks LABELS — package name, package.json
+    // os/cpu/version, file name — all of which live inside the artifact and are
+    // therefore controlled by whatever produced it. A binary holding another
+    // platform's machine code under the right filename satisfies every one of
+    // them, and `cpu` above is read from the vendored manifest, never from the
+    // machine code, so an x64↔ARM64 or glibc↔musl swap keeps them all happy.
+    //
+    // From here the expected values come from `native-binary-digests.json`
+    // instead: the FILE NAMES and the exact SHA-256 of each, recorded from a
+    // tarball whose SHA-512 was verified against pnpm-lock.yaml before anything
+    // inside it was hashed. Nothing below reads a label out of the artifact.
+    let pin;
+    try {
+      pin = binaryPin(pkg);
+    } catch (error) {
+      problems.push(error.message);
+      continue;
+    }
+
+    // `main` still has to point at one of the pinned binaries — a loader that
+    // requires a file we never pinned would load unverified bytes at runtime.
     const main = typeof manifest.main === 'string' ? manifest.main : undefined;
     if (!main || !main.endsWith('.node')) {
       problems.push(`${pkg} package.json "main" is ${JSON.stringify(main)} — expected a .node file`);
-      continue;
+    } else if (!pin.binaries[main]) {
+      problems.push(
+        `${pkg} package.json "main" is "${main}", which is not one of the .node files ` +
+        `${pkg}@${pin.version} is pinned to ship (${Object.keys(pin.binaries).join(', ')})`
+      );
     }
-    const binary = entries.get(`${NODE_MODULES_PREFIX}${pkg}/${main}`);
-    if (!binary) {
-      problems.push(`${pkg} is present but its native binary "${main}" is missing from the VSIX`);
-    } else if (binary.uncompressedSize === 0) {
-      problems.push(`${pkg}/${main} is present but empty (0 bytes)`);
-    } else {
-      // Everything above this line checks LABELS — package name, package.json
-      // os/cpu/version, file name. A binary holding another platform's machine
-      // code under the right filename satisfies all of them. Reading the magic
-      // number is the first check on the bytes themselves, so it is what
-      // catches a content swap (and a file truncated at the front).
+
+    for (const [rel, expectedDigest] of Object.entries(pin.binaries)) {
+      const binary = entries.get(`${NODE_MODULES_PREFIX}${pkg}/${rel}`);
+      if (!binary) {
+        problems.push(`${pkg} is present but its native binary "${rel}" is missing from the VSIX`);
+        continue;
+      }
+      if (binary.uncompressedSize === 0) {
+        problems.push(`${pkg}/${rel} is present but empty (0 bytes)`);
+        continue;
+      }
+
+      const bytes = readMember(buf, binary);
+
+      // Magic first — it is not sufficient (it proves OS only) but it turns the
+      // common case into one readable sentence before the digest reports hex.
       const magics = expectedBinaryMagics(config.os);
-      const prefix = readMember(buf, binary).subarray(0, 4).toString('hex');
-      if (!magics.some((m) => prefix.startsWith(m.hex))) {
+      const prefix = bytes.subarray(0, 4).toString('hex');
+      const magic = magics.find((m) => prefix.startsWith(m.hex));
+      if (!magic) {
         problems.push(
-          `${pkg}/${main} starts with 0x${prefix}, which is not a ${config.os} binary ` +
+          `${pkg}/${rel} starts with 0x${prefix}, which is not a ${config.os} binary ` +
           `(expected ${magics.map((m) => `0x${m.hex} ${m.label}`).join(' or ')}). ` +
           'The file name is right but its CONTENTS are for another platform, or truncated.'
         );
-      } else {
-        verified.push({
-          pkg,
-          version: manifest.version,
-          binary: main,
-          bytes: binary.uncompressedSize,
-          magic: prefix.slice(0, magics.find((m) => prefix.startsWith(m.hex)).hex.length),
-        });
+        continue;
       }
+
+      const actualDigest = createHash('sha256').update(bytes).digest('hex');
+      if (actualDigest !== expectedDigest) {
+        // Name the impostor. Every platform binary we publish is pinned, so a
+        // same-OS arch swap or a glibc↔musl swap resolves to an exact package.
+        const impostor = identifyBinaryDigest(actualDigest);
+        const identified = impostor
+          ? `these are the bytes of ${impostor.name}@${impostor.version}/${impostor.file}` +
+            (impostor.targets.length > 0 ? ` — the binary for ${impostor.targets.join(', ')}, not ${target}` : '')
+          : 'these bytes match no platform binary pinned in scripts/native-binary-digests.json';
+        problems.push(
+          `${pkg}/${rel} has the WRONG CONTENTS — it is a valid ${config.os} binary but not the ` +
+          `one ${target} must ship.\n` +
+          `      expected sha256 ${expectedDigest}  (${pkg}@${pin.version}, pinned from pnpm-lock.yaml)\n` +
+          `      actual   sha256 ${actualDigest}  (${identified})`
+        );
+        continue;
+      }
+
+      verified.push({
+        pkg,
+        version: manifest.version,
+        binary: rel,
+        bytes: binary.uncompressedSize,
+        magic: prefix.slice(0, magic.hex.length),
+        sha256: actualDigest,
+      });
     }
   }
 
@@ -341,7 +411,10 @@ function main() {
     } else {
       console.log(`\n✓ ${basename(file)}  [${target}]`);
       for (const v of result.verified) {
-        console.log(`    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB, magic 0x${v.magic})`);
+        console.log(
+          `    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB, ` +
+          `magic 0x${v.magic}, sha256 ${v.sha256.slice(0, 16)}… pinned)`
+        );
       }
     }
   }
@@ -361,7 +434,11 @@ function main() {
     console.error('VSIX native-binary assertions FAILED.');
     process.exit(1);
   }
-  console.log(`VSIX native-binary assertions passed for ${files.length} artifact(s).`);
+  console.log(
+    `Artifact packaging/assertion smoke passed for ${files.length} target artifact(s) — ` +
+    'contents verified byte-exact against the lockfile-derived pins. ' +
+    'Runtime loading of a native binding is only possible for the host target.'
+  );
 }
 
 // Run only when invoked directly, not when imported by package-targets.mjs.

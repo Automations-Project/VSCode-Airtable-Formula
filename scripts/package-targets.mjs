@@ -7,6 +7,15 @@
  * VSIX whose native binaries could not be verified must never reach a publish
  * step.
  *
+ * WHAT THIS IS, NAMED PRECISELY: eight target artifact packaging/assertion
+ * smokes. Each target is packaged and its contents verified byte-for-byte
+ * against the lockfile-derived digest pins. It is NOT a runtime smoke of eight
+ * native bindings — one host can only `require()` the binding built for itself,
+ * so only the host target's binding can ever receive a genuine runtime load.
+ * That is precisely why the assertion verifies exact bytes rather than settling
+ * for labels: content equality is the strongest claim a single host can make
+ * about seven foreign artifacts.
+ *
  * Assumes the monorepo has already been built (`pnpm build`): this script only
  * vendors, packages and verifies.
  *
@@ -104,7 +113,10 @@ for (const target of targets) {
   }
   console.log(`\n✓ ${target} verified:`);
   for (const v of result.verified) {
-    console.log(`    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB, magic 0x${v.magic})`);
+    console.log(
+      `    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB, ` +
+      `magic 0x${v.magic}, sha256 ${v.sha256.slice(0, 16)}… pinned)`
+    );
   }
   built.push({ target, vsix, verified: result.verified });
 }
@@ -114,4 +126,8 @@ for (const { target, vsix, verified } of built) {
   console.log(`${target.padEnd(14)} ${relative(repoRoot, vsix)}`);
   for (const v of verified) console.log(`${''.padEnd(14)}   ${v.pkg} → ${v.binary}`);
 }
-console.log(`\n✓ ${built.length} platform-specific VSIX(es) built and verified in ${relative(repoRoot, outDir)}/`);
+console.log(
+  `\n✓ ${built.length} target artifact packaging/assertion smoke(s) passed — ` +
+  `built in ${relative(repoRoot, outDir)}/, contents verified byte-exact against the lockfile pins.\n` +
+  '  (Packaging smokes, not runtime smokes: only the host target\'s native binding can be loaded here.)'
+);

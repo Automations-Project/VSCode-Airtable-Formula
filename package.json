@@ -7,6 +7,8 @@
     "package": "pnpm -F airtable-formula package",
     "package:targets": "node scripts/package-targets.mjs",
     "assert:vsix": "node scripts/assert-vsix-binaries.mjs --dir=artifacts",
+    "record:binary-digests": "node scripts/record-native-binary-digests.mjs",
+    "check:binary-digests": "node scripts/record-native-binary-digests.mjs --check",
     "check:tool-sync": "node scripts/check-tool-sync.mjs",
     "check:bundle-sync": "node scripts/check-bundle-sync.mjs",
     "test": "node scripts/check-tool-sync.mjs && pnpm -F shared test && pnpm -F language-services test && pnpm -F airtable-user-mcp test && pnpm -F webview test && pnpm -F airtable-formula test",
