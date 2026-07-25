@@ -435,6 +435,22 @@ describe('apply: applyViewConfig', () => {
     assert.equal(res.failed, 0);
     assert.ok(res.warnings.some((w) => w.code === 'VIEW_ANCHOR_FALLBACK' || w.code === 'VIEW_UNRESOLVABLE_REF'));
   });
+
+  it('a source column with no `visibility` key at all is applied as SHOWN, not silently dropped as hidden', async () => {
+    // Airtable's internal API omits `visibility` entirely for a visible column
+    // in some responses. The columns facet must use the same isColumnVisible
+    // semantics as getView, or a real source column never reaches setViewColumns's
+    // visibleColumnIds and destination views end up missing columns forever.
+    const { client, viewId, price, destSnapshot } = await destWithView('grid');
+    const plan = { planId: 'pV3', sourceBaseId: 'appS', destBaseId: 'appD',
+      idmap: { tables: {}, fields: { fSrcPrice: { destFld: price, choices: {} } }, views: { vSrc: viewId } },
+      actions: [{ kind: 'applyViewConfig', sourceTableId: 'tS', sourceViewId: 'vSrc', type: 'grid',
+        config: { columnOrder: [{ columnId: 'fSrcPrice' /* no visibility key */ }] } }], orphans: [], warnings: [] };
+    const res = await run(client, plan, destSnapshot);
+    assert.equal(res.failed, 0);
+    assert.ok(client.calls.some((k) => k === `setViewColumns:${viewId}`));
+    assert.deepEqual(client._view(viewId).config.columns.visibleColumnIds, [price]);
+  });
 });
 
 describe('apply: createField (autoNumber — strip read-only maxUsedAutoNumber)', () => {

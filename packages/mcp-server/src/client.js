@@ -1,5 +1,6 @@
 import { SchemaCache } from './cache.js';
 import { formulaRefsToIds } from './formula-refs.js';
+import { isColumnVisible } from './column-visibility.js';
 import { randomBytes, createHash } from 'node:crypto';
 
 /**
@@ -1143,7 +1144,7 @@ export class AirtableClient {
 
     const columnOrder = Array.isArray(viewData.columnOrder) ? viewData.columnOrder : null;
     const visibleColumnOrder = columnOrder
-      ? columnOrder.filter(c => c && c.visibility !== false).map(c => c.columnId)
+      ? columnOrder.filter(isColumnVisible).map(c => c.columnId)
       : null;
 
     return {
@@ -1789,12 +1790,13 @@ export class AirtableClient {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await this.showOrHideColumns(appId, viewId, remaining, true);
       const view = await this.getView(appId, viewId);
-      // Must match getView's own visibility semantics (client.js ~1146): a column
-      // with no `visibility` key is VISIBLE by default. Filtering on truthy
-      // `c.visibility` instead treats an absent key as hidden, so a freshly-shown
-      // column (which the API often returns without a `visibility` key at all)
-      // never reads back as confirmed — burning every retry attempt for nothing.
-      const visible = new Set((view.columnOrder || []).filter((c) => c && c.visibility !== false).map((c) => c.columnId));
+      // Must use the SAME predicate getView uses to build visibleColumnOrder
+      // (isColumnVisible, imported above) — a column with no `visibility` key
+      // is VISIBLE by default. A divergent truthy `c.visibility` check treats
+      // an absent key as hidden, so a freshly-shown column (which the API
+      // often returns without a `visibility` key at all) never reads back as
+      // confirmed — burning every retry attempt for nothing.
+      const visible = new Set((view.columnOrder || []).filter(isColumnVisible).map((c) => c.columnId));
       remaining = wanted.filter((id) => !visible.has(id));
       if (remaining.length === 0) return wanted.length;
       // Let eventual consistency settle before retrying the columns that didn't take.

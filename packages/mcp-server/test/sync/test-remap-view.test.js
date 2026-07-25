@@ -172,4 +172,14 @@ describe('remap.canonicalizeViewConfig columns convergence', () => {
     const differentVisible = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fC', visibility: true }, { columnId: 'fB', visibility: false }, { columnId: 'fD', visibility: false }] }, names, {});
     assert.notEqual(x, differentVisible); // C shown instead of B → different visible set → not equal
   });
+
+  it('a column with no `visibility` key at all is treated as VISIBLE, matching getView/isColumnVisible semantics', () => {
+    // Airtable's internal API omits `visibility` entirely for a visible column
+    // in some responses. A source config shaped that way must canonicalize
+    // identically to an explicit `visibility: true` config, or a real source
+    // column silently compares as hidden and view sync never shows it on dest.
+    const explicit = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA', visibility: true }, { columnId: 'fB', visibility: false }] }, names, {});
+    const noKey = canonicalizeViewConfig({ columnOrder: [{ columnId: 'fA' }, { columnId: 'fB', visibility: false }] }, names, {});
+    assert.equal(noKey, explicit);
+  });
 });

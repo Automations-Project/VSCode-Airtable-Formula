@@ -1,5 +1,7 @@
 // Canonicalize computed-field configs so cross-base comparisons ignore field-ID churn:
 // every fld... reference is replaced with the referenced field's name.
+import { isColumnVisible } from '../column-visibility.js';
+
 const FLD_TOKEN = /fld[A-Za-z0-9]+/g;
 
 function subIds(str, fldIdToName) {
@@ -285,9 +287,12 @@ export function canonicalizeViewConfig(config, fldNames, selNames, stripRecordRe
     // left-to-right order. Apply reliably sets visibility (setViewColumns verify-retry) but the
     // internal API's reorder is unreliable under bulk, so comparing exact order would re-flag
     // forever. Column ORDER is therefore best-effort (applied, not gated on convergence).
+    // isColumnVisible: an absent `visibility` key means VISIBLE (see
+    // column-visibility.js) — matches getView/apply so a source column
+    // returned without the key compares as visible here too, not hidden.
     columns: {
-      visible: (c.columnOrder || []).filter((co) => co.visibility).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
-      hidden: (c.columnOrder || []).filter((co) => !co.visibility).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
+      visible: (c.columnOrder || []).filter((co) => isColumnVisible(co)).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
+      hidden: (c.columnOrder || []).filter((co) => !isColumnVisible(co)).map((co) => viewNameOf(fldNames, co.columnId)).sort(),
     },
     frozen: c.frozenColumnCount ?? null,
     // Only the select-driven colour rule is syncable; 'colorDefinitions' (conditional rules

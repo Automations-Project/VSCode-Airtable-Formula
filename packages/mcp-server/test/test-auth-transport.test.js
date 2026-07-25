@@ -95,6 +95,16 @@ describe('auth._rawApiCall → HttpTransport', () => {
     assert.equal(sent._csrf, 'FRESH-CSRF-AFTER-RECOVERY');
   });
 
+  it('json POST: a non-plain-object body (array) is sent through UNCHANGED, not coerced by the _csrf spread', async () => {
+    // {...['a','b'], _csrf} would silently become {"0":"a","1":"b","_csrf":...} —
+    // guard the spread to plain objects only so a future array/string/number
+    // JSON body isn't corrupted by the _csrf injection.
+    transport.next = { status: 200, body: '{}' };
+    await auth._rawApiCall('POST', '/v0.3/some/endpoint', ['a', 'b'], 'appABC123', 'json');
+    const sent = JSON.parse(transport.calls[0].body);
+    assert.deepEqual(sent, ['a', 'b']);
+  });
+
   it('builds an absolute URL only for path inputs, leaving full URLs intact', async () => {
     transport.next = { status: 200, body: '{}' };
     await auth._rawApiCall('GET', 'https://airtable.com/v0.3/already/full');

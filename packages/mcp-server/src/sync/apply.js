@@ -4,6 +4,7 @@
 // delete the 5 non-primary scaffolding fields (D1); links are foreignKey (later task).
 import { remapRefs, toWritableComputedOptions, remapViewConfig, collectFilterRecordRefs } from './remap.js';
 import { isDone, recordDone, recordFailed } from './journal.js';
+import { isColumnVisible } from '../column-visibility.js';
 
 const UNSUPPORTED_TYPES = new Set(['button', 'asyncText', 'aiText', 'externalSyncSource']);
 const VIEW_GROUP_ANCHOR = new Set(['select', 'singleSelect', 'multiSelect', 'multipleSelects', 'collaborator']);
@@ -494,7 +495,11 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
       if (!cfg.sorts || cfg.sorts.every((s) => refOk(s.columnId))) await tryFacet('sorts', () => client.applySorts(destAppId, destViewId, cfg.sorts || [])); else warnRef('sorts');
       if (!cfg.groupLevels || cfg.groupLevels.every((g) => refOk(g.columnId))) await tryFacet('groups', () => client.updateGroupLevels(destAppId, destViewId, cfg.groupLevels || [])); else warnRef('groups');
       if (cfg.columnOrder && cfg.columnOrder.length) {
-        const visible = cfg.columnOrder.filter((c) => c.visibility && refOk(c.columnId)).map((c) => c.columnId);
+        // isColumnVisible: an absent `visibility` key means VISIBLE (see
+        // column-visibility.js) — the same predicate client.js's getView and
+        // _showColumnsWithRetry use, so a source column returned without the
+        // key is applied as shown here too, not silently dropped as hidden.
+        const visible = cfg.columnOrder.filter((c) => isColumnVisible(c) && refOk(c.columnId)).map((c) => c.columnId);
         await tryFacet('columns', () => client.setViewColumns(destAppId, destViewId, { visibleColumnIds: visible, frozenColumnCount: cfg.frozenColumnCount }));
       } else if (typeof cfg.frozenColumnCount === 'number') {
         await tryFacet('frozen', () => client.updateFrozenColumnCount(destAppId, destViewId, cfg.frozenColumnCount));

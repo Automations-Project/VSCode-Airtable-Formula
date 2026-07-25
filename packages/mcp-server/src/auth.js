@@ -809,7 +809,11 @@ export class AirtableAuth {
         // csrfToken in that window. Overwriting unconditionally means no JSON
         // caller — now or in the future — can ship a token staler than "current
         // at send time", the same guarantee form POSTs already have.
-        requestBody = JSON.stringify(csrfToken ? { ...body, _csrf: csrfToken } : body);
+        // Only spread plain objects — an array/string/number body (no current
+        // caller does this, but nothing stops a future one) would otherwise be
+        // silently coerced into `{"0":...,"_csrf":...}` by the spread.
+        const isPlainObject = body && typeof body === 'object' && !Array.isArray(body);
+        requestBody = JSON.stringify(isPlainObject && csrfToken ? { ...body, _csrf: csrfToken } : body);
       }
     } else {
       headers = {
