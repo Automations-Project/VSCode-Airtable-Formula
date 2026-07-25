@@ -229,44 +229,16 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
   /**
    * After the keychain credentials are cleared in a daemon + byo/direct-login
-   * setup, the running daemon still holds the injected credentials in memory.
-   * Restart it so it re-spawns creds-free — with the keychain now empty it has
-   * nothing to load, so the stale in-memory copy is dropped. Fully best-effort:
-   * every await is guarded and nothing throws to the webview.
+   * setup, the running daemon still holds the injected credentials in memory —
+   * only a restart drops them.
+   *
+   * The implementation lives on AuthManager so that every credential-clearing
+   * path (this provider's narrow "clear cookie" action AND both logout entry
+   * points, which route through `AuthManager.logout()`) shares ONE drop. Kept as
+   * a thin wrapper for the non-logout call sites.
    */
   private async _restartDaemonAfterCredClear(): Promise<void> {
-    try {
-      const settings = getSettings();
-      const authMode = settings.mcp.authMode;
-      if (!settings.mcp.useDaemon) return;
-      if (authMode !== 'byo' && authMode !== 'direct-login') return;
-      const dm = this._daemonManager;
-      if (!dm) return;
-      const status = await dm.getDaemonStatus();
-      if (!status?.running) return;
-      try {
-        await dm.restartDaemon();
-      } catch (restartErr) {
-        // The daemon still holds the (now-cleared) creds in memory. A restart would
-        // drop them but it failed — force-stop so the stale in-memory session dies.
-        console.warn('[DashboardProvider] daemon restart after credential clear failed:', restartErr instanceof Error ? restartErr.message : 'unknown error');
-        try {
-          const forced = await dm.forceStop();
-          // The sweep never kills a process it cannot attribute to this install; if one was left
-          // alive it may still be serving the cleared session, so say so rather than implying
-          // everything is down.
-          const leftAlive = forced?.skippedUnowned?.length
-            ? ` ${forced.skippedUnowned.length} daemon-like process(es) were left running because ownership could not be verified (PID ${forced.skippedUnowned.map(p => p.pid).join(', ')}) — stop them manually if they are yours.`
-            : '';
-          vscode.window.showErrorMessage(`Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.${leftAlive}`);
-        } catch (stopErr) {
-          console.warn('[DashboardProvider] daemon force-stop after failed restart also failed:', stopErr instanceof Error ? stopErr.message : 'unknown error');
-          vscode.window.showErrorMessage('Credentials cleared, but the daemon may still hold your session in memory — stop/restart it manually to fully clear it.');
-        }
-      }
-    } catch (err) {
-      console.warn('[DashboardProvider] daemon restart after credential clear failed:', err instanceof Error ? err.message : 'unknown error');
-    }
+    await this.authManager?.dropDaemonCredentials();
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -436,9 +408,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           'Logout',
         );
         if (confirm === 'Logout') {
+          // logout() itself releases the daemon's browser session and drops its
+          // in-memory creds — the single logout path both entry points share.
           await this.authManager!.logout();
-          // Logout clears the keychain — drop the daemon's in-memory creds too.
-          await this._restartDaemonAfterCredClear();
           await this.pushState();
           this.postResult(msg.id, true);
         } else {

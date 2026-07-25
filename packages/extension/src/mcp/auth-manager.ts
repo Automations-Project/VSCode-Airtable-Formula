@@ -242,6 +242,21 @@ export class AuthManager implements vscode.Disposable {
     this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
   }
 
+  /**
+   * THE logout path. Every entry point (Command Palette `airtable-formula.logout`
+   * and the dashboard's `action:logout`) must go through this and nothing else:
+   * clearing the keychain alone left a running daemon serving the old session, so
+   * the user believed they had logged out while tool calls kept working.
+   *
+   * Clears, in order:
+   *   1. the auto-refresh timer (so it can't re-launch a browser mid-wipe),
+   *   2. the OS-keychain secrets,
+   *   3. the daemon's live browser session (`/daemon/release-browser`) — this is
+   *      the browser-mode credential drop AND it unlocks the persistent profile
+   *      so the directory removal below can actually succeed on Windows,
+   *   4. the on-disk Chrome profile,
+   *   5. the daemon's in-memory byo/direct-login credentials (daemon restart).
+   */
   async logout(): Promise<void> {
     // Stop the refresh timer first so it can't race against the profile wipe
     // and immediately re-launch the browser with stale (now-deleted) state.
@@ -252,6 +267,12 @@ export class AuthManager implements vscode.Disposable {
     await this.secrets.delete(SECRET_OTP_SECRET);
     await this.secrets.delete(SECRET_COOKIE);
 
+    // Browser mode keeps its session in the daemon's live Chromium (cookies in
+    // memory, profile dir held open). Releasing it drops that session and frees
+    // the profile lock — without this, `fs.rm` below fails on Windows and the
+    // daemon happily keeps answering tool calls with the "logged out" session.
+    await this._releaseDaemonBrowser();
+
     const fs = await import('fs/promises');
     try {
       await fs.rm(PROFILE_DIR, { recursive: true, force: true });
@@ -260,7 +281,56 @@ export class AuthManager implements vscode.Disposable {
       console.warn('[AuthManager] Failed to clear browser profile:', err);
     }
 
+    // byo / direct-login creds live in the daemon's memory (cred-store), not on
+    // disk — only a restart drops them.
+    await this.dropDaemonCredentials();
+
     this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
+  }
+
+  /**
+   * After the keychain credentials are cleared in a daemon + byo/direct-login
+   * setup, the running daemon still holds the injected credentials in memory.
+   * Restart it so it re-spawns creds-free — with the keychain now empty it has
+   * nothing to load, so the stale in-memory copy is dropped. Fully best-effort:
+   * every await is guarded and nothing throws to the caller.
+   *
+   * Called by `logout()` and by the dashboard's narrower "clear cookie" /
+   * "clear credentials" actions (via DashboardProvider).
+   */
+  async dropDaemonCredentials(): Promise<void> {
+    try {
+      const settings = getSettings();
+      const authMode = settings.mcp.authMode;
+      if (!settings.mcp.useDaemon) return;
+      if (authMode !== 'byo' && authMode !== 'direct-login') return;
+      const dm = this._daemonManager;
+      if (!dm) return;
+      const status = await dm.getDaemonStatus();
+      if (!status?.running) return;
+      try {
+        await dm.restartDaemon();
+      } catch (restartErr) {
+        // The daemon still holds the (now-cleared) creds in memory. A restart would
+        // drop them but it failed — force-stop so the stale in-memory session dies.
+        console.warn('[AuthManager] daemon restart after credential clear failed:', restartErr instanceof Error ? restartErr.message : 'unknown error');
+        try {
+          const forced = await dm.forceStop();
+          // The sweep never kills a process it cannot attribute to this install; if one was left
+          // alive it may still be serving the cleared session, so say so rather than implying
+          // everything is down.
+          const leftAlive = forced?.skippedUnowned?.length
+            ? ` ${forced.skippedUnowned.length} daemon-like process(es) were left running because ownership could not be verified (PID ${forced.skippedUnowned.map(p => p.pid).join(', ')}) — stop them manually if they are yours.`
+            : '';
+          vscode.window.showErrorMessage(`Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.${leftAlive}`);
+        } catch (stopErr) {
+          console.warn('[AuthManager] daemon force-stop after failed restart also failed:', stopErr instanceof Error ? stopErr.message : 'unknown error');
+          vscode.window.showErrorMessage('Credentials cleared, but the daemon may still hold your session in memory — stop/restart it manually to fully clear it.');
+        }
+      }
+    } catch (err) {
+      console.warn('[AuthManager] daemon restart after credential clear failed:', err instanceof Error ? err.message : 'unknown error');
+    }
   }
 
   async hasCredentials(): Promise<boolean> {
