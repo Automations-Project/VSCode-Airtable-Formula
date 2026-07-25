@@ -56,6 +56,7 @@ import {
   findNodeBinaries,
   sha256Hex,
 } from './vendor-platform-packages.mjs';
+import { assertSafeSymlinks } from './safe-symlinks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_FILE = join(__dirname, 'native-binary-digests.json');
@@ -77,6 +78,15 @@ async function digestsFor(name, scratch) {
   writeFileSync(join(scratch, `${key}.tgz`), bytes);
   extractTarball(`${key}.tgz`, key, scratch);
   const unpacked = join(scratch, key);
+
+  // `tar` creates whatever symlinks the archive asks for, and `findNodeBinaries`
+  // treats a symlinked `.node` as an ordinary file — so without this guard a
+  // tarball could point `foo.node` at a file outside the extraction and we would
+  // hash THAT, pinning a digest of something we never unpacked. Unreachable
+  // today (the tarball is byte-identical to what the registry published, per the
+  // integrity gate above), but this is the routine that mints the trust root for
+  // every later check, so it should not rely on an upstream guarantee.
+  assertSafeSymlinks(unpacked);
 
   const manifest = JSON.parse(readFileSync(join(unpacked, 'package.json'), 'utf8'));
   if (manifest.name !== name || manifest.version !== version) {
@@ -136,18 +146,54 @@ async function main() {
     return;
   }
 
+  // Compare the PINS only, never the whole serialized file. `$comment` is prose
+  // and `algorithm` is a constant; diffing them would report a comment reword as
+  // "does not match the tarballs pnpm-lock.yaml pins", which is both alarming
+  // and false. What this check exists to catch is a pin file that is internally
+  // consistent — right version, right integrity — but carries WRONG DIGESTS.
   let existing;
   try {
-    existing = readFileSync(OUT_FILE, 'utf8');
+    existing = JSON.parse(readFileSync(OUT_FILE, 'utf8'));
   } catch (error) {
     console.error(`\n✗ scripts/native-binary-digests.json could not be read: ${error.message}`);
     process.exit(1);
   }
-  if (existing !== serialized) {
+
+  const canonical = (pkgs) => JSON.stringify(
+    Object.fromEntries(
+      Object.keys(pkgs ?? {}).sort().map((n) => [n, {
+        version: pkgs[n]?.version,
+        integrity: pkgs[n]?.integrity,
+        binaries: Object.fromEntries(Object.keys(pkgs[n]?.binaries ?? {}).sort().map((f) => [f, pkgs[n].binaries[f]])),
+      }])
+    )
+  );
+
+  if (canonical(existing.packages) !== canonical(output.packages)) {
     console.error(
       '\n✗ scripts/native-binary-digests.json does not match the tarballs pnpm-lock.yaml pins.\n' +
-      '  Run `node scripts/record-native-binary-digests.mjs` and commit the result.'
+      '  Run `pnpm record:binary-digests` and commit the result.'
     );
+    // Name what actually differs — a bare "does not match" over 16 packages is
+    // a scavenger hunt.
+    for (const name of names) {
+      const was = existing.packages?.[name];
+      const now = output.packages[name];
+      if (!was) { console.error(`    ${name}: absent from the pin file`); continue; }
+      if (was.version !== now.version) console.error(`    ${name}: pinned v${was.version}, lockfile v${now.version}`);
+      if (was.integrity !== now.integrity) console.error(`    ${name}: integrity differs`);
+      for (const [file, digest] of Object.entries(now.binaries)) {
+        if (was.binaries?.[file] !== digest) {
+          console.error(`    ${name}/${file}: pinned ${was.binaries?.[file] ?? '(absent)'}, actual ${digest}`);
+        }
+      }
+      for (const file of Object.keys(was.binaries ?? {})) {
+        if (!now.binaries[file]) console.error(`    ${name}/${file}: pinned but not present in the tarball`);
+      }
+    }
+    for (const name of Object.keys(existing.packages ?? {})) {
+      if (!output.packages[name]) console.error(`    ${name}: pinned but no longer in the target matrix`);
+    }
     process.exit(1);
   }
   console.log(`\n✓ All ${names.length} pinned platform packages match their lockfile-verified tarballs.`);

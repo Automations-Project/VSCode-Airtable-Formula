@@ -327,7 +327,9 @@ function loadBinaryDigests() {
   return digestCache;
 }
 
-const REGENERATE = 'Regenerate with `node scripts/record-native-binary-digests.mjs` (needs registry access).';
+const REGENERATE =
+  'Regenerate with `pnpm record:binary-digests` ' +
+  '(= `node scripts/record-native-binary-digests.mjs`; needs registry access), then commit the result.';
 
 /**
  * The pinned `{ version, integrity, binaries: { <relPath>: <sha256 hex> } }`

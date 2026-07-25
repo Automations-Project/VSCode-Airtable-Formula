@@ -18,7 +18,9 @@ pnpm package              # create .vsix (build must be run first)
 pnpm packx                # full build + version bump + package host-target .vsix
 pnpm packx:no-bump        # full build + package host-target .vsix without version bump
 pnpm package:targets      # package + verify ALL 8 platform-specific .vsix (release rehearsal)
-pnpm assert:vsix          # verify the .node binaries inside artifacts/*.vsix
+pnpm assert:vsix          # verify the .node binaries inside artifacts/*.vsix (byte-exact vs pins)
+pnpm check:binary-digests # re-derive the native-binary pins from the registry and diff (network)
+pnpm record:binary-digests # rewrite scripts/native-binary-digests.json — only after an impit/ngrok bump
 ```
 
 ### Per-package
