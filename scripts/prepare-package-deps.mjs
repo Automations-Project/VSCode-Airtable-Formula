@@ -19,12 +19,13 @@
  * `vsix-targets.mjs`. Run this once per target before each `vsce package
  * --target <t>`; `package-targets.mjs` does exactly that.
  */
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { ALL_TARGETS, hostTarget, isPlatformPackage, targetConfig } from './vsix-targets.mjs';
 import { vendorPlatformPackagesForTarget } from './vendor-platform-packages.mjs';
+import { assertSafeSymlinks } from './safe-symlinks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -96,70 +97,9 @@ function resolvePackageRoot(packageName) {
   return undefined;
 }
 
-// ── Symlink-escape guard ─────────────────────────────────────────────────
-// `cpSync(..., { dereference: true })` follows EVERY symlink in the tree and
-// copies its target into the VSIX. A trojanized npm package could ship a
-// symlink pointing at ~/.ssh, CI credentials, etc., and the target file would
-// silently end up inside the published artifact. Before copying, walk the
-// tree (following directory symlinks, cycle-safe) and require every symlink
-// to resolve inside the workspace node_modules tree — pnpm's legitimate
-// nested-dependency links all resolve into <workspace>/node_modules/.pnpm.
-
-const workspaceRoot = realpathSync(join(__dirname, '..'));
-
-// Windows paths are case-insensitive; normalize before prefix comparison.
-const normalizeForCompare = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
-const isWithin = (child, parent) => {
-  const c = normalizeForCompare(child);
-  const p = normalizeForCompare(parent);
-  return c === p || c.startsWith(p + sep);
-};
-
-function assertSafeSymlinks(rootDir) {
-  // Both roots must be canonicalized — symlink targets are compared after
-  // realpathSync, so an un-resolved allowlist entry (workspace itself behind
-  // a symlink, e.g. a git worktree) would reject legitimate pnpm links.
-  const allowedRoots = [realpathSync(rootDir), realpathSync(join(workspaceRoot, 'node_modules'))];
-  const visited = new Set();
-  const stack = [realpathSync(rootDir)];
-
-  while (stack.length > 0) {
-    const dir = stack.pop();
-    const dirKey = normalizeForCompare(dir);
-    if (visited.has(dirKey)) continue;
-    visited.add(dirKey);
-
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-
-    for (const entry of entries) {
-      const entryPath = join(dir, entry.name);
-      let stat;
-      try { stat = lstatSync(entryPath); } catch { continue; }
-
-      if (stat.isSymbolicLink()) {
-        let resolved;
-        try {
-          resolved = realpathSync(entryPath);
-        } catch {
-          throw new Error(`Refusing to package: broken symlink ${entryPath}`);
-        }
-        if (!allowedRoots.some((root) => isWithin(resolved, root))) {
-          throw new Error(
-            `Refusing to package: symlink escapes workspace node_modules:\n  ${entryPath}\n  → ${resolved}`
-          );
-        }
-        // dereference:true copies the target's contents too — keep walking
-        // through it so a second-level symlink can't smuggle files out.
-        try {
-          if (lstatSync(resolved).isDirectory()) stack.push(resolved);
-        } catch { /* target vanished — cpSync will surface it */ }
-      } else if (stat.isDirectory()) {
-        stack.push(entryPath);
-      }
-    }
-  }
-}
+// The symlink-escape guard `copyPackage` applies before every dereferencing
+// copy now lives in `safe-symlinks.mjs`, so the foreign-platform vendoring path
+// (`vendor-platform-packages.mjs`) applies the identical check.
 
 /**
  * Resolve + safety-check + copy a single package into dist/node_modules.
