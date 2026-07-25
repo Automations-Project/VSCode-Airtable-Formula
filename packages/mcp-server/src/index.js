@@ -137,11 +137,11 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable base structure with 62 tools: schema inspection, table/field/view CRUD, ' +
+      'Manage Airtable bases with 71 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
       'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
       'select field choices with color support, formula validation and file-based bulk editing, ' +
-      'extension management, and granular tool profile control (read-only / safe-write / full / custom). ' +
-      'Record read/write/delete is handled by the official Airtable MCP — this server focuses on schema and structure.',
+      'record create/update/duplicate/delete plus URL-based attachment uploads, base-to-base schema and record sync, ' +
+      'extension management, and granular tool profile control (read-only / safe-write / full / custom).',
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },

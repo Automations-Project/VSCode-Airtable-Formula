@@ -392,6 +392,18 @@ const docCountProblems = [
       allOccurrences: true,
     },
   ])),
+  // The MCP `serverInfo.description` string is rendered in every MCP client's
+  // server-info panel and ships verbatim to npm — it is the single most-visible
+  // surface this guard reaches. It previously drifted to "62 tools" and a false
+  // claim that record CRUD was handled by a different server (fixed pre-merge);
+  // nothing guarded it before, which is exactly how it went stale unnoticed.
+  ...(await checkCanonicalCounts('packages/mcp-server/src/index.js', [
+    {
+      re: /(\d+) Airtable tools \+ `manage_tools`/,
+      want: [totalTools],
+      label: 'serverInfo.description "N Airtable tools + `manage_tools`" (shown in every MCP client\'s server-info panel)',
+    },
+  ])),
   // The banner/architecture SVGs are hand-authored marketing graphics — the first
   // element of both published READMEs (raw-GitHub URLs pinned to `main`, so they go
   // live the moment a merge lands). They embed the same counts as plain <tspan>/<text>
@@ -426,7 +438,8 @@ if (docCountProblems.length) {
   console.error('\n\x1b[31mTool-count convention ("71 Airtable tools + `manage_tools`") is stale in published docs:\x1b[0m');
   for (const msg of docCountProblems) console.error(`  - ${msg}`);
   console.error(
-    '\nFix: update the counts in README.md, packages/mcp-server/README.md, and\n' +
+    '\nFix: update the counts in README.md, packages/mcp-server/README.md,\n' +
+    'packages/mcp-server/src/index.js (serverInfo.description), and\n' +
     'packages/extension/src/skills/templates/skillTemplates.ts. Where a sentence describes\n' +
     'what an MCP client actually lists (tools/list), 72 is correct (71 + manage_tools) — see\n' +
     'CLAUDE.md "Keeping tool categories in sync" for the convention.'
