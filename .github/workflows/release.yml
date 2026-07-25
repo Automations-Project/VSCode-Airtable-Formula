@@ -299,10 +299,15 @@ jobs:
           # Target list comes from the same source of truth the build used.
           VERSION="${{ steps.ext_version.outputs.next }}"
           TARGETS=$(node -e "import('./scripts/vsix-targets.mjs').then(m=>console.log(m.ALL_TARGETS.join(' ')))")
+          # Wait up to 3 min for the FIRST target — that covers Open VSX's
+          # indexing latency. Once any target is confirmed the rest are moments
+          # behind, so drop to 1 min each; otherwise a stalled index would sleep
+          # 3 min x 8 targets before the job could finish.
+          ATTEMPTS=18
           for TARGET in $TARGETS; do
             echo "Verifying Open VSX indexed v${VERSION} (${TARGET})..."
             FOUND=""
-            for i in $(seq 1 18); do
+            for i in $(seq 1 $ATTEMPTS); do
               FOUND=$(curl -s "https://open-vsx.org/api/Nskha/airtable-formula/${TARGET}/${VERSION}" \
                 | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
                     try{const p=JSON.parse(d);console.log(p.version||'not-found')}
@@ -310,9 +315,10 @@ jobs:
                   })")
               if [[ "$FOUND" == "$VERSION" ]]; then
                 echo "✓ Open VSX confirmed: v${VERSION} (${TARGET})"
+                ATTEMPTS=6
                 break
               fi
-              echo "  not indexed yet (attempt $i/18), waiting 10s..."
+              echo "  not indexed yet (attempt $i/${ATTEMPTS}), waiting 10s..."
               sleep 10
             done
             if [[ "$FOUND" != "$VERSION" ]]; then
