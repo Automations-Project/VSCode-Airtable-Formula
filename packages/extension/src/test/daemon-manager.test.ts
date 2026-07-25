@@ -407,6 +407,11 @@ describe('DaemonManager._parseProcessList', () => {
 describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
   const WIN_ROOT = 'C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.32';
   const POSIX_ROOT = '/home/u/.vscode/extensions/nskha.airtable-formula-2.1.32';
+  /** configDir (`AIRTABLE_USER_MCP_HOME`) — `<configDir>/.chrome-profile` is the owned profile. */
+  const WIN_CFG = 'C:\\Users\\admin\\.airtable-user-mcp';
+  const POSIX_CFG = '/home/u/.airtable-user-mcp';
+  const WIN_PROFILE = `${WIN_CFG}\\.chrome-profile`;
+  const POSIX_PROFILE = `${POSIX_CFG}/.chrome-profile`;
 
   /**
    * Build a manager whose process listing is fixed and whose kill primitive is recorded.
@@ -417,8 +422,11 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
     extensionPath: string,
     processes: Array<{ pid: number; commandLine: string }>,
     platform: NodeJS.Platform = 'win32',
+    // Criterion (b) resolves the owned browser profile as `<configDir>/.chrome-profile`, so the
+    // profile-holder cases must pass the configDir their command lines are written against.
+    configDir = '/tmp/cfg',
   ) => {
-    const dm = new DaemonManager('/tmp/cfg', extensionPath);
+    const dm = new DaemonManager(configDir, extensionPath);
     const listed = vi.fn(() => processes);
     const killTree = vi.fn();
     (dm as any)._listProcesses = listed;
@@ -589,21 +597,21 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
     expect(killTree).not.toHaveBeenCalled();
   });
 
-  // ── Chrome-profile pattern — already correctly scoped, must NOT regress ─────
+  // ── Chrome-profile criterion (b) — must keep working after the hardening ────
 
   it('CHROME PROFILE: still kills a Chromium squatting ~/.airtable-user-mcp/.chrome-profile (Windows)', () => {
     const { result, killedPids } = sweep(WIN_ROOT, [
-      { pid: 7001, commandLine: '"C:\\Program Files\\Google\\Chrome\\chrome.exe" --user-data-dir=C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile --headless' },
-    ]);
+      { pid: 7001, commandLine: `"C:\\Program Files\\Google\\Chrome\\chrome.exe" --user-data-dir=${WIN_PROFILE} --headless` },
+    ], 'win32', WIN_CFG);
     expect(killedPids).toEqual([7001]);
     expect(result.killed).toEqual([7001]);
   });
 
   it('CHROME PROFILE: still kills the POSIX equivalent, including helper processes', () => {
     const { killedPids } = sweep(POSIX_ROOT, [
-      { pid: 7002, commandLine: '/opt/chromium --user-data-dir=/home/u/.airtable-user-mcp/.chrome-profile' },
-      { pid: 7003, commandLine: '/opt/chromium --type=renderer --user-data-dir=/home/u/.airtable-user-mcp/.chrome-profile' },
-    ], 'linux');
+      { pid: 7002, commandLine: `/opt/chromium --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 7003, commandLine: `/opt/chromium --type=renderer --user-data-dir=${POSIX_PROFILE}` },
+    ], 'linux', POSIX_CFG);
     expect(killedPids).toEqual([7002, 7003]);
   });
 
@@ -615,7 +623,7 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
       { pid: 7005, commandLine: 'Code.exe C:\\Users\\admin\\.airtable-user-mcp\\tools-config.json' },
       // Right fragments, WRONG ORDER — the original filter was ordered, keep it ordered.
       { pid: 7006, commandLine: 'chrome.exe --user-data-dir=C:\\x\\.chrome-profile\\.airtable-user-mcp' },
-    ]);
+    ], 'win32', WIN_CFG);
     expect(killTree).not.toHaveBeenCalled();
     expect(result).toEqual({ killed: [], skipped: [] });
   });
@@ -641,6 +649,257 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
     expect(killedPids).toEqual([8001]);
     expect(result.killed).toEqual([8001]);
     expect(result.skipped.map(p => p.pid)).toEqual([8002, 8003, 8004, 8005]);
+  });
+});
+
+/**
+ * Criterion (b) — the browser-profile half of ownership.
+ *
+ * It used to be a two-fragment substring scan (`.airtable-user-mcp` … `.chrome-profile`, in
+ * order) with NO executable requirement and NO argument matching, mis-documented as "already
+ * correctly scoped". Anything whose command line merely MENTIONED the profile path — an editor
+ * with `…/.chrome-profile/Default/Preferences` open, a `grep`/`rg` over the config dir, a file
+ * manager, a backup job — was force-killed with its whole process tree by the dashboard Stop
+ * button. These tests pin the replacement: kill ONLY a Chrome-family image that carries the EXACT
+ * `--user-data-dir=<configDir>/.chrome-profile` argv token. Every case appears in both Windows
+ * and POSIX command-line form.
+ */
+describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND exact --user-data-dir', () => {
+  const WIN_ROOT = 'C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.32';
+  const POSIX_ROOT = '/home/u/.vscode/extensions/nskha.airtable-formula-2.1.32';
+  const WIN_CFG = 'C:\\Users\\admin\\.airtable-user-mcp';
+  const POSIX_CFG = '/home/u/.airtable-user-mcp';
+  const WIN_PROFILE = `${WIN_CFG}\\.chrome-profile`;
+  const POSIX_PROFILE = `${POSIX_CFG}/.chrome-profile`;
+
+  const sweep = (
+    configDir: string,
+    processes: Array<{ pid: number; commandLine: string }>,
+    platform: NodeJS.Platform,
+    extensionPath: string,
+  ) => {
+    const dm = new DaemonManager(configDir, extensionPath);
+    const killTree = vi.fn();
+    (dm as any)._listProcesses = vi.fn(() => processes);
+    (dm as any)._killTree = killTree;
+    const result = (dm as any)._sweepOrphans(platform) as {
+      killed: number[];
+      skipped: Array<{ pid: number; commandLine: string }>;
+    };
+    return { result, killTree, killedPids: killTree.mock.calls.map(c => c[0] as number) };
+  };
+  const win = (processes: Array<{ pid: number; commandLine: string }>) =>
+    sweep(WIN_CFG, processes, 'win32', WIN_ROOT);
+  const posix = (processes: Array<{ pid: number; commandLine: string }>) =>
+    sweep(POSIX_CFG, processes, 'linux', POSIX_ROOT);
+
+  // ── POSITIVE: a real Chrome-family process on our exact profile IS killed ───
+
+  it('POSITIVE (Windows): every Chrome-family image we can launch, on the exact profile, IS killed', () => {
+    const { result, killedPids } = win([
+      { pid: 1001, commandLine: `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir=${WIN_PROFILE} --headless` },
+      { pid: 1002, commandLine: `"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --user-data-dir=${WIN_PROFILE}` },
+      // patchright's downloaded chromium + its headless shell.
+      { pid: 1003, commandLine: `"C:\\Users\\admin\\AppData\\Local\\ms-playwright\\chromium-1187\\chrome-win64\\chrome.exe" --user-data-dir=${WIN_PROFILE}` },
+      { pid: 1004, commandLine: `"C:\\Users\\admin\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1187\\chrome-headless-shell-win64\\chrome-headless-shell.exe" --user-data-dir=${WIN_PROFILE}` },
+      // Brave — browser-detect hands patchright its executablePath with channel 'chromium'.
+      { pid: 1005, commandLine: `"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe" --user-data-dir=${WIN_PROFILE}` },
+      // An UNQUOTED image path containing spaces (CIM reports both shapes).
+      { pid: 1006, commandLine: `C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe --user-data-dir=${WIN_PROFILE}` },
+    ]);
+    expect(killedPids).toEqual([1001, 1002, 1003, 1004, 1005, 1006]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('POSITIVE (POSIX): system chrome/chromium/edge/brave, the mac app bundles and helpers, ARE killed', () => {
+    const { result, killedPids } = posix([
+      { pid: 2001, commandLine: `/opt/google/chrome/chrome --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 2002, commandLine: `/usr/bin/chromium-browser --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 2003, commandLine: `/opt/microsoft/msedge/msedge --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 2004, commandLine: `/usr/bin/brave-browser --user-data-dir=${POSIX_PROFILE}` },
+      // patchright download layouts: linux `chrome-linux64/chrome`, arm64 `headless_shell`.
+      { pid: 2005, commandLine: `/home/u/.cache/ms-playwright/chromium-1187/chrome-linux64/chrome --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 2006, commandLine: `/home/u/.cache/ms-playwright/chromium_headless_shell-1187/chrome-linux/headless_shell --user-data-dir=${POSIX_PROFILE}` },
+      // macOS: app-bundle executables have SPACES in the image name, and helpers carry the flag too.
+      { pid: 2007, commandLine: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 2008, commandLine: `/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/140/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper (Renderer) --type=renderer --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 2009, commandLine: `/Users/u/Library/Caches/ms-playwright/chromium-1187/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --user-data-dir=${POSIX_PROFILE}` },
+    ]);
+    expect(killedPids).toEqual([2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('POSITIVE: a quoted argv (spaces in the config dir) and mixed case/separators still match', () => {
+    const cfg = 'C:\\Users\\A B\\.airtable-user-mcp';
+    const profile = `${cfg}\\.chrome-profile`;
+    const { killedPids } = sweep(cfg, [
+      // Node quotes the WHOLE argument when its value contains a space.
+      { pid: 3001, commandLine: `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" "--user-data-dir=${profile}"` },
+      // Only the VALUE quoted.
+      { pid: 3002, commandLine: `chrome.exe --user-data-dir="${profile}"` },
+      // Same file, other separator + other casing.
+      { pid: 3003, commandLine: 'CHROME.EXE --user-data-dir=C:/USERS/A B/.AIRTABLE-USER-MCP/.CHROME-PROFILE' },
+      // Trailing separator is the same directory.
+      { pid: 3004, commandLine: `chrome.exe --user-data-dir=${profile}\\` },
+    ], 'win32', WIN_ROOT);
+    expect(killedPids).toEqual([3001, 3002, 3003, 3004]);
+  });
+
+  it('POSITIVE (POSIX): single-quoted value form still matches', () => {
+    const { killedPids } = posix([
+      { pid: 3005, commandLine: `/usr/bin/chromium --user-data-dir='${POSIX_PROFILE}'` },
+    ]);
+    expect(killedPids).toEqual([3005]);
+  });
+
+  // ── NEGATIVE: an EDITOR holding a file under the profile ────────────────────
+
+  it('NEGATIVE (Windows): an editor with a file under the profile open is NOT killed and NOT reported', () => {
+    const { result, killTree } = win([
+      { pid: 4001, commandLine: `"C:\\Program Files\\Microsoft VS Code\\Code.exe" "${WIN_PROFILE}\\Default\\Preferences"` },
+      { pid: 4002, commandLine: `"C:\\Windows\\System32\\NOTEPAD.EXE" ${WIN_PROFILE}\\Default\\Preferences` },
+      { pid: 4003, commandLine: `"C:\\Program Files\\Microsoft VS Code\\Code.exe" --folder-uri file:///C:/Users/admin/.airtable-user-mcp/.chrome-profile` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('NEGATIVE (POSIX): vim/emacs/less on a file under the profile are NOT killed and NOT reported', () => {
+    const { result, killTree } = posix([
+      { pid: 4004, commandLine: `vim ${POSIX_PROFILE}/Default/Preferences` },
+      { pid: 4005, commandLine: `emacs -nw ${POSIX_PROFILE}/Default/Preferences` },
+      { pid: 4006, commandLine: `less ${POSIX_PROFILE}/DevToolsActivePort` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  // ── NEGATIVE: search tools / file managers / backup jobs ────────────────────
+
+  it('NEGATIVE (Windows): rg/findstr/explorer/backup mentioning the profile are NOT killed', () => {
+    const { result, killTree } = win([
+      { pid: 5001, commandLine: `rg --files-with-matches airtable ${WIN_PROFILE}` },
+      { pid: 5002, commandLine: `findstr /s /i cookie ${WIN_PROFILE}\\Default\\*` },
+      { pid: 5003, commandLine: `C:\\Windows\\explorer.exe ${WIN_PROFILE}` },
+      { pid: 5004, commandLine: `"C:\\Program Files\\7-Zip\\7z.exe" a backup.7z ${WIN_PROFILE}` },
+      { pid: 5005, commandLine: `robocopy ${WIN_PROFILE} D:\\backup\\.chrome-profile /MIR` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('NEGATIVE (POSIX): grep/rg/find/rsync/nautilus mentioning the profile are NOT killed', () => {
+    const { result, killTree } = posix([
+      { pid: 5006, commandLine: `grep -r airtable ${POSIX_PROFILE}` },
+      { pid: 5007, commandLine: `rg --hidden secretSocketId ${POSIX_PROFILE}` },
+      { pid: 5008, commandLine: `find ${POSIX_PROFILE} -name SingletonLock` },
+      { pid: 5009, commandLine: `rsync -a ${POSIX_PROFILE}/ /mnt/backup/.chrome-profile/` },
+      { pid: 5010, commandLine: `nautilus ${POSIX_PROFILE}` },
+      { pid: 5011, commandLine: `tar -czf profile.tgz ${POSIX_PROFILE}` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  // ── NEGATIVE: a real Chrome on somebody ELSE'S profile ─────────────────────
+
+  it('NEGATIVE (Windows): Chrome/Edge with a DIFFERENT --user-data-dir is NOT killed', () => {
+    const { result, killTree } = win([
+      { pid: 6001, commandLine: '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome\\User Data' },
+      { pid: 6002, commandLine: '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"' },
+      { pid: 6003, commandLine: 'msedge.exe --user-data-dir=C:\\Users\\admin\\.other-app\\.chrome-profile' },
+      // Another OS user's install of THIS extension — still not ours to kill.
+      { pid: 6004, commandLine: 'chrome.exe --user-data-dir=C:\\Users\\other\\.airtable-user-mcp\\.chrome-profile' },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('NEGATIVE (POSIX): Chrome/Chromium with a DIFFERENT --user-data-dir is NOT killed', () => {
+    const { result, killTree } = posix([
+      { pid: 6005, commandLine: '/opt/google/chrome/chrome --user-data-dir=/home/u/.config/google-chrome' },
+      { pid: 6006, commandLine: '/usr/bin/chromium' },
+      { pid: 6007, commandLine: '/usr/bin/chromium --user-data-dir=/home/u/.other-app/.chrome-profile' },
+      { pid: 6008, commandLine: '/opt/google/chrome/chrome --user-data-dir=/home/other/.airtable-user-mcp/.chrome-profile' },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  // ── NEGATIVE: prefix / suffix / subdirectory near-misses ────────────────────
+
+  it('NEGATIVE (Windows): a path that merely CONTAINS the profile dir as a substring is NOT killed', () => {
+    const { result, killTree } = win([
+      // Suffix: `…\.chrome-profile-backup` starts with our profile path.
+      { pid: 7001, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}-backup` },
+      { pid: 7002, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}.old` },
+      // Subdirectory of our profile is a different --user-data-dir.
+      { pid: 7003, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}\\Default` },
+      // Prefix: a mounted copy whose path ENDS with ours.
+      { pid: 7004, commandLine: 'chrome.exe --user-data-dir=D:\\snapshots\\Users\\admin\\.airtable-user-mcp\\.chrome-profile' },
+      // The parent config dir, not the profile.
+      { pid: 7005, commandLine: `chrome.exe --user-data-dir=${WIN_CFG}` },
+      // Our profile path present, but as a value of a DIFFERENT flag.
+      { pid: 7006, commandLine: `chrome.exe --disk-cache-dir=${WIN_PROFILE} --user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome\\User Data` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('NEGATIVE (POSIX): a path that merely CONTAINS the profile dir as a substring is NOT killed', () => {
+    const { result, killTree } = posix([
+      { pid: 7007, commandLine: `/usr/bin/chromium --user-data-dir=${POSIX_PROFILE}-backup` },
+      { pid: 7008, commandLine: `/usr/bin/chromium --user-data-dir=${POSIX_PROFILE}.bak` },
+      { pid: 7009, commandLine: `/usr/bin/chromium --user-data-dir=${POSIX_PROFILE}/Default` },
+      { pid: 7010, commandLine: `/usr/bin/chromium --user-data-dir=/mnt/backup${POSIX_PROFILE}` },
+      { pid: 7011, commandLine: `/usr/bin/chromium --user-data-dir=${POSIX_CFG}` },
+      { pid: 7012, commandLine: `/usr/bin/chromium --disk-cache-dir=${POSIX_PROFILE} --user-data-dir=/home/u/.config/chromium` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  // ── FAIL-SAFE: the flag alone is never enough, and is reported instead ──────
+
+  it('FAIL-SAFE (both platforms): a NON-browser process carrying our exact --user-data-dir is left alive and REPORTED', () => {
+    const winCmd = `node C:\\tools\\wrapper.js --user-data-dir=${WIN_PROFILE}`;
+    const w = win([{ pid: 8001, commandLine: winCmd }]);
+    expect(w.killTree).not.toHaveBeenCalled();
+    expect(w.result).toEqual({ killed: [], skipped: [{ pid: 8001, commandLine: winCmd }] });
+
+    const posixCmd = `python3 /opt/tools/probe.py --user-data-dir=${POSIX_PROFILE}`;
+    const p = posix([{ pid: 8002, commandLine: posixCmd }]);
+    expect(p.killTree).not.toHaveBeenCalled();
+    expect(p.result).toEqual({ killed: [], skipped: [{ pid: 8002, commandLine: posixCmd }] });
+  });
+
+  it('FAIL-SAFE: a Chrome-family image with NO --user-data-dir for our profile is neither killed nor reported', () => {
+    const { result, killTree } = posix([
+      { pid: 8003, commandLine: `/usr/bin/chromium ${POSIX_PROFILE}` },
+      { pid: 8004, commandLine: `/opt/google/chrome/chrome file://${POSIX_PROFILE}/Default/Preferences` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('FAIL-SAFE: an empty or relative configDir yields NO profile kills (no bare `.chrome-profile` match)', () => {
+    for (const cfg of ['', '   ', '.airtable-user-mcp', './rel']) {
+      const { result, killTree } = sweep(cfg, [
+        { pid: 8005, commandLine: 'chrome.exe --user-data-dir=.chrome-profile' },
+        { pid: 8006, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}` },
+        { pid: 8007, commandLine: `/usr/bin/chromium --user-data-dir=${POSIX_PROFILE}` },
+      ], 'win32', WIN_ROOT);
+      expect(killTree).not.toHaveBeenCalled();
+      expect(result).toEqual({ killed: [], skipped: [] });
+    }
+  });
+
+  it('never kills our own pid even when it is a Chrome on our exact profile', () => {
+    const { result, killTree } = win([
+      { pid: process.pid, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
   });
 });
 

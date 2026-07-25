@@ -419,6 +419,149 @@ export class DaemonManager implements vscode.Disposable {
   }
 
   /**
+   * The exact persistent browser profile THIS install hands the daemon, in `_canon` form.
+   *
+   * `buildDaemonEnv()` pins `AIRTABLE_USER_MCP_HOME = configDir`, and the server resolves its
+   * profile as `<AIRTABLE_USER_MCP_HOME>/.chrome-profile` (`mcp-server/src/paths.js`
+   * `getProfileDir()`), which is also the literal path `registration.ts` and `auth-manager.ts`
+   * use. So `<configDir>/.chrome-profile` IS the profile — no guessing, no `os.homedir()`
+   * fallback that could attribute another OS user's browser to us.
+   *
+   * Returns null for an empty/relative configDir, for the same reason `_bundledEntryPath()` does:
+   * a relative join would yield the bare fragment `.chrome-profile` and match another app's.
+   */
+  private _profileDir(): string | null {
+    const root = this.configDir;
+    if (typeof root !== 'string' || root.trim().length === 0) return null;
+    if (!DaemonManager.ABSOLUTE_LIKE.test(root)) return null;
+    return DaemonManager._stripTrailingSep(DaemonManager._canon(path.join(root, '.chrome-profile')));
+  }
+
+  /** Trailing separators are not part of a directory's identity (`_canon` already made them `/`). */
+  private static _stripTrailingSep(p: string): string {
+    return p.replace(/\/+$/, '');
+  }
+
+  /**
+   * Chrome-family process images (argv[0] basename, lower-cased, `.exe` stripped) — the ONLY
+   * images criterion (b) will ever kill. DERIVED from what this project actually launches:
+   *
+   *  - `mcp-server/src/auth.js` launches patchright with `channel: AIRTABLE_BROWSER_CHANNEL ||
+   *    'chrome'` (documented values `chrome|msedge|chromium`) and an optional explicit
+   *    `AIRTABLE_BROWSER_PATH` executable.
+   *  - patchright-core's channel registry resolves those channels to `chrome.exe` / `msedge.exe`
+   *    (win32), `/opt/google/chrome{,-beta,-unstable,-canary}/chrome` and
+   *    `/opt/microsoft/msedge{,-beta,-dev}/msedge` (linux), and `…/MacOS/Google Chrome[ Beta|Dev|
+   *    Canary]` / `…/MacOS/Microsoft Edge[ Beta|Dev|Canary]` (darwin).
+   *  - patchright-core's DOWNLOADED-browser registry resolves to `chrome`/`chrome.exe`,
+   *    `Google Chrome for Testing`, `Chromium` (older mac layout — see `browser-download.ts`),
+   *    `chrome-headless-shell[.exe]` and `headless_shell`.
+   *  - `browser-detect.ts` additionally hands patchright a system Chromium (`chromium`,
+   *    `chromium-browser`, `…/MacOS/Chromium`), Chrome (`google-chrome`,
+   *    `google-chrome-stable`), Edge (`microsoft-edge`, `microsoft-edge-stable`) or Brave
+   *    (`brave.exe`, `brave`, `brave-browser`, `…/MacOS/Brave Browser`).
+   *
+   * This mirrors the process-name filter `mcp-server/src/process-tree.js` applies on Windows
+   * (`chrome.exe`/`msedge.exe`/`chromium.exe`), widened to the images the other platforms and the
+   * downloaded/Brave paths actually produce.
+   */
+  private static readonly CHROME_FAMILY_IMAGES: ReadonlySet<string> = new Set([
+    'chrome', 'chromium', 'chromium-browser', 'chrome-headless-shell', 'headless_shell',
+    'google chrome for testing',
+    'google-chrome', 'google-chrome-stable', 'google-chrome-beta', 'google-chrome-unstable',
+    'google chrome', 'google chrome beta', 'google chrome dev', 'google chrome canary',
+    'msedge', 'microsoft-edge', 'microsoft-edge-stable', 'microsoft-edge-beta', 'microsoft-edge-dev',
+    'microsoft edge', 'microsoft edge beta', 'microsoft edge dev', 'microsoft edge canary',
+    'brave', 'brave-browser', 'brave browser',
+  ]);
+
+  /**
+   * macOS helper images (`Google Chrome Helper`, `… Helper (Renderer)`, …). They carry the same
+   * `--user-data-dir` as their root browser, so without this they would be *reported* as
+   * unattributable on every macOS stop — pure noise for processes that are demonstrably ours.
+   */
+  private static readonly CHROME_FAMILY_HELPER =
+    /^(?:google chrome(?: for testing| beta| dev| canary)?|microsoft edge(?: beta| dev| canary)?|chromium|brave browser) helper(?: \([^)]*\))?$/;
+
+  /**
+   * argv[0]'s basename, lower-cased and `.exe`-stripped, from a `_canon`-form command line.
+   *
+   * Handles the three shapes process enumeration actually yields:
+   *   `"C:/Program Files/Google/Chrome/Application/chrome.exe" --user-data-dir=…`  (quoted image)
+   *   `C:/Program Files/Google/Chrome/Application/chrome.exe --user-data-dir=…`    (bare, spaces)
+   *   `/applications/google chrome.app/contents/macos/google chrome --user-data-dir=…`
+   * For the unquoted forms the image is everything before the first flag-shaped token, so a path
+   * containing spaces survives. A command line with no flag at all (`vim /some/file`) keeps its
+   * whole text as the "image", whose basename is a filename — never a browser name.
+   */
+  private static _imageName(cmd: string): string {
+    let head: string;
+    const quote = cmd[0];
+    if (quote === '"' || quote === '\'') {
+      const end = cmd.indexOf(quote, 1);
+      head = end > 0 ? cmd.slice(1, end) : cmd.slice(1);
+    } else {
+      const flag = /\s-{1,2}\S/.exec(cmd);
+      head = flag ? cmd.slice(0, flag.index) : cmd;
+    }
+    head = head.trim().replace(/["']+$/, '');
+    const base = head.slice(head.lastIndexOf('/') + 1);
+    return base.endsWith('.exe') ? base.slice(0, -'.exe'.length) : base;
+  }
+
+  /** Is this command line's process image a Chrome-family browser we could have launched? */
+  private static _isChromeFamilyImage(cmd: string): boolean {
+    const image = DaemonManager._imageName(cmd);
+    return DaemonManager.CHROME_FAMILY_IMAGES.has(image)
+      || DaemonManager.CHROME_FAMILY_HELPER.test(image);
+  }
+
+  private static readonly USER_DATA_DIR_FLAG = '--user-data-dir=';
+
+  /**
+   * Does argv carry `--user-data-dir=<profileDir>` for EXACTLY this directory?
+   *
+   * Deliberately built on the SAME `_containsPathToken` boundary check criterion (a) uses — one
+   * matching primitive for both criteria is what stops them drifting apart again. `flag+dir` is
+   * matched as a whole argv token, so:
+   *   - `…/.chrome-profile-backup`, `…/.chrome-profile.old` → the following `-`/`.` is not an
+   *     argv boundary → MISS;
+   *   - `…/.chrome-profile/Default` (a subdirectory) → following `/` → MISS;
+   *   - `--user-data-dir=/mnt/backup/home/u/…/.chrome-profile` → `flag+dir` never appears
+   *     contiguously → MISS;
+   *   - a longer flag ending in `user-data-dir=` → the preceding character is not a boundary
+   *     → MISS.
+   * The three needle spellings cover the quotings argv actually arrives in: bare,
+   * `"--user-data-dir=C:/Users/a b/…"` (Node quotes the WHOLE argument when it contains a space —
+   * the opening quote is itself a boundary), and `--user-data-dir="…"` / `'…'`. The bare form
+   * also covers POSIX `ps -o args=`, which joins argv with spaces and quotes nothing, so a home
+   * directory containing a space still matches. A trailing separator is the same directory.
+   *
+   * Both arguments must already be in `_canon` form — that is what makes the comparison
+   * case-insensitive and `\` vs `/` tolerant.
+   */
+  private static _hasUserDataDirArg(cmd: string, profileDir: string): boolean {
+    if (!profileDir) return false;
+    const flag = DaemonManager.USER_DATA_DIR_FLAG;
+    for (const dir of [profileDir, `${profileDir}/`]) {
+      if (DaemonManager._containsPathToken(cmd, `${flag}${dir}`)) return true;
+      if (DaemonManager._containsPathToken(cmd, `${flag}"${dir}"`)) return true;
+      if (DaemonManager._containsPathToken(cmd, `${flag}'${dir}'`)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Does this (`_canon`-form) command line claim OUR exact browser profile via `--user-data-dir`?
+   * Independent of *what* the process is — used both as half of ownership criterion (b) and as
+   * the fail-safe REPORTING predicate for a profile holder we cannot attribute.
+   */
+  private _claimsOurProfile(canonCmd: string): boolean {
+    const profileDir = this._profileDir();
+    return profileDir !== null && DaemonManager._hasUserDataDirArg(canonCmd, profileDir);
+  }
+
+  /**
    * Positive ownership test — the ONLY kill criterion.
    *
    * (a) the exact bundled `<extensionPath>/dist/mcp/index.mjs` this install spawns, matched as a
@@ -430,11 +573,28 @@ export class DaemonManager implements vscode.Disposable {
    *     editor case that is the user's unsaved work and the extension host running this sweep.
    *     This is the same "our file appears in someone else's argv" hazard that rules out using a
    *     bare `.airtable-user-mcp` fragment as a criterion; or
-   * (b) a Chromium still squatting our persistent profile — `.airtable-user-mcp` followed by
-   *     `.chrome-profile`. Semantics are UNCHANGED from the original (already correctly scoped)
-   *     `%.airtable-user-mcp%.chrome-profile%` filter: both fragments, in that order. It is
-   *     scoped to our unique config-dir fragment so it can never hit an unrelated app's Chrome
-   *     that merely happens to have `.chrome-profile` in its args.
+   * (b) a Chrome-family browser process ACTUALLY RUNNING our persistent profile. Like (a), this
+   *     requires TWO conjuncts:
+   *       1. the process image (argv[0]'s basename) is one of the Chrome-family binaries this
+   *          project can launch (`CHROME_FAMILY_IMAGES` / `CHROME_FAMILY_HELPER`, derived from
+   *          patchright's channel + download registries and `browser-detect.ts`), AND
+   *       2. argv carries `--user-data-dir=<profileDir>` for the EXACT resolved
+   *          `<configDir>/.chrome-profile` (`_profileDir()`), matched as a whole argv token with
+   *          the same canonicalization and boundary rules criterion (a) uses.
+   *
+   *     CORRECTION — the docblock this replaces asserted criterion (b) was "already correctly
+   *     scoped" and "UNCHANGED from the original". That claim was FALSE, and it is why two review
+   *     passes let the criterion through. What it actually did was
+   *       `cmd.indexOf('.airtable-user-mcp') >= 0 && cmd.indexOf('.chrome-profile', …) > …`
+   *     — a loose two-fragment substring scan with no executable requirement and no argument
+   *     matching. Any process whose command line merely MENTIONED the profile path was force-
+   *     killed WITH ITS PROCESS TREE: an editor holding `…/.chrome-profile/Default/Preferences`,
+   *     a `grep -r`/`rg` over the config dir, a file manager, a backup job — and
+   *     `…/.chrome-profile-backup` or another app's Chrome pointed at a *different*
+   *     `--user-data-dir` under `~/.airtable-user-mcp` matched just as readily. That is exactly
+   *     the "our path appears in someone else's argv" hazard criterion (a) was hardened against
+   *     one branch above; (b) is now closed the same way, and fails safe the same way — a
+   *     profile holder we cannot positively attribute is left ALIVE and reported.
    */
   private _isOwnedCommandLine(commandLine: string): boolean {
     const cmd = DaemonManager._canon(commandLine);
@@ -442,8 +602,7 @@ export class DaemonManager implements vscode.Disposable {
     if (entry
       && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))
       && DaemonManager._hasDaemonStartShape(commandLine)) return true;
-    const i = cmd.indexOf('.airtable-user-mcp');
-    return i >= 0 && cmd.indexOf('.chrome-profile', i + '.airtable-user-mcp'.length) > i;
+    return this._claimsOurProfile(cmd) && DaemonManager._isChromeFamilyImage(cmd);
   }
 
   /**
@@ -485,7 +644,11 @@ export class DaemonManager implements vscode.Disposable {
       if (this._isOwnedCommandLine(proc.commandLine)) {
         this._killTree(proc.pid, platform);
         killed.push(proc.pid);
-      } else if (DaemonManager._hasDaemonStartShape(proc.commandLine)) {
+      } else if (DaemonManager._hasDaemonStartShape(proc.commandLine)
+        || this._claimsOurProfile(DaemonManager._canon(proc.commandLine))) {
+        // Reported, never killed: a stray daemon of ANOTHER install (criterion a's shape), or
+        // something holding our exact profile that is not a browser we could have launched
+        // (criterion b's argument without criterion b's image).
         skipped.push(proc);
       }
     }
@@ -504,7 +667,9 @@ export class DaemonManager implements vscode.Disposable {
    * markers travel via the ENVIRONMENT and are never interpolated into the script, so no path can
    * inject script or alter match semantics — and the markers are separator-free literals, so no
    * WQL/`LIKE` escaping question arises at all. The pre-filter is a strict SUPERSET of the
-   * ownership test (it can only ever return too much, never too little).
+   * ownership test (it can only ever return too much, never too little): criterion (a) always
+   * carries `index.mjs`, and criterion (b) always carries `--user-data-dir=<…>/.chrome-profile`
+   * because `_profileDir()` is `<configDir>` joined with that exact literal.
    *
    * POSIX: `ps -A -ww -o pid= -o args=` — a fixed argv with nothing interpolated.
    */
