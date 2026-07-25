@@ -22,6 +22,7 @@ import { basename, join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import {
   ALL_TARGETS,
+  expectedBinaryMagics,
   isPlatformPackage,
   lockedPackage,
   targetConfig,
@@ -237,7 +238,28 @@ export function assertVsix(file, target) {
     } else if (binary.uncompressedSize === 0) {
       problems.push(`${pkg}/${main} is present but empty (0 bytes)`);
     } else {
-      verified.push({ pkg, version: manifest.version, binary: main, bytes: binary.uncompressedSize });
+      // Everything above this line checks LABELS — package name, package.json
+      // os/cpu/version, file name. A binary holding another platform's machine
+      // code under the right filename satisfies all of them. Reading the magic
+      // number is the first check on the bytes themselves, so it is what
+      // catches a content swap (and a file truncated at the front).
+      const magics = expectedBinaryMagics(config.os);
+      const prefix = readMember(buf, binary).subarray(0, 4).toString('hex');
+      if (!magics.some((m) => prefix.startsWith(m.hex))) {
+        problems.push(
+          `${pkg}/${main} starts with 0x${prefix}, which is not a ${config.os} binary ` +
+          `(expected ${magics.map((m) => `0x${m.hex} ${m.label}`).join(' or ')}). ` +
+          'The file name is right but its CONTENTS are for another platform, or truncated.'
+        );
+      } else {
+        verified.push({
+          pkg,
+          version: manifest.version,
+          binary: main,
+          bytes: binary.uncompressedSize,
+          magic: prefix.slice(0, magics.find((m) => prefix.startsWith(m.hex)).hex.length),
+        });
+      }
     }
   }
 
@@ -319,7 +341,7 @@ function main() {
     } else {
       console.log(`\n✓ ${basename(file)}  [${target}]`);
       for (const v of result.verified) {
-        console.log(`    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB)`);
+        console.log(`    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB, magic 0x${v.magic})`);
       }
     }
   }

@@ -124,6 +124,50 @@ export const EXCLUDED_TARGETS = {
 
 export const ALL_TARGETS = Object.keys(VSIX_TARGETS);
 
+/**
+ * Leading bytes an executable native binary must have, per OS.
+ *
+ * Package name, package.json metadata and file name are all just *labels* — a
+ * binary carrying another platform's machine code under the correct filename
+ * satisfies every one of them. The magic number is the first check that looks
+ * at the bytes themselves, so it is what catches a content swap (and a file
+ * truncated at the front).
+ *
+ * Values below were read from the actual vendored binaries, not assumed:
+ * every win32 package starts `4d5a`, every linux/alpine one `7f454c46`, every
+ * darwin one `cffaedfe`. The extra darwin entries are the other legal Mach-O
+ * containers — byte-swapped and universal/fat — which we do not currently ship
+ * (no target uses `@ngrok/ngrok-darwin-universal`) but which would be valid if
+ * one ever did.
+ */
+export const NATIVE_BINARY_MAGICS = {
+  win32: [
+    { hex: '4d5a', label: 'PE/COFF ("MZ")' },
+  ],
+  linux: [
+    { hex: '7f454c46', label: 'ELF' },
+  ],
+  darwin: [
+    { hex: 'cffaedfe', label: 'Mach-O 64-bit (MH_MAGIC_64)' },
+    { hex: 'feedfacf', label: 'Mach-O 64-bit (MH_CIGAM_64, byte-swapped)' },
+    { hex: 'cafebabe', label: 'Mach-O universal/fat' },
+    { hex: 'cafebabf', label: 'Mach-O universal/fat (64-bit)' },
+    { hex: 'bebafeca', label: 'Mach-O universal/fat (byte-swapped)' },
+  ],
+};
+
+/** Accepted magic-number prefixes for a target's OS. */
+export function expectedBinaryMagics(os) {
+  const magics = NATIVE_BINARY_MAGICS[os];
+  if (!magics) {
+    throw new Error(
+      `No native-binary magic numbers are defined for os "${os}". Add them to ` +
+      'NATIVE_BINARY_MAGICS in scripts/vsix-targets.mjs before publishing that target.'
+    );
+  }
+  return magics;
+}
+
 /** Every platform package referenced by any target (used for absence checks). */
 export function allPlatformPackages() {
   return [...new Set(Object.values(VSIX_TARGETS).flatMap((t) => t.packages))].sort();

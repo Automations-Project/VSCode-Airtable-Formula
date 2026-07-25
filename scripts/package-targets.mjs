@@ -104,7 +104,7 @@ for (const target of targets) {
   }
   console.log(`\n✓ ${target} verified:`);
   for (const v of result.verified) {
-    console.log(`    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB)`);
+    console.log(`    ${v.pkg}@${v.version} → ${v.binary} (${(v.bytes / 1048576).toFixed(1)} MiB, magic 0x${v.magic})`);
   }
   built.push({ target, vsix, verified: result.verified });
 }
