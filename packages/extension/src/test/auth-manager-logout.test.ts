@@ -283,6 +283,103 @@ describe('AuthManager.logout escalates when the browser release is not confirmed
 });
 
 /**
+ * The profile directory is a live session ON DISK: it holds the Airtable cookies,
+ * and every daemon points at the same AIRTABLE_PROFILE_DIR. So a wipe that fails
+ * (EBUSY/EPERM on Windows, because the daemon's Chromium still has it open) means
+ * the replacement daemon simply authenticates from it again on the next tool call
+ * — or on the dashboard refresh fired immediately after logout. Dropping the
+ * daemon's in-memory session while leaving that directory behind is the original
+ * "you are not really logged out" bug wearing a different hat.
+ */
+describe('AuthManager.logout retries the profile wipe after the daemon is down', () => {
+  let server: http.Server | undefined;
+  let port = 0;
+  let restarts: number;
+  let rmCalls: number;
+
+  const busy = () => Object.assign(new Error('EBUSY: resource busy or locked, rm'), { code: 'EBUSY' });
+
+  const make = (o?: { healthy?: boolean; running?: boolean }) => {
+    const daemonManager = {
+      getDaemonStatus: async () => ({
+        running: o?.running ?? true,
+        // healthy:false = the daemon missed its 2 s probe while alive and serving
+        healthy: o?.healthy ?? false,
+        port,
+        bearerToken: 'tok',
+      }),
+      restartDaemon: async () => { restarts++; return {}; },
+      forceStop: async () => ({ skippedUnowned: [] }),
+    } as any;
+    return new AuthManager(fakeSecrets() as any, '/tmp/ext', daemonManager);
+  };
+
+  beforeEach(async () => {
+    useDaemon = true;
+    authMode = 'browser';
+    restarts = 0; rmCalls = 0;
+    shownErrors.length = 0;
+    rmMock.mockClear();
+    // A real endpoint so `healthy:true` means the release genuinely succeeds —
+    // otherwise every case here would escalate for the wrong reason.
+    server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>(r => server!.listen(0, '127.0.0.1', r));
+    port = (server!.address() as import('net').AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    if (server) { await new Promise<void>(r => server!.close(() => r())); server = undefined; }
+  });
+
+  it('wipe blocked, then freed by the restart: retried and reported as dropped', async () => {
+    rmMock.mockImplementation(async () => {
+      rmCalls++;
+      if (rmCalls === 1) throw busy();   // daemon's Chromium still holds the dir
+    });
+
+    const result = await make().logout();
+
+    expect(restarts).toBe(1);                          // escalation ran
+    expect(rmCalls).toBe(2);                           // and the wipe was retried after it
+    expect(result.daemonSessionDropped).toBe(true);    // profile really is gone now
+  });
+
+  it('a wipe that keeps failing is NEVER reported as a dropped session', async () => {
+    rmMock.mockImplementation(async () => { rmCalls++; throw busy(); });
+
+    const result = await make().logout();
+
+    // The daemon side succeeded — but the cookies are still on disk and the next
+    // daemon would log itself straight back in.
+    expect(result.daemonSessionDropped).toBe(false);
+    expect(rmCalls).toBe(2);
+    expect(restarts).toBe(1);
+  });
+
+  it('a failed wipe escalates even when the browser release WAS confirmed', async () => {
+    rmMock.mockImplementation(async () => { rmCalls++; throw busy(); });
+
+    // healthy daemon + a release that would normally need no escalation in
+    // browser mode: the stuck profile alone must still force the restart.
+    const result = await make({ healthy: true }).logout();
+
+    expect(restarts).toBe(1);
+    expect(result.daemonSessionDropped).toBe(false);
+  });
+
+  it('does not retry when the first wipe succeeded', async () => {
+    rmMock.mockImplementation(async () => { rmCalls++; });
+    const result = await make({ healthy: true }).logout();
+    expect(rmCalls).toBe(1);
+    expect(restarts).toBe(0);
+    expect(result.daemonSessionDropped).toBe(true);
+  });
+});
+
+/**
  * Wiring guard: both logout entry points must delegate to AuthManager.logout()
  * rather than re-implementing a partial teardown. This is what regressed —
  * the Command-Palette command was wired straight to the keychain-only logout

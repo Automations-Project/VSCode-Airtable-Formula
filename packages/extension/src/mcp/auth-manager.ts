@@ -258,12 +258,15 @@ export class AuthManager implements vscode.Disposable {
    *
    * Step 3 can fail while the daemon is very much alive (its `healthy` flag comes
    * from a 2 s probe). That must NOT read as a successful logout, so an
-   * unconfirmed release escalates to a daemon restart/force-stop — which drops the
-   * session either way, since daemon shutdown runs `auth.close()` — and the
-   * outcome is returned so the caller can tell the user the truth.
+   * unconfirmed release — or a profile wipe blocked by a still-running Chromium —
+   * escalates to a daemon restart/force-stop, which drops the session either way
+   * since daemon shutdown runs `auth.close()`. Step 4 is then retried, because a
+   * surviving profile directory is a live session on disk: the replacement daemon
+   * points at the same `AIRTABLE_PROFILE_DIR` and would authenticate from it.
    *
    * @returns `daemonSessionDropped:false` when the daemon may still be serving the
-   *          session the user just logged out of.
+   *          session the user just logged out of, OR when the profile is still on
+   *          disk. Either way the caller must not claim the session was cleared.
    */
   async logout(): Promise<{ daemonSessionDropped: boolean }> {
     // Stop the refresh timer first so it can't race against the profile wipe
@@ -284,22 +287,43 @@ export class AuthManager implements vscode.Disposable {
       console.warn(`[AuthManager] daemon browser release not confirmed (${release.reason}) — escalating to a daemon restart`);
     }
 
+    let profileWiped = await this._wipeBrowserProfile();
+
+    // byo / direct-login creds live in the daemon's memory (cred-store), not on
+    // disk — only a restart drops them. `force` extends that to browser mode when
+    // the session may still be live: either the release was not confirmed, or the
+    // profile could not be removed (something still holds it open, and the
+    // daemon's Chromium is the usual suspect). Restarting is then the only way to
+    // be sure the old session is gone.
+    const dropped = await this.dropDaemonCredentials({ force: !release.released || !profileWiped });
+
+    // Retry the wipe once after the daemon is down: its shutdown runs
+    // auth.close() → _killBrowserTree, so a profile that was locked a moment ago
+    // is free now. This retry is NOT optional — a profile left on disk still holds
+    // live Airtable cookies, and the freshly spawned daemon points at the same
+    // AIRTABLE_PROFILE_DIR, so its next tool call (or the dashboard refresh fired
+    // right after logout) would simply log itself back in.
+    if (!profileWiped) profileWiped = await this._wipeBrowserProfile();
+
+    this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
+    // An un-wiped profile is a live session on disk, so it can never count as
+    // dropped no matter how cleanly the daemon side went.
+    return { daemonSessionDropped: (release.released || dropped) && profileWiped };
+  }
+
+  /** Remove the persistent Chrome profile. Returns false if it is still on disk. */
+  private async _wipeBrowserProfile(): Promise<boolean> {
     const fs = await import('fs/promises');
     try {
       await fs.rm(PROFILE_DIR, { recursive: true, force: true });
       console.log('[AuthManager] Browser profile cleared');
+      return true;
     } catch (err) {
+      // `force: true` already swallows "not found", so this is a real failure —
+      // typically EBUSY/EPERM on Windows while a Chromium still holds the dir.
       console.warn('[AuthManager] Failed to clear browser profile:', err);
+      return false;
     }
-
-    // byo / direct-login creds live in the daemon's memory (cred-store), not on
-    // disk — only a restart drops them. `force` extends that to browser mode when
-    // the release above could not be confirmed: restarting is then the only way
-    // to be sure the old session is gone.
-    const dropped = await this.dropDaemonCredentials({ force: !release.released });
-
-    this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
-    return { daemonSessionDropped: release.released || dropped };
   }
 
   /**

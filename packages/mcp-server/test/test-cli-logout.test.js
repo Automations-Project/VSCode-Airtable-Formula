@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 /**
  * `airtable-user-mcp logout` used to delete the Chrome profile directory and
@@ -40,6 +40,18 @@ function logout() {
   });
 }
 
+/**
+ * A pid that is guaranteed NOT to be a live process: run a child to completion and
+ * reuse its pid. spawnSync returns only after the child has exited, so the pid is
+ * dead by the time we use it — unlike a hardcoded sentinel, which the OS may have
+ * legitimately allocated.
+ */
+function deadPid() {
+  const child = spawnSync(process.execPath, ['-e', ''], { timeout: 30_000 });
+  assert.ok(child.pid > 0, 'could not spawn a probe process');
+  return child.pid;
+}
+
 before(() => {
   // Sanity: the entry point must exist, otherwise every assertion below is vacuous.
   assert.equal(fs.existsSync(ENTRY), true);
@@ -65,8 +77,14 @@ describe('cli logout', () => {
     // behind. The OLD logout ignored the daemon entirely, so this file survived;
     // the fixed one routes through stopDaemon({force:true}), which reclaims it.
     // Port 1 refuses instantly, so the health probe returns without waiting.
+    //
+    // The pid must be PROVEN dead, not merely large: on Linux a hardcoded 999999
+    // is within an allocatable range under a raised pid_max, and if it happened to
+    // be live the test would fall through to stopDaemon's force path and SIGTERM
+    // an unrelated process. Spawning a child and reusing its pid after it exits
+    // guarantees a dead pid on every platform.
     fs.writeFileSync(LOCK, JSON.stringify({
-      pid: 999999,                 // not a live process
+      pid: deadPid(),
       uuid: 'test-uuid-0000',
       port: 1,
       port_lsp: null,
