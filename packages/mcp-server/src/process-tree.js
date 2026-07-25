@@ -7,6 +7,33 @@ import { join } from 'node:path';
 const execFile = promisify(execFileCb);
 
 /**
+ * Node's default `maxBuffer` is 1 MB and OVERFLOW REJECTS THE CALL — for a process enumeration
+ * that means "no candidates", i.e. a squatter is never evicted and the profile lock stays wedged.
+ * 16 MB, matching `daemon-manager.ts`'s `_listProcesses`. One constant for every exec in this
+ * module so the two enumeration paths cannot drift apart on it.
+ */
+const EXEC_MAX_BUFFER = 16 * 1024 * 1024;
+
+/**
+ * Windows PowerShell 5.1 writes REDIRECTED stdout in the console OEM codepage (e.g. 437/850),
+ * while Node decodes it as UTF-8. Every PowerShell invocation in this module must therefore open
+ * with this, exactly as `daemon-manager.ts:_listProcesses` does.
+ *
+ * It was immaterial while only ASCII pids crossed stdout. It stopped being immaterial the moment
+ * the command line itself started round-tripping: without it, a profile path containing non-ASCII
+ * (`C:\Users\José\.airtable-user-mcp\.chrome-profile`) arrives mojibaked (`Jos\uFFFD`), so
+ *   1. `findProfileBrowserPids` re-checks the mangled string, the `--user-data-dir` token no
+ *      longer matches, and a REAL squatter is never evicted — the profile lock stays wedged and
+ *      the browser cannot launch; and, worse,
+ *   2. `makeOwnershipVerifier`'s re-read returns a NON-EMPTY mangled string, which is not
+ *      `'unknown'` but `'not-owned'` — so it does not merely fail to help, it ACTIVELY ABORTS a
+ *      legitimate eviction that the selection pass had already approved.
+ * Both fail safe (never a false kill), but both are functional breakage on this project's primary
+ * platform, for users whose Windows account name is not ASCII.
+ */
+const PS_UTF8_PROLOGUE = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; ';
+
+/**
  * Process-tree termination and browser-profile squatter eviction.
  *
  * Orphan Chromium processes hold the profile ProcessSingleton so later
@@ -94,7 +121,7 @@ async function collectDescendantPids(rootPid, exec) {
     const parent = queue.shift();
     let stdout = '';
     try {
-      ({ stdout } = await exec('pgrep', ['-P', String(parent)], { timeout: 5_000 }));
+      ({ stdout } = await exec('pgrep', ['-P', String(parent)], { timeout: 5_000, maxBuffer: EXEC_MAX_BUFFER }));
     } catch {
       continue;
     }
@@ -507,6 +534,8 @@ export async function findProfileBrowserPids(
     // predicate that decides the outcome. Emits `<pid>\t<commandLine>` so that decision can be
     // made here rather than in PowerShell.
     const script =
+      // Required: the command line ROUND-TRIPS through this stdout. See PS_UTF8_PROLOGUE.
+      PS_UTF8_PROLOGUE +
       'Get-CimInstance Win32_Process | Where-Object { ' +
       "($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe' -or $_.Name -eq 'chromium.exe') -and " +
       '$_.CommandLine -and ' +
@@ -518,8 +547,10 @@ export async function findProfileBrowserPids(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', script],
         {
+          encoding: 'utf8',
           windowsHide: true,
           timeout: 15_000,
+          maxBuffer: EXEC_MAX_BUFFER,
           env: { ...process.env, AIRTABLE_EVICT_MARKER: canon(marker) },
         },
       );
@@ -538,7 +569,7 @@ export async function findProfileBrowserPids(
     // substrings; `filterOwnedBrowserPids` below re-checks every candidate literally, as a
     // whole argv token, against a Chrome-family image. `pgrep` exits 1 on "no match" — there
     // is deliberately no bare-directory fallback (see the docblock above).
-    const { stdout } = await exec('pgrep', ['-f', '--', marker], { timeout: 10_000 });
+    const { stdout } = await exec('pgrep', ['-f', '--', marker], { timeout: 10_000, maxBuffer: EXEC_MAX_BUFFER });
     pids = parsePids(stdout);
   } catch {
     return [];
@@ -597,7 +628,7 @@ async function readProcessArgs(pid, exec, readProc = readProcCmdline) {
   const fromProc = readProc(pid);
   if (fromProc != null) return fromProc;
   try {
-    const { stdout } = await exec('ps', ['-p', String(pid), '-o', 'args='], { timeout: 5_000 });
+    const { stdout } = await exec('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8', timeout: 5_000, maxBuffer: EXEC_MAX_BUFFER });
     return String(stdout || '');
   } catch {
     return '';
@@ -615,9 +646,13 @@ async function readOneCommandLine(pid, { platform, exec, readProc }) {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" | ForEach-Object { $_.CommandLine }`,
+        // Required, and MORE consequential here than in the selection query: a mojibaked re-read
+        // is non-empty, so it reads as 'not-owned' and ABORTS an eviction rather than merely
+        // failing to confirm one. See PS_UTF8_PROLOGUE.
+        PS_UTF8_PROLOGUE +
+          `Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" | ForEach-Object { $_.CommandLine }`,
       ],
-      { windowsHide: true, timeout: 10_000 },
+      { encoding: 'utf8', windowsHide: true, timeout: 10_000, maxBuffer: EXEC_MAX_BUFFER },
     );
     return String(stdout || '').replace(/[\r\n]+/g, ' ');
   } catch {

@@ -477,6 +477,165 @@ describe("findProfileBrowserPids — the bare-directory pgrep fallback is gone",
   });
 });
 
+/**
+ * PROPERTIES OF THE WIN32 POWERSHELL INVOCATION ITSELF.
+ *
+ * The shared fixture pins the PREDICATE. It structurally cannot pin the CANDIDATE-GENERATION
+ * QUERY — and that is precisely where the last drift from the reference crept in: the query round-
+ * trips the command line through PowerShell's stdout, and Windows PowerShell 5.1 writes redirected
+ * stdout in the console OEM codepage while Node decodes UTF-8. `daemon-manager.ts:_listProcesses`
+ * has always opened with `[Console]::OutputEncoding=[Text.Encoding]::UTF8;` for exactly this; this
+ * module did not, because until the command line started round-tripping only ASCII pids crossed
+ * stdout.
+ *
+ * Consequence for a user whose Windows account name is not ASCII
+ * (`C:\Users\José\.airtable-user-mcp\.chrome-profile`): the path arrives mojibaked, the
+ * `--user-data-dir` token no longer matches, a real squatter is NEVER evicted, and the profile
+ * lock stays wedged. Worse in `makeOwnershipVerifier`, where a mojibaked re-read is non-empty and
+ * therefore reads as `'not-owned'` — it does not merely fail to confirm an eviction, it ABORTS one
+ * the selection pass already approved.
+ *
+ * These tests are the answer to "what else in the PowerShell invocation should be pinned by a
+ * non-fixture test": the encoding prologue, the buffer ceiling, and an end-to-end non-ASCII
+ * round-trip through BOTH win32 PowerShell call sites.
+ */
+describe("win32 PowerShell invocation — properties the fixture cannot pin", () => {
+  const PROLOGUE = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; ";
+  const ACCENTED = "C:\\Users\\Jos\u00e9\\.airtable-user-mcp\\.chrome-profile";
+
+  it("the selection query OPENS with the UTF-8 output-encoding prologue", async () => {
+    const s = spyExec();
+    s.impl = async () => ({ stdout: "" });
+    await findProfileBrowserPids(WIN_PROFILE, { platform: "win32", exec: (f, a, o) => s.exec(f, a, o) });
+    const script = s.calls[0].args[s.calls[0].args.length - 1];
+    assert.ok(
+      script.startsWith(PROLOGUE),
+      "without this a non-ASCII profile path arrives mojibaked and the squatter is never evicted",
+    );
+  });
+
+  it("the verifier's per-pid re-read ALSO opens with the prologue", async () => {
+    const s = spyExec();
+    s.impl = async () => ({ stdout: "" });
+    let verify;
+    const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
+    try {
+      await evictProfileSquatters(WIN_PROFILE, dir, {
+        platform: "win32",
+        exec: (f, a, o) => s.exec(f, a, o),
+        findPids: async () => [101],
+        terminate: async (_pid, opts) => { verify = opts.verify; },
+        settleMs: 0,
+      });
+      s.calls.length = 0;
+      await verify(101);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const script = s.calls[0].args[s.calls[0].args.length - 1];
+    assert.ok(
+      script.startsWith(PROLOGUE),
+      "a mojibaked re-read is non-empty → 'not-owned' → it ABORTS a legitimate eviction",
+    );
+  });
+
+  it("both win32 call sites decode utf8 and raise maxBuffer to 16 MB", async () => {
+    const s = spyExec();
+    s.impl = async () => ({ stdout: "" });
+    await findProfileBrowserPids(WIN_PROFILE, { platform: "win32", exec: (f, a, o) => s.exec(f, a, o) });
+
+    let verify;
+    const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
+    try {
+      await evictProfileSquatters(WIN_PROFILE, dir, {
+        platform: "win32",
+        exec: (f, a, o) => s.exec(f, a, o),
+        findPids: async () => [101],
+        terminate: async (_pid, opts) => { verify = opts.verify; },
+        settleMs: 0,
+      });
+      await verify(101);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const psCalls = s.calls.filter((c) => c.file === "powershell.exe");
+    assert.equal(psCalls.length, 2, "both win32 PowerShell call sites must be covered");
+    for (const call of psCalls) {
+      assert.equal(call.opts.encoding, "utf8");
+      // Node's default is 1 MB and overflow REJECTS the call — which for an enumeration means
+      // "no candidates", i.e. the squatter is silently never evicted.
+      assert.equal(call.opts.maxBuffer, 16 * 1024 * 1024);
+    }
+  });
+
+  it("ROUND-TRIP: a non-ASCII profile path still finds its squatter and still verifies as ours", async () => {
+    const squatter = `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir=${ACCENTED}`;
+    const s = spyExec();
+    s.impl = async (_file, args) => {
+      const script = args[args.length - 1];
+      if (script.includes("ProcessId=")) return { stdout: `${squatter}\r\n` };
+      return { stdout: winRows({ 7777: squatter }) };
+    };
+
+    // 1. selection
+    const pids = await findProfileBrowserPids(ACCENTED, {
+      platform: "win32",
+      exec: (f, a, o) => s.exec(f, a, o),
+    });
+    assert.deepEqual(pids, [7777]);
+    assert.equal(
+      s.calls[0].opts.env.AIRTABLE_EVICT_MARKER,
+      "--user-data-dir=c:/users/jos\u00e9/.airtable-user-mcp/.chrome-profile",
+      "the marker must carry the accented path canonicalised, not stripped",
+    );
+
+    // 2. last-instant verification
+    const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
+    try {
+      let verify;
+      await evictProfileSquatters(ACCENTED, dir, {
+        platform: "win32",
+        exec: (f, a, o) => s.exec(f, a, o),
+        findPids: async () => [7777],
+        terminate: async (_pid, opts) => { verify = opts.verify; },
+        settleMs: 0,
+      });
+      assert.equal(await verify(7777), "owned");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("REGRESSION SHAPE: a mojibaked command line aborts the eviction — which is why the prologue is required", async () => {
+    // Documents the failure mode the prologue prevents, so that removing it is visibly a
+    // behaviour change rather than a silent one. `é` (U+00E9) written as CP437 and decoded as
+    // UTF-8 becomes U+FFFD.
+    const mangled = `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ` +
+      `--user-data-dir=C:\\Users\\Jos\uFFFD\\.airtable-user-mcp\\.chrome-profile`;
+    const s = spyExec();
+    s.impl = async () => ({ stdout: `${mangled}\r\n` });
+    const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
+    try {
+      let verify;
+      await evictProfileSquatters(ACCENTED, dir, {
+        platform: "win32",
+        exec: (f, a, o) => s.exec(f, a, o),
+        findPids: async () => [7777],
+        terminate: async (_pid, opts) => { verify = opts.verify; },
+        settleMs: 0,
+      });
+      assert.equal(
+        await verify(7777),
+        "not-owned",
+        "non-empty but mangled reads as 'not-owned', NOT 'unknown' — it actively aborts",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── THE SHARED VECTOR ────────────────────────────────────────────────────────
 //
 // `packages/shared/test-fixtures/process-attribution-cases.json` is asserted by BOTH this file
