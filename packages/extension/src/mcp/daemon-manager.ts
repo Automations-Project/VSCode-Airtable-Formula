@@ -375,14 +375,14 @@ export class DaemonManager implements vscode.Disposable {
    * and `…/dist/mcp/index.mjs=1 daemon start` (a DIFFERENT file) for criterion (a).
    */
   private static readonly ARG_BOUNDARY = /[\s"']/;
-  /**
-   * The ONE asymmetry, and it is leading-side only: a PATH may legitimately follow `=`
-   * (`--script=<path>`), so criterion (a) — which matches a path — accepts `=` before its match.
-   * Criterion (b) matches a FLAG, which never legitimately follows `=`, so it uses
-   * `ARG_BOUNDARY` on both sides and thereby rejects `--foo=--user-data-dir=<p>` and
-   * `--user-data-dir=/other=--user-data-dir=<p>`. Nothing accepts `=` on the TRAILING side.
-   */
-  private static readonly PATH_LEAD_BOUNDARY = /[\s"'=]/;
+  // There is NO `=`-accepting variant any more. Criterion (a) used to allow `=` before its path
+  // match on the theory that "a path may legitimately follow `=`" — true in general, but not for
+  // anything WE emit: `_spawnDetached()` (and `daemon/launcher.js`) always spawn
+  // `[serverPath, 'daemon', 'start']`, so the bundled entry is never an `=`-attached value. The
+  // widening protected no real invocation and force-killed real tools whose argv referenced our
+  // entry as a flag value: `rsync --exclude=<entry> …`, `tar --exclude=<entry> …`,
+  // `rg --file=<entry> …`, `node --require=<entry> …`, `grep --include=<entry> …`,
+  // `code --extensions-dir=<entry> …`. Both criteria now use `ARG_BOUNDARY` on both sides.
   /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative extensionPath. */
   private static readonly ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
 
@@ -403,9 +403,9 @@ export class DaemonManager implements vscode.Disposable {
   /**
    * Does `haystack` contain `needle` as a whole argv token?
    *
-   * TRAILING side: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`.
-   * LEADING side: the same, unless the caller passes `PATH_LEAD_BOUNDARY` to also allow `=`
-   * (criterion (a) only; see that constant for why the two differ).
+   * BOTH sides: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`, on
+   * either side, for either criterion. (An earlier version accepted `=` before criterion (a)'s
+   * match; see `ARG_BOUNDARY` for why that was removed rather than kept.)
    *
    * Probed rather than asserted: `…/index.mjs.bak`, `…/index.mjson`, `…/index.mjs=1`,
    * `<profile>-backup`, `<profile>.old`, `<profile>/Default` and `<profile>=2` are all misses,
@@ -413,15 +413,11 @@ export class DaemonManager implements vscode.Disposable {
    * docblock used to make — "a longer neighbouring path can NEVER satisfy it" — was false for
    * exactly one character, `=`, which was in the boundary set on both sides.
    *
-   * Both arguments must already be in `_canon` form. One implementation, one parameter: the two
-   * criteria share this matcher deliberately, because a second hand-rolled predicate is how they
-   * drifted apart in the first place.
+   * Both arguments must already be in `_canon` form. ONE implementation with no per-caller knobs:
+   * the two criteria share this matcher deliberately, because a second hand-rolled predicate — and
+   * then a per-criterion boundary parameter — is how they drifted apart twice.
    */
-  private static _containsPathToken(
-    haystack: string,
-    needle: string,
-    leadingBoundary: RegExp = DaemonManager.ARG_BOUNDARY,
-  ): boolean {
+  private static _containsPathToken(haystack: string, needle: string): boolean {
     if (!needle) return false;
     for (let from = 0; ; ) {
       const i = haystack.indexOf(needle, from);
@@ -429,7 +425,7 @@ export class DaemonManager implements vscode.Disposable {
       const before = i === 0 ? '' : haystack[i - 1];
       const afterIdx = i + needle.length;
       const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
-      if ((before === '' || leadingBoundary.test(before))
+      if ((before === '' || DaemonManager.ARG_BOUNDARY.test(before))
         && (after === '' || DaemonManager.ARG_BOUNDARY.test(after))) return true;
       from = i + 1;
     }
@@ -543,12 +539,23 @@ export class DaemonManager implements vscode.Disposable {
   private static readonly ROOTED = /^(?:[a-z]:\/|\/|\.\.?\/)/;
 
   /**
-   * A token that CANNOT be the continuation of an unquoted path that contains spaces, because it
-   * is itself rooted, quoted, or flag-shaped. NOTE what this does NOT cover: a bare relative path
-   * (`x/chrome`) is indistinguishable from a path continuation by inspection alone — that gap is
-   * closed by the separate `ROOTED` and bundle-marker requirements in `_imageName`, NOT here.
+   * A token that CANNOT be the continuation of a path containing spaces, because it is itself
+   * rooted, quoted, or flag-shaped. NOTE what this does NOT cover: a bare relative path
+   * (`x/chrome`) is indistinguishable from a path continuation by inspection alone. That gap is
+   * closed ELSEWHERE, and differently per branch — unquoted: `ROOTED` + the spelling gate + the
+   * bundle-naming rule; quoted: `ROOTED` + the bundle-naming rule on POSIX spellings, or
+   * `WIN_EXEC_EXT` on Windows spellings. This regex closes none of it on its own.
    */
   private static readonly NEW_ARG_LIKE = /^(?:[a-z]:\/|\/|\.|["'-])/;
+
+  /**
+   * A fragment that ends in a Windows executable extension. A single Windows path names ONE
+   * executable and names it LAST, so an executable extension in any fragment BUT the final one
+   * means the quoted token is a program plus arguments, not one image path:
+   * `"C:\Program Files\vim\vim.exe x\chrome.exe"` → `vim.exe` is not final → not an image;
+   * `"C:\Program Files\Google\Chrome\Application\chrome.exe"` → only the final fragment → image.
+   */
+  private static readonly WIN_EXEC_EXT = /\.(?:exe|com|bat|cmd)$/;
 
   /**
    * The only structural proof that an unquoted, SPACE-CONTAINING string is one path rather than a
@@ -607,15 +614,21 @@ export class DaemonManager implements vscode.Disposable {
    * Process enumeration hands us a FLAT STRING, and an unquoted argv[0] may itself contain spaces,
    * so argv[0]'s extent has to be recovered. The rules, and the reason each one exists:
    *
-   *   1. A quoted leading token IS argv[0] — the launcher's own quoting is its statement of the
-   *      extent, which is exactly why quoted Windows paths with spaces still work. Two guards
-   *      against a MIS-PARSE presenting somebody's argument as the image: a token containing
-   *      whitespace must be `ROOTED`, and none of its later sub-tokens may be `NEW_ARG_LIKE`.
-   *      Those reject `"vim /home/u/chrome" …` and `"C:\Program Files\vim\vim.exe C:\x\chrome" …`
-   *      while leaving `"C:\Program Files\Google\Chrome\Application\chrome.exe"` intact. What they
-   *      do NOT do is second-guess a quoted single path: if a command line claims argv[0] is
-   *      `"/usr/bin/vim x/chrome"`, the image really is a file named `chrome`, and only a process
-   *      naming ITSELF that way could produce it.
+   *   1. A quoted leading token bounds argv[0]: the launcher's quoting states where it ENDS. That
+   *      is why quoted Windows paths with spaces attribute at all. It does NOT state that the
+   *      interior is a single path, and argv[0] is caller-chosen (`execve`/`CreateProcess` let a
+   *      launcher write anything there) — so a space-containing quoted token must clear the SAME
+   *      structural bar as the unquoted branch:
+   *        - `ROOTED`, and no later sub-token `NEW_ARG_LIKE`
+   *          (rejects `"vim /home/u/chrome"`, `"C:\Program Files\vim\vim.exe C:\x\chrome"`);
+   *        - POSIX-spelled → a correctly-named macOS bundle (`_macBundleExec`), which is what
+   *          rejects the bare-relative twins `"/usr/bin/vim x/chrome"`,
+   *          `"/usr/bin/git add sub/msedge"`, `"/usr/bin/tar cf a x/google chrome"` while keeping
+   *          `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"`;
+   *        - Windows-spelled → no executable extension outside the FINAL fragment
+   *          (`WIN_EXEC_EXT`), which rejects `"C:\Program Files\vim\vim.exe x\chrome.exe"` while
+   *          keeping `"C:\Program Files\Google\Chrome\Application\chrome.exe"`.
+   *      A quoted token with NO whitespace is taken as-is; there is nothing to disambiguate.
    *   2. Otherwise: take the text before the first flag-shaped token (`\s["']?-{1,2}\S`), skip a
    *      leading run of `WRAPPER_IMAGES`, and then
    *        - ONE token left  → that is argv[0] (`chrome.exe`, `/opt/chromium`, `./chrome`, `vim`);
@@ -643,24 +656,35 @@ export class DaemonManager implements vscode.Disposable {
    * are the same shape. Verified against live `Win32_Process` during review: every Chrome-family
    * entry, root and `--type=` children alike, emits a QUOTED argv[0], so rule 1 covers Windows.
    *
-   * RESIDUAL, stated rather than papered over — and it is now POSIX-only and narrow: a
-   * POSIX-spelled command line that hands another program a CORRECTLY-NAMED bundle executable
-   * path, e.g. `/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome
-   * --user-data-dir=<our profile>`. That string is byte-for-byte a real macOS browser invocation;
-   * nothing short of asking the filesystem can separate them, and it still requires the caller to
-   * pass our exact profile flag. Everything else enumerated in the `IMAGE CONJUNCT` tests and in
-   * `packages/shared/test-fixtures/process-attribution-cases.json` resolves to `''`.
+   * RESIDUALS — two, both narrow, both PINNED in the shared vector so neither can drift:
+   *   1. a FORWARD-SLASH-SPELLED command line (any host — the gate is spelling, not platform) that
+   *      hands another program a CORRECTLY-NAMED bundle executable path, e.g.
+   *      `/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=<profile>`.
+   *      Byte-for-byte a real macOS invocation; only the filesystem could separate them.
+   *      (`residual-posix-named-bundle-arg`.)
+   *   2. a Windows-spelled QUOTED argv[0] holding two relative paths with no executable extension,
+   *      e.g. `"C:\x\vim x\chrome" --user-data-dir=<profile>` — `WIN_EXEC_EXT` has nothing to bite
+   *      on, and refusing all space-containing quoted Windows tokens would drop the one shape
+   *      Windows browsers actually emit. (`residual-win-quoted-two-relative-paths`.)
+   * Both still require the caller to pass our exact profile flag. NOT a residual, because they are
+   * closed: every other spelling enumerated in the `IMAGE CONJUNCT` tests and in
+   * `packages/shared/test-fixtures/process-attribution-cases.json`.
    */
   private static _imageName(cmd: string, winSpelling: boolean): string {
     const quote = cmd[0];
     if (quote === '"' || quote === '\'') {
       const end = cmd.indexOf(quote, 1);
       const token = (end > 0 ? cmd.slice(1, end) : cmd.slice(1)).trim();
-      if (/\s/.test(token)) {
-        if (!DaemonManager.ROOTED.test(token)) return '';
-        const sub = token.split(/\s+/);
-        if (sub.slice(1).some(t => DaemonManager.NEW_ARG_LIKE.test(t))) return '';
-      }
+      if (!/\s/.test(token)) return DaemonManager._basename(token);
+      if (!DaemonManager.ROOTED.test(token)) return '';
+      if (token.split(/\s+/).slice(1).some(t => DaemonManager.NEW_ARG_LIKE.test(t))) return '';
+      // A space-containing quoted token gets the SAME structural proof the unquoted branch
+      // demands — the quoting settles where argv[0] ENDS, not that its interior is one path.
+      // POSIX: only a correctly-named macOS bundle. Windows: an executable extension may appear
+      // only in the FINAL fragment, since a single path names one executable and names it last.
+      if (!winSpelling) return DaemonManager._basename(DaemonManager._macBundleExec(token));
+      const sub = token.split(/\s+/);
+      if (sub.slice(0, -1).some(t => DaemonManager.WIN_EXEC_EXT.test(t))) return '';
       return DaemonManager._basename(token);
     }
     const flag = /\s["']?-{1,2}\S/.exec(cmd);
@@ -771,6 +795,20 @@ export class DaemonManager implements vscode.Disposable {
    *          same canonicalization as criterion (a), and `ARG_BOUNDARY` on BOTH sides, so
    *          `<profile>=2` (a different directory) is a miss just as `<profile>-backup` is.
    *
+   *     WHY (a) HAS NO IMAGE CONJUNCT, decided explicitly rather than left implicit. (b) requires
+   *     one because its path — the browser profile — is SHARED: every install of this extension,
+   *     and every tool the user points at it, names the same directory. (a)'s path is
+   *     `<extensionPath>/dist/mcp/index.mjs`: absolute, install-specific, and carried as a whole
+   *     argv token next to the whole tokens `daemon` and `start`. After F7 the residual is
+   *     "some tool invoked as `<tool> <our exact entry path> daemon start`", and I could not
+   *     construct a plausible instance — the six real victims all depended on the `=` boundary or
+   *     on `daemonize`/`restart`, both now closed. The conjunct I could derive is
+   *     `basename(process.execPath)` (what `_spawnDetached` spawns), and it FAILS OPEN for the
+   *     feature: any host binary it does not anticipate leaves our own orphan daemon unswept, the
+   *     profile locked, and the "session dead" bug back — a worse and much more likely outcome
+   *     than the residual it removes. If a real victim is ever demonstrated, the fix is that
+   *     conjunct plus a seam for the host binary; the known limit is pinned in the tests today.
+   *
    *     CORRECTION — the docblock this replaces asserted criterion (b) was "already correctly
    *     scoped" and "UNCHANGED from the original". That claim was FALSE, and it is why two review
    *     passes let the criterion through. What it actually did was
@@ -789,31 +827,69 @@ export class DaemonManager implements vscode.Disposable {
     const cmd = DaemonManager._canon(commandLine);
     const entry = this._bundledEntryPath();
     if (entry
-      && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry), DaemonManager.PATH_LEAD_BOUNDARY)
+      && DaemonManager._containsPathToken(cmd, DaemonManager._canon(entry))
       && DaemonManager._hasDaemonStartShape(commandLine)) return true;
     return this._claimsOurProfile(cmd)
       && DaemonManager._isChromeFamilyImage(cmd, DaemonManager._isWindowsSpelling(commandLine, cmd));
   }
 
   /**
-   * `index.mjs` … `daemon` … `start`, in that order, anywhere in argv — the shape
+   * An `index.mjs` token, then the WHOLE TOKENS `daemon` and `start`, in that order — the shape
    * `_spawnDetached()` always emits (`[serverPath, 'daemon', 'start', …]`).
    *
-   * This was the OLD kill criterion **on its own**, which is what made the sweep dangerous. It is
-   * never sufficient now. It serves two purposes:
-   *   1. as a REQUIRED CONJUNCT of ownership criterion (a) — proving the process is *running* our
-   *      bundled entry as a daemon rather than merely naming the file; and
-   *   2. as the REPORTING predicate — a process with this shape that fails ownership is surfaced
-   *      as "looked like a stray daemon, ownership unverified" so the user still learns about a
-   *      leftover from another install instead of it being silently executed.
+   * WHOLE TOKENS, because this used to be an ordered `indexOf` scan over the raw string, in which
+   * `daemonize` satisfied `daemon` and `restart` satisfied `start`. Combined with the `=` that
+   * criterion (a) then accepted before a path match, that turned ordinary tooling into kill
+   * targets: `rsync -a --exclude=<entry> /home/u/daemonize/restart/ /mnt/b`,
+   * `tar --exclude=<entry> -cf b.tar /srv/daemonize/restart`, `rg --file=<entry> "daemon" /srv/startup`.
+   * Both halves are fixed; this is the half that stops a SUBSTRING of an unrelated word from
+   * standing in for our subcommand.
+   *
+   * This is the KILL conjunct only. Reporting uses `_looksLikeStrayDaemon()`, which is
+   * deliberately more generous — see there for why the two are now separate predicates.
    */
   private static _hasDaemonStartShape(commandLine: string): boolean {
-    const cmd = DaemonManager._canon(commandLine);
-    const a = cmd.indexOf('index.mjs');
-    if (a < 0) return false;
-    const b = cmd.indexOf('daemon', a + 'index.mjs'.length);
-    if (b < 0) return false;
-    return cmd.indexOf('start', b + 'daemon'.length) > b;
+    const tokens = DaemonManager._canon(commandLine)
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(t => t.replace(/^["']+/, '').replace(/["']+$/, ''));
+    // The entry token may be an unquoted path containing spaces, in which case only its LAST
+    // fragment is a token — `…/index.mjs` still ends it, which is all this needs to establish.
+    const entry = tokens.findIndex(t => t === 'index.mjs' || t.endsWith('/index.mjs'));
+    if (entry < 0) return false;
+    const daemon = tokens.indexOf('daemon', entry + 1);
+    if (daemon < 0) return false;
+    return tokens.indexOf('start', daemon + 1) > daemon;
+  }
+
+  /**
+   * The REPORTING predicate: "this looks like a stray daemon of SOME install". It never kills —
+   * a process matching it that fails ownership is surfaced as "left running, ownership
+   * unverified" so the user learns about a leftover instead of it being silently ignored.
+   *
+   * Deliberately more generous than the kill conjunct, and deliberately NOT the same function:
+   * for reporting we want another install's `…/index.mjs.bak`, a sibling version, or a
+   * `--daemon start` spelling to show up, none of which may be killed. Splitting them is what
+   * lets `_hasDaemonStartShape` be strict without silently dropping those heads-ups.
+   *
+   * The one thing it does NOT do is name innocent tooling: the `index.mjs` token must be a BARE
+   * argv entry, so the six F7 victims — `rsync --exclude=<entry> …`, `tar --exclude=<entry> …`,
+   * `rg --file=<entry> …`, `node --require=<entry> …`, `grep --include=<entry> …`,
+   * `code --extensions-dir=<entry> …`, all of which carry our entry as a FLAG VALUE — are neither
+   * killed nor reported. Probed: each of the six returns false here.
+   */
+  private static _looksLikeStrayDaemon(commandLine: string): boolean {
+    const tokens = DaemonManager._canon(commandLine)
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(t => t.replace(/^["']+/, '').replace(/["']+$/, ''));
+    const entry = tokens.findIndex(t => !t.startsWith('-') && t.includes('index.mjs'));
+    if (entry < 0) return false;
+    // `-{0,2}` — bare `daemon start` (what we spawn) OR another project's `--daemon --start`
+    // spelling. Whole tokens either way: `daemonize`/`restart` still do not qualify.
+    const daemon = tokens.findIndex((t, i) => i > entry && /^-{0,2}daemon$/.test(t));
+    if (daemon < 0) return false;
+    return tokens.findIndex((t, i) => i > daemon && /^-{0,2}start$/.test(t)) > daemon;
   }
 
   /**
@@ -834,11 +910,12 @@ export class DaemonManager implements vscode.Disposable {
       if (this._isOwnedCommandLine(proc.commandLine)) {
         this._killTree(proc.pid, platform);
         killed.push(proc.pid);
-      } else if (DaemonManager._hasDaemonStartShape(proc.commandLine)
+      } else if (DaemonManager._looksLikeStrayDaemon(proc.commandLine)
         || this._claimsOurProfile(DaemonManager._canon(proc.commandLine))) {
-        // Reported, never killed: a stray daemon of ANOTHER install (criterion a's shape), or
-        // something holding our exact profile that is not a browser we could have launched
-        // (criterion b's argument without criterion b's image).
+        // Reported, never killed: a stray daemon of ANOTHER install (the generous reporting
+        // shape, NOT criterion (a)'s strict kill conjunct), or something holding our exact
+        // profile that is not a browser we could have launched (criterion (b)'s argument
+        // without criterion (b)'s image).
         skipped.push(proc);
       }
     }

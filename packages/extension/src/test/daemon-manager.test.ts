@@ -525,6 +525,52 @@ describe('DaemonManager._sweepOrphans — ownership-scoped matching', () => {
     expect(result).toEqual({ killed: [], skipped: [] });
   });
 
+  it('NEGATIVE (flag VALUE): ordinary tooling carrying our entry after `=` is neither killed nor reported', () => {
+    // Criterion (a) used to accept `=` before its path match ("a path may follow `=`"), and
+    // `_hasDaemonStartShape` was a substring scan in which `daemonize` satisfied `daemon` and
+    // `restart` satisfied `start`. Together those force-killed real backup/search/editor tools
+    // WITH THEIR PROCESS TREES. Neither half is enough on its own — both are pinned here.
+    const E = `${POSIX_ROOT}/dist/mcp/index.mjs`;
+    const cmds = [
+      `rsync -a --exclude=${E} /home/u/daemonize/restart/ /mnt/b`,
+      `tar --exclude=${E} -cf b.tar /srv/daemonize/restart`,
+      `rg --file=${E} "daemon" /srv/startup`,
+      `node --require=${E} ./daemon-start.js`,
+      `grep -r --include=${E} "daemon start" .`,
+      `code --extensions-dir=${E} /home/u/notes/daemon/start.md`,
+    ];
+    const { result, killTree } = sweep(
+      POSIX_ROOT,
+      cmds.map((commandLine, i) => ({ pid: 9120 + i, commandLine })),
+      'linux',
+    );
+    expect(killTree).not.toHaveBeenCalled();
+    // Not merely un-killed: not even named in the "left running" notice, because our entry is a
+    // FLAG VALUE in every one of them.
+    expect(result).toEqual({ killed: [], skipped: [] });
+  });
+
+  it('NEGATIVE (substring subcommands): `daemonize`/`restart` do not satisfy `daemon`/`start`', () => {
+    const E = `${POSIX_ROOT}/dist/mcp/index.mjs`;
+    const { result, killTree } = sweep(POSIX_ROOT, [
+      // Our entry as a BARE token this time — only the token-shape rule stands between these and
+      // a kill, so this is the half of the fix the boundary change cannot cover.
+      { pid: 9130, commandLine: `node ${E} daemonize restart` },
+      { pid: 9131, commandLine: `node ${E} daemonize --restart-now` },
+      { pid: 9132, commandLine: `node ${E} start daemon` },
+    ], 'linux');
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+  });
+
+  it('POSITIVE (unchanged): the exact `<entry> daemon start` shape we spawn still attributes', () => {
+    const { killedPids } = sweep(POSIX_ROOT, [
+      { pid: 9140, commandLine: `node ${POSIX_ROOT}/dist/mcp/index.mjs daemon start` },
+      { pid: 9141, commandLine: `node ${POSIX_ROOT}/dist/mcp/index.mjs daemon start --port 8723` },
+    ], 'linux');
+    expect(killedPids).toEqual([9140, 9141]);
+  });
+
   it('NEGATIVE (trailing `=`): `…/index.mjs=1` is a DIFFERENT file and is NOT killed', () => {
     // Criterion (a)'s half of the same boundary bug: `=` was accepted as a trailing boundary, so
     // any longer path formed by appending `=<anything>` matched our bundled entry.

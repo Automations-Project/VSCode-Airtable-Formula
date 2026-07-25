@@ -1145,7 +1145,63 @@
       "form": "posix",
       "cmd": "/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir={PROFILE}",
       "expect": "owned",
-      "why": "KNOWN IRREDUCIBLE LIMIT, pinned deliberately — this is NOT a shape we want to kill. A POSIX command line that hands another program a CORRECTLY-NAMED macOS bundle executable path is byte-for-byte identical to a real bundle invocation (`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`), so no rule over the string can separate them; only the filesystem could. It is pinned as `owned` so that BOTH implementations keep agreeing about it and neither can widen or narrow the limit unnoticed. If a future change makes this `not-owned` WITHOUT losing the real bundle cases (`posix-mac-bundle-*`), that is an improvement — change this case then, deliberately. Mitigation today: it still requires the caller to pass our exact `--user-data-dir=<profile>`, which no ordinary vim/git/tar invocation carries."
+      "why": "KNOWN IRREDUCIBLE LIMIT, pinned deliberately — this is NOT a shape we want to kill. A FORWARD-SLASH-SPELLED command line — on any host, since the gate is the path spelling and not the platform — that hands another program a CORRECTLY-NAMED macOS bundle executable path is byte-for-byte identical to a real bundle invocation (`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`), so no rule over the string can separate them; only the filesystem could. It is pinned as `owned` so that BOTH implementations keep agreeing about it and neither can widen or narrow the limit unnoticed. If a future change makes this `not-owned` WITHOUT losing the real bundle cases (`posix-mac-bundle-*`), that is an improvement — change this case then, deliberately. Mitigation today: it still requires the caller to pass our exact `--user-data-dir=<profile>`, which no ordinary vim/git/tar invocation carries."
+    },
+    {
+      "id": "arg-quoted-bare-relative-two-paths",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "\"/usr/bin/vim x/chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the bare-relative twin of arg-quoted-rooted-two-paths — quoting bounds argv[0] but does not make its interior one path"
+    },
+    {
+      "id": "arg-quoted-bare-relative-multi-token",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "\"/usr/bin/git add sub/msedge\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "a quoted program-plus-arguments string, three tokens, bare-relative browser name last"
+    },
+    {
+      "id": "arg-quoted-bare-relative-space-path",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "\"/usr/bin/tar cf a x/google chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the space-containing relative variant — rejected by the bundle-naming rule, not by NEW_ARG_LIKE"
+    },
+    {
+      "id": "win-arg-quoted-bare-relative-two-paths",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\vim\\vim.exe x\\chrome.exe\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "a Windows path names ONE executable and names it LAST, so vim.exe in a non-final fragment means this is a program plus arguments"
+    },
+    {
+      "id": "win-arg-quoted-bare-relative-bat",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "\"C:\\tools\\launch.bat x\\chrome.exe\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "same rule for the other Windows executable extensions (.bat/.cmd/.com)"
+    },
+    {
+      "id": "win-quoted-image-with-spaces-keeps-attributing",
+      "group": "owned-launch-spelling",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "the guard above must not cost the one shape Windows browsers actually emit — a quoted argv[0] with spaces whose ONLY executable extension is final"
+    },
+    {
+      "id": "residual-win-quoted-two-relative-paths",
+      "group": "known-limit-attributes-but-should-not",
+      "form": "win32",
+      "cmd": "\"C:\\x\\vim x\\chrome\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "KNOWN LIMIT, pinned deliberately — this is NOT a shape we want to kill. A Windows-spelled QUOTED argv[0] holding two relative paths with NO executable extension gives `WIN_EXEC_EXT` nothing to bite on, and the alternative — refusing every space-containing quoted Windows token — would drop `\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\"`, the one shape Windows browsers actually emit (verified against live Win32_Process). Pinned so both implementations keep agreeing and the limit cannot widen unnoticed. It still requires the caller to pass our exact --user-data-dir=<profile>, and a quoted argv[0] that is neither an executable path nor a real program is a launcher-fabricated string."
     }
   ]
 }

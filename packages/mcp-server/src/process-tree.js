@@ -139,7 +139,7 @@ async function collectDescendantPids(rootPid, exec) {
 // ─── Positive-attribution primitives ──────────────────────────────────────────
 //
 // CROSS-REFERENCE: these are a LINE-FOR-LINE port of `_canon`, `_containsPathToken`,
-// `ARG_BOUNDARY`, `PATH_LEAD_BOUNDARY`, `ABSOLUTE_LIKE`, `_stripTrailingSep`,
+// `ARG_BOUNDARY`, `WIN_EXEC_EXT`, `ABSOLUTE_LIKE`, `_stripTrailingSep`,
 // `CHROME_FAMILY_IMAGES`, `CHROME_FAMILY_HELPER`, `WRAPPER_IMAGES`, `ROOTED`, `NEW_ARG_LIKE`,
 // `MAC_BUNDLE_MARKER`, `_isWindowsSpelling`, `_macBundleExec`, `_imageName`, `_basename`,
 // `_isChromeFamilyImage` and
@@ -170,16 +170,12 @@ async function collectDescendantPids(rootPid, exec) {
  * `near-miss-trailing-equals`).
  */
 const ARG_BOUNDARY = /[\s"']/;
-/**
- * The ONE asymmetry, and it is leading-side only: a PATH may legitimately sit after `=`
- * (`--script=<path>`), but a FLAG never does. `--user-data-dir=` is therefore matched with
- * `ARG_BOUNDARY` on both sides, which rejects the nested spellings `--foo=--user-data-dir=<p>`
- * and `--user-data-dir=/other=--user-data-dir=<p>` — the latter being a browser pointed at a
- * DIFFERENT profile. Nothing accepts `=` on the TRAILING side. Kept as a named export-scope
- * constant because the extension's `daemon-manager.ts` criterion (a) needs the relaxed leading
- * form; this module has no criterion (a), so nothing here passes it today.
- */
-const PATH_LEAD_BOUNDARY = /[\s"'=]/;
+// There is deliberately NO `=`-accepting boundary variant. The extension's criterion (a) kept one
+// on the leading side ("a path may legitimately follow `=`"); it protected no invocation this
+// project emits — `_spawnDetached`/`spawnDetachedDaemon` both emit `[entry, 'daemon', 'start']` —
+// and it force-killed ordinary tooling whose argv referenced our entry as a flag VALUE
+// (`rsync --exclude=<entry> …`, `rg --file=<entry> …`, `code --extensions-dir=<entry> …`).
+// It is gone there too: `=` is a boundary on neither side, for neither criterion.
 /** `C:\…`, `\\server\share…` or `/…` — guards against an empty/relative userDataDir. */
 const ABSOLUTE_LIKE = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
 
@@ -202,7 +198,7 @@ function stripTrailingSep(p) {
  * Does `haystack` contain `needle` as a whole argv token?
  *
  * TRAILING side: start/end of string, whitespace or a quote (`ARG_BOUNDARY`) — never `=`.
- * LEADING side: the same, unless the caller passes `PATH_LEAD_BOUNDARY` to also allow `=`.
+ * LEADING side: the same. `=` is a boundary on neither side, for neither criterion.
  *
  * Probed, not asserted: `<profile>-backup`, `<profile>.old`, `<profile>/Default` and
  * `<profile>=2` are all misses, because `-`, `.`, `/` and `=` are none of them boundary
@@ -211,7 +207,7 @@ function stripTrailingSep(p) {
  *
  * Both args must be in `canon` form. One implementation, one parameter.
  */
-function containsPathToken(haystack, needle, leadingBoundary = ARG_BOUNDARY) {
+function containsPathToken(haystack, needle) {
   if (!needle) return false;
   for (let from = 0; ; ) {
     const i = haystack.indexOf(needle, from);
@@ -219,7 +215,7 @@ function containsPathToken(haystack, needle, leadingBoundary = ARG_BOUNDARY) {
     const before = i === 0 ? '' : haystack[i - 1];
     const afterIdx = i + needle.length;
     const after = afterIdx >= haystack.length ? '' : haystack[afterIdx];
-    if ((before === '' || leadingBoundary.test(before)) && (after === '' || ARG_BOUNDARY.test(after))) {
+    if ((before === '' || ARG_BOUNDARY.test(before)) && (after === '' || ARG_BOUNDARY.test(after))) {
       return true;
     }
     from = i + 1;
@@ -294,12 +290,23 @@ const WRAPPER_IMAGES = new Set([
 const ROOTED = /^(?:[a-z]:\/|\/|\.\.?\/)/;
 
 /**
- * A token that CANNOT be the continuation of an unquoted path that contains spaces, because it
- * is itself rooted, quoted, or flag-shaped. NOTE what this does NOT cover: a bare relative path
- * (`x/chrome`) is indistinguishable from a path continuation by inspection alone — that gap is
- * closed by the separate `ROOTED` and bundle-marker requirements in `imageName`, NOT here.
+ * A token that CANNOT be the continuation of a path containing spaces, because it is itself
+ * rooted, quoted, or flag-shaped. NOTE what this does NOT cover: a bare relative path
+ * (`x/chrome`) is indistinguishable from a path continuation by inspection alone. That gap is
+ * closed ELSEWHERE, and differently per branch — unquoted: `ROOTED` + the spelling gate + the
+ * bundle-naming rule; quoted: `ROOTED` + the bundle-naming rule on POSIX spellings, or
+ * `WIN_EXEC_EXT` on Windows spellings. This regex closes none of it on its own.
  */
 const NEW_ARG_LIKE = /^(?:[a-z]:\/|\/|\.|["'-])/;
+
+/**
+ * A fragment ending in a Windows executable extension. A single Windows path names ONE executable
+ * and names it LAST, so an executable extension in any fragment BUT the final one means a quoted
+ * token is a program plus arguments, not one image path:
+ * `"C:\Program Files\vim\vim.exe x\chrome.exe"` → not an image;
+ * `"C:\Program Files\Google\Chrome\Application\chrome.exe"` → image.
+ */
+const WIN_EXEC_EXT = /\.(?:exe|com|bat|cmd)$/;
 
 /**
  * The only structural proof that an unquoted, SPACE-CONTAINING string is one path rather than a
@@ -353,12 +360,15 @@ function macBundleExec(joined) {
  * Process enumeration hands us a FLAT STRING, and an unquoted argv[0] may itself contain spaces,
  * so argv[0]'s extent has to be recovered. The rules, and the reason each one exists:
  *
- *   1. A quoted leading token IS argv[0] — the launcher's own quoting is its statement of the
- *      extent, which is why quoted Windows paths with spaces still work. Two guards against a
- *      MIS-PARSE presenting somebody's argument as the image: a token containing whitespace must
- *      be `ROOTED`, and none of its later sub-tokens may be `NEW_ARG_LIKE`. Those reject
- *      `"vim /home/u/chrome" …` and `"C:\Program Files\vim\vim.exe C:\x\chrome" …` while leaving
- *      `"C:\Program Files\Google\Chrome\Application\chrome.exe"` intact.
+ *   1. A quoted leading token BOUNDS argv[0]: the launcher's quoting states where it ENDS, which
+ *      is why quoted Windows paths with spaces attribute at all. It does NOT state that the
+ *      interior is one path, and argv[0] is caller-chosen (`execve`/`CreateProcess` let a launcher
+ *      write anything there), so a space-containing quoted token must clear the same structural
+ *      bar as the unquoted branch: `ROOTED`, no later sub-token `NEW_ARG_LIKE`, and then the
+ *      bundle-naming rule on POSIX spellings (rejecting `"/usr/bin/vim x/chrome"`,
+ *      `"/usr/bin/git add sub/msedge"`) or `WIN_EXEC_EXT` on Windows spellings (rejecting
+ *      `"C:\Program Files\vim\vim.exe x\chrome.exe"`), while
+ *      `"C:\Program Files\Google\Chrome\Application\chrome.exe"` is left intact.
  *   2. Otherwise: take the text before the first flag-shaped token (`\s["']?-{1,2}\S`), skip a
  *      leading run of `WRAPPER_IMAGES`, and then
  *        - ONE token left  → that is argv[0] (`chrome.exe`, `/opt/chromium`, `./chrome`, `vim`);
@@ -392,22 +402,32 @@ function macBundleExec(joined) {
  * are the same shape. Every launcher that matters (Node's `child_process`, shell shortcuts, the
  * Start menu) quotes an argv[0] containing spaces, so the quoted branch still covers Windows.
  *
- * RESIDUAL, stated rather than papered over — POSIX-only and narrow after (c)+(d): a POSIX-spelled
- * command line that hands another program a CORRECTLY-NAMED bundle executable path, e.g.
- * `/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=<our profile>`.
- * That string is byte-for-byte a real macOS browser invocation; nothing short of asking the
- * filesystem can separate them, and it still requires the caller to pass our exact profile flag.
- * Pinned as `residual-posix-named-bundle-arg` in the shared vector so it cannot drift silently.
+ * RESIDUALS — two, both narrow, both PINNED in the shared vector so neither can drift:
+ *   1. a FORWARD-SLASH-SPELLED command line (any host — the gate is spelling, not platform) that
+ *      hands another program a CORRECTLY-NAMED bundle executable path, e.g.
+ *      `/usr/bin/vim x/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=<profile>`;
+ *      byte-for-byte a real macOS invocation (`residual-posix-named-bundle-arg`).
+ *   2. a Windows-spelled QUOTED argv[0] holding two relative paths with no executable extension —
+ *      `"C:\x\vim x\chrome" --user-data-dir=<profile>` — where `WIN_EXEC_EXT` has nothing to bite
+ *      on, and refusing every space-containing quoted Windows token would drop the one shape
+ *      Windows browsers actually emit (`residual-win-quoted-two-relative-paths`).
+ * Both still require the caller to pass our exact profile flag.
  */
 function imageName(cmd, winSpelling) {
   const quote = cmd[0];
   if (quote === '"' || quote === "'") {
     const end = cmd.indexOf(quote, 1);
     const token = (end > 0 ? cmd.slice(1, end) : cmd.slice(1)).trim();
-    if (/\s/.test(token)) {
-      if (!ROOTED.test(token)) return '';
-      if (token.split(/\s+/).slice(1).some((t) => NEW_ARG_LIKE.test(t))) return '';
-    }
+    if (!/\s/.test(token)) return basename(token);
+    if (!ROOTED.test(token)) return '';
+    if (token.split(/\s+/).slice(1).some((t) => NEW_ARG_LIKE.test(t))) return '';
+    // A space-containing quoted token gets the SAME structural proof the unquoted branch demands:
+    // quoting settles where argv[0] ENDS, not that its interior is one path. POSIX spelling → a
+    // correctly named macOS bundle; Windows spelling → an executable extension only in the FINAL
+    // fragment. This is what closes the bare-relative twins `"/usr/bin/vim x/chrome"` and
+    // `"C:\Program Files\vim\vim.exe x\chrome.exe"`.
+    if (!winSpelling) return basename(macBundleExec(token));
+    if (token.split(/\s+/).slice(0, -1).some((t) => WIN_EXEC_EXT.test(t))) return '';
     return basename(token);
   }
   const flag = /\s["']?-{1,2}\S/.exec(cmd);
