@@ -704,11 +704,24 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
       { pid: 1004, commandLine: `"C:\\Users\\admin\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1187\\chrome-headless-shell-win64\\chrome-headless-shell.exe" --user-data-dir=${WIN_PROFILE}` },
       // Brave — browser-detect hands patchright its executablePath with channel 'chromium'.
       { pid: 1005, commandLine: `"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe" --user-data-dir=${WIN_PROFILE}` },
-      // An UNQUOTED image path containing spaces (CIM reports both shapes).
-      { pid: 1006, commandLine: `C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe --user-data-dir=${WIN_PROFILE}` },
+      // An unquoted image path with NO spaces still attributes.
+      { pid: 1006, commandLine: `C:\\chrome\\chrome.exe --user-data-dir=${WIN_PROFILE}` },
     ]);
     expect(killedPids).toEqual([1001, 1002, 1003, 1004, 1005, 1006]);
     expect(result.skipped).toEqual([]);
+  });
+
+  it('NARROWED (Windows): an UNQUOTED image path CONTAINING SPACES is reported, not killed', () => {
+    // Deliberate narrowing, not an oversight. `C:\Program Files\…\chrome.exe --flag` is
+    // byte-for-byte the same shape as `C:\Windows\System32\notepad.exe x\chrome.exe --flag`, so
+    // accepting the first means accepting the second — a false KILL of an editor. Every launcher
+    // that matters (Node child_process, shortcuts, the Start menu) quotes an argv[0] containing
+    // spaces, and the quoted form (pid 1001 above) still attributes; the unquoted hand-typed form
+    // degrades to the fail-safe disposition instead.
+    const cmd = `C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe --user-data-dir=${WIN_PROFILE}`;
+    const { result, killTree } = win([{ pid: 1007, commandLine: cmd }]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [{ pid: 1007, commandLine: cmd }] });
   });
 
   it('POSITIVE (POSIX): system chrome/chromium/edge/brave, the mac app bundles and helpers, ARE killed', () => {
@@ -803,6 +816,95 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
     expect(killTree).not.toHaveBeenCalled();
     expect(result.killed).toEqual([]);
     expect(result.skipped.map(p => p.pid)).toEqual([9101, 9102, 9103, 9104, 9105]);
+  });
+
+  /**
+   * THE ENUMERATION. `_imageName` recovers argv[0] from a flat string, so the only way to be sure
+   * a browser-NAMED FILE can never pose as the process image is to walk every path spelling that
+   * exists rather than the ones a reviewer happened to try. Rows are (spelling → command line);
+   * each carries our EXACT profile flag, so the image test is the ONLY thing standing between them
+   * and `taskkill /T /F`.
+   */
+  it('IMAGE CONJUNCT (POSIX): every path spelling of "browser-named file as an argument" is rejected', () => {
+    const cmds = [
+      /* bare relative          */ `vim x/chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* bare relative, nested  */ `node tools/build/chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* bare relative, no sep  */ `vim chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* ./-relative            */ `vim ./chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* ../-relative           */ `vim ../chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* absolute               */ `vim /home/u/chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* rooted prog + bare rel */ `/usr/bin/vim x/chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* rooted prog + absolute */ `/usr/bin/vim /home/u/chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* multi-token argv       */ `git add sub/msedge --user-data-dir=${POSIX_PROFILE}`,
+      /* multi-token, rooted    */ `/usr/bin/git add sub/msedge --user-data-dir=${POSIX_PROFILE}`,
+      /* space in the arg path  */ `/usr/bin/vim x/google chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* quoted arg             */ `less "/home/u/Google Chrome" --user-data-dir=${POSIX_PROFILE}`,
+      /* fabricated quoted argv0*/ `"vim /home/u/chrome" --user-data-dir=${POSIX_PROFILE}`,
+      /* ambiguous wrapper tail */ `env DISPLAY=:0 chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* wrapper with own flag  */ `xvfb-run -a /usr/bin/chrome --user-data-dir=${POSIX_PROFILE}`,
+      /* interpreter + script   */ `python3 opt/x/chromium --user-data-dir=${POSIX_PROFILE}`,
+      /* shell -c               */ `bash -c "chrome --user-data-dir=${POSIX_PROFILE}"`,
+    ];
+    const { result, killTree } = posix(cmds.map((commandLine, i) => ({ pid: 9200 + i, commandLine })));
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    // All are profile holders we cannot attribute → reported, never killed.
+    expect(result.skipped.length).toBe(cmds.length);
+  });
+
+  it('IMAGE CONJUNCT (Windows): every path spelling of "browser-named file as an argument" is rejected', () => {
+    const cmds = [
+      /* bare relative          */ `NOTEPAD.EXE x\\chrome --user-data-dir=${WIN_PROFILE}`,
+      /* bare relative, fwd sep */ `NOTEPAD.EXE x/chrome --user-data-dir=${WIN_PROFILE}`,
+      /* bare relative, nested  */ `node tools\\build\\chrome --user-data-dir=${WIN_PROFILE}`,
+      /* .\\-relative            */ `notepad.exe .\\chrome.exe --user-data-dir=${WIN_PROFILE}`,
+      /* ..\\-relative           */ `notepad.exe ..\\chrome.exe --user-data-dir=${WIN_PROFILE}`,
+      /* drive-rooted arg       */ `NOTEPAD.EXE C:\\x\\chrome --user-data-dir=${WIN_PROFILE}`,
+      /* drive-RELATIVE arg     */ `notepad.exe C:x\\chrome --user-data-dir=${WIN_PROFILE}`,
+      /* rooted prog + bare rel */ `C:\\Windows\\System32\\notepad.exe x\\chrome.exe --user-data-dir=${WIN_PROFILE}`,
+      /* rooted prog + rooted   */ `"C:\\Program Files\\Microsoft VS Code\\Code.exe" C:\\x\\chromium --user-data-dir=${WIN_PROFILE}`,
+      /* UNC argument           */ `notepad.exe \\\\srv\\share\\chrome.exe --user-data-dir=${WIN_PROFILE}`,
+      /* quoted arg with space  */ `notepad.exe "C:\\x\\Google Chrome" --user-data-dir=${WIN_PROFILE}`,
+      /* multi-token argv       */ `git add sub\\msedge --user-data-dir=${WIN_PROFILE}`,
+      /* fabricated quoted argv0*/ `"vim C:\\x\\chrome" --user-data-dir=${WIN_PROFILE}`,
+    ];
+    const { result, killTree } = win(cmds.map((commandLine, i) => ({ pid: 9300 + i, commandLine })));
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped.length).toBe(cmds.length);
+  });
+
+  it('IMAGE CONJUNCT: the legitimate path spellings of a REAL browser still attribute', () => {
+    // The other side of the enumeration — the rules above must not have cost us any real shape.
+    const p = posix([
+      /* absolute              */ { pid: 9400, commandLine: `/opt/google/chrome/chrome --user-data-dir=${POSIX_PROFILE}` },
+      /* ./-relative launch    */ { pid: 9401, commandLine: `./chrome --user-data-dir=${POSIX_PROFILE}` },
+      /* ../-relative launch   */ { pid: 9402, commandLine: `../bin/chromium --user-data-dir=${POSIX_PROFILE}` },
+      /* bare name launch      */ { pid: 9403, commandLine: `chrome --user-data-dir=${POSIX_PROFILE}` },
+      /* bare relative launch  */ { pid: 9404, commandLine: `bin/chromium --user-data-dir=${POSIX_PROFILE}` },
+      /* macOS bundle (spaces) */ { pid: 9405, commandLine: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=${POSIX_PROFILE}` },
+      /* macOS bundle, ~ path  */ { pid: 9406, commandLine: `/Users/u/Applications/Brave Browser.app/Contents/MacOS/Brave Browser --user-data-dir=${POSIX_PROFILE}` },
+    ]);
+    expect(p.killedPids).toEqual([9400, 9401, 9402, 9403, 9404, 9405, 9406]);
+
+    const w = win([
+      /* quoted, spaces        */ { pid: 9500, commandLine: `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir=${WIN_PROFILE}` },
+      /* unquoted, no spaces   */ { pid: 9501, commandLine: `C:\\chrome\\chrome.exe --user-data-dir=${WIN_PROFILE}` },
+      /* UNC image             */ { pid: 9502, commandLine: `\\\\srv\\share\\chrome.exe --user-data-dir=${WIN_PROFILE}` },
+      /* bare image            */ { pid: 9503, commandLine: `chrome.exe --user-data-dir=${WIN_PROFILE}` },
+    ]);
+    expect(w.killedPids).toEqual([9500, 9501, 9502, 9503]);
+  });
+
+  it('ARGUMENT CONJUNCT: a NESTED --user-data-dir spelling never counts as the flag', () => {
+    // `=` may precede a PATH (criterion a) but never an argv entry, so neither nesting attributes.
+    // The second one matters most: that browser is pointed at a DIFFERENT profile.
+    const { result, killTree } = posix([
+      { pid: 9600, commandLine: `/usr/bin/chromium --foo=--user-data-dir=${POSIX_PROFILE}` },
+      { pid: 9601, commandLine: `/usr/bin/chromium --user-data-dir=/other=--user-data-dir=${POSIX_PROFILE}` },
+    ]);
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result).toEqual({ killed: [], skipped: [] });
   });
 
   // ── NEGATIVE: an EDITOR holding a file under the profile ────────────────────
