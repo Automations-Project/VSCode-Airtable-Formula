@@ -228,6 +228,8 @@ export function assertVsix(file, target) {
   // 3. Every expected platform package present, at the locked version, for the
   //    right os/cpu, with the exact .node file its own package.json points at.
   const expected = new Set(config.packages);
+  /** pkg -> Set of .node paths that package is PINNED to ship. Feeds check 5. */
+  const pinnedFiles = new Map();
   for (const pkg of config.packages) {
     const manifest = manifestOf(pkg);
     if (!manifest) {
@@ -264,6 +266,7 @@ export function assertVsix(file, target) {
       problems.push(error.message);
       continue;
     }
+    pinnedFiles.set(pkg, new Set(Object.keys(pin.binaries)));
 
     // `main` still has to point at one of the pinned binaries — a loader that
     // requires a file we never pinned would load unverified bytes at runtime.
@@ -348,14 +351,35 @@ export function assertVsix(file, target) {
     }
   }
 
-  // 5. Belt and braces: every .node file anywhere in the artifact must live in
-  //    an expected platform package. Catches a stray binary copied outside
-  //    node_modules, which check 3 would not see.
+  // 5. Belt and braces: every .node file anywhere in the artifact must be one
+  //    this target is PINNED to ship — right package AND pinned filename.
+  //
+  //    Keying on the package alone was not enough. Check 3 iterates the pinned
+  //    filenames, so an EXTRA `.node` added alongside them — e.g. a rogue
+  //    `impit-darwin-arm64/rogue.node` holding darwin-x64 machine code — is
+  //    invisible to it, and a package-level check here waves it through because
+  //    the package is legitimately expected. Node will happily load such a file
+  //    if anything `require()`s it by path. The vendoring cache already refuses
+  //    unpinned `.node` files (`validateCacheDir`), so our own pipeline cannot
+  //    emit one — but this assertion is the LAST gate before publish and must
+  //    not be the weaker of the two.
   for (const name of entries.keys()) {
     if (!name.endsWith('.node')) continue;
     const pkg = packageNameOf(name);
     if (!pkg || !expected.has(pkg)) {
       problems.push(`unexpected native binary in ${target} VSIX: ${name}`);
+      continue;
+    }
+    // Undefined only when the pin could not be resolved at all — that failure
+    // is already recorded by check 3; don't report it a second time here.
+    const allowed = pinnedFiles.get(pkg);
+    const relative = name.slice(NODE_MODULES_PREFIX.length + pkg.length + 1);
+    if (allowed && !allowed.has(relative)) {
+      problems.push(
+        `unpinned native binary in ${target} VSIX: ${name} — ${pkg} is pinned to ship only ` +
+        `${[...allowed].join(', ')}. An extra .node beside the pinned ones is never verified ` +
+        'by digest and must not be published.'
+      );
     }
   }
 
