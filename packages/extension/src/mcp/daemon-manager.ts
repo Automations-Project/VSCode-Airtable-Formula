@@ -461,9 +461,12 @@ export class DaemonManager implements vscode.Disposable {
    *    `google-chrome-stable`), Edge (`microsoft-edge`, `microsoft-edge-stable`) or Brave
    *    (`brave.exe`, `brave`, `brave-browser`, `…/MacOS/Brave Browser`).
    *
-   * This mirrors the process-name filter `mcp-server/src/process-tree.js` applies on Windows
-   * (`chrome.exe`/`msedge.exe`/`chromium.exe`), widened to the images the other platforms and the
-   * downloaded/Brave paths actually produce.
+   * CROSS-REFERENCE — `mcp-server/src/process-tree.js` (`findProfileBrowserPids`) solves the same
+   * problem for the SERVER, but the two now differ SUBSTANTIVELY, not just in mechanism: it filters
+   * by Windows image name (`chrome.exe`/`msedge.exe`/`chromium.exe`, no macOS/Linux/Brave/headless
+   * names) inside a CIM query, applies no image filter at all on POSIX, and accepts a bare
+   * profile-dir substring as a `pgrep` fallback when the `--user-data-dir=` marker misses. Keep
+   * them in sync only deliberately — do not assume a change here is mirrored there, or vice versa.
    */
   private static readonly CHROME_FAMILY_IMAGES: ReadonlySet<string> = new Set([
     'chrome', 'chromium', 'chromium-browser', 'chrome-headless-shell', 'headless_shell',
@@ -484,28 +487,69 @@ export class DaemonManager implements vscode.Disposable {
     /^(?:google chrome(?: for testing| beta| dev| canary)?|microsoft edge(?: beta| dev| canary)?|chromium|brave browser) helper(?: \([^)]*\))?$/;
 
   /**
-   * argv[0]'s basename, lower-cased and `.exe`-stripped, from a `_canon`-form command line.
+   * Exec-wrappers that replace themselves with the real image, shifting it out of argv[0]. A
+   * LEADING run of these is skipped so `env chrome …` / `xvfb-run /usr/bin/chromium …` are still
+   * attributable. Deliberately tiny and allowlisted: any other leading token (`vim`, `node`,
+   * `python3`, `notepad.exe`, …) means the browser-looking token is that program's ARGUMENT, not
+   * the process image, and the command line is then NOT attributable — the exact confusion this
+   * whole criterion exists to prevent. A wrapper form we do not list (`xvfb-run -a chrome …`,
+   * `snap run chromium`, `flatpak run …`) simply fails to attribute: reported, never killed.
+   */
+  private static readonly WRAPPER_IMAGES: ReadonlySet<string> = new Set([
+    'env', 'nohup', 'xvfb-run', 'dbus-run-session', 'setarch', 'stdbuf',
+  ]);
+
+  /**
+   * A token that starts a NEW argv entry rather than continuing an unquoted path that contains
+   * spaces: an absolute POSIX path, a UNC path (`\\srv` → `//srv` after `_canon`), a drive-rooted
+   * Windows path, a `./`-relative path, a quote, or a flag.
+   */
+  private static readonly NEW_ARG_LIKE = /^(?:[a-z]:\/|\/|\.|["'-])/;
+
+  /**
+   * argv[0]'s basename, lower-cased and `.exe`-stripped, from a `_canon`-form command line — or
+   * `''` when argv[0] cannot be identified unambiguously.
    *
-   * Handles the three shapes process enumeration actually yields:
-   *   `"C:/Program Files/Google/Chrome/Application/chrome.exe" --user-data-dir=…`  (quoted image)
-   *   `C:/Program Files/Google/Chrome/Application/chrome.exe --user-data-dir=…`    (bare, spaces)
-   *   `/applications/google chrome.app/contents/macos/google chrome --user-data-dir=…`
-   * For the unquoted forms the image is everything before the first flag-shaped token, so a path
-   * containing spaces survives. A command line with no flag at all (`vim /some/file`) keeps its
-   * whole text as the "image", whose basename is a filename — never a browser name.
+   * Process enumeration hands us a flat string, so argv[0]'s extent has to be recovered:
+   *   1. A quoted leading token IS argv[0], unambiguously:
+   *      `"C:/Program Files/Google/Chrome/Application/chrome.exe" --user-data-dir=…`.
+   *   2. Otherwise take the text before the first flag-shaped token (`\s["']?-{1,2}\S`) and skip a
+   *      leading run of `WRAPPER_IMAGES`. What remains must plausibly be ONE path — no token after
+   *      the first may look like a separate argument (`NEW_ARG_LIKE`) — which is what preserves
+   *      unquoted images containing spaces, the normal shape in POSIX `ps -o args=` output and in
+   *      some Windows command lines:
+   *        `/applications/google chrome.app/contents/macos/google chrome --user-data-dir=…`
+   *        `C:/Program Files/Google/Chrome/Application/chrome.exe --user-data-dir=…`
+   *
+   * NOT argv[0]-lenient by accident: `vim /home/u/chrome --user-data-dir=…`,
+   * `notepad.exe C:/x/chrome …`, `node /home/u/tools/chrome …` and `vim ./chrome …` all resolve
+   * to `''` (the second token is argument-shaped and `vim`/`node`/`notepad` are not wrappers), so
+   * a chrome-NAMED FILE handed to some other program can never satisfy the image conjunct. An
+   * ambiguous remainder (`env DISPLAY=:0 chrome`, a bare `vim chrome`) also yields a non-matching
+   * image — the failure direction is always "not attributable", i.e. reported, never killed.
    */
   private static _imageName(cmd: string): string {
-    let head: string;
     const quote = cmd[0];
     if (quote === '"' || quote === '\'') {
       const end = cmd.indexOf(quote, 1);
-      head = end > 0 ? cmd.slice(1, end) : cmd.slice(1);
-    } else {
-      const flag = /\s-{1,2}\S/.exec(cmd);
-      head = flag ? cmd.slice(0, flag.index) : cmd;
+      return DaemonManager._basename(end > 0 ? cmd.slice(1, end) : cmd.slice(1));
     }
-    head = head.trim().replace(/["']+$/, '');
-    const base = head.slice(head.lastIndexOf('/') + 1);
+    const flag = /\s["']?-{1,2}\S/.exec(cmd);
+    const head = (flag ? cmd.slice(0, flag.index) : cmd).trim();
+    let tokens = head.split(/\s+/).filter(Boolean);
+    while (tokens.length > 1
+      && DaemonManager.WRAPPER_IMAGES.has(DaemonManager._basename(tokens[0]))) {
+      tokens = tokens.slice(1);
+    }
+    if (tokens.length === 0) return '';
+    if (tokens.slice(1).some(t => DaemonManager.NEW_ARG_LIKE.test(t))) return '';
+    return DaemonManager._basename(tokens.join(' '));
+  }
+
+  /** Basename of a `_canon`-form path: quotes trimmed, text after the last `/`, `.exe` dropped. */
+  private static _basename(p: string): string {
+    const s = p.trim().replace(/^["']+/, '').replace(/["']+$/, '');
+    const base = s.slice(s.lastIndexOf('/') + 1);
     return base.endsWith('.exe') ? base.slice(0, -'.exe'.length) : base;
   }
 
@@ -531,6 +575,10 @@ export class DaemonManager implements vscode.Disposable {
    *     contiguously → MISS;
    *   - a longer flag ending in `user-data-dir=` → the preceding character is not a boundary
    *     → MISS.
+   * KNOWN LENIENCY: `_containsPathToken`'s boundary set includes `=`, so a nested spelling like
+   * `--foo=--user-data-dir=<profileDir>` also satisfies THIS conjunct. Harmless — criterion (b)
+   * still requires the Chrome-family image conjunct, and a browser passed such an argument is one
+   * we would want to stop anyway. Recorded rather than special-cased so nobody re-derives it.
    * The three needle spellings cover the quotings argv actually arrives in: bare,
    * `"--user-data-dir=C:/Users/a b/…"` (Node quotes the WHOLE argument when it contains a space —
    * the opening quote is itself a boundary), and `--user-data-dir="…"` / `'…'`. The bare form
@@ -575,9 +623,14 @@ export class DaemonManager implements vscode.Disposable {
    *     bare `.airtable-user-mcp` fragment as a criterion; or
    * (b) a Chrome-family browser process ACTUALLY RUNNING our persistent profile. Like (a), this
    *     requires TWO conjuncts:
-   *       1. the process image (argv[0]'s basename) is one of the Chrome-family binaries this
-   *          project can launch (`CHROME_FAMILY_IMAGES` / `CHROME_FAMILY_HELPER`, derived from
-   *          patchright's channel + download registries and `browser-detect.ts`), AND
+   *       1. the process image is one of the Chrome-family binaries this project can launch
+   *          (`CHROME_FAMILY_IMAGES` / `CHROME_FAMILY_HELPER`, derived from patchright's channel +
+   *          download registries and `browser-detect.ts`). "Image" means argv[0]'s basename as
+   *          recovered by `_imageName()` from a flat command-line string — quoted argv[0] taken
+   *          verbatim, an unquoted argv[0] allowed to contain spaces, and a leading run of exec
+   *          wrappers (`env`, `xvfb-run`, …) skipped. A browser-NAMED file passed as some other
+   *          program's argument (`vim /home/u/chrome`) is NOT an image and never satisfies this;
+   *          an argv[0] we cannot pin down unambiguously is treated the same way, AND
    *       2. argv carries `--user-data-dir=<profileDir>` for the EXACT resolved
    *          `<configDir>/.chrome-profile` (`_profileDir()`), matched as a whole argv token with
    *          the same canonicalization and boundary rules criterion (a) uses.

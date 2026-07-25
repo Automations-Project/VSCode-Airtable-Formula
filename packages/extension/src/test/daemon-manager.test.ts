@@ -752,6 +752,59 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
     expect(killedPids).toEqual([3005]);
   });
 
+  it('POSITIVE (Windows): a BARE image with a whole-argument-quoted flag matches', () => {
+    // Node quotes the whole argument when its value contains a space; the image itself may still
+    // arrive unquoted. Pinning the shape explicitly — the other quoted cases all quote the image.
+    const { killedPids } = win([
+      { pid: 3006, commandLine: `chrome.exe "--user-data-dir=${WIN_PROFILE}"` },
+      { pid: 3007, commandLine: `msedge.exe '--user-data-dir=${WIN_PROFILE}'` },
+    ]);
+    expect(killedPids).toEqual([3006, 3007]);
+  });
+
+  it('POSITIVE: a LEADING exec wrapper (env/nohup/xvfb-run) still resolves to the browser image', () => {
+    // The wrapper execs the real browser, so argv[0] is the wrapper while the process IS ours.
+    const { killedPids } = posix([
+      { pid: 3101, commandLine: `env chrome --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 3102, commandLine: `xvfb-run /usr/bin/chromium --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 3103, commandLine: `nohup /opt/google/chrome/chrome --user-data-dir=${POSIX_PROFILE}` },
+      { pid: 3104, commandLine: `/usr/bin/env /usr/bin/chromium-browser --user-data-dir=${POSIX_PROFILE}` },
+    ]);
+    expect(killedPids).toEqual([3101, 3102, 3103, 3104]);
+  });
+
+  // ── NEGATIVE: a browser-NAMED FILE as another program's argument ────────────
+
+  it('NEGATIVE (Windows): a chrome-NAMED file passed to another program is NOT killed (it is not the image)', () => {
+    // The image conjunct means argv[0], not "some pre-flag token that happens to be chrome-named".
+    // Each of these carries our EXACT profile flag, so only the image test can save them.
+    const cmds = [
+      `NOTEPAD.EXE C:\\x\\chrome --user-data-dir=${WIN_PROFILE}`,
+      `notepad.exe "C:\\x\\Google Chrome" --user-data-dir=${WIN_PROFILE}`,
+      `node C:\\tools\\chrome --user-data-dir=${WIN_PROFILE}`,
+      `"C:\\Program Files\\Microsoft VS Code\\Code.exe" C:\\x\\chromium --user-data-dir=${WIN_PROFILE}`,
+    ];
+    const { result, killTree } = win(cmds.map((commandLine, i) => ({ pid: 9001 + i, commandLine })));
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    // Fail-safe: they hold our exact profile, so they are REPORTED rather than silently ignored.
+    expect(result.skipped.map(p => p.pid)).toEqual([9001, 9002, 9003, 9004]);
+  });
+
+  it('NEGATIVE (POSIX): a chrome-NAMED file passed to vim/node/python is NOT killed (it is not the image)', () => {
+    const cmds = [
+      `vim /home/u/chrome --user-data-dir=${POSIX_PROFILE}`,
+      `vim ./chrome --user-data-dir=${POSIX_PROFILE}`,
+      `node /home/u/tools/chrome --user-data-dir=${POSIX_PROFILE}`,
+      `python3 /opt/x/chromium --user-data-dir=${POSIX_PROFILE}`,
+      `less "/home/u/Google Chrome" --user-data-dir=${POSIX_PROFILE}`,
+    ];
+    const { result, killTree } = posix(cmds.map((commandLine, i) => ({ pid: 9101 + i, commandLine })));
+    expect(killTree).not.toHaveBeenCalled();
+    expect(result.killed).toEqual([]);
+    expect(result.skipped.map(p => p.pid)).toEqual([9101, 9102, 9103, 9104, 9105]);
+  });
+
   // ── NEGATIVE: an EDITOR holding a file under the profile ────────────────────
 
   it('NEGATIVE (Windows): an editor with a file under the profile open is NOT killed and NOT reported', () => {
