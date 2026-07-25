@@ -240,7 +240,15 @@ for (const packageName of packagesToCopy) {
 // Pinned to pnpm-lock.yaml (version AND integrity) and fetched for the chosen
 // target regardless of what this machine runs, so every published VSIX carries
 // exactly the binaries its own platform loads.
-await vendorPlatformPackagesForTarget(target, extensionNodeModules);
+try {
+  await vendorPlatformPackagesForTarget(target, extensionNodeModules);
+} catch (error) {
+  // Surface the reason, not an unhandled-rejection stack — these failures
+  // (integrity mismatch, unreachable registry, missing lockfile entry) all
+  // carry an actionable message.
+  console.error(`\n✗ ${error.message}`);
+  process.exit(1);
+}
 
 // Copy @airtable-formula/language-services (workspace package — not on npm,
 // so it cannot be resolved from the mcp-server scope like patchright/otpauth).
