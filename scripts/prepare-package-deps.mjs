@@ -11,14 +11,42 @@
  * We resolve each package directly via `require.resolve(<pkg>/package.json)`
  * using the mcp-server root as a paths hint, which transparently walks the
  * symlinked store and returns the real on-disk path.
+ *
+ * TARGETED OUTPUT. The tree this produces is specific to ONE vsce target,
+ * selected with `--target=<t>` (or `VSIX_TARGET`, defaulting to this machine's
+ * platform). `impit` and `@ngrok/ngrok` keep their native binary in separate
+ * per-platform packages, and only the target's are vendored — see
+ * `vsix-targets.mjs`. Run this once per target before each `vsce package
+ * --target <t>`; `package-targets.mjs` does exactly that.
  */
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { ALL_TARGETS, hostTarget, isPlatformPackage, targetConfig } from './vsix-targets.mjs';
+import { vendorPlatformPackagesForTarget } from './vendor-platform-packages.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+
+// ── Target selection ───────────────────────────────────────────────────────
+const targetArg = process.argv.find((a) => a.startsWith('--target='))?.slice('--target='.length);
+const target = targetArg || process.env.VSIX_TARGET || hostTarget();
+if (!target) {
+  console.error(
+    `Cannot determine a vsce target for ${process.platform}-${process.arch}: it is not a ` +
+    'published target. Pass one explicitly, e.g. --target=linux-x64.\n' +
+    `Published targets: ${ALL_TARGETS.join(', ')}`
+  );
+  process.exit(1);
+}
+try {
+  targetConfig(target); // rejects unknown targets and deliberately-excluded ones
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+console.log(`→ Preparing dist/node_modules for vsce target: ${target}`);
 
 // Anchor: mcp-server workspace package root
 const mcpPkgPath = require.resolve('airtable-user-mcp/package.json');
@@ -167,22 +195,22 @@ function copyPackage(packageName) {
  * variant matching the current build machine. Copying just the parent
  * package folder copies the pure-JS loader but never the native binary it
  * `require()`s at runtime, so the feature throws "Cannot find native
- * binding" in the packaged VSIX despite being selectable/enabled. This bit
- * us for impit first; rather than hardcode a second package name when it
- * turned out `@ngrok/ngrok` has the exact same shape, this generalizes: walk
- * whatever optionalDependencies the ALREADY-COPIED package itself declares
- * (read from dist/node_modules/<name>/package.json — sidesteps packages with
- * a strict `exports` map, like otpauth, that don't expose ./package.json via
- * require.resolve) and vendor whichever of those resolve from this machine.
+ * binding" in the packaged VSIX despite being selectable/enabled.
  *
- * Not every optionalDependency is a platform-binary split, though (e.g.
- * patchright declares `fsevents`, a genuinely-optional macOS file watcher
- * its own code already handles being absent) — those are still vendored
- * when resolvable (harmless, and correct when it IS available), but a
- * missing one doesn't warrant the loud "will crash at runtime" warning.
- * NAPI-style platform splits conventionally name the child after the
- * parent (impit -> impit-<platform>, @ngrok/ngrok -> @ngrok/ngrok-<platform>);
- * only THOSE trigger the stronger aggregate warning when none resolve.
+ * Those platform children are deliberately NOT vendored here: copying
+ * whatever the build host happens to have installed is exactly how an
+ * untargeted VSIX ends up shipping one platform's binary to everyone. They
+ * are vendored per target further below, from the lockfile, by
+ * `vendorPlatformPackagesForTarget`.
+ *
+ * What this function still handles is the OTHER kind of optionalDependency:
+ * genuinely optional runtime extras that are not platform-binary splits (e.g.
+ * patchright declares `fsevents`, a macOS file watcher its own code already
+ * handles being absent). Those are copied when resolvable from this machine —
+ * harmless when they are not. The package's optionalDependencies are read from
+ * dist/node_modules/<name>/package.json, which sidesteps packages with a
+ * strict `exports` map (like otpauth) that don't expose ./package.json via
+ * require.resolve.
  */
 function vendorOptionalDependencies(packageName) {
   const pkgJsonPath = join(extensionNodeModules, packageName, 'package.json');
@@ -195,24 +223,10 @@ function vendorOptionalDependencies(packageName) {
     return; // malformed — nothing we can do, the parent package is still vendored
   }
 
-  const optionalDeps = Object.keys(pkg.optionalDependencies || {});
-  if (optionalDeps.length === 0) return;
-
-  const platformShaped = optionalDeps.filter((dep) => dep.startsWith(`${packageName}-`));
-
-  for (const dep of optionalDeps) {
+  for (const dep of Object.keys(pkg.optionalDependencies || {})) {
+    // Platform-split children are target-selected, never host-selected.
+    if (isPlatformPackage(dep)) continue;
     copyPackage(dep);
-  }
-
-  const anyPlatformCopied = platformShaped.some((dep) => existsSync(join(extensionNodeModules, dep)));
-  if (platformShaped.length > 0 && !anyPlatformCopied) {
-    console.warn(
-      `⚠ ${packageName} was vendored but none of its platform-specific native binary packages ` +
-      `(${platformShaped.join(', ')}) could be resolved — any feature that depends on ` +
-      `${packageName}'s native binding will fail with "Cannot find native binding" in this VSIX. ` +
-      'Run `pnpm install` on this machine before packaging so the current platform\'s ' +
-      `${packageName}-<platform> optional dependency is present in node_modules.`
-    );
   }
 }
 
@@ -221,6 +235,12 @@ for (const packageName of packagesToCopy) {
     vendorOptionalDependencies(packageName);
   }
 }
+
+// ── Per-target native binaries ─────────────────────────────────────────────
+// Pinned to pnpm-lock.yaml (version AND integrity) and fetched for the chosen
+// target regardless of what this machine runs, so every published VSIX carries
+// exactly the binaries its own platform loads.
+await vendorPlatformPackagesForTarget(target, extensionNodeModules);
 
 // Copy @airtable-formula/language-services (workspace package — not on npm,
 // so it cannot be resolved from the mcp-server scope like patchright/otpauth).

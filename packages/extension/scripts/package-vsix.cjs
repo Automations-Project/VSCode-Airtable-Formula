@@ -5,7 +5,6 @@ const { spawnSync } = require('node:child_process');
 const packageRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(packageRoot, '..', '..');
 const artifactsDir = path.resolve(repoRoot, 'artifacts');
-const tempVsixPath = path.join(artifactsDir, 'airtable-formula.vsix');
 const packageJsonPath = path.join(packageRoot, 'package.json');
 
 function bumpVersion() {
@@ -72,10 +71,7 @@ run('pnpm', ['-F', 'webview', 'build'], repoRoot);
 run('node', ['scripts/bundle-mcp.mjs'], repoRoot);
 run('pnpm', ['-F', 'airtable-formula', 'build'], repoRoot);
 
-// ── 3. Prepare deps & package VSIX ──
-run('node', ['scripts/prepare-package-deps.mjs'], repoRoot);
-
-// ── 3b. Copy root README, replacing SVGs (vsce rejects SVG in README) ──
+// ── 3. Copy root README, replacing SVGs (vsce rejects SVG in README) ──
 const readmeSrc = path.join(repoRoot, 'README.md');
 const readmeDst = path.join(packageRoot, 'README.md');
 let readme = fs.readFileSync(readmeSrc, 'utf8');
@@ -106,33 +102,16 @@ console.log(`[readme] ${readmeSrc} -> ${readmeDst} (SVGs replaced)`);
 
 fs.mkdirSync(artifactsDir, { recursive: true });
 
-const vsceCommand = process.platform === 'win32' ? 'vsce.cmd' : 'vsce';
-const vsceResult = spawnSync(
-	vsceCommand,
-	['package', '--no-dependencies', '--out', tempVsixPath],
-	{
-		cwd: packageRoot,
-		stdio: 'inherit',
-		shell: process.platform === 'win32',
-	}
-);
+// ── 4. Vendor + package + assert, for THIS machine's platform target ──
+// Deliberately targeted, not untargeted: `impit` and `@ngrok/ngrok` keep their
+// native binary in per-platform packages, so an untargeted VSIX is only ever
+// correct on the machine that built it. Producing one here would mean the
+// artifact a developer sideloads is a different shape from the one users get,
+// which is how the missing-native-binding bug went unnoticed in the first
+// place. Building the host target exercises the exact release path.
+// Use `node scripts/package-targets.mjs` (all targets) for a release rehearsal.
+run('node', ['scripts/package-targets.mjs', '--targets=host'], repoRoot);
 
-if (vsceResult.error) {
-	console.error(vsceResult.error);
-	process.exit(1);
-}
-if (vsceResult.status !== 0) {
-	process.exit(vsceResult.status ?? 1);
-}
-
-// ── 4. Rename with version ──
 const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const version = typeof pkg.version === 'string' ? pkg.version.trim() : 'unknown';
-const finalVsixPath = path.join(artifactsDir, `airtable-formula-${version}.vsix`);
-
-if (fs.existsSync(finalVsixPath)) {
-	fs.unlinkSync(finalVsixPath);
-}
-
-fs.renameSync(tempVsixPath, finalVsixPath);
-console.log(`[vsix] ${finalVsixPath}`);
+console.log(`[vsix] host-target VSIX for v${version} written to ${artifactsDir}`);

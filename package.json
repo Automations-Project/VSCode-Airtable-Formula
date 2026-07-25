@@ -5,6 +5,8 @@
     "build": "node scripts/check-tool-sync.mjs && pnpm -F shared build && pnpm -F language-services build && pnpm -F webview build && node scripts/bundle-mcp.mjs && pnpm -F airtable-formula build",
     "dev": "pnpm -F webview dev",
     "package": "pnpm -F airtable-formula package",
+    "package:targets": "node scripts/package-targets.mjs",
+    "assert:vsix": "node scripts/assert-vsix-binaries.mjs --dir=artifacts",
     "check:tool-sync": "node scripts/check-tool-sync.mjs",
     "check:bundle-sync": "node scripts/check-bundle-sync.mjs",
     "test": "node scripts/check-tool-sync.mjs && pnpm -F shared test && pnpm -F language-services test && pnpm -F airtable-user-mcp test && pnpm -F webview test && pnpm -F airtable-formula test",
