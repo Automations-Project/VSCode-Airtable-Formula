@@ -33,7 +33,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { binaryPin, lockedPackage, targetConfig, assertPlatformVersionsMatchParents, REPO_ROOT } from './vsix-targets.mjs';
-import { assertSafeSymlinks } from './safe-symlinks.mjs';
+import { assertSafeSymlinks, SYMLINK_POLICY } from './safe-symlinks.mjs';
 
 export const CACHE_ROOT = join(REPO_ROOT, '.cache', 'vsix-platform-packages');
 
@@ -154,7 +154,9 @@ function populateFromNodeModules(name, version, cacheDir) {
   } catch {
     return false;
   }
-  assertSafeSymlinks(installed);
+  // Copied FROM an installed pnpm package: its own dependency links
+  // legitimately resolve into the workspace node_modules .pnpm store.
+  assertSafeSymlinks(installed, SYMLINK_POLICY.ALLOW_WORKSPACE_NODE_MODULES);
   rmSync(cacheDir, { recursive: true, force: true });
   mkdirSync(dirname(cacheDir), { recursive: true });
   cpSync(installed, cacheDir, { recursive: true, dereference: true });
@@ -266,9 +268,10 @@ export async function vendorPlatformPackagesForTarget(target, destNodeModules) {
     mkdirSync(dirname(dest), { recursive: true });
     rmSync(dest, { recursive: true, force: true });
     // `tar` creates symlinks from whatever the tarball asks for, and the copy
-    // below dereferences them — so foreign packages get the same escape guard
-    // the non-foreign path in prepare-package-deps.mjs already applies.
-    assertSafeSymlinks(cacheDir);
+    // below dereferences them — this is a foreign/untrusted tree, so only its
+    // own canonical root may be a link target (no legitimate reason for a
+    // registry tarball to point at the workspace node_modules).
+    assertSafeSymlinks(cacheDir, SYMLINK_POLICY.OWN_ROOT_ONLY);
     cpSync(cacheDir, dest, { recursive: true, dereference: true });
     rmSync(join(dest, '.vendored.json'), { force: true });
     console.log(`✓ Vendored ${name}@${version} for ${target}  (from ${source})`);

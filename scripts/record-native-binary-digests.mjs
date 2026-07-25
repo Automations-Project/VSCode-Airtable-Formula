@@ -56,7 +56,7 @@ import {
   findNodeBinaries,
   sha256Hex,
 } from './vendor-platform-packages.mjs';
-import { assertSafeSymlinks } from './safe-symlinks.mjs';
+import { assertSafeSymlinks, SYMLINK_POLICY } from './safe-symlinks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_FILE = join(__dirname, 'native-binary-digests.json');
@@ -85,8 +85,12 @@ async function digestsFor(name, scratch) {
   // hash THAT, pinning a digest of something we never unpacked. Unreachable
   // today (the tarball is byte-identical to what the registry published, per the
   // integrity gate above), but this is the routine that mints the trust root for
-  // every later check, so it should not rely on an upstream guarantee.
-  assertSafeSymlinks(unpacked);
+  // every later check, so it should not rely on an upstream guarantee. This is
+  // a throwaway scratch extraction, not an installed package, so only its own
+  // root is an allowed link target — and, notably, this call never touches
+  // node_modules at all, which is what lets `--check` run in the advisory
+  // verify-pins CI job that deliberately skips `pnpm install`.
+  assertSafeSymlinks(unpacked, SYMLINK_POLICY.OWN_ROOT_ONLY);
 
   const manifest = JSON.parse(readFileSync(join(unpacked, 'package.json'), 'utf8'));
   if (manifest.name !== name || manifest.version !== version) {

@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { ALL_TARGETS, hostTarget, isPlatformPackage, targetConfig } from './vsix-targets.mjs';
 import { vendorPlatformPackagesForTarget } from './vendor-platform-packages.mjs';
-import { assertSafeSymlinks } from './safe-symlinks.mjs';
+import { assertSafeSymlinks, SYMLINK_POLICY } from './safe-symlinks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -98,8 +98,11 @@ function resolvePackageRoot(packageName) {
 }
 
 // The symlink-escape guard `copyPackage` applies before every dereferencing
-// copy now lives in `safe-symlinks.mjs`, so the foreign-platform vendoring path
-// (`vendor-platform-packages.mjs`) applies the identical check.
+// copy now lives in `safe-symlinks.mjs`, shared with the foreign-platform
+// vendoring path (`vendor-platform-packages.mjs`) — though the two apply
+// different policies: this path resolves an installed pnpm package (whose own
+// links legitimately point into the workspace node_modules .pnpm store),
+// while the foreign-tarball path allows only that tree's own root.
 
 /**
  * Resolve + safety-check + copy a single package into dist/node_modules.
@@ -117,7 +120,9 @@ function copyPackage(packageName) {
     return false;
   }
 
-  assertSafeSymlinks(realSource);
+  // Resolved from an installed pnpm package: its own dependency links
+  // legitimately resolve into the workspace node_modules .pnpm store.
+  assertSafeSymlinks(realSource, SYMLINK_POLICY.ALLOW_WORKSPACE_NODE_MODULES);
 
   const target = join(extensionNodeModules, packageName);
   // dereference: true — follow symlinks and copy real files, required for

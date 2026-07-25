@@ -64,6 +64,12 @@ on:
       - 'scripts/native-binary-digests.json'      # the pins themselves
       - 'scripts/record-native-binary-digests.mjs' # HOW digests are produced
       - 'scripts/vsix-targets.mjs'                # WHICH packages are expected at all
+      - 'scripts/safe-symlinks.mjs'                # the symlink-escape guard the check relies on
+      - 'scripts/vendor-platform-packages.mjs'     # tarball fetch/verify/vendor logic the check imports
+      - 'package.json'                             # the `check:binary-digests` script definition itself
+
+permissions:
+  contents: read
 
 jobs:
   verify-pins:
