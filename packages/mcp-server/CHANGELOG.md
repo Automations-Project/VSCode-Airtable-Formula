@@ -92,6 +92,30 @@
 - **`AIRTABLE_HTTP_CLIENT=impit` ignores the proxy environment.** impit takes an explicit `proxyUrl` and has no `NO_PROXY` support, so a partial implementation would be misleading. **Workaround:** use the default `fetch` client behind a proxy.
 - **`ALL_PROXY` is not honoured** (undici's env contract does not include it). Setting it alone logs a warning pointing at `HTTPS_PROXY`.
 
+### Fixed (2026-07-25 sync column-visibility)
+
+- **`sync_base mode=diff`/`mode=apply` — column-visibility comparison no
+  longer produces a false negative on an absent `visibility` key.**
+  Airtable's internal API omits the `visibility` key entirely for a visible
+  column in some responses (absent key = visible; visibility is only ever
+  explicitly `false` for a hidden column) — `client.js`'s `getView` has
+  always honoured this correctly, but `sync/remap.js`'s
+  `canonicalizeViewConfig` (feeds `mode=diff`'s classified compare) and
+  `sync/apply.js`'s `applyViewConfig` columns facet both treated an absent
+  key as **hidden**, backwards from `getView`'s semantics. A source column
+  returned without the key therefore canonicalized as hidden, which
+  **matched** a dest column explicitly `false` and reported convergence —
+  silently masking real column-visibility drift — and `apply` never
+  re-showed that column on the destination. All four read sites
+  (`client.js`'s `getView` + `_showColumnsWithRetry`, `sync/apply.js`,
+  `sync/remap.js`) now share one predicate, `isColumnVisible()` in the new
+  `src/column-visibility.js`, so the semantics cannot re-diverge.
+  **This is a correctness fix that surfaces previously-hidden drift, not a
+  regression:** a base pair previously reported `converged` or `identical`
+  by `mode=diff` may correctly report column-visibility drift on the next
+  run for any column whose source `columnOrder` entry omits `visibility`;
+  re-run `mode=apply` to converge it.
+
 ### Fixed (2026-07-09 field-ref & upload bug report)
 
 - **`download_base_formulas` / `download_formula_field` now emit real field names.** Airtable's internal API stores formulas with opaque `{column_value_fldXXX}` refs; downloads previously wrote them verbatim, producing unreadable files that Airtable rejected on re-upload ("Unknown field names: column_value_…"). Field refs are now resolved to `{Field Name}` (Airtable's native syntax) via a base-wide id→name map (`src/formula-refs.js`); an unknown id — or a name that cannot round-trip (contains braces, or is itself shaped like a ref token, e.g. a field literally named `fldXXX…`) — falls back to the `{fldXXX}` id form, which the write API accepts. Non-field placeholder tokens (e.g. n8n's `{ACCOUNT_TITLE_PLACEHOLDER}`) never match the fld-id pattern and pass through verbatim.

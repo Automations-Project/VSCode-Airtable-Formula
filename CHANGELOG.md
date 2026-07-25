@@ -66,6 +66,22 @@ already shipped.
   documentation gap ahead of merge.
 
 #### Fixed
+- **`sync_base`'s column-visibility comparison no longer produces a false
+  negative.** Airtable's internal API omits the `visibility` key entirely for
+  a visible column in some responses (absent = visible, explicit `false` =
+  hidden); the sync engine's `apply`/`diff` column-visibility handling
+  (`sync/apply.js`, `sync/remap.js`) previously treated an absent key as
+  *hidden* instead, the opposite of `getView`'s own long-standing semantics.
+  A source column returned without the key therefore compared as hidden
+  against a dest column explicitly `false`, which **matched** — masking real
+  column-visibility drift behind a false `converged`/`identical` verdict —
+  and `apply` never re-showed that column on the destination. The predicate
+  is now unified behind one function (`src/column-visibility.js`) shared by
+  `client.js` and both sync sites. **This is a correctness fix, not a
+  regression:** the drift was always real, just hidden by the comparison
+  bug. A base pair that previously reported `sync_base mode=diff` as
+  `converged`/`identical` may now correctly surface column-visibility drift
+  on the next run — re-run `mode=apply` to converge it.
 - **The daemon's orphan-process sweep (Stop button / `stopDaemon` command) no
   longer kills unrelated Node processes on a loose command-line match.** The
   previous kill criteria were an unanchored substring match against
