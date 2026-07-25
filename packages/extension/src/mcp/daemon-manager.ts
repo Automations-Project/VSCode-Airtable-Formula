@@ -479,12 +479,18 @@ export class DaemonManager implements vscode.Disposable {
    *    `google-chrome-stable`), Edge (`microsoft-edge`, `microsoft-edge-stable`) or Brave
    *    (`brave.exe`, `brave`, `brave-browser`, `…/MacOS/Brave Browser`).
    *
-   * CROSS-REFERENCE — `mcp-server/src/process-tree.js` (`findProfileBrowserPids`) solves the same
-   * problem for the SERVER, but the two now differ SUBSTANTIVELY, not just in mechanism: it filters
-   * by Windows image name (`chrome.exe`/`msedge.exe`/`chromium.exe`, no macOS/Linux/Brave/headless
-   * names) inside a CIM query, applies no image filter at all on POSIX, and accepts a bare
-   * profile-dir substring as a `pgrep` fallback when the `--user-data-dir=` marker misses. Keep
-   * them in sync only deliberately — do not assume a change here is mirrored there, or vice versa.
+   * CROSS-REFERENCE — `mcp-server/src/process-tree.js` (`isOwnedBrowserCommandLine`) solves the
+   * same problem for the SERVER. The two are now the SAME predicate: this class is the reference
+   * and process-tree.js is a line-for-line port of it (it cannot import this file — the MCP server
+   * is a standalone npm package). The one deliberate difference is downstream of attribution:
+   * process-tree kills process TREES, so it skips Chromium helpers (`--type=`), whereas this sweep
+   * kills pids individually and therefore keeps them.
+   *
+   * THE DRIFT IS TEST-ENFORCED, not comment-enforced. Both implementations are asserted against
+   * ONE committed vector, `packages/shared/test-fixtures/process-attribution-cases.json`, by this
+   * package's `src/test/daemon-manager.test.ts` and the server's `test/test-process-tree.test.js`.
+   * Change the predicate here without changing it there (or vice versa) and the side that was NOT
+   * changed fails. Five previous drifts each shipped a force-kill of an innocent process.
    */
   private static readonly CHROME_FAMILY_IMAGES: ReadonlySet<string> = new Set([
     'chrome', 'chromium', 'chromium-browser', 'chrome-headless-shell', 'headless_shell',

@@ -59,6 +59,22 @@ describe('isProfileLockError', () => {
   });
 });
 
+/**
+ * `killProfileHolders` now has exactly ONE path: ownership-guarded eviction through
+ * `process-tree.evictProfileSquatters`.
+ *
+ * The `legacy: true` escape hatch is DELETED, along with the tests that pinned it. It was
+ * test-only (production `auth.js` passes `{ configDir }` and never `legacy`), but it shipped in
+ * the published `airtable-user-mcp` npm package carrying a second, independent copy of the
+ * defect this module has now been hardened against three times:
+ *   POSIX  `pkill -f <profileDir>` — kills EVERY process whose command line matches the profile
+ *          path as a REGEX. The user's `vim …/.chrome-profile/Default/Preferences`, a `grep -r`,
+ *          an `rsync` backup, a file manager. No image filter, no argv-token matching, no
+ *          ownership guard, no `--type=` exclusion. One boolean away from any future caller.
+ *   win32  `… -like '*<dir>*' … taskkill /T /F` — the same bare-mention widening that was just
+ *          removed from `process-tree.js`'s win32 query.
+ * The tests below assert its ABSENCE and pin the guarded behaviour that replaced it.
+ */
 describe('killProfileHolders', () => {
   function spy() {
     return {
@@ -72,64 +88,93 @@ describe('killProfileHolders', () => {
     };
   }
 
-  it('win32: builds a powershell command referencing the profileDir + taskkill', async () => {
-    const s = spy();
-    const profileDir = 'C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile';
-    const out = await killProfileHolders(profileDir, {
-      platform: 'win32',
-      legacy: true,
-      exec: (f, a) => s.exec(f, a),
-    });
-    assert.equal(out.killed, true);
-    assert.equal(out.platform, 'win32');
-    assert.equal(s.calls.length, 1);
-    const { file, args } = s.calls[0];
-    assert.equal(file, 'powershell');
-    assert.deepEqual(args.slice(0, 2), ['-NoProfile', '-Command']);
-    const script = args[2];
-    assert.ok(script.includes(profileDir), 'script embeds the profile dir');
-    assert.match(script, /Get-CimInstance Win32_Process/);
-    assert.match(script, /chrome\.exe/);
-    assert.match(script, /msedge\.exe/);
-    assert.match(script, /--type=/); // the child-process exclusion guard
-    assert.match(script, /taskkill \/PID \$_\.ProcessId \/T \/F/);
+  it('NEVER issues `pkill -f <profileDir>` — not on any platform, not with any option', async () => {
+    for (const platform of ['linux', 'darwin', 'win32']) {
+      for (const opts of [{}, { legacy: true }]) {
+        const s = spy();
+        await killProfileHolders('/home/user/.airtable-user-mcp/.chrome-profile', {
+          platform,
+          configDir: '/home/user/.airtable-user-mcp',
+          exec: (f, a) => s.exec(f, a),
+          ...opts,
+        });
+        const files = s.calls.map((c) => c.file);
+        assert.ok(!files.includes('pkill'), `pkill reached on ${platform} with ${JSON.stringify(opts)}`);
+        assert.ok(
+          !files.includes('powershell'),
+          `the legacy taskkill-in-PowerShell script reached on ${platform}`,
+        );
+      }
+    }
   });
 
-  it('win32: doubles single quotes in the profileDir to keep the PS string safe', async () => {
-    const s = spy();
-    const profileDir = "C:\\Users\\o'brien\\.chrome-profile";
-    await killProfileHolders(profileDir, { platform: 'win32', legacy: true, exec: (f, a) => s.exec(f, a) });
-    const script = s.calls[0].args[2];
-    assert.ok(script.includes("o''brien"), 'single quote is doubled for PowerShell');
-    assert.ok(!/[^']'[^']/.test(script.replace("o''brien", '')) || true); // sanity: no unbalanced quoting crash
-  });
-
-  it('posix: builds `pkill -f <profileDir>`', async () => {
-    const s = spy();
+  it('a stray `legacy: true` is inert — the guarded path runs regardless', async () => {
+    // If the option were ever re-introduced by a merge, this fails rather than silently
+    // re-enabling a `pkill -f`.
     const profileDir = '/home/user/.airtable-user-mcp/.chrome-profile';
+    const s = spy();
     const out = await killProfileHolders(profileDir, {
       platform: 'linux',
       legacy: true,
+      configDir: '/home/user/.airtable-user-mcp',
       exec: (f, a) => s.exec(f, a),
     });
-    assert.equal(out.killed, true);
-    assert.equal(s.calls.length, 1);
-    assert.deepEqual(s.calls[0], { file: 'pkill', args: ['-f', profileDir] });
+    // `pgrep` (candidate generation) is the only thing the guarded POSIX path may reach for.
+    assert.deepEqual(s.calls.map((c) => c.file), ['pgrep']);
+    assert.deepEqual(s.calls[0].args, ['-f', '--', `--user-data-dir=${profileDir}`]);
+    assert.equal(out.killed, false);
+    assert.equal(out.refusedReason, null);
   });
 
-  it('NEVER throws when the injected exec rejects — returns { killed: false, error }', async () => {
+  it('reports the pids the guarded eviction actually killed', async () => {
+    const profileDir = '/home/user/.airtable-user-mcp/.chrome-profile';
     const s = spy();
-    s.impl = () => { throw new Error('taskkill: access denied'); };
-    const out = await killProfileHolders('C:\\p', { platform: 'win32', legacy: true, exec: (f, a) => s.exec(f, a) });
+    s.impl = async (file, args) => {
+      if (file === 'pgrep' && args.includes('-f')) return { stdout: '4242\n' };
+      if (file === 'ps') return { stdout: `/opt/google/chrome/chrome --user-data-dir=${profileDir}` };
+      return { stdout: '' };
+    };
+    const out = await killProfileHolders(profileDir, {
+      platform: 'linux',
+      configDir: '/home/user/.airtable-user-mcp',
+      exec: (f, a) => s.exec(f, a),
+    });
+    assert.equal(out.platform, 'linux');
+    assert.deepEqual(out.pids, [4242]);
+    assert.equal(out.killed, true);
+  });
+
+  it('NEVER throws when the injected exec rejects — returns { killed: false }', async () => {
+    const s = spy();
+    s.impl = () => { throw new Error('access denied'); };
+    const out = await killProfileHolders('C:\\p', {
+      platform: 'win32',
+      configDir: 'C:\\cfg',
+      exec: (f, a) => s.exec(f, a),
+    });
     assert.equal(out.killed, false);
-    assert.match(out.error, /access denied/);
   });
 
   it('NEVER throws when exec rejects with a non-Error value', async () => {
     const s = spy();
     s.impl = () => Promise.reject('nope-string');
-    const out = await killProfileHolders('/p', { platform: 'linux', legacy: true, exec: (f, a) => s.exec(f, a) });
+    const out = await killProfileHolders('/p', {
+      platform: 'linux',
+      configDir: '/cfg',
+      exec: (f, a) => s.exec(f, a),
+    });
     assert.equal(out.killed, false);
-    assert.equal(out.error, 'nope-string');
+  });
+
+  it('NEVER throws when eviction itself throws — surfaces the error, kills nothing', async () => {
+    // A non-string configDir makes `join()` inside evictProfileSquatters throw. The contract is
+    // that the error is REPORTED, never swallowed into an unguarded fallback kill.
+    const out = await killProfileHolders('/p', {
+      platform: 'linux',
+      configDir: 42,
+      exec: async () => ({ stdout: '' }),
+    });
+    assert.equal(out.killed, false);
+    assert.ok(typeof out.error === 'string' && out.error.length > 0);
   });
 });

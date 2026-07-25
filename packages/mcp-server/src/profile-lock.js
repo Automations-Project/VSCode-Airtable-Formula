@@ -57,29 +57,37 @@ export function isProfileLockError(err) {
  * profile directory. NEVER throws — a failure here just means the retry will
  * fail again and the real error propagates.
  *
- * Prefer ownership-guarded eviction when configDir is known. Falls back to
- * direct tree kill for callers that only pass profileDir (legacy tests inject
- * `exec`/`platform`).
+ * Always goes through ownership-guarded eviction (`process-tree.evictProfileSquatters`), which
+ * kills ONLY pids positively attributable to a Chrome-family browser running this exact
+ * profile.
+ *
+ * THE `legacy` ESCAPE HATCH IS GONE. It existed for unit tests that spied on raw
+ * `powershell`/`pkill` arguments, and it carried a second, independent copy of the very defect
+ * this module has now been hardened against three times over:
+ *   POSIX  `pkill -f <profileDir>`  — kills EVERY process whose command line matches the profile
+ *          path as a regex: the user's `vim …/.chrome-profile/Default/Preferences`, a `grep -r`,
+ *          an `rsync` backup, a file manager. No image filter, no argv-token matching, no
+ *          ownership guard, no `--type=` exclusion.
+ *   win32  `… -like '*<dir>*' … taskkill /T /F` — same bare-mention widening as the win32 hole
+ *          removed from `process-tree.js`.
+ * It was reachable only from tests (production `auth.js` passes `{ configDir }` and never
+ * `legacy`), but it SHIPPED in the published `airtable-user-mcp` npm package, one boolean away
+ * from any future caller. Deleted rather than fixed: the guarded path already covers every
+ * production use.
  *
  * @param {string} profileDir absolute path to the persistent profile directory
  * @param {object} [opts]
  * @param {NodeJS.Platform} [opts.platform=process.platform]
  * @param {(file: string, args: string[], opts?: object) => Promise<any>} [opts.exec]
  * @param {string} [opts.configDir]
- * @param {boolean} [opts.legacy] force legacy powershell/pkill path (unit tests)
  * @returns {Promise<{ killed: boolean, platform: string, error?: string, refusedReason?: string|null, pids?: number[] }>}
  */
 export async function killProfileHolders(
   profileDir,
-  { platform = process.platform, exec = execFileAsync, configDir, legacy = false } = {},
+  { platform = process.platform, exec = execFileAsync, configDir } = {},
 ) {
   try {
     const home = configDir ?? getHomeDir();
-    // Explicit legacy opt-in for unit tests that spy on powershell/pkill args.
-    if (legacy) {
-      return legacyKillProfileHolders(profileDir, { platform, exec });
-    }
-
     const result = await evictProfileSquatters(profileDir, home, {
       platform,
       exec,
@@ -109,24 +117,5 @@ export async function killProfileHolders(
       platform,
       error: err instanceof Error ? err.message : String(err),
     };
-  }
-}
-
-/** Legacy path kept for injectable-exec unit tests. */
-async function legacyKillProfileHolders(profileDir, { platform, exec }) {
-  try {
-    if (platform === 'win32') {
-      const escaped = String(profileDir).replace(/'/g, "''");
-      const script =
-        `Get-CimInstance Win32_Process -Filter "Name='chrome.exe' OR Name='msedge.exe'" | ` +
-        `Where-Object { $_.CommandLine -like '*${escaped}*' -and $_.CommandLine -notlike '*--type=*' } | ` +
-        `ForEach-Object { taskkill /PID $_.ProcessId /T /F }`;
-      await exec('powershell', ['-NoProfile', '-Command', script]);
-    } else {
-      await exec('pkill', ['-f', String(profileDir)]);
-    }
-    return { killed: true, platform };
-  } catch (err) {
-    return { killed: false, platform, error: err instanceof Error ? err.message : String(err) };
   }
 }

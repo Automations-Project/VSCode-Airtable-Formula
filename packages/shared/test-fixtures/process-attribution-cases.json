@@ -1,0 +1,1022 @@
+{
+  "$schema": "process-attribution-cases/v1",
+  "purpose": "ONE shared vector for the process-attribution predicate that decides whether a process may be force-killed as ours. Loaded and asserted by BOTH packages/mcp-server/test/test-process-tree.test.js (isOwnedBrowserCommandLine) and packages/extension/src/test/daemon-manager.test.ts (DaemonManager._isOwnedCommandLine criterion b). The predicate has been reimplemented independently on each side (the mcp-server is a standalone npm package and must not depend on the extension); it has drifted apart five times, each drift shipping a force-kill of an innocent process. Editing one implementation and not the other now fails a test on the side that was NOT edited.",
+  "rules": [
+    "expect=\"owned\"     → the command line IS a Chrome-family browser process running EXACTLY our profile, and may be force-killed.",
+    "expect=\"not-owned\" → it may NOT be killed, whatever else it is. Both sides must agree.",
+    "helper=true        → additionally a Chromium helper (--type=...). ATTRIBUTION is still \"owned\" on both sides; only the SELECTION policy differs, and that difference is deliberate: packages/mcp-server kills process TREES, so a helper is skipped because its root browser's tree-kill already takes it; the extension kills pids individually and therefore keeps helpers. This is the ONE documented semantic difference between the two call sites.",
+    "form=\"posix\"|\"win32\" → which path spelling the command line is written in; it selects which profile/config path the placeholders expand to. It is NOT a platform gate: both suites run both forms, because canonicalisation (\\ → /, lower-case) is what makes the predicate platform-independent."
+  ],
+  "placeholders": {
+    "{PROFILE}": "the owned browser profile directory, in this case's path spelling",
+    "{PROFILE_URL}": "the same directory, always forward-slashed (for file:/// URLs)",
+    "{CFG}": "the config directory — the profile's PARENT — used for near-miss cases"
+  },
+  "paths": {
+    "posix": {
+      "cfg": "/home/u/.airtable-user-mcp",
+      "profile": "/home/u/.airtable-user-mcp/.chrome-profile"
+    },
+    "win32": {
+      "cfg": "C:\\Users\\admin\\.airtable-user-mcp",
+      "profile": "C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile"
+    }
+  },
+  "cases": [
+    {
+      "id": "posix-chrome-channel",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir={PROFILE} --headless=new",
+      "expect": "owned",
+      "why": "patchright channel:chrome on linux"
+    },
+    {
+      "id": "posix-google-chrome-stable",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/google-chrome-stable --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "browser-detect system Chrome"
+    },
+    {
+      "id": "posix-chromium",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "system Chromium"
+    },
+    {
+      "id": "posix-chromium-browser",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium-browser --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "Debian/Ubuntu Chromium"
+    },
+    {
+      "id": "posix-msedge",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/opt/microsoft/msedge/msedge --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "patchright channel:msedge"
+    },
+    {
+      "id": "posix-microsoft-edge-stable",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/microsoft-edge-stable --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "browser-detect system Edge"
+    },
+    {
+      "id": "posix-brave",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/brave-browser --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "browser-detect Brave"
+    },
+    {
+      "id": "posix-downloaded-chromium",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/home/u/.cache/ms-playwright/chromium-1187/chrome-linux64/chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "patchright download layout (linux)"
+    },
+    {
+      "id": "posix-headless-shell",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/home/u/.cache/ms-playwright/chromium_headless_shell-1187/chrome-linux/headless_shell --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "patchright headless-shell download layout"
+    },
+    {
+      "id": "posix-mac-bundle-chrome",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "macOS bundle: the ONLY unquoted image with spaces that may attribute"
+    },
+    {
+      "id": "posix-mac-bundle-testing",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/Users/u/Library/Caches/ms-playwright/chromium-1187/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "macOS downloaded Chrome for Testing bundle"
+    },
+    {
+      "id": "posix-mac-bundle-brave",
+      "group": "owned-real-browser",
+      "form": "posix",
+      "cmd": "/Users/u/Applications/Brave Browser.app/Contents/MacOS/Brave Browser --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "macOS Brave bundle"
+    },
+    {
+      "id": "win-quoted-chrome",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --user-data-dir={PROFILE} --headless",
+      "expect": "owned",
+      "why": "the shape Node child_process actually emits on Windows"
+    },
+    {
+      "id": "win-quoted-msedge",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "channel:msedge on Windows"
+    },
+    {
+      "id": "win-quoted-downloaded-chromium",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "\"C:\\Users\\admin\\AppData\\Local\\ms-playwright\\chromium-1187\\chrome-win64\\chrome.exe\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "patchright download layout (win)"
+    },
+    {
+      "id": "win-quoted-headless-shell",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "\"C:\\Users\\admin\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1187\\chrome-headless-shell-win64\\chrome-headless-shell.exe\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "patchright headless shell (win)"
+    },
+    {
+      "id": "win-quoted-brave",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "browser-detect Brave on Windows"
+    },
+    {
+      "id": "win-unquoted-no-spaces",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "C:\\chrome\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "unquoted image with no spaces is unambiguous"
+    },
+    {
+      "id": "win-unc-image",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "\\\\srv\\share\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "UNC image path (canon: //srv/... → ROOTED)"
+    },
+    {
+      "id": "win-bare-image",
+      "group": "owned-real-browser",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "single-token argv[0]"
+    },
+    {
+      "id": "posix-dot-relative-launch",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "./chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "./-relative launch is ROOTED"
+    },
+    {
+      "id": "posix-dotdot-relative-launch",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "../bin/chromium --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "../-relative launch is ROOTED"
+    },
+    {
+      "id": "posix-bare-name-launch",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "single-token argv[0], nothing else it could be"
+    },
+    {
+      "id": "posix-bare-relative-launch",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "bin/chromium --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "single bare-relative token: only ONE token, so it cannot be a program+argument pair"
+    },
+    {
+      "id": "posix-quoted-image",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "\"/opt/google/chrome/chrome\" --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "quoted argv[0]"
+    },
+    {
+      "id": "posix-flag-late-in-argv",
+      "group": "owned-launch-spelling",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --no-sandbox --disable-gpu --remote-debugging-port=9222 --user-data-dir={PROFILE} about:blank",
+      "expect": "owned",
+      "why": "the profile flag need not be first"
+    },
+    {
+      "id": "posix-trailing-separator",
+      "group": "owned-flag-quoting",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir={PROFILE}/",
+      "expect": "owned",
+      "why": "a trailing separator is the same directory"
+    },
+    {
+      "id": "posix-value-quoted",
+      "group": "owned-flag-quoting",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir=\"{PROFILE}\"",
+      "expect": "owned",
+      "why": "only the VALUE quoted"
+    },
+    {
+      "id": "posix-value-single-quoted",
+      "group": "owned-flag-quoting",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir='{PROFILE}'",
+      "expect": "owned",
+      "why": "single-quoted value"
+    },
+    {
+      "id": "posix-whole-arg-quoted",
+      "group": "owned-flag-quoting",
+      "form": "posix",
+      "cmd": "\"/opt/google/chrome/chrome\" \"--user-data-dir={PROFILE}\"",
+      "expect": "owned",
+      "why": "whole argument quoted (Node style)"
+    },
+    {
+      "id": "win-trailing-separator",
+      "group": "owned-flag-quoting",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={PROFILE}\\",
+      "expect": "owned",
+      "why": "trailing separator, backslash form"
+    },
+    {
+      "id": "win-value-quoted",
+      "group": "owned-flag-quoting",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=\"{PROFILE}\"",
+      "expect": "owned",
+      "why": "only the VALUE quoted"
+    },
+    {
+      "id": "win-whole-arg-quoted-bare-image",
+      "group": "owned-flag-quoting",
+      "form": "win32",
+      "cmd": "chrome.exe \"--user-data-dir={PROFILE}\"",
+      "expect": "owned",
+      "why": "bare image + whole-argument-quoted flag"
+    },
+    {
+      "id": "win-whole-arg-single-quoted-bare-image",
+      "group": "owned-flag-quoting",
+      "form": "win32",
+      "cmd": "msedge.exe '--user-data-dir={PROFILE}'",
+      "expect": "owned",
+      "why": "bare image + single-quoted whole argument"
+    },
+    {
+      "id": "wrapper-env",
+      "group": "owned-wrapper",
+      "form": "posix",
+      "cmd": "env chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "env execs the real browser"
+    },
+    {
+      "id": "wrapper-xvfb-run",
+      "group": "owned-wrapper",
+      "form": "posix",
+      "cmd": "xvfb-run /usr/bin/chromium --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "xvfb-run execs the real browser"
+    },
+    {
+      "id": "wrapper-nohup",
+      "group": "owned-wrapper",
+      "form": "posix",
+      "cmd": "nohup /opt/google/chrome/chrome --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "nohup execs the real browser"
+    },
+    {
+      "id": "wrapper-env-rooted",
+      "group": "owned-wrapper",
+      "form": "posix",
+      "cmd": "/usr/bin/env /usr/bin/chromium-browser --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "why": "rooted wrapper path"
+    },
+    {
+      "id": "helper-renderer-root-image",
+      "group": "owned-helper",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --type=renderer --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "helper": true,
+      "why": "ours, but process-tree skips it: it dies with its root browser’s tree"
+    },
+    {
+      "id": "helper-gpu-root-image",
+      "group": "owned-helper",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --type=gpu-process --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "helper": true,
+      "why": "ours, but process-tree skips it (helper)"
+    },
+    {
+      "id": "helper-mac-bundle",
+      "group": "owned-helper",
+      "form": "posix",
+      "cmd": "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/140/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper (Renderer) --type=renderer --user-data-dir={PROFILE}",
+      "expect": "owned",
+      "helper": true,
+      "why": "macOS helper image name — matched by CHROME_FAMILY_HELPER, still skipped by process-tree"
+    },
+    {
+      "id": "win-unquoted-image-with-spaces",
+      "group": "not-owned-narrowing",
+      "form": "win32",
+      "cmd": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "byte-identical in shape to `C:\\Windows\\System32\\notepad.exe x\\chrome.exe --flag`; accepting one accepts the other. Real launchers quote it."
+    },
+    {
+      "id": "arg-bare-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "vim x/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "REVIEWER-PROBE: bare relative argument"
+    },
+    {
+      "id": "arg-bare-relative-nested",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "node tools/build/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "bare relative, nested"
+    },
+    {
+      "id": "arg-bare-no-separator",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "vim chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "bare name as an argument"
+    },
+    {
+      "id": "arg-dot-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "vim ./chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "REVIEWER-PROBE: ./-relative argument"
+    },
+    {
+      "id": "arg-dotdot-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "vim ../chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "../-relative argument"
+    },
+    {
+      "id": "arg-absolute",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "vim /home/u/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "REVIEWER-PROBE: absolute argument"
+    },
+    {
+      "id": "arg-node-absolute",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "node /home/u/tools/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "REVIEWER-PROBE: node + absolute argument"
+    },
+    {
+      "id": "arg-rooted-prog-bare-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/vim x/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "rooted program + bare-relative argument — the shape only MAC_BUNDLE_MARKER can separate from a real bundle"
+    },
+    {
+      "id": "arg-rooted-prog-absolute",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/vim /home/u/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "rooted program + rooted argument"
+    },
+    {
+      "id": "arg-multi-token-argv",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "git add sub/msedge --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "subcommand + path"
+    },
+    {
+      "id": "arg-multi-token-argv-rooted",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/git add sub/msedge --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "rooted program, subcommand + path"
+    },
+    {
+      "id": "arg-space-in-arg-path",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "/usr/bin/vim x/google chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "multi-token argv with NO bundle marker"
+    },
+    {
+      "id": "arg-quoted-with-space",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "less \"/home/u/Google Chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "quoted ARGUMENT, unquoted program"
+    },
+    {
+      "id": "arg-fabricated-quoted-argv0",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "\"vim /home/u/chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "a quoted leading token containing whitespace must be ROOTED"
+    },
+    {
+      "id": "arg-ambiguous-wrapper-tail",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "env DISPLAY=:0 chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "wrapper remainder is ambiguous — env with an assignment, not a bare exec"
+    },
+    {
+      "id": "arg-wrapper-with-own-flag",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "xvfb-run -a /usr/bin/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the wrapper’s own flag ends the head; image resolves to xvfb-run"
+    },
+    {
+      "id": "arg-interpreter-script",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "python3 opt/x/chromium --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "interpreter + script"
+    },
+    {
+      "id": "arg-interpreter-script-absolute",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "python3 /opt/x/chromium --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "interpreter + rooted script"
+    },
+    {
+      "id": "arg-shell-dash-c",
+      "group": "not-owned-image-conjunct",
+      "form": "posix",
+      "cmd": "bash -c \"chrome --user-data-dir={PROFILE}\"",
+      "expect": "not-owned",
+      "why": "shell -c: the image is bash"
+    },
+    {
+      "id": "win-arg-bare-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "NOTEPAD.EXE x\\chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "bare relative, backslash"
+    },
+    {
+      "id": "win-arg-bare-relative-fwd",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "NOTEPAD.EXE x/chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "bare relative, forward slash"
+    },
+    {
+      "id": "win-arg-bare-relative-nested",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "node tools\\build\\chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "bare relative, nested"
+    },
+    {
+      "id": "win-arg-dot-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe .\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": ".\\-relative argument"
+    },
+    {
+      "id": "win-arg-dotdot-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe ..\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "..\\-relative argument"
+    },
+    {
+      "id": "win-arg-drive-rooted",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "NOTEPAD.EXE C:\\x\\chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "REVIEWER-PROBE: drive-rooted argument"
+    },
+    {
+      "id": "win-arg-drive-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe C:x\\chrome --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "drive-RELATIVE argument (c:x/... is not ROOTED)"
+    },
+    {
+      "id": "win-arg-rooted-prog-bare-relative",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "C:\\Windows\\System32\\notepad.exe x\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "rooted program + bare-relative argument"
+    },
+    {
+      "id": "win-arg-rooted-prog-rooted-arg",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\Microsoft VS Code\\Code.exe\" C:\\x\\chromium --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "quoted rooted program + rooted argument"
+    },
+    {
+      "id": "win-arg-unc",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe \\\\srv\\share\\chrome.exe --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "UNC argument"
+    },
+    {
+      "id": "win-arg-quoted-with-space",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "notepad.exe \"C:\\x\\Google Chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "quoted argument with a space"
+    },
+    {
+      "id": "win-arg-multi-token-argv",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "git add sub\\msedge --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "subcommand + path"
+    },
+    {
+      "id": "win-arg-fabricated-quoted-argv0",
+      "group": "not-owned-image-conjunct",
+      "form": "win32",
+      "cmd": "\"vim C:\\x\\chrome\" --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "fabricated quoted argv[0]"
+    },
+    {
+      "id": "nonbrowser-firefox",
+      "group": "not-owned-non-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/firefox --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "not a Chrome-family image"
+    },
+    {
+      "id": "nonbrowser-vim-flag",
+      "group": "not-owned-non-browser",
+      "form": "posix",
+      "cmd": "vim --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "the flag alone is never ownership"
+    },
+    {
+      "id": "nonbrowser-python-probe",
+      "group": "not-owned-non-browser",
+      "form": "posix",
+      "cmd": "/usr/bin/python3 /home/u/probe.py --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "interpreter + script + our flag"
+    },
+    {
+      "id": "nonbrowser-node-wrapper",
+      "group": "not-owned-non-browser",
+      "form": "win32",
+      "cmd": "node C:\\tools\\wrapper.js --user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "node wrapper carrying our flag"
+    },
+    {
+      "id": "mention-vim-preferences",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "vim {PROFILE}/Default/Preferences",
+      "expect": "not-owned",
+      "why": "THE bug: an editor holding a file under the profile"
+    },
+    {
+      "id": "mention-nano-preferences",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "nano {PROFILE}/Default/Preferences",
+      "expect": "not-owned",
+      "why": "editor"
+    },
+    {
+      "id": "mention-code-preferences",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "/usr/share/code/code {PROFILE}/Default/Preferences",
+      "expect": "not-owned",
+      "why": "editor, rooted image"
+    },
+    {
+      "id": "mention-vi-profile-dir",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "vi {PROFILE}",
+      "expect": "not-owned",
+      "why": "editor on the directory itself"
+    },
+    {
+      "id": "mention-grep",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "grep -r cookie {PROFILE}",
+      "expect": "not-owned",
+      "why": "search over the config dir"
+    },
+    {
+      "id": "mention-rg",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "rg --files {PROFILE}",
+      "expect": "not-owned",
+      "why": "ripgrep"
+    },
+    {
+      "id": "mention-find",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "find {PROFILE} -name SingletonLock",
+      "expect": "not-owned",
+      "why": "find"
+    },
+    {
+      "id": "mention-rsync",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "rsync -a {PROFILE}/ /mnt/backup/chrome-profile/",
+      "expect": "not-owned",
+      "why": "backup job"
+    },
+    {
+      "id": "mention-tar",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "tar -czf /mnt/backup/p.tgz {PROFILE}",
+      "expect": "not-owned",
+      "why": "archiver"
+    },
+    {
+      "id": "mention-nautilus",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "nautilus {PROFILE}",
+      "expect": "not-owned",
+      "why": "file manager"
+    },
+    {
+      "id": "mention-dolphin",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "/usr/bin/dolphin {PROFILE}",
+      "expect": "not-owned",
+      "why": "file manager, rooted image"
+    },
+    {
+      "id": "mention-tail-log",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "tail -f {PROFILE}/chrome_debug.log",
+      "expect": "not-owned",
+      "why": "log tail"
+    },
+    {
+      "id": "mention-node-inspect",
+      "group": "not-owned-mentions-profile",
+      "form": "posix",
+      "cmd": "node /home/u/tools/inspect.js {PROFILE}",
+      "expect": "not-owned",
+      "why": "node script naming the profile"
+    },
+    {
+      "id": "win-mention-vscode",
+      "group": "not-owned-mentions-profile",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\Microsoft VS Code\\Code.exe\" \"{PROFILE}\\Default\\Preferences\"",
+      "expect": "not-owned",
+      "why": "editor"
+    },
+    {
+      "id": "win-mention-notepad",
+      "group": "not-owned-mentions-profile",
+      "form": "win32",
+      "cmd": "\"C:\\Windows\\System32\\NOTEPAD.EXE\" {PROFILE}\\Default\\Preferences",
+      "expect": "not-owned",
+      "why": "editor"
+    },
+    {
+      "id": "win-mention-explorer",
+      "group": "not-owned-mentions-profile",
+      "form": "win32",
+      "cmd": "C:\\Windows\\explorer.exe {PROFILE}",
+      "expect": "not-owned",
+      "why": "file manager"
+    },
+    {
+      "id": "win-mention-robocopy",
+      "group": "not-owned-mentions-profile",
+      "form": "win32",
+      "cmd": "robocopy {PROFILE} D:\\backup\\.chrome-profile /MIR",
+      "expect": "not-owned",
+      "why": "backup job"
+    },
+    {
+      "id": "win-mention-7zip",
+      "group": "not-owned-mentions-profile",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\7-Zip\\7z.exe\" a backup.7z {PROFILE}",
+      "expect": "not-owned",
+      "why": "archiver"
+    },
+    {
+      "id": "win-mention-findstr",
+      "group": "not-owned-mentions-profile",
+      "form": "win32",
+      "cmd": "findstr /s /i cookie {PROFILE}\\Default\\*",
+      "expect": "not-owned",
+      "why": "search"
+    },
+    {
+      "id": "win-everyday-chrome-opening-profile-file",
+      "group": "not-owned-win32-file-url",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome\\User Data file:///{PROFILE_URL}/Default/Preferences",
+      "expect": "not-owned",
+      "why": "THE win32 bug: the user opens a file under our profile in their everyday Chrome. Right image, right mention, WRONG profile — every tab was force-killed."
+    },
+    {
+      "id": "win-everyday-chrome-file-url-no-flag",
+      "group": "not-owned-win32-file-url",
+      "form": "win32",
+      "cmd": "chrome.exe file:///{PROFILE_URL}/Default/Preferences",
+      "expect": "not-owned",
+      "why": "same, default profile (no --user-data-dir at all)"
+    },
+    {
+      "id": "win-everyday-edge-file-url",
+      "group": "not-owned-win32-file-url",
+      "form": "win32",
+      "cmd": "msedge.exe --profile-directory=Default file:///{PROFILE_URL}/",
+      "expect": "not-owned",
+      "why": "same via Edge, browsing the profile directory"
+    },
+    {
+      "id": "posix-everyday-chrome-file-url",
+      "group": "not-owned-win32-file-url",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir=/home/u/.config/google-chrome file:///{PROFILE_URL}/Default/Preferences",
+      "expect": "not-owned",
+      "why": "the POSIX twin of the same case"
+    },
+    {
+      "id": "other-default-profile",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir=/home/u/.config/google-chrome",
+      "expect": "not-owned",
+      "why": "the user’s own Chrome"
+    },
+    {
+      "id": "other-no-flag",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium",
+      "expect": "not-owned",
+      "why": "a browser with no profile flag at all"
+    },
+    {
+      "id": "near-miss-suffix-backup",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir={PROFILE}-backup",
+      "expect": "not-owned",
+      "why": "<profile>-backup"
+    },
+    {
+      "id": "near-miss-suffix-old",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir={PROFILE}.old",
+      "expect": "not-owned",
+      "why": "<profile>.old"
+    },
+    {
+      "id": "near-miss-subdirectory",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir={PROFILE}/Default",
+      "expect": "not-owned",
+      "why": "a SUBDIRECTORY is a different profile"
+    },
+    {
+      "id": "near-miss-prefix-mount",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir=/mnt/backup{PROFILE}",
+      "expect": "not-owned",
+      "why": "a mounted copy whose path ENDS with ours"
+    },
+    {
+      "id": "near-miss-parent-config-dir",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir={CFG}",
+      "expect": "not-owned",
+      "why": "the PARENT config dir is not the profile"
+    },
+    {
+      "id": "near-miss-longer-flag",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --xx-user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "a longer flag merely ENDING in user-data-dir="
+    },
+    {
+      "id": "near-miss-different-flag",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --disk-cache-dir={PROFILE} --user-data-dir=/home/u/other",
+      "expect": "not-owned",
+      "why": "our path present, but as a DIFFERENT flag’s value"
+    },
+    {
+      "id": "near-miss-other-os-user",
+      "group": "not-owned-other-profile",
+      "form": "posix",
+      "cmd": "/opt/google/chrome/chrome --user-data-dir=/home/other/.airtable-user-mcp/.chrome-profile",
+      "expect": "not-owned",
+      "why": "another OS user’s identically-named profile"
+    },
+    {
+      "id": "win-near-miss-suffix-backup",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={PROFILE}-backup",
+      "expect": "not-owned",
+      "why": "<profile>-backup"
+    },
+    {
+      "id": "win-near-miss-suffix-old",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={PROFILE}.old",
+      "expect": "not-owned",
+      "why": "<profile>.old"
+    },
+    {
+      "id": "win-near-miss-subdirectory",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={PROFILE}\\Default",
+      "expect": "not-owned",
+      "why": "a SUBDIRECTORY is a different profile"
+    },
+    {
+      "id": "win-near-miss-snapshot-prefix",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=D:\\snapshots\\Users\\admin\\.airtable-user-mcp\\.chrome-profile",
+      "expect": "not-owned",
+      "why": "a snapshot copy whose path ENDS with ours"
+    },
+    {
+      "id": "win-near-miss-parent-config-dir",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir={CFG}",
+      "expect": "not-owned",
+      "why": "the PARENT config dir"
+    },
+    {
+      "id": "win-near-miss-different-flag",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --disk-cache-dir={PROFILE} --user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome\\User Data",
+      "expect": "not-owned",
+      "why": "our path present, but as a DIFFERENT flag’s value"
+    },
+    {
+      "id": "win-near-miss-other-os-user",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "chrome.exe --user-data-dir=C:\\Users\\other\\.airtable-user-mcp\\.chrome-profile",
+      "expect": "not-owned",
+      "why": "another OS user’s install of this extension"
+    },
+    {
+      "id": "win-near-miss-other-app",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "msedge.exe --user-data-dir=C:\\Users\\admin\\.other-app\\.chrome-profile",
+      "expect": "not-owned",
+      "why": "another app’s .chrome-profile"
+    },
+    {
+      "id": "win-other-default-profile",
+      "group": "not-owned-other-profile",
+      "form": "win32",
+      "cmd": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome\\User Data",
+      "expect": "not-owned",
+      "why": "the user’s own Chrome"
+    },
+    {
+      "id": "nested-inside-other-flag",
+      "group": "not-owned-nested-flag",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --foo=--user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "`=` may precede a PATH but never an argv entry"
+    },
+    {
+      "id": "nested-after-other-profile",
+      "group": "not-owned-nested-flag",
+      "form": "posix",
+      "cmd": "/usr/bin/chromium --user-data-dir=/other=--user-data-dir={PROFILE}",
+      "expect": "not-owned",
+      "why": "this browser is pointed at a DIFFERENT profile — accepting it would be a false kill"
+    },
+    {
+      "id": "unreadable-empty",
+      "group": "not-owned-unreadable",
+      "form": "posix",
+      "cmd": "",
+      "expect": "not-owned",
+      "why": "empty command line is never attributable"
+    },
+    {
+      "id": "unreadable-blank",
+      "group": "not-owned-unreadable",
+      "form": "posix",
+      "cmd": "   ",
+      "expect": "not-owned",
+      "why": "blank command line is never attributable"
+    }
+  ]
+}

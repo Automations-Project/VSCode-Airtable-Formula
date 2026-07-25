@@ -1,13 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import {
   terminateProcessTree,
   findProfileBrowserPids,
   evictProfileSquatters,
   killProfileBrowserTree,
+  isOwnedBrowserCommandLine,
 } from "../src/process-tree.js";
 
 function spyExec() {
@@ -37,24 +39,85 @@ describe("terminateProcessTree", () => {
     await terminateProcessTree(process.pid, { platform: "win32", exec: (f, a, o) => s.exec(f, a, o) });
     assert.equal(s.calls.length, 0);
   });
+
+  // ── pid-recycling window: the last-instant argv re-read ────────────────────
+
+  it("aborts when the last-instant re-read proves the pid is now something ELSE", async () => {
+    const s = spyExec();
+    await terminateProcessTree(1234, {
+      platform: "win32",
+      exec: (f, a, o) => s.exec(f, a, o),
+      verify: async () => "not-owned",
+    });
+    assert.equal(s.calls.length, 0, "a recycled pid must not be taskkill'd");
+  });
+
+  it("aborts BEFORE the POSIX descendant walk, so a recycled pid's children are safe too", async () => {
+    const s = spyExec();
+    await terminateProcessTree(1234, {
+      platform: "linux",
+      exec: (f, a, o) => s.exec(f, a, o),
+      verify: async () => "not-owned",
+    });
+    assert.deepEqual(s.calls, [], "no `pgrep -P` may run for a pid that is no longer ours");
+  });
+
+  it("proceeds on 'owned'", async () => {
+    const s = spyExec();
+    await terminateProcessTree(1234, {
+      platform: "win32",
+      exec: (f, a, o) => s.exec(f, a, o),
+      verify: async () => "owned",
+    });
+    assert.equal(s.calls[0].file, "taskkill");
+  });
+
+  it("proceeds on 'unknown' and on a throwing verifier — an unreadable argv is NOT proof", async () => {
+    // Failing CLOSED here would turn a safety check into a "browser won't launch" bug: a
+    // transient read failure would silently abandon the eviction this module exists to perform.
+    for (const verify of [async () => "unknown", async () => { throw new Error("no ps"); }]) {
+      const s = spyExec();
+      await terminateProcessTree(1234, { platform: "win32", exec: (f, a, o) => s.exec(f, a, o), verify });
+      assert.equal(s.calls[0].file, "taskkill");
+    }
+  });
+
+  it("runs no verification at all when no verifier is supplied (unchanged default)", async () => {
+    const s = spyExec();
+    await terminateProcessTree(1234, { platform: "win32", exec: (f, a, o) => s.exec(f, a, o) });
+    assert.equal(s.calls.length, 1);
+    assert.equal(s.calls[0].file, "taskkill");
+  });
 });
 
+const WIN_PROFILE = "C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile";
+
+/** Format a `{ pid: commandLine }` table the way the win32 CIM query emits it. */
+function winRows(table) {
+  return Object.entries(table).map(([pid, cmd]) => `${pid}\t${cmd}`).join("\r\n") + "\r\n";
+}
+
 describe("findProfileBrowserPids", () => {
-  it("win32: uses env marker and chrome/msedge name filter", async () => {
+  it("win32: uses a canonicalised env marker and the chrome/msedge/chromium name filter", async () => {
     const s = spyExec();
-    s.impl = async () => ({ stdout: "111\n222\n" });
-    const profileDir = "C:\\\\Users\\\\admin\\\\.airtable-user-mcp\\\\.chrome-profile";
-    const pids = await findProfileBrowserPids(profileDir, {
+    s.impl = async () => ({ stdout: winRows({ 111: `chrome.exe --user-data-dir=${WIN_PROFILE}` }) });
+    const pids = await findProfileBrowserPids(WIN_PROFILE, {
       platform: "win32",
       exec: (f, a, o) => s.exec(f, a, o),
     });
-    assert.deepEqual(pids, [111, 222]);
+    assert.deepEqual(pids, [111]);
     assert.equal(s.calls[0].file, "powershell.exe");
-    assert.equal(s.calls[0].opts.env.AIRTABLE_EVICT_MARKER, "--user-data-dir=" + profileDir);
-    assert.equal(s.calls[0].opts.env.AIRTABLE_EVICT_DIR, profileDir);
+    // Marker is pre-canonicalised (`\`→`/`, lower-cased) because the query canonicalises the
+    // command line the same way — so the coarse filter is case/separator-insensitive exactly
+    // like the JS predicate that makes the final decision.
+    assert.equal(
+      s.calls[0].opts.env.AIRTABLE_EVICT_MARKER,
+      "--user-data-dir=c:/users/admin/.airtable-user-mcp/.chrome-profile",
+    );
     const script = s.calls[0].args[s.calls[0].args.length - 1];
     assert.match(script, /chrome\.exe/);
     assert.match(script, /msedge\.exe/);
+    assert.match(script, /chromium\.exe/);
     assert.match(script, /--type=/);
   });
 
@@ -84,20 +147,100 @@ describe("findProfileBrowserPids", () => {
     assert.ok(s.calls[0].args.includes("--user-data-dir=/home/u/.chrome-profile"));
   });
 
-  it("win32: keeps matching on the bare profile-dir clause (unchanged coverage)", async () => {
+  /**
+   * THE WIN32 HOLE. The CIM query used to select on
+   *   `$_.CommandLine.Contains($env:AIRTABLE_EVICT_MARKER) -or
+   *    $_.CommandLine.Contains($env:AIRTABLE_EVICT_DIR)`
+   * so ANY root chrome.exe/msedge.exe/chromium.exe whose command line merely MENTIONED the
+   * profile path was `taskkill /T /F`'d — a user opening
+   * `file:///C:/Users/u/.airtable-user-mcp/.chrome-profile/Default/Preferences` in their everyday
+   * Chrome lost the whole browser and every tab. On this project's primary platform.
+   */
+  it("win32: the bare profile-dir clause is GONE — only the --user-data-dir marker is queried", async () => {
     const s = spyExec();
-    s.impl = async () => ({ stdout: "4242\n" });
-    const pids = await findProfileBrowserPids("C:\\Users\\admin\\.airtable-user-mcp\\.chrome-profile", {
+    s.impl = async () => ({ stdout: "" });
+    await findProfileBrowserPids(WIN_PROFILE, {
       platform: "win32",
       exec: (f, a, o) => s.exec(f, a, o),
     });
-    assert.deepEqual(pids, [4242]);
     const script = s.calls[0].args[s.calls[0].args.length - 1];
-    // Both clauses (marker OR bare dir) are still present, and BOTH are still gated by the
-    // process-Name filter — the win32 branch is deliberately untouched by this fix.
     assert.match(script, /AIRTABLE_EVICT_MARKER/);
-    assert.match(script, /AIRTABLE_EVICT_DIR/);
-    assert.match(script, /chromium\.exe/);
+    assert.ok(
+      !/AIRTABLE_EVICT_DIR/.test(script),
+      "the bare profile-dir clause must never be part of the query again",
+    );
+    assert.equal(
+      s.calls[0].opts.env.AIRTABLE_EVICT_DIR,
+      undefined,
+      "the bare profile-dir must not even be handed to PowerShell",
+    );
+  });
+
+  it("win32: an everyday Chrome that merely MENTIONS the profile path is NOT selected", async () => {
+    const s = spyExec();
+    // Both rows survive the coarse CIM filter (both are chrome.exe and both contain the marker
+    // text somewhere); only the JS predicate can tell them apart.
+    s.impl = async () => ({
+      stdout: winRows({
+        // The user's own browser, opening a file under our profile. Right image, right mention,
+        // WRONG --user-data-dir.
+        3001:
+          `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ` +
+          `--user-data-dir=C:\\Users\\admin\\AppData\\Local\\Google\\Chrome\\User Data ` +
+          `file:///C:/Users/admin/.airtable-user-mcp/.chrome-profile/Default/Preferences`,
+        // An actual squatter.
+        3002: `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir=${WIN_PROFILE}`,
+      }),
+    });
+    const pids = await findProfileBrowserPids(WIN_PROFILE, {
+      platform: "win32",
+      exec: (f, a, o) => s.exec(f, a, o),
+    });
+    assert.deepEqual(pids, [3002]);
+  });
+
+  it("win32: a row whose command line is missing or unparseable is never selected", async () => {
+    const s = spyExec();
+    s.impl = async () => ({ stdout: "4242\r\n\t\r\n0\tchrome.exe --user-data-dir=" + WIN_PROFILE + "\r\n" });
+    const pids = await findProfileBrowserPids(WIN_PROFILE, {
+      platform: "win32",
+      exec: (f, a, o) => s.exec(f, a, o),
+    });
+    // `4242` has no tab (no command line), the blank row has no pid, `0` is not a valid pid.
+    assert.deepEqual(pids, []);
+  });
+
+  it("builds the marker from the TRIMMED dir, so a padded path still matches (win32 + posix)", async () => {
+    const padded = `  ${WIN_PROFILE}  `;
+    const w = spyExec();
+    w.impl = async () => ({ stdout: winRows({ 5151: `chrome.exe --user-data-dir=${WIN_PROFILE}` }) });
+    assert.deepEqual(
+      await findProfileBrowserPids(padded, { platform: "win32", exec: (f, a, o) => w.exec(f, a, o) }),
+      [5151],
+      "a padded userDataDir used to produce a marker no live process could carry",
+    );
+    assert.ok(!w.calls[0].opts.env.AIRTABLE_EVICT_MARKER.includes(" --user-data-dir"));
+
+    const posixPadded = "  /home/u/.airtable-user-mcp/.chrome-profile  ";
+    const p = spyExec();
+    p.impl = async (file, args) => {
+      if (file === "pgrep") return { stdout: "5252" };
+      if (file === "ps") return { stdout: "/opt/google/chrome/chrome --user-data-dir=/home/u/.airtable-user-mcp/.chrome-profile" };
+      return { stdout: "" };
+    };
+    assert.deepEqual(
+      await findProfileBrowserPids(posixPadded, {
+        platform: "linux",
+        exec: (f, a, o) => p.exec(f, a, o),
+        readProc: () => null,
+      }),
+      [5252],
+    );
+    assert.deepEqual(
+      p.calls[0].args,
+      ["-f", "--", "--user-data-dir=/home/u/.airtable-user-mcp/.chrome-profile"],
+      "the pgrep pattern must carry the trimmed dir",
+    );
   });
 
   it("refuses to enumerate for an empty or relative userDataDir (no exec at all)", async () => {
@@ -334,6 +477,104 @@ describe("findProfileBrowserPids — the bare-directory pgrep fallback is gone",
   });
 });
 
+// ─── THE SHARED VECTOR ────────────────────────────────────────────────────────
+//
+// `packages/shared/test-fixtures/process-attribution-cases.json` is asserted by BOTH this file
+// and `packages/extension/src/test/daemon-manager.test.ts`. The attribution predicate exists
+// twice (this package is a standalone npm package and cannot import the extension's
+// TypeScript), and it has drifted apart five separate times — each drift shipping a force-kill
+// of an innocent process, each fix patching the reported example and missing a neighbour.
+//
+// This is the thing that stops the sixth: edit one implementation and not the other, and the
+// side that was NOT edited fails here or there. Verified by deliberately breaking each side in
+// turn — see `.superpowers/sdd/PLAN-round3/task-22-report.md`.
+
+const FIXTURE_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../shared/test-fixtures/process-attribution-cases.json",
+);
+const FIXTURE = JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));
+
+/** Expand a fixture case's placeholders into its form's concrete paths. */
+function expandCase(testCase) {
+  const paths = FIXTURE.paths[testCase.form];
+  const cmd = testCase.cmd
+    .split("{PROFILE_URL}").join(paths.profile.replace(/\\/g, "/"))
+    .split("{PROFILE}").join(paths.profile)
+    .split("{CFG}").join(paths.cfg);
+  return { cmd, profile: paths.profile, cfg: paths.cfg };
+}
+
+describe("shared attribution vector — isOwnedBrowserCommandLine", () => {
+  it("the fixture is well-formed and every placeholder is expanded", () => {
+    assert.ok(Array.isArray(FIXTURE.cases) && FIXTURE.cases.length >= 100);
+    const ids = new Set();
+    for (const c of FIXTURE.cases) {
+      assert.ok(!ids.has(c.id), `duplicate case id ${c.id}`);
+      ids.add(c.id);
+      assert.ok(["owned", "not-owned"].includes(c.expect), `bad expect on ${c.id}`);
+      assert.ok(FIXTURE.paths[c.form], `unknown form on ${c.id}`);
+      // Guards the ONE thing a shared vector cannot itself catch: a suite that expands the
+      // placeholders differently (or not at all) would silently assert on the wrong strings.
+      const { cmd } = expandCase(c);
+      assert.ok(!/\{[A-Z_]+\}/.test(cmd), `unexpanded placeholder in ${c.id}: ${cmd}`);
+    }
+  });
+
+  for (const testCase of FIXTURE.cases) {
+    it(`${testCase.expect} — ${testCase.id}`, () => {
+      const { cmd, profile } = expandCase(testCase);
+      assert.equal(
+        isOwnedBrowserCommandLine(cmd, profile) ? "owned" : "not-owned",
+        testCase.expect,
+        `${testCase.why}\n    ${cmd}`,
+      );
+    });
+  }
+
+  it("SELECTION (POSIX): every owned non-helper case is found, everything else is left alive", async () => {
+    const posix = FIXTURE.cases.filter((c) => c.form === "posix");
+    const table = {};
+    const expected = [];
+    posix.forEach((c, i) => {
+      const pid = 20000 + i;
+      table[pid] = expandCase(c).cmd;
+      if (c.expect === "owned" && !c.helper) expected.push(pid);
+    });
+    const { pids } = await findPosix(table);
+    assert.deepEqual(pids, expected);
+  });
+
+  it("SELECTION (win32): every owned non-helper case is found, everything else is left alive", async () => {
+    const win = FIXTURE.cases.filter((c) => c.form === "win32");
+    const table = {};
+    const expected = [];
+    win.forEach((c, i) => {
+      const pid = 30000 + i;
+      table[pid] = expandCase(c).cmd;
+      if (c.expect === "owned" && !c.helper) expected.push(pid);
+    });
+    const s = spyExec();
+    s.impl = async () => ({ stdout: winRows(table) });
+    const pids = await findProfileBrowserPids(FIXTURE.paths.win32.profile, {
+      platform: "win32",
+      exec: (f, a, o) => s.exec(f, a, o),
+    });
+    assert.deepEqual(pids, expected);
+  });
+
+  it("SELECTION: a Chromium helper is OWNED but never selected — the one deliberate site difference", async () => {
+    const helpers = FIXTURE.cases.filter((c) => c.helper);
+    assert.ok(helpers.length > 0, "the vector must cover the helper case");
+    for (const c of helpers) {
+      const { cmd, profile } = expandCase(c);
+      assert.equal(isOwnedBrowserCommandLine(cmd, profile), true, `${c.id} must attribute`);
+      const { pids } = await findPosix({ 21000: cmd }, { profile });
+      assert.deepEqual(pids, [], `${c.id} must NOT be selected — it dies with its root's tree`);
+    }
+  });
+});
+
 describe("evictProfileSquatters", () => {
   it("refuses when a foreign live daemon owns the lock", async () => {
     const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
@@ -378,6 +619,53 @@ describe("evictProfileSquatters", () => {
       assert.equal(result.refusedReason, null);
       assert.deepEqual(result.evicted, [101, 102]);
       assert.deepEqual(terminated, [101, 102]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hands terminateProcessTree a verifier that re-reads argv at the last instant", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
+    try {
+      const verifiers = [];
+      // win32 so the re-read goes through the injected `exec` on every host.
+      const s = spyExec();
+      s.impl = async (_file, args) => {
+        const script = args[args.length - 1];
+        if (script.includes("ProcessId=101")) return { stdout: `chrome.exe --user-data-dir=${WIN_PROFILE}\r\n` };
+        if (script.includes("ProcessId=102")) return { stdout: "sshd: u@pts/0\r\n" };
+        return { stdout: "" };
+      };
+      await evictProfileSquatters(WIN_PROFILE, dir, {
+        platform: "win32",
+        exec: (f, a, o) => s.exec(f, a, o),
+        findPids: async () => [101],
+        terminate: async (_pid, opts) => verifiers.push(opts.verify),
+        settleMs: 0,
+      });
+      assert.equal(typeof verifiers[0], "function", "the pid-recycling re-read must be wired up");
+
+      // And it decides on the SAME predicate the selection used.
+      const verify = verifiers[0];
+      assert.equal(await verify(101), "owned", "still our browser → proceed");
+      assert.equal(await verify(102), "not-owned", "pid recycled into someone else → abort");
+      assert.equal(await verify(103), "unknown", "unreadable argv is not proof → proceed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("supplies no verifier for an unusable (empty/relative) profile dir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "at-evict-"));
+    try {
+      const seen = [];
+      await evictProfileSquatters("relative/.chrome-profile", dir, {
+        platform: "linux",
+        findPids: async () => [101],
+        terminate: async (_pid, opts) => seen.push(opts.verify),
+        settleMs: 0,
+      });
+      assert.equal(seen[0], undefined);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

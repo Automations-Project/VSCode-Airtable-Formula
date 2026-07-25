@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 
 // `execFileSync` is the ONLY process-control primitive the orphan sweep reaches for
 // (process listing on both platforms + taskkill on Windows). Mock just that binding and
@@ -1055,6 +1056,103 @@ describe('DaemonManager._sweepOrphans — criterion (b): Chrome-family image AND
     ]);
     expect(killTree).not.toHaveBeenCalled();
     expect(result.killed).toEqual([]);
+  });
+});
+
+/**
+ * THE SHARED VECTOR.
+ *
+ * `packages/shared/test-fixtures/process-attribution-cases.json` is asserted by BOTH this file
+ * and `packages/mcp-server/test/test-process-tree.test.js`. The same "may we force-kill this
+ * process?" predicate exists on both sides — reimplemented rather than imported, because
+ * `packages/mcp-server` is a standalone npm package (`airtable-user-mcp`) that must not depend
+ * on the extension and bridging ESM→CJS would mean a new build step. It has drifted apart FIVE
+ * separate times, each drift shipping a force-kill of an innocent process, each fix patching the
+ * reported example and missing a neighbouring spelling.
+ *
+ * This is what stops the sixth: edit one implementation and not the other, and the side that was
+ * NOT edited fails. The suites assert the same verdicts on the same command lines, so a
+ * narrowing or widening on either side shows up as a red test rather than as a shipped bug.
+ *
+ * `daemon-manager.ts` is the REFERENCE implementation — `mcp-server/src/process-tree.js` was
+ * ported from it. Nothing here changes its behaviour; it only pins it.
+ */
+describe('process-attribution — the vector shared with mcp-server/process-tree.js', () => {
+  const FIXTURE_PATH = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../shared/test-fixtures/process-attribution-cases.json',
+  );
+  const FIXTURE = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')) as {
+    paths: Record<string, { cfg: string; profile: string }>;
+    cases: Array<{
+      id: string; group: string; form: string; cmd: string;
+      expect: 'owned' | 'not-owned'; helper?: boolean; why: string;
+    }>;
+  };
+
+  /** Expand a case's placeholders into its form's concrete paths. */
+  const expandCase = (c: (typeof FIXTURE)['cases'][number]) => {
+    const paths = FIXTURE.paths[c.form];
+    const cmd = c.cmd
+      .split('{PROFILE_URL}').join(paths.profile.replace(/\\/g, '/'))
+      .split('{PROFILE}').join(paths.profile)
+      .split('{CFG}').join(paths.cfg);
+    return { cmd, cfg: paths.cfg };
+  };
+
+  // An extensionPath that appears in NO fixture command line, so ownership criterion (a)
+  // (the bundled `dist/mcp/index.mjs` daemon-start shape) can never fire and every verdict
+  // below is criterion (b) — the shared attribution predicate — alone.
+  const EXT_ROOT = 'C:\\Users\\admin\\.vscode\\extensions\\nskha.airtable-formula-2.1.32';
+
+  it('the fixture is well-formed and every placeholder is expanded', () => {
+    expect(Array.isArray(FIXTURE.cases)).toBe(true);
+    expect(FIXTURE.cases.length).toBeGreaterThanOrEqual(100);
+    const ids = new Set<string>();
+    for (const c of FIXTURE.cases) {
+      expect(ids.has(c.id), `duplicate case id ${c.id}`).toBe(false);
+      ids.add(c.id);
+      expect(['owned', 'not-owned']).toContain(c.expect);
+      expect(FIXTURE.paths[c.form], `unknown form on ${c.id}`).toBeDefined();
+      // Guards the ONE thing a shared vector cannot itself catch: a suite that expands the
+      // placeholders differently (or not at all) would silently assert on the wrong strings.
+      expect(/\{[A-Z_]+\}/.test(expandCase(c).cmd), `unexpanded placeholder in ${c.id}`).toBe(false);
+    }
+  });
+
+  for (const testCase of FIXTURE.cases) {
+    it(`${testCase.expect} — ${testCase.id}`, () => {
+      const { cmd, cfg } = expandCase(testCase);
+      const dm = new DaemonManager(cfg, EXT_ROOT);
+      const verdict = (dm as any)._isOwnedCommandLine(cmd) ? 'owned' : 'not-owned';
+      expect(verdict, `${testCase.why}\n    ${cmd}`).toBe(testCase.expect);
+    });
+  }
+
+  it('the sweep kills exactly the owned cases and reports the profile-holders it cannot attribute', () => {
+    for (const form of ['posix', 'win32'] as const) {
+      const forForm = FIXTURE.cases.filter(c => c.form === form);
+      const processes = forForm.map((c, i) => ({ pid: 40000 + i, commandLine: expandCase(c).cmd }));
+      const expectedKills = forForm
+        .map((c, i) => (c.expect === 'owned' ? 40000 + i : -1))
+        .filter(pid => pid > 0);
+
+      const dm = new DaemonManager(FIXTURE.paths[form].cfg, EXT_ROOT);
+      const killTree = vi.fn();
+      (dm as any)._listProcesses = vi.fn(() => processes);
+      (dm as any)._killTree = killTree;
+      const result = (dm as any)._sweepOrphans(form === 'win32' ? 'win32' : 'linux') as {
+        killed: number[]; skipped: Array<{ pid: number }>;
+      };
+
+      expect(result.killed, `form=${form}`).toEqual(expectedKills);
+      // Helpers ARE killed here — the extension sweeps pids individually, whereas process-tree
+      // kills whole trees and therefore skips them. That is the ONE deliberate site difference.
+      const helperPids = forForm
+        .map((c, i) => (c.helper ? 40000 + i : -1))
+        .filter(pid => pid > 0);
+      for (const pid of helperPids) expect(result.killed).toContain(pid);
+    }
   });
 });
 
