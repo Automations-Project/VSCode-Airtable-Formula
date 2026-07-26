@@ -3,17 +3,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../lib/vscode.js', () => ({
   sendToExtension: vi.fn(),
   onExtensionMessage: vi.fn(() => () => {}),
+  getPersistedState: vi.fn(),
+  setPersistedState: vi.fn(),
 }));
 
 import { useStore } from '../store.js';
-import { sendToExtension } from '../lib/vscode.js';
+import { getPersistedState, sendToExtension, setPersistedState } from '../lib/vscode.js';
 
 beforeEach(() => {
   useStore.setState({
     ideStatuses: [], versions: { extension: '—', mcpServerBundled: '—' }, aiFilesCount: 0, loading: true,
     activeTab: 'overview', pendingActions: new Set(),
     settings: {
-      mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true, toolProfile: { profile: 'safe-write', enabledCount: 54, totalCount: 71, categories: { read: true, recordRead: true, tableWrite: true, tableDestructive: true, fieldWrite: true, fieldDestructive: true, recordDestructive: false, viewWrite: true, viewDestructive: true, viewSection: true, viewSectionDestructive: true, formWrite: true, extension: true, recordWrite: true, sync: false } }, serverSource: 'bundled', daemonPort: 0, authMode: 'browser', httpClient: 'fetch' },
+      mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true, toolProfile: { profile: 'safe-write', enabledCount: 54, totalCount: 71, categories: { read: true, recordRead: true, tableWrite: true, tableDestructive: true, fieldWrite: true, fieldDestructive: true, recordDestructive: false, viewWrite: true, viewDestructive: true, viewSection: true, viewSectionDestructive: true, formWrite: true, extension: true, recordWrite: true, sync: false } }, serverSource: 'bundled', daemonPort: 0, authMode: 'browser', httpClient: 'fetch', useDaemon: true, browserIdleParkMinutes: 30 },
       ai: { autoInstallFiles: true, includeAgents: false },
       formula: { formatterVersion: 'v2' },
       script: { beautifyStyle: 'default', minifyLevel: 'standard' },
@@ -27,19 +29,27 @@ beforeEach(() => {
 });
 
 describe('store', () => {
-  it('setTab updates activeTab', () => {
-    useStore.getState().setTab('setup');
-    expect(useStore.getState().activeTab).toBe('setup');
+  it('persists only the active tab', () => {
+    useStore.getState().setTab('settings');
+
+    expect(useStore.getState().activeTab).toBe('settings');
+    expect(setPersistedState).toHaveBeenCalledWith({ activeTab: 'settings' });
+  });
+
+  it('hydrates the active tab from persisted webview state', () => {
+    vi.mocked(getPersistedState).mockReturnValue({ activeTab: 'prompts' });
+
+    useStore.getState().hydratePersistedState();
+
+    expect(useStore.getState().activeTab).toBe('prompts');
   });
 
   it('applyState replaces dashboard data and clears loading', () => {
+    const current = useStore.getState();
     useStore.getState().applyState({
       ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' }, aiFilesCount: 3, loading: false,
-      settings: {
-        mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
-        ai: { autoInstallFiles: true, includeAgents: false },
-        formula: { formatterVersion: 'v2' }
-      }
+      settings: current.settings,
+      auth: current.auth,
     });
     expect(useStore.getState().versions.mcpServerBundled).toBe('2.1.0');
     expect(useStore.getState().loading).toBe(false);
@@ -70,22 +80,113 @@ describe('store', () => {
     expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:restoreSession' }));
   });
 
-  it('openStoragePath sends action:openStoragePath with path', () => {
-    useStore.getState().openStoragePath('/tmp/test');
-    expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:openStoragePath', path: '/tmp/test' }));
+  it('opens storage by opaque id', () => {
+    const id = useStore.getState().openStoragePath('tool-config');
+
+    expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'action:openStoragePath',
+      entryId: 'tool-config',
+      id,
+    }));
+    expect(vi.mocked(sendToExtension).mock.calls[0]?.[0]).not.toHaveProperty('path');
+    expect(id).toMatch(/^[0-9a-f]{24}$/);
+    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+  });
+
+  it('sends detected browser id without an executable', () => {
+    const id = useStore.getState().setBrowserChoice({
+      mode: 'detected',
+      browserId: 'chrome',
+    });
+
+    expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'action:setBrowserChoice',
+      choice: { mode: 'detected', browserId: 'chrome' },
+      id,
+    }));
+    expect(vi.mocked(sendToExtension).mock.calls[0]?.[0]).not.toHaveProperty('executablePath');
+    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+  });
+
+  it('opens links by opaque id instead of sending a raw URL', () => {
+    const id = useStore.getState().openLink('github');
+
+    expect(sendToExtension).toHaveBeenCalledWith({
+      type: 'action:openLink',
+      id,
+      link: 'github',
+    });
+    expect(JSON.stringify(vi.mocked(sendToExtension).mock.calls[0]?.[0])).not.toContain('https://');
+  });
+
+  it('opens IDE documentation by IDE id', () => {
+    const id = useStore.getState().openIdeDocs('zed');
+
+    expect(sendToExtension).toHaveBeenCalledWith({
+      type: 'action:openIdeDocs',
+      id,
+      ideId: 'zed',
+    });
+  });
+
+  it('wraps setting changes in the strict change DTO', () => {
+    const id = useStore.getState().changeSetting({
+      key: 'mcp.browserIdleParkMinutes',
+      value: 45,
+    });
+
+    expect(sendToExtension).toHaveBeenCalledWith({
+      type: 'setting:change',
+      id,
+      change: { key: 'mcp.browserIdleParkMinutes', value: 45 },
+    });
+    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+  });
+
+  it('tracks cookie mutations with cryptographic action ids', () => {
+    const saveId = useStore.getState().saveCookie('session=value');
+    const clearId = useStore.getState().clearCookie();
+
+    expect(sendToExtension).toHaveBeenNthCalledWith(1, {
+      type: 'auth:saveCookie',
+      id: saveId,
+      cookie: 'session=value',
+    });
+    expect(sendToExtension).toHaveBeenNthCalledWith(2, {
+      type: 'auth:clearCookie',
+      id: clearId,
+    });
+    expect(saveId).toMatch(/^[0-9a-f]{24}$/);
+    expect(clearId).toMatch(/^[0-9a-f]{24}$/);
+    expect(saveId).not.toBe(clearId);
+    expect(useStore.getState().pendingActions).toEqual(new Set([saveId, clearId]));
+  });
+
+  it('applies a parsed IDE status update without replacing dashboard state', () => {
+    useStore.setState({ versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' } });
+    const statuses = [{
+      ideId: 'cursor' as const,
+      label: 'Cursor',
+      detected: true,
+      mcpConfigured: false,
+      aiFiles: { skills: 'ok' as const, rules: 'ok' as const, workflows: 'ok' as const, agents: 'ok' as const },
+    }];
+
+    useStore.getState().applyIdeStatus(statuses);
+
+    expect(useStore.getState().ideStatuses).toEqual(statuses);
+    expect(useStore.getState().versions.extension).toBe('2.0.10');
   });
 });
 
 describe('store daemon field', () => {
   it('applyState with daemon field populates store.daemon', () => {
+    const current = useStore.getState();
     useStore.getState().applyState({
       ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' },
       aiFilesCount: 0, loading: false,
-      settings: {
-        mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
-        ai: { autoInstallFiles: true, includeAgents: false },
-        formula: { formatterVersion: 'v2' },
-      },
+      settings: current.settings,
+      auth: current.auth,
       daemon: { running: true, healthy: true, port: 3100, port_lsp: 2087, tunnelUrl: null, uptime: 90_000 },
     });
     expect(useStore.getState().daemon?.port).toBe(3100);
@@ -94,14 +195,12 @@ describe('store daemon field', () => {
   });
 
   it('applyState without daemon leaves daemon undefined', () => {
+    const current = useStore.getState();
     useStore.getState().applyState({
       ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' },
       aiFilesCount: 0, loading: false,
-      settings: {
-        mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true },
-        ai: { autoInstallFiles: true, includeAgents: false },
-        formula: { formatterVersion: 'v2' },
-      },
+      settings: current.settings,
+      auth: current.auth,
     });
     expect(useStore.getState().daemon).toBeUndefined();
   });
@@ -121,16 +220,29 @@ describe('action result confirmation (PromptEditor wait-for-result)', () => {
 
   it('markActionDone records a consumable result and clears pending', () => {
     const id = useStore.getState().deletePrompt('my-prompt');
-    useStore.getState().markActionDone(id, false);
+    useStore.getState().markActionDone(id, { ok: false, error: 'Could not delete prompt' });
     expect(useStore.getState().pendingActions.has(id)).toBe(false);
-    expect(useStore.getState().consumeActionResult(id)).toBe(false);
+    expect(useStore.getState().consumeActionResult(id)).toEqual({
+      ok: false,
+      error: 'Could not delete prompt',
+    });
     // consumed — second read is undefined
     expect(useStore.getState().consumeActionResult(id)).toBeUndefined();
   });
 
   it('resetPrompt success result round-trips as true', () => {
     const id = useStore.getState().resetPrompt('built-in');
-    useStore.getState().markActionDone(id, true);
-    expect(useStore.getState().consumeActionResult(id)).toBe(true);
+    useStore.getState().markActionDone(id, { ok: true });
+    expect(useStore.getState().consumeActionResult(id)).toEqual({ ok: true });
+  });
+
+  it('keeps only the 50 most recent bounded action outcomes', () => {
+    const ids = Array.from({ length: 51 }, (_, index) => index.toString(16).padStart(24, '0'));
+    for (const id of ids) {
+      useStore.getState().markActionDone(id, { ok: true });
+    }
+
+    expect(useStore.getState().consumeActionResult(ids[0]!)).toBeUndefined();
+    expect(useStore.getState().consumeActionResult(ids[1]!)).toEqual({ ok: true });
   });
 });

@@ -1,10 +1,28 @@
 import { create } from 'zustand';
-import type { DashboardState, IdeStatus, SettingsSnapshot, AuthState, TunnelProviderId, PromptDef } from '@shared/types.js';
-import { sendToExtension } from './lib/vscode.js';
+import type {
+  AuthState,
+  DashboardState,
+  DashboardTabId,
+  IdeId,
+  IdeStatus,
+  PromptDef,
+  SettingsSnapshot,
+  StorageEntryId,
+  TunnelProviderId,
+  WebviewLinkId,
+} from '@shared/types.js';
+import type { WebviewBrowserChoice, WebviewSettingChange } from '@shared/messages.js';
+import { getPersistedState, sendToExtension, setPersistedState } from './lib/vscode.js';
 import { randomId } from './lib/utils.js';
 
+export interface ActionOutcome {
+  ok: boolean;
+  error?: string;
+  cancelled?: boolean;
+}
+
 interface Store extends DashboardState {
-  activeTab: 'overview' | 'setup' | 'prompts' | 'settings';
+  activeTab: DashboardTabId;
   pendingActions: Set<string>;
   pendingIdeActions: Map<string, string>; // ideId → actionId
   /** Daemon start/stop/restart in flight — daemon controls disable on THIS,
@@ -12,30 +30,36 @@ interface Store extends DashboardState {
    *  open file dialog) can't lock the user out of stopping the daemon. */
   pendingDaemonActions: Set<string>;
   setTab: (tab: Store['activeTab']) => void;
+  hydratePersistedState: () => void;
   applyState: (state: DashboardState) => void;
+  applyIdeStatus: (statuses: IdeStatus[]) => void;
   applyAuthState: (state: AuthState) => void;
-  setupIde: (ideId: string) => void;
+  setupIde: (ideId: IdeId) => void;
   setupAll: () => void;
   refresh: () => void;
   login: () => void;
   logout: () => void;
   status: () => void;
   saveCredentials: (email: string, password: string, otpSecret: string) => void;
-  saveCookie: (cookie: string) => void;
-  clearCookie: () => void;
+  saveCookie: (cookie: string) => string;
+  clearCookie: () => string;
   installBrowser: () => void;
   removeBrowser: () => void;
-  unconfigureIde: (ideId: string) => void;
+  unconfigureIde: (ideId: IdeId) => void;
   debugStartSession: () => void;
   debugStopAndExport: () => void;
   debugExport: () => void;
-  markActionDone: (id: string, ok: boolean) => void;
+  markActionDone: (id: string, outcome: ActionOutcome) => void;
   manualLogin: () => void;
   backupSession: () => void;
   restoreSession: () => void;
   selectCustomBrowser: () => void;
-  setBrowserChoice: (choice: import('@shared/types.js').BrowserChoice) => void;
-  openStoragePath: (path: string) => void;
+  setBrowserChoice: (choice: WebviewBrowserChoice) => string;
+  openStoragePath: (entryId: StorageEntryId) => string;
+  openLink: (link: WebviewLinkId) => string;
+  openIdeDocs: (ideId: IdeId) => string;
+  openToolConfig: () => string;
+  changeSetting: (change: WebviewSettingChange) => string;
   enableTunnel: (provider: TunnelProviderId, authtoken?: string, domain?: string) => void;
   disableTunnel: () => void;
   setNgrokAuthtoken: (authtoken: string) => void;
@@ -53,9 +77,9 @@ interface Store extends DashboardState {
   savePrompt: (prompt: PromptDef) => string;
   deletePrompt: (name: string) => string;
   resetPrompt: (name: string) => string;
-  /** Read-and-clear the success flag recorded by markActionDone. Undefined
+  /** Read and clear the bounded outcome recorded by markActionDone. Undefined
    *  when no result was recorded (e.g. id unknown). */
-  consumeActionResult: (id: string) => boolean | undefined;
+  consumeActionResult: (id: string) => ActionOutcome | undefined;
 }
 
 const defaultSettings: SettingsSnapshot = {
@@ -79,6 +103,8 @@ const defaultSettings: SettingsSnapshot = {
     daemonPort:   8723,
     authMode:     'browser' as const,
     httpClient:   'fetch' as const,
+    useDaemon:    true,
+    browserIdleParkMinutes: 30,
   },
   ai:      { autoInstallFiles: true, includeAgents: false },
   formula: { formatterVersion: 'v2' },
@@ -101,7 +127,7 @@ const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // Per-action outcomes recorded by markActionDone, consumed by components that
 // wait for confirmation before navigating (PromptEditor). Bounded — unclaimed
 // results from fire-and-forget actions are evicted oldest-first.
-const actionResults = new Map<string, boolean>();
+const actionResults = new Map<string, ActionOutcome>();
 const ACTION_RESULTS_MAX = 50;
 
 export const useStore = create<Store>((set, get) => {
@@ -110,7 +136,7 @@ export const useStore = create<Store>((set, get) => {
     set(s => ({ pendingActions: new Set([...s.pendingActions, id]) }));
     pendingTimers.set(id, setTimeout(() => {
       pendingTimers.delete(id);
-      get().markActionDone(id, false);
+      get().markActionDone(id, { ok: false });
     }, timeoutMs));
   };
 
@@ -127,12 +153,20 @@ export const useStore = create<Store>((set, get) => {
   loading: true,
   settings: defaultSettings,
   auth: defaultAuth,
+  prompts: { prompts: [] },
   activeTab: 'overview',
   pendingActions: new Set(),
   pendingIdeActions: new Map(),
   pendingDaemonActions: new Set(),
 
-  setTab: (tab) => set({ activeTab: tab }),
+  setTab: (tab) => {
+    set({ activeTab: tab });
+    setPersistedState({ activeTab: tab });
+  },
+  hydratePersistedState: () => {
+    const persisted = getPersistedState();
+    if (persisted?.activeTab) set({ activeTab: persisted.activeTab });
+  },
   applyState: (state) => set(s => {
     // Auth merge rules:
     //   1. hasCredentials is STICKY — once true, it stays true until an
@@ -157,6 +191,7 @@ export const useStore = create<Store>((set, get) => {
           };
     return { ...state, auth, loading: false };
   }),
+  applyIdeStatus: (statuses) => set({ ideStatuses: statuses }),
   applyAuthState: (state) => set({ auth: state }),
 
   setupIde: (ideId) => {
@@ -167,7 +202,7 @@ export const useStore = create<Store>((set, get) => {
       nextIde.set(ideId, id);
       return { pendingIdeActions: nextIde };
     });
-    sendToExtension({ type: 'action:setupIde', id, ideId: ideId as any });
+    sendToExtension({ type: 'action:setupIde', id, ideId });
   },
 
   setupAll: () => {
@@ -207,13 +242,19 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'action:saveCredentials', id, email, password, otpSecret });
   },
 
-  // Fire-and-forget (no action id): the byo cookie save has no acknowledgement
-  // round-trip — the refreshed hasCookie arrives on the next auth:state/state:update.
+  // Cookie mutations use the same tracked action lifecycle as every other
+  // host mutation; the host also refreshes auth state after completion.
   saveCookie: (cookie) => {
-    sendToExtension({ type: 'auth:saveCookie', cookie });
+    const id = randomId();
+    beginAction(id);
+    sendToExtension({ type: 'auth:saveCookie', id, cookie });
+    return id;
   },
   clearCookie: () => {
-    sendToExtension({ type: 'auth:clearCookie' });
+    const id = randomId();
+    beginAction(id);
+    sendToExtension({ type: 'auth:clearCookie', id });
+    return id;
   },
 
   installBrowser: () => {
@@ -237,7 +278,7 @@ export const useStore = create<Store>((set, get) => {
       nextIde.set(ideId, id);
       return { pendingIdeActions: nextIde };
     });
-    sendToExtension({ type: 'action:unconfigureIde', id, ideId: ideId as any });
+    sendToExtension({ type: 'action:unconfigureIde', id, ideId });
   },
 
   debugStartSession: () => {
@@ -288,12 +329,42 @@ export const useStore = create<Store>((set, get) => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:setBrowserChoice', id, choice });
+    return id;
   },
 
-  openStoragePath: (p) => {
+  openStoragePath: (entryId) => {
     const id = randomId();
     beginAction(id);
-    sendToExtension({ type: 'action:openStoragePath', id, path: p });
+    sendToExtension({ type: 'action:openStoragePath', id, entryId });
+    return id;
+  },
+
+  openLink: (link) => {
+    const id = randomId();
+    beginAction(id);
+    sendToExtension({ type: 'action:openLink', id, link });
+    return id;
+  },
+
+  openIdeDocs: (ideId) => {
+    const id = randomId();
+    beginAction(id);
+    sendToExtension({ type: 'action:openIdeDocs', id, ideId });
+    return id;
+  },
+
+  openToolConfig: () => {
+    const id = randomId();
+    beginAction(id);
+    sendToExtension({ type: 'action:openToolConfig', id });
+    return id;
+  },
+
+  changeSetting: (change) => {
+    const id = randomId();
+    beginAction(id);
+    sendToExtension({ type: 'setting:change', id, change });
+    return id;
   },
 
   enableTunnel: (provider, authtoken, domain) => {
@@ -398,10 +469,10 @@ export const useStore = create<Store>((set, get) => {
     return result;
   },
 
-  markActionDone: (id, ok) => {
+  markActionDone: (id, outcome) => {
     const timer = pendingTimers.get(id);
     if (timer) { clearTimeout(timer); pendingTimers.delete(id); }
-    actionResults.set(id, ok);
+    actionResults.set(id, outcome);
     while (actionResults.size > ACTION_RESULTS_MAX) {
       const oldest = actionResults.keys().next().value;
       if (oldest === undefined) break;

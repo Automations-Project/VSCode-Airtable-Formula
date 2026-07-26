@@ -7,7 +7,7 @@ const actionResultIds = new Set<string>();
 export async function resetWebviewStore(): Promise<void> {
   const { useStore } = await import('../store.js');
   const store = useStore.getState();
-  for (const id of store.pendingActions) store.markActionDone(id, false);
+  for (const id of store.pendingActions) store.markActionDone(id, { ok: false });
   for (const id of actionResultIds) useStore.getState().consumeActionResult(id);
   actionResultIds.clear();
   const initialStoreState = useStore.getInitialState();
@@ -18,9 +18,9 @@ async function trackActionResults(): Promise<void> {
   const { useStore } = await import('../store.js');
   const markActionDone = useStore.getState().markActionDone;
   useStore.setState({
-    markActionDone: (id, ok) => {
+    markActionDone: (id, outcome) => {
       actionResultIds.add(id);
-      markActionDone(id, ok);
+      markActionDone(id, outcome);
     },
   });
 }

@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { useStore } from './store.js';
 import { onExtensionMessage, sendToExtension } from './lib/vscode.js';
-import type { ExtensionMessage } from '@shared/messages.js';
+import { parseExtensionMessage } from '@shared/webview-contract.js';
+import { resolveHostConfirmation } from './lib/confirmation.js';
 import { Overview } from './tabs/Overview.js';
 import { Setup } from './tabs/Setup.js';
 import { Prompts } from './tabs/Prompts.js';
@@ -58,27 +59,46 @@ function LoadingScreen() {
 }
 
 export function App() {
-  const { activeTab, setTab, applyState, applyAuthState, markActionDone, versions, loading } = useStore();
+  const {
+    activeTab,
+    setTab,
+    hydratePersistedState,
+    applyState,
+    applyIdeStatus,
+    applyAuthState,
+    markActionDone,
+    openLink,
+    versions,
+    loading,
+  } = useStore();
 
   useEffect(() => {
-    // Runtime guards — the extension is the sole message source but a bug or
-    // version mismatch could ship a malformed payload. Silently drop invalid
-    // messages so a bad push doesn't crash the whole dashboard.
-    const isStateUpdate = (p: unknown): p is Parameters<typeof applyState>[0] =>
-      !!p && typeof p === 'object' && Array.isArray((p as { ideStatuses?: unknown }).ideStatuses);
-    const isAuthState = (p: unknown): p is Parameters<typeof applyAuthState>[0] =>
-      !!p && typeof p === 'object' && typeof (p as { status?: unknown }).status === 'string';
+    hydratePersistedState();
+    const off = onExtensionMessage(input => {
+      const parsed = parseExtensionMessage(input);
+      if (!parsed.ok) {
+        console.warn(
+          '[airtable-formula] ignoring malformed extension message',
+          { type: parsed.type, reason: parsed.reason },
+        );
+        return;
+      }
 
-    const off = onExtensionMessage((msg: ExtensionMessage) => {
-      if (!msg || typeof msg !== 'object' || typeof (msg as { type?: unknown }).type !== 'string') return;
-      if (msg.type === 'state:update') {
-        if (isStateUpdate(msg.payload)) applyState(msg.payload);
-        else console.warn('[airtable-formula] ignoring malformed state:update', msg);
-      } else if (msg.type === 'auth:state') {
-        if (isAuthState(msg.payload)) applyAuthState(msg.payload);
-        else console.warn('[airtable-formula] ignoring malformed auth:state', msg);
-      } else if (msg.type === 'action:result') {
-        if (typeof msg.id === 'string' && typeof msg.ok === 'boolean') markActionDone(msg.id, msg.ok);
+      const message = parsed.value;
+      if (message.type === 'state:update') {
+        applyState(message.payload);
+      } else if (message.type === 'ide:status') {
+        applyIdeStatus(message.payload);
+      } else if (message.type === 'auth:state') {
+        applyAuthState(message.payload);
+      } else if (message.type === 'action:result') {
+        markActionDone(message.id, {
+          ok: message.ok,
+          error: message.error,
+          cancelled: message.cancelled,
+        });
+      } else if (message.type === 'confirmation:result') {
+        resolveHostConfirmation(message.id, message.confirmed);
       }
     });
     sendToExtension({ type: 'ready' });
@@ -110,7 +130,7 @@ export function App() {
               role="tab"
               aria-selected={activeTab === t.id}
               aria-controls={`tabpanel-${t.id}`}
-              aria-label={`${t.label} tab`}
+              aria-label={t.label}
               style={{
                 padding: '8px 14px 9px', fontSize: 11, fontWeight: activeTab === t.id ? 600 : 500,
                 color: activeTab === t.id ? 'var(--fg)' : 'var(--fg-muted)',
@@ -142,9 +162,9 @@ export function App() {
       {/* Footer */}
       <div style={{ padding: '8px 16px 10px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: 8, flexShrink: 0, position: 'relative', zIndex: 1 }}>
         {([
-          { label: 'Docs', url: 'https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula' },
-          { label: 'Changelog', url: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/CHANGELOG.md' },
-          { label: 'GitHub', url: 'https://github.com/Automations-Project/VSCode-Airtable-Formula' },
+          { id: 'docs', label: 'Docs' },
+          { id: 'changelog', label: 'Changelog' },
+          { id: 'github', label: 'GitHub' },
         ] as const).map((link, i) => (
           <React.Fragment key={link.label}>
             {i > 0 && <span style={{ width: 1, height: 10, background: 'var(--border)', alignSelf: 'center' }} aria-hidden="true" />}
@@ -152,7 +172,7 @@ export function App() {
               type="button"
               aria-label={`Open ${link.label} (external link)`}
               style={{ fontSize: 9, color: 'var(--fg-muted)', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-              onClick={() => sendToExtension({ type: 'setting:change', key: '_openUrl', value: link.url })}
+              onClick={() => openLink(link.id)}
             >{link.label}</button>
           </React.Fragment>
         ))}

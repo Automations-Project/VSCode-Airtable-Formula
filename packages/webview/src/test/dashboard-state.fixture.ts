@@ -39,6 +39,7 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
         },
       },
       serverSource: 'bundled', daemonPort: 8723, authMode: 'browser', httpClient: 'fetch',
+      useDaemon: true, browserIdleParkMinutes: 30,
     },
     ai: { autoInstallFiles: true, includeAgents: false },
     formula: { formatterVersion: 'v2' },

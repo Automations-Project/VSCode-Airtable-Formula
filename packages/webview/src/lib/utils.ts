@@ -1,1 +1,4 @@
-export const randomId = () => Math.random().toString(36).slice(2);
+export function randomId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}

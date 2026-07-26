@@ -1,12 +1,40 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store.js';
-import { sendToExtension } from '../lib/vscode.js';
+import type { WebviewSettingChange } from '@shared/messages.js';
+import type { ToolCategories } from '@shared/types.js';
 import { friendlyError } from '../lib/friendlyError.js';
 import { StatusDot } from '../components/StatusDot.js';
 import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson, FolderOpen, ChevronDown, ChevronRight, Archive, Upload } from 'lucide-react';
 
-function SettingToggle({ label, desc, value, settingKey }: { label: string; desc?: string; value: boolean; settingKey: string }) {
-  const toggle = () => sendToExtension({ type: 'setting:change', key: settingKey, value: !value });
+type BooleanSettingKey =
+  | 'auth.autoRefresh'
+  | 'mcp.autoConfigureOnInstall'
+  | 'mcp.notifyOnUpdates'
+  | 'ai.autoInstallFiles'
+  | 'ai.includeAgents'
+  | 'debug.enabled'
+  | 'debug.verboseHttp';
+
+function SettingToggle({
+  label,
+  desc,
+  value,
+  settingKey,
+  category,
+}: {
+  label: string;
+  desc?: string;
+  value: boolean;
+  settingKey?: BooleanSettingKey;
+  category?: keyof ToolCategories;
+}) {
+  const changeSetting = useStore(s => s.changeSetting);
+  const toggle = () => {
+    const change: WebviewSettingChange = category
+      ? { key: 'mcp.category', category, value: !value }
+      : { key: settingKey!, value: !value };
+    changeSetting(change);
+  };
   return (
     <div className="toggle-row">
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -58,18 +86,37 @@ export function Settings() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
-  const { saveCredentials, saveCookie, clearCookie, login, logout, status, installBrowser, removeBrowser, manualLogin, openStoragePath, backupSession, restoreSession, selectCustomBrowser, setBrowserChoice } = useStore();
+  const {
+    saveCredentials,
+    saveCookie,
+    clearCookie,
+    login,
+    logout,
+    status,
+    installBrowser,
+    removeBrowser,
+    manualLogin,
+    openStoragePath,
+    openToolConfig,
+    backupSession,
+    restoreSession,
+    selectCustomBrowser,
+    setBrowserChoice,
+    changeSetting,
+  } = useStore();
 
   const [settingsPending, setSettingsPending] = useState(false);
 
   // Clear pending indicator when a fresh state arrives from the extension
   useEffect(() => { setSettingsPending(false); }, [settings]);
 
-  const changeHeavySetting = useCallback((key: string, value: unknown) => {
+  const changeHeavySetting = useCallback((change: WebviewSettingChange) => {
     setSettingsPending(true);
-    sendToExtension({ type: 'setting:change', key, value });
-  }, []);
-  const availableBrowsers = auth.availableBrowsers ?? [];
+    changeSetting(change);
+  }, [changeSetting]);
+  const availableBrowsers = (auth.availableBrowsers ?? []).filter(
+    (browser): browser is Extract<typeof browser, { found: true }> => browser.found,
+  );
   const browserChoice = settings.auth.browserChoice;
   const debugStartSession = useStore(s => s.debugStartSession);
   const debugStopAndExport = useStore(s => s.debugStopAndExport);
@@ -84,11 +131,17 @@ export function Settings() {
   const storage = useStore(s => s.storage);
 
   const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    sendToExtension({ type: 'setting:change', key: 'formula.formatterVersion', value: e.target.value });
+    changeSetting({
+      key: 'formula.formatterVersion',
+      value: e.target.value as 'v1' | 'v2',
+    });
   };
 
   const handleIntervalChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    sendToExtension({ type: 'setting:change', key: 'auth.refreshIntervalHours', value: Number(e.target.value) });
+    changeSetting({
+      key: 'auth.refreshIntervalHours',
+      value: Number(e.target.value),
+    });
   };
 
   const resetCredsForm = () => {
@@ -127,8 +180,8 @@ export function Settings() {
 
   const isBusy = auth.status === 'checking' || auth.status === 'logging-in';
   const browserFound = auth.browser?.found ?? true; // optimistic until probe runs
-  const browserLabel = auth.browser?.label;
-  const browserIsDownloaded = auth.browser?.downloaded === true;
+  const browserLabel = auth.browser?.found ? auth.browser.label : undefined;
+  const browserIsDownloaded = auth.browser?.found && auth.browser.downloaded === true;
   const chromeMissing = auth.browser && auth.browser.found === false;
   const dl = auth.browserDownload;
   const downloading = dl?.status === 'downloading';
@@ -163,7 +216,10 @@ export function Settings() {
                     aria-checked={!isManual}
                     aria-label={isManual ? 'Switch to automatic login with stored credentials' : 'Switch to manual login in the browser'}
                     checked={!isManual}
-                    onChange={() => sendToExtension({ type: 'setting:change', key: 'auth.loginMode', value: isManual ? 'auto' : 'manual' })}
+                    onChange={() => changeSetting({
+                      key: 'auth.loginMode',
+                      value: isManual ? 'auto' : 'manual',
+                    })}
                   />
                   <span className="toggle-track" />
                 </label>
@@ -196,9 +252,11 @@ export function Settings() {
             <select
               className="select-input"
               value={
-                browserChoice?.mode === 'auto' && !browserChoice.executablePath
-                  ? 'auto'
-                  : browserChoice?.executablePath ?? 'auto'
+                browserChoice?.mode === 'detected'
+                  ? browserChoice.browserId
+                  : browserChoice?.mode === 'custom'
+                    ? 'custom'
+                    : 'auto'
               }
               onChange={e => {
                 const val = e.target.value;
@@ -207,13 +265,11 @@ export function Settings() {
                 } else if (val === 'auto') {
                   setBrowserChoice({ mode: 'auto' });
                 } else {
-                  const browser = availableBrowsers.find(b => b.executablePath === val);
+                  const browser = availableBrowsers.find(b => b.id === val);
                   if (browser) {
                     setBrowserChoice({
-                      mode: 'auto',
-                      channel: browser.channel,
-                      executablePath: browser.executablePath,
-                      label: browser.label,
+                      mode: 'detected',
+                      browserId: browser.id,
                     });
                   }
                 }
@@ -221,7 +277,7 @@ export function Settings() {
             >
               <option value="auto">Auto (pick best available)</option>
               {availableBrowsers.map(b => (
-                <option key={b.executablePath} value={b.executablePath}>
+                <option key={b.id} value={b.id}>
                   {b.label}{b.downloaded ? ' (bundled)' : ''}
                 </option>
               ))}
@@ -242,7 +298,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.authMode ?? 'browser'}
-              onChange={e => changeHeavySetting('mcp.authMode', e.target.value)}
+              onChange={e => changeHeavySetting({
+                key: 'mcp.authMode',
+                value: e.target.value as 'browser' | 'byo' | 'direct-login',
+              })}
             >
               <option value="browser">Browser (log in via Chrome)</option>
               <option value="byo">Cookie — no browser</option>
@@ -261,7 +320,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.httpClient ?? 'fetch'}
-              onChange={e => changeHeavySetting('mcp.httpClient', e.target.value)}
+              onChange={e => changeHeavySetting({
+                key: 'mcp.httpClient',
+                value: e.target.value as 'fetch' | 'impit',
+              })}
             >
               <option value="fetch">Automatic (fetch)</option>
               <option value="impit">Chrome impersonation (impit)</option>
@@ -564,13 +626,13 @@ export function Settings() {
                     }
                   </div>
                   <div style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: entry.exists ? 'var(--fg-subtle)' : 'var(--fg-muted)', marginTop: 1, wordBreak: 'break-all' }}>
-                    {entry.path}
+                    {entry.id}
                   </div>
                 </div>
                 {entry.exists && (
                   <button
                     className="btn btn-ghost"
-                    onClick={() => openStoragePath(entry.path)}
+                    onClick={() => openStoragePath(entry.id)}
                     style={{ fontSize: '0.62rem', padding: '2px 8px', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}
                     title="Open in file explorer"
                   >
@@ -667,7 +729,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.serverSource ?? 'bundled'}
-              onChange={e => changeHeavySetting('mcp.serverSource', e.target.value)}
+              onChange={e => changeHeavySetting({
+                key: 'mcp.serverSource',
+                value: e.target.value as 'bundled' | 'npx',
+              })}
             >
               <option value="bundled">bundled</option>
               <option value="npx">npx</option>
@@ -687,7 +752,10 @@ export function Settings() {
               min={0}
               max={65535}
               value={settings.mcp.daemonPort ?? 8723}
-              onChange={e => changeHeavySetting('mcp.daemonPort', Number(e.target.value))}
+              onChange={e => changeHeavySetting({
+                key: 'mcp.daemonPort',
+                value: Number(e.target.value),
+              })}
             />
           </div>
         </div>
@@ -711,7 +779,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.toolProfile.profile}
-              onChange={e => changeHeavySetting('mcp.toolProfile', e.target.value)}
+              onChange={e => changeHeavySetting({
+                key: 'mcp.toolProfile',
+                value: e.target.value as 'read-only' | 'safe-write' | 'full' | 'custom',
+              })}
             >
               <option value="read-only">read-only</option>
               <option value="safe-write">safe-write</option>
@@ -736,25 +807,25 @@ export function Settings() {
 
           {settings.mcp.toolProfile.profile === 'custom' && (
             <div className="stack stack-sm" style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (11 tools)" value={settings.mcp.toolProfile.categories.read}                   settingKey="mcp.categories.read" />
-              <SettingToggle label="Record Read"          desc="query_records — snapshot read of up to 1000 rows per call (1 tool)"                            value={settings.mcp.toolProfile.categories.recordRead}             settingKey="mcp.categories.recordRead" />
-              <SettingToggle label="Table Write"          desc="Tables + record templates: create / rename / update / set cells / duplicate / apply (9 tools)" value={settings.mcp.toolProfile.categories.tableWrite}             settingKey="mcp.categories.tableWrite" />
-              <SettingToggle label="Table Destructive"    desc="delete_table, delete_record_template (2 tools)"                              value={settings.mcp.toolProfile.categories.tableDestructive}       settingKey="mcp.categories.tableDestructive" />
-              <SettingToggle label="Field Write"          desc="Create / update / rename / duplicate fields (7 tools)"                        value={settings.mcp.toolProfile.categories.fieldWrite}             settingKey="mcp.categories.fieldWrite" />
-              <SettingToggle label="Field Destructive"    desc="delete_field, delete_fields (2 tools)"                                        value={settings.mcp.toolProfile.categories.fieldDestructive}       settingKey="mcp.categories.fieldDestructive" />
-              <SettingToggle label="View Write"           desc="Views, filters, sorts, columns, freezing, covers, calendar dates (19 tools)" value={settings.mcp.toolProfile.categories.viewWrite}              settingKey="mcp.categories.viewWrite" />
-              <SettingToggle label="View Destructive"     desc="delete_view (1 tool)"                                                         value={settings.mcp.toolProfile.categories.viewDestructive}        settingKey="mcp.categories.viewDestructive" />
-              <SettingToggle label="View Sections"        desc="Sidebar grouping: create / rename / move (3 tools)"                           value={settings.mcp.toolProfile.categories.viewSection}            settingKey="mcp.categories.viewSection" />
-              <SettingToggle label="View Sections (destructive)" desc="delete_view_section (1 tool)"                                          value={settings.mcp.toolProfile.categories.viewSectionDestructive} settingKey="mcp.categories.viewSectionDestructive" />
-              <SettingToggle label="Form Metadata"        desc="Edit legacy form views — public-facing (2 tools)"                             value={settings.mcp.toolProfile.categories.formWrite}              settingKey="mcp.categories.formWrite" />
-              <SettingToggle label="Extension Management" desc="Create / install / duplicate / remove extensions (7 tools)"                   value={settings.mcp.toolProfile.categories.extension}              settingKey="mcp.categories.extension" />
-              <SettingToggle label="Record Write"         desc="create_records, update_records, duplicate_records, upload_attachment — bulk record create / update / duplication / attachment upload (4 tools)" value={settings.mcp.toolProfile.categories.recordWrite}            settingKey="mcp.categories.recordWrite" />
-              <SettingToggle label="Record Destructive"   desc="delete_records — batch record deletion (1 tool)"                              value={settings.mcp.toolProfile.categories.recordDestructive}      settingKey="mcp.categories.recordDestructive" />
-              <SettingToggle label="Sync"                 desc="sync_base — plan/diff/status are read-only; apply mutates the destination and can delete under policy=mirror (1 tool)" value={settings.mcp.toolProfile.categories.sync}                   settingKey="mcp.categories.sync" />
+              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (11 tools)" value={settings.mcp.toolProfile.categories.read}                   category="read" />
+              <SettingToggle label="Record Read"          desc="query_records — snapshot read of up to 1000 rows per call (1 tool)"                            value={settings.mcp.toolProfile.categories.recordRead}             category="recordRead" />
+              <SettingToggle label="Table Write"          desc="Tables + record templates: create / rename / update / set cells / duplicate / apply (9 tools)" value={settings.mcp.toolProfile.categories.tableWrite}             category="tableWrite" />
+              <SettingToggle label="Table Destructive"    desc="delete_table, delete_record_template (2 tools)"                              value={settings.mcp.toolProfile.categories.tableDestructive}       category="tableDestructive" />
+              <SettingToggle label="Field Write"          desc="Create / update / rename / duplicate fields (7 tools)"                        value={settings.mcp.toolProfile.categories.fieldWrite}             category="fieldWrite" />
+              <SettingToggle label="Field Destructive"    desc="delete_field, delete_fields (2 tools)"                                        value={settings.mcp.toolProfile.categories.fieldDestructive}       category="fieldDestructive" />
+              <SettingToggle label="View Write"           desc="Views, filters, sorts, columns, freezing, covers, calendar dates (19 tools)" value={settings.mcp.toolProfile.categories.viewWrite}              category="viewWrite" />
+              <SettingToggle label="View Destructive"     desc="delete_view (1 tool)"                                                         value={settings.mcp.toolProfile.categories.viewDestructive}        category="viewDestructive" />
+              <SettingToggle label="View Sections"        desc="Sidebar grouping: create / rename / move (3 tools)"                           value={settings.mcp.toolProfile.categories.viewSection}            category="viewSection" />
+              <SettingToggle label="View Sections (destructive)" desc="delete_view_section (1 tool)"                                          value={settings.mcp.toolProfile.categories.viewSectionDestructive} category="viewSectionDestructive" />
+              <SettingToggle label="Form Metadata"        desc="Edit legacy form views — public-facing (2 tools)"                             value={settings.mcp.toolProfile.categories.formWrite}              category="formWrite" />
+              <SettingToggle label="Extension Management" desc="Create / install / duplicate / remove extensions (7 tools)"                   value={settings.mcp.toolProfile.categories.extension}              category="extension" />
+              <SettingToggle label="Record Write"         desc="create_records, update_records, duplicate_records, upload_attachment — bulk record create / update / duplication / attachment upload (4 tools)" value={settings.mcp.toolProfile.categories.recordWrite}            category="recordWrite" />
+              <SettingToggle label="Record Destructive"   desc="delete_records — batch record deletion (1 tool)"                              value={settings.mcp.toolProfile.categories.recordDestructive}      category="recordDestructive" />
+              <SettingToggle label="Sync"                 desc="sync_base — plan/diff/status are read-only; apply mutates the destination and can delete under policy=mirror (1 tool)" value={settings.mcp.toolProfile.categories.sync}                   category="sync" />
             </div>
           )}
 
-          <button type="button" className="action-card" onClick={() => sendToExtension({ type: 'action:openToolConfig', id: 'open-tool-config' })}>
+          <button type="button" className="action-card" onClick={openToolConfig}>
             <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
               <FileJson size={11} />
             </div>
@@ -814,7 +885,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.script.beautifyStyle}
-              onChange={e => sendToExtension({ type: 'setting:change', key: 'script.beautifyStyle', value: e.target.value })}
+              onChange={e => changeSetting({
+                key: 'script.beautifyStyle',
+                value: e.target.value as 'default' | 'compact' | 'singleQuote' | 'tabIndent' | 'semicolonFree',
+              })}
             >
               <option value="default">Default</option>
               <option value="compact">Compact (printWidth: 120)</option>
@@ -831,7 +905,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.script.minifyLevel}
-              onChange={e => sendToExtension({ type: 'setting:change', key: 'script.minifyLevel', value: e.target.value })}
+              onChange={e => changeSetting({
+                key: 'script.minifyLevel',
+                value: e.target.value as 'safe' | 'standard' | 'aggressive' | 'extreme',
+              })}
             >
               <option value="safe">Safe (whitespace only)</option>
               <option value="standard">Standard (compress)</option>
@@ -884,7 +961,10 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.debug?.bufferSize ?? 1000}
-              onChange={e => sendToExtension({ type: 'setting:change', key: 'debug.bufferSize', value: Number(e.target.value) })}
+              onChange={e => changeSetting({
+                key: 'debug.bufferSize',
+                value: Number(e.target.value),
+              })}
             >
               <option value={100}>100</option>
               <option value={500}>500</option>
