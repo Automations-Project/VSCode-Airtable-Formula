@@ -100,6 +100,23 @@ describe('App rendered shell', () => {
     expect(screen.getByRole('tabpanel')).toHaveAccessibleName('Prompts');
   });
 
+  it.each([
+    ['an array', ['prompts']],
+    ['a coercible object', { toString: () => 'prompts' }],
+    ['a number', 42],
+  ])('ignores persisted activeTab when it is %s', async (_label, activeTab) => {
+    vscodeApiMock.getState.mockReturnValue({ activeTab });
+    useStore.setState({ activeTab: 'overview', loading: false });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Overview' }))
+        .toHaveAttribute('aria-selected', 'true');
+    });
+    expect(screen.getByRole('tabpanel')).toHaveAccessibleName('Overview');
+  });
+
   it('routes a parsed host confirmation reply to the pending request', async () => {
     render(<App />);
     const confirmation = requestHostConfirmation('discard-prompt-edits');

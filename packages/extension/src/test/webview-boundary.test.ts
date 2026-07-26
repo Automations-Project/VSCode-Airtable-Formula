@@ -808,6 +808,141 @@ describe('DashboardProvider webview trust boundary', () => {
     expect(JSON.stringify(debugCollector.trace.mock.calls)).not.toContain('user@example.test');
   });
 
+  it('settles auth:saveCookie with the exact request ID after success', async () => {
+    const id = '0123456789abcdef01234567';
+    const saveCookie = vi.fn().mockResolvedValue(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    provider.setAuthManager({
+      onDidChange: vi.fn(),
+      saveCookie,
+    } as any);
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({
+      type: 'auth:saveCookie',
+      id,
+      cookie: 'session=top-secret',
+    });
+
+    await waitForResult(id);
+    expect(saveCookie).toHaveBeenCalledWith('session=top-secret');
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({
+      type: 'action:result',
+      id,
+      ok: true,
+    });
+  });
+
+  it('settles auth:saveCookie with a secret-safe failure for the exact request ID', async () => {
+    const id = '1123456789abcdef01234567';
+    const secret = 'session=top-secret';
+    const saveCookie = vi
+      .fn()
+      .mockRejectedValue(new Error(`keychain rejected ${secret}`));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { provider, inboundMessage } = mountProvider();
+    provider.setAuthManager({
+      onDidChange: vi.fn(),
+      saveCookie,
+    } as any);
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'auth:saveCookie', id, cookie: secret });
+
+    await waitForResult(id);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({
+      type: 'action:result',
+      id,
+      ok: false,
+      error: 'Failed to save the Airtable session cookie',
+    });
+    expect(JSON.stringify(vscodeMock.postMessage.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(vscodeMock.showErrorMessage.mock.calls)).not.toContain(
+      secret,
+    );
+    warn.mockRestore();
+  });
+
+  it('settles auth:clearCookie with the exact request ID after success', async () => {
+    const id = '2123456789abcdef01234567';
+    const clearCookie = vi.fn().mockResolvedValue(undefined);
+    const dropDaemonCredentials = vi.fn().mockResolvedValue(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    provider.setAuthManager({
+      onDidChange: vi.fn(),
+      clearCookie,
+      dropDaemonCredentials,
+    } as any);
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'auth:clearCookie', id });
+
+    await waitForResult(id);
+    expect(clearCookie).toHaveBeenCalledOnce();
+    expect(dropDaemonCredentials).toHaveBeenCalledOnce();
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({
+      type: 'action:result',
+      id,
+      ok: true,
+    });
+  });
+
+  it('settles auth:clearCookie with a secret-safe failure for the exact request ID', async () => {
+    const id = '3123456789abcdef01234567';
+    const secret = 'session=top-secret';
+    const clearCookie = vi
+      .fn()
+      .mockRejectedValue(new Error(`keychain rejected ${secret}`));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { provider, inboundMessage } = mountProvider();
+    provider.setAuthManager({
+      onDidChange: vi.fn(),
+      clearCookie,
+    } as any);
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'auth:clearCookie', id });
+
+    await waitForResult(id);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({
+      type: 'action:result',
+      id,
+      ok: false,
+      error: 'Failed to clear the saved Airtable session cookie',
+    });
+    expect(JSON.stringify(vscodeMock.postMessage.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(vscodeMock.showErrorMessage.mock.calls)).not.toContain(
+      secret,
+    );
+    warn.mockRestore();
+  });
+
+  it.each([
+    ['auth:saveCookie', '4123456789abcdef01234567'],
+    ['auth:clearCookie', '5123456789abcdef01234567'],
+  ] as const)(
+    'settles %s when the authentication manager is unavailable',
+    async (type, id) => {
+      const { inboundMessage } = mountProvider();
+
+      inboundMessage(
+        type === 'auth:saveCookie'
+          ? { type, id, cookie: 'session=top-secret' }
+          : { type, id },
+      );
+
+      await waitForResult(id);
+      expect(vscodeMock.postMessage).toHaveBeenCalledWith({
+        type: 'action:result',
+        id,
+        ok: false,
+        error: 'Airtable authentication is unavailable',
+      });
+    },
+  );
+
   it('sets localResourceRoots to exactly dist/webview under the extension URI', () => {
     const { view } = mountProvider();
 

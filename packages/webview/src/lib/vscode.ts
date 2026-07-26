@@ -32,7 +32,10 @@ export function getPersistedState(): PersistedWebviewState | undefined {
   const value = vscodeApi.getState();
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const activeTab = (value as { activeTab?: unknown }).activeTab;
-  if (!['overview', 'setup', 'prompts', 'settings'].includes(String(activeTab))) {
+  if (
+    typeof activeTab !== 'string'
+    || !['overview', 'setup', 'prompts', 'settings'].includes(activeTab)
+  ) {
     return undefined;
   }
   return { activeTab: activeTab as PersistedWebviewState['activeTab'] };

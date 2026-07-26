@@ -55,6 +55,10 @@ const CONFIRMATION_COPY: Record<ConfirmationKind, string> = {
   'discard-prompt-edits': 'Discard unsaved prompt changes?',
 };
 
+const AUTH_UNAVAILABLE_ERROR = 'Airtable authentication is unavailable';
+const SAVE_COOKIE_ERROR = 'Failed to save the Airtable session cookie';
+const CLEAR_COOKIE_ERROR = 'Failed to clear the saved Airtable session cookie';
+
 type CustomBrowserChannel = 'chrome' | 'msedge' | 'chromium';
 
 interface ResolvedCustomBrowserExecutable {
@@ -581,9 +585,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
 
     if (msg.type === 'auth:saveCookie') {
+      if (!this.authManager) {
+        this.postResult(msg.id, false, AUTH_UNAVAILABLE_ERROR);
+        return;
+      }
       try {
-        // No auth manager wired → nowhere to store the cookie; skip the success message.
-        if (!this.authManager) return;
         // CSRF is auto-scraped server-side from the cookie's authed session, so it's not collected here.
         await this.authManager.saveCookie(msg.cookie);
         const pushed = await this._pushDaemonCredsIfNeeded();
@@ -595,30 +601,39 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           // Confirm the save — never echo the cookie value.
           vscode.window.showInformationMessage('Airtable session cookie saved to the keychain.');
         }
-      } catch (err) {
-        // Never surface the cookie — log only a concise, secret-free message + a user-facing error
-        // (a silent failure would leave the "Not set" chip with no explanation).
-        const m = err instanceof Error ? err.message : 'unknown error';
-        console.warn('[DashboardProvider] saveCookie failed:', m);
-        vscode.window.showErrorMessage(`Failed to save the Airtable cookie to the keychain: ${m}`);
+        this.postResult(msg.id, true);
+      } catch {
+        console.warn('[DashboardProvider] saveCookie failed');
+        vscode.window.showErrorMessage(SAVE_COOKIE_ERROR);
+        this.postResult(msg.id, false, SAVE_COOKIE_ERROR);
       }
       return;
     }
     if (msg.type === 'auth:clearCookie') {
-      if (!this.authManager) return;
+      if (!this.authManager) {
+        this.postResult(msg.id, false, AUTH_UNAVAILABLE_ERROR);
+        return;
+      }
+      let failed = false;
       try {
         await this.authManager.clearCookie();
         // Drop the daemon's in-memory copy of the (now-cleared) cookie.
         await this._restartDaemonAfterCredClear();
-      } catch (err) {
-        // Never echo the cookie value — surface a concise, secret-free error.
-        const m = err instanceof Error ? err.message : 'unknown error';
-        console.warn('[DashboardProvider] clearCookie failed:', m);
-        vscode.window.showErrorMessage(`Failed to clear the saved cookie: ${m}`);
-      } finally {
-        // Always refresh the UI so the chip reflects the real keychain state.
-        await this.pushState();
+      } catch {
+        failed = true;
+        console.warn('[DashboardProvider] clearCookie failed');
+        vscode.window.showErrorMessage(CLEAR_COOKIE_ERROR);
       }
+      try {
+        await this.pushState();
+      } catch {
+        if (!failed) {
+          console.warn('[DashboardProvider] clearCookie state refresh failed');
+          vscode.window.showErrorMessage(CLEAR_COOKIE_ERROR);
+        }
+        failed = true;
+      }
+      this.postResult(msg.id, !failed, failed ? CLEAR_COOKIE_ERROR : undefined);
       return;
     }
     if (msg.type === 'action:login') {
