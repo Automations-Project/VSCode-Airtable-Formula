@@ -1,11 +1,24 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+const actionResultIds = new Set<string>();
 
 export async function resetWebviewStore(): Promise<void> {
   const { useStore } = await import('../store.js');
   const initialStoreState = useStore.getInitialState();
   useStore.setState(initialStoreState, true);
+}
+
+async function trackActionResults(): Promise<void> {
+  const { useStore } = await import('../store.js');
+  const markActionDone = useStore.getState().markActionDone;
+  useStore.setState({
+    markActionDone: (id, ok) => {
+      actionResultIds.add(id);
+      markActionDone(id, ok);
+    },
+  });
 }
 
 export const vscodeApiMock = {
@@ -16,9 +29,20 @@ export const vscodeApiMock = {
 
 Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: vi.fn(() => vscodeApiMock) });
 
+beforeEach(async () => {
+  vi.useFakeTimers();
+  await resetWebviewStore();
+  await trackActionResults();
+});
+
 afterEach(async () => {
   cleanup();
+  vi.clearAllTimers();
+  const { useStore } = await import('../store.js');
+  for (const id of actionResultIds) useStore.getState().consumeActionResult(id);
+  actionResultIds.clear();
   await resetWebviewStore();
+  vi.useRealTimers();
   document.body.className = '';
   vscodeApiMock.getState.mockReturnValue(undefined);
 });
