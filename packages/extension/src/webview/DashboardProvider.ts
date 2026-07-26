@@ -55,6 +55,113 @@ const CONFIRMATION_COPY: Record<ConfirmationKind, string> = {
   'discard-prompt-edits': 'Discard unsaved prompt changes?',
 };
 
+type CustomBrowserChannel = 'chrome' | 'msedge' | 'chromium';
+
+interface ResolvedCustomBrowserExecutable {
+  channel: CustomBrowserChannel;
+  executablePath: string;
+  label: string;
+}
+
+const WINDOWS_CUSTOM_BROWSER_EXECUTABLES: ReadonlyMap<
+  string,
+  CustomBrowserChannel
+> = new Map([
+  ['chrome.exe', 'chrome'],
+  ['msedge.exe', 'msedge'],
+  ['chromium.exe', 'chromium'],
+  ['brave.exe', 'chromium'],
+]);
+
+const LINUX_CUSTOM_BROWSER_EXECUTABLES: ReadonlyMap<
+  string,
+  CustomBrowserChannel
+> = new Map([
+  ['google-chrome', 'chrome'],
+  ['google-chrome-stable', 'chrome'],
+  ['chrome', 'chrome'],
+  ['microsoft-edge', 'msedge'],
+  ['microsoft-edge-stable', 'msedge'],
+  ['msedge', 'msedge'],
+  ['chromium', 'chromium'],
+  ['chromium-browser', 'chromium'],
+  ['brave', 'chromium'],
+  ['brave-browser', 'chromium'],
+]);
+
+const MACOS_CUSTOM_BROWSER_BUNDLES: ReadonlyArray<{
+  bundle: string;
+  executable: string;
+  channel: CustomBrowserChannel;
+}> = [
+  {
+    bundle: 'Google Chrome.app',
+    executable: 'Google Chrome',
+    channel: 'chrome',
+  },
+  {
+    bundle: 'Microsoft Edge.app',
+    executable: 'Microsoft Edge',
+    channel: 'msedge',
+  },
+  {
+    bundle: 'Chromium.app',
+    executable: 'Chromium',
+    channel: 'chromium',
+  },
+  {
+    bundle: 'Brave Browser.app',
+    executable: 'Brave Browser',
+    channel: 'chromium',
+  },
+];
+
+function resolveCustomBrowserExecutable(
+  selectedPath: string,
+): ResolvedCustomBrowserExecutable | undefined {
+  if (process.platform === 'win32') {
+    const label = path.win32.basename(selectedPath);
+    const channel = WINDOWS_CUSTOM_BROWSER_EXECUTABLES.get(label.toLowerCase());
+    return channel ? { channel, executablePath: selectedPath, label } : undefined;
+  }
+
+  if (process.platform === 'darwin') {
+    const normalizedPath = selectedPath.replaceAll('\\', '/');
+
+    for (const browser of MACOS_CUSTOM_BROWSER_BUNDLES) {
+      const bundleSuffix = `/${browser.bundle}`;
+      const executableSuffix = `${bundleSuffix}/Contents/MacOS/${browser.executable}`;
+
+      if (normalizedPath.endsWith(executableSuffix)) {
+        return {
+          channel: browser.channel,
+          executablePath: selectedPath,
+          label: browser.executable,
+        };
+      }
+
+      if (normalizedPath.endsWith(bundleSuffix)) {
+        return {
+          channel: browser.channel,
+          executablePath: path.join(
+            selectedPath,
+            'Contents',
+            'MacOS',
+            browser.executable,
+          ),
+          label: browser.executable,
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  const label = path.posix.basename(selectedPath);
+  const channel = LINUX_CUSTOM_BROWSER_EXECUTABLES.get(label);
+  return channel ? { channel, executablePath: selectedPath, label } : undefined;
+}
+
 function withoutUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -684,16 +791,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         });
 
         if (result?.[0]) {
-          let execPath = result[0].fsPath;
-          if (process.platform === 'darwin' && execPath.endsWith('.app')) {
-            const appName = path.basename(execPath, '.app');
-            execPath = path.join(execPath, 'Contents', 'MacOS', appName);
-          }
-
-          const base = path.basename(execPath).toLowerCase();
-          const browserName = ['chrome', 'chromium', 'edge', 'msedge', 'brave']
-            .find(name => base.includes(name));
-          if (!browserName) {
+          const browser = resolveCustomBrowserExecutable(result[0].fsPath);
+          if (!browser) {
             void vscode.window.showWarningMessage('Only Chromium-based browsers are supported (Chrome, Edge, Chromium, Brave).');
             this.postResult(msg.id, false, 'Unsupported browser executable');
             return;
@@ -701,13 +800,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
           const choice: HostBrowserChoice = {
             mode: 'custom',
-            channel: browserName === 'edge' || browserName === 'msedge'
-              ? 'msedge'
-              : browserName === 'chrome'
-                ? 'chrome'
-                : 'chromium',
-            executablePath: execPath,
-            label: path.basename(execPath),
+            channel: browser.channel,
+            executablePath: browser.executablePath,
+            label: browser.label,
           };
           const cfg = vscode.workspace.getConfiguration('airtableFormula');
           await cfg.update('auth.browserChoice', choice, vscode.ConfigurationTarget.Global);

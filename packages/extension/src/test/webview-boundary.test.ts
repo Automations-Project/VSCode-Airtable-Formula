@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const vscodeMock = vi.hoisted(() => {
   const configValues = new Map<string, unknown>();
@@ -187,6 +187,8 @@ const waitForResult = async (id: string) => {
 };
 
 describe('DashboardProvider webview trust boundary', () => {
+  const originalPlatform = process.platform;
+
   beforeEach(() => {
     vi.clearAllMocks();
     vscodeMock.configValues.clear();
@@ -203,6 +205,10 @@ describe('DashboardProvider webview trust boundary', () => {
         label: 'Google Chrome',
       },
     ]);
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
   });
 
   it('drops a malformed message before dispatching a side effect', async () => {
@@ -397,7 +403,112 @@ describe('DashboardProvider webview trust boundary', () => {
     );
   });
 
-  it('writes a custom path only after the picker returns a Chromium-family executable', async () => {
+  it.each([
+    ['win32', 'C:\\Browsers\\chrome.exe', 'chrome'],
+    ['win32', 'C:\\Browsers\\msedge.exe', 'msedge'],
+    ['win32', 'C:\\Browsers\\chromium.exe', 'chromium'],
+    ['win32', 'C:\\Browsers\\brave.exe', 'chromium'],
+    ['linux', '/opt/google-chrome-stable', 'chrome'],
+    ['linux', '/opt/google/chrome/chrome', 'chrome'],
+    ['linux', '/opt/microsoft-edge-stable', 'msedge'],
+    ['linux', '/opt/microsoft/msedge/msedge', 'msedge'],
+    ['linux', '/opt/chromium-browser', 'chromium'],
+    ['linux', '/opt/brave-browser', 'chromium'],
+  ] as const)(
+    'accepts exact %s Chromium-family executable %s',
+    async (platform, executablePath, channel) => {
+      Object.defineProperty(process, 'platform', { value: platform });
+      vscodeMock.showOpenDialog.mockResolvedValueOnce([{ fsPath: executablePath }]);
+      const { provider, inboundMessage } = mountProvider();
+      vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+      inboundMessage({ type: 'action:selectCustomBrowser', id: 'pickok1' });
+
+      await waitForResult('pickok1');
+      expect(vscodeMock.update).toHaveBeenCalledWith(
+        'auth.browserChoice',
+        expect.objectContaining({
+          mode: 'custom',
+          channel,
+          executablePath,
+        }),
+        1,
+      );
+    },
+  );
+
+  it.each([
+    ['Google Chrome.app', 'Google Chrome', 'chrome'],
+    ['Microsoft Edge.app', 'Microsoft Edge', 'msedge'],
+    ['Chromium.app', 'Chromium', 'chromium'],
+    ['Brave Browser.app', 'Brave Browser', 'chromium'],
+  ] as const)(
+    'accepts the exact macOS %s bundle layout',
+    async (bundleName, executableName, channel) => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      vscodeMock.showOpenDialog.mockResolvedValueOnce([
+        { fsPath: `/Applications/${bundleName}` },
+      ]);
+      const { provider, inboundMessage } = mountProvider();
+      vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+      inboundMessage({ type: 'action:selectCustomBrowser', id: 'macok01' });
+
+      await waitForResult('macok01');
+      expect(vscodeMock.update).toHaveBeenCalledWith(
+        'auth.browserChoice',
+        expect.objectContaining({
+          mode: 'custom',
+          channel,
+          executablePath: expect.stringMatching(
+            new RegExp(
+              `${bundleName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\\\/]Contents[\\\\/]MacOS[\\\\/]${executableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+            ),
+          ),
+        }),
+        1,
+      );
+    },
+  );
+
+  it.each([
+    ['win32', 'C:\\Temp\\chrome-helper.exe'],
+    ['win32', 'C:\\Temp\\fake-chromium.exe'],
+    ['win32', 'C:\\Temp\\msedge-old.exe'],
+    ['win32', 'C:\\Temp\\brave-browser.exe.bak'],
+    ['linux', '/tmp/google-chrome-wrapper'],
+    ['linux', '/tmp/chromium-helper'],
+    ['linux', '/tmp/microsoft-edge-old'],
+    ['linux', '/tmp/brave-browser-wrapper'],
+    ['linux', '/tmp/constructor'],
+    ['linux', '/tmp/toString'],
+    ['darwin', '/Applications/Google Chrome Helper.app'],
+    ['darwin', '/tmp/Google Chrome'],
+    ['darwin', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome Helper'],
+  ] as const)(
+    'rejects deceptive %s near-match %s',
+    async (platform, executablePath) => {
+      Object.defineProperty(process, 'platform', { value: platform });
+      vscodeMock.showOpenDialog.mockResolvedValueOnce([{ fsPath: executablePath }]);
+      const { provider, inboundMessage } = mountProvider();
+      vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+      inboundMessage({ type: 'action:selectCustomBrowser', id: 'badpick' });
+
+      await waitForResult('badpick');
+      expect(vscodeMock.update).not.toHaveBeenCalled();
+      expect(vscodeMock.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'badpick',
+          ok: false,
+          error: 'Unsupported browser executable',
+        }),
+      );
+    },
+  );
+
+  it('writes no custom path when the picker returns a non-browser executable', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
     vscodeMock.showOpenDialog.mockResolvedValueOnce([{ fsPath: '/host/firefox' }]);
     const { provider, inboundMessage } = mountProvider();
     vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
@@ -406,19 +517,6 @@ describe('DashboardProvider webview trust boundary', () => {
 
     await waitForResult('badpick');
     expect(vscodeMock.update).not.toHaveBeenCalled();
-
-    vscodeMock.showOpenDialog.mockResolvedValueOnce([{ fsPath: '/host/brave-browser' }]);
-    inboundMessage({ type: 'action:selectCustomBrowser', id: 'goodpick' });
-
-    await waitForResult('goodpick');
-    expect(vscodeMock.update).toHaveBeenCalledWith(
-      'auth.browserChoice',
-      expect.objectContaining({
-        mode: 'custom',
-        executablePath: '/host/brave-browser',
-      }),
-      1,
-    );
   });
 
   it('posts matching setting results only after persistence, side effects, and pushed state', async () => {
