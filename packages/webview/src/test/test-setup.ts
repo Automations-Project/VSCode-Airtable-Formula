@@ -6,6 +6,10 @@ const actionResultIds = new Set<string>();
 
 export async function resetWebviewStore(): Promise<void> {
   const { useStore } = await import('../store.js');
+  const store = useStore.getState();
+  for (const id of store.pendingActions) store.markActionDone(id, false);
+  for (const id of actionResultIds) useStore.getState().consumeActionResult(id);
+  actionResultIds.clear();
   const initialStoreState = useStore.getInitialState();
   useStore.setState(initialStoreState, true);
 }
@@ -30,17 +34,12 @@ export const vscodeApiMock = {
 Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: vi.fn(() => vscodeApiMock) });
 
 beforeEach(async () => {
-  vi.useFakeTimers();
   await resetWebviewStore();
   await trackActionResults();
 });
 
 afterEach(async () => {
   cleanup();
-  vi.clearAllTimers();
-  const { useStore } = await import('../store.js');
-  for (const id of actionResultIds) useStore.getState().consumeActionResult(id);
-  actionResultIds.clear();
   await resetWebviewStore();
   vi.useRealTimers();
   document.body.className = '';

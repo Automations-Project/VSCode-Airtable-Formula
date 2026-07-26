@@ -4,11 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App.js';
 import { useStore } from '../store.js';
 import { makeDashboardState } from './dashboard-state.fixture.js';
+import { resetWebviewStore } from './test-setup.js';
 
 describe('App rendered shell', () => {
-  let completedActionId: string;
-  let pendingActionId: string;
-
   beforeEach(() => {
     useStore.setState({ loading: true, activeTab: 'overview' });
   });
@@ -40,19 +38,21 @@ describe('App rendered shell', () => {
     expect(state.tunnel).toBeUndefined();
   });
 
-  it('leaves completed and pending prompt actions for the rendered-test harness to clean up', () => {
+  it('reset clears real pending and completed action sidecars', async () => {
     vi.useFakeTimers();
     render(<App />);
 
-    completedActionId = useStore.getState().deletePrompt('leftover-result');
+    const completedActionId = useStore.getState().deletePrompt('completed-result');
     useStore.getState().markActionDone(completedActionId, false);
-    pendingActionId = useStore.getState().savePrompt({
+    expect(useStore.getState().consumeActionResult(completedActionId)).toBe(false);
+    useStore.getState().markActionDone(completedActionId, false);
+
+    const pendingActionId = useStore.getState().savePrompt({
       name: 'leftover-timer', description: '', arguments: [], template: '', isBuiltin: false, isModified: false,
     });
-  });
+    expect(useStore.getState().pendingActions.has(pendingActionId)).toBe(true);
 
-  it('cannot observe action sidecars left by a prior rendered test', () => {
-    render(<App />);
+    await resetWebviewStore();
     vi.advanceTimersByTime(60_000);
 
     expect(useStore.getState().consumeActionResult(completedActionId)).toBeUndefined();
