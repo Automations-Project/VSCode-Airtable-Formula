@@ -659,6 +659,24 @@ describe('parseExtensionMessage', () => {
     }).ok).toBe(false);
   });
 
+  it('rejects custom-browser as a found detected browser id', () => {
+    expect(parseExtensionMessage({
+      type: 'state:update',
+      payload: {
+        ...completeDashboardState,
+        auth: {
+          ...completeDashboardState.auth,
+          browser: {
+            found: true,
+            id: 'custom-browser',
+            channel: 'chromium',
+            label: 'Custom browser',
+          },
+        },
+      },
+    }).ok).toBe(false);
+  });
+
   it('rejects a DashboardState storage entry carrying a raw path', () => {
     expect(parseExtensionMessage({
       type: 'state:update',
@@ -673,6 +691,24 @@ describe('parseExtensionMessage', () => {
               path: 'C:\\Windows\\System32',
             },
           ],
+        },
+      },
+    }).ok).toBe(false);
+  });
+
+  it.each([
+    'https://tunnel.example.test',
+    'tunnel.example.test/path',
+    'tunnel.example.test?token=x',
+    'tunnel example.test',
+  ])('rejects malformed named tunnel hostname %s', (namedTunnelHostname) => {
+    expect(parseExtensionMessage({
+      type: 'state:update',
+      payload: {
+        ...completeDashboardState,
+        tunnel: {
+          ...completeDashboardState.tunnel,
+          namedTunnelHostname,
         },
       },
     }).ok).toBe(false);

@@ -55,14 +55,6 @@ const AUTH_STATUSES = [
   'chrome-missing',
 ] as const;
 const BROWSER_CHANNELS = ['chrome', 'msedge', 'chromium'] as const;
-const BROWSER_IDS = [
-  'chrome',
-  'edge',
-  'chromium',
-  'brave',
-  'bundled-chromium',
-  'custom-browser',
-] as const;
 const DETECTED_BROWSER_IDS = [
   'chrome',
   'edge',
@@ -242,7 +234,7 @@ function isBrowserInfo(input: unknown): input is BrowserInfo {
     return hasExactKeys(input, ['found']);
   }
   return hasExactKeys(input, ['found', 'id', 'channel', 'label'], ['downloaded'])
-    && isOneOf(input.id, BROWSER_IDS)
+    && isOneOf(input.id, DETECTED_BROWSER_IDS)
     && isOneOf(input.channel, BROWSER_CHANNELS)
     && typeof input.label === 'string'
     && hasOptional(input, 'downloaded', value => typeof value === 'boolean');
@@ -500,7 +492,11 @@ function isTunnelState(input: unknown): input is TunnelState {
       input.autoDisabledReason === null
       || isTunnelAutoDisabledReason(input.autoDisabledReason)
     )
-    && hasOptional(input, 'namedTunnelHostname', isNullableString);
+    && hasOptional(
+      input,
+      'namedTunnelHostname',
+      value => value === null || isTunnelDomain(value),
+    );
 }
 
 function isDaemonStatusInfo(input: unknown): input is DaemonStatusInfo {

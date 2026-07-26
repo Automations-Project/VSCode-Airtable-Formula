@@ -40,7 +40,7 @@ export type BrowserInfo =
   | { found: false }
   | {
       found: true;
-      id: BrowserId;
+      id: DetectedBrowserId;
       channel: BrowserChannel;
       label: string;
       downloaded?: boolean;
