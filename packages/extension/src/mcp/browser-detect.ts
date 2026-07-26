@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import type { BrowserChannel, BrowserId } from '@airtable-formula/shared';
 
 /**
  * Result of probing the system for a Chromium-based browser usable by Patchright.
@@ -11,21 +12,16 @@ import * as os from 'os';
  * browser is found, login and health checks will fail with an opaque Patchright
  * error, so we do this detection up front and surface an actionable message.
  */
-export interface BrowserProbe {
-  /** True if any supported Chromium-based browser was found. */
-  found: boolean;
-  /** The channel name to pass to Patchright's launchPersistentContext. */
-  channel?: 'chrome' | 'msedge' | 'chromium';
-  /** Absolute path to the executable we detected. */
-  executablePath?: string;
-  /** Human-readable name for UI display. */
-  label?: string;
-  /**
-   * True when this probe resolved to a bundled Chromium we downloaded into
-   * globalStorage rather than a system-installed browser.
-   */
-  downloaded?: boolean;
-}
+export type BrowserProbe =
+  | { found: false }
+  | {
+      found: true;
+      id: BrowserId;
+      channel: BrowserChannel;
+      executablePath: string;
+      label: string;
+      downloaded?: boolean;
+    };
 
 function existsSafe(p: string | undefined): boolean {
   if (!p) return false;
@@ -171,22 +167,23 @@ export function detectAllBrowsers(downloadedPath?: string): BrowserProbe[] {
   const results: BrowserProbe[] = [];
 
   const chrome = probeChrome();
-  if (chrome) results.push({ found: true, channel: 'chrome', executablePath: chrome, label: 'Google Chrome' });
+  if (chrome) results.push({ found: true, id: 'chrome', channel: 'chrome', executablePath: chrome, label: 'Google Chrome' });
 
   const edge = probeEdge();
-  if (edge) results.push({ found: true, channel: 'msedge', executablePath: edge, label: 'Microsoft Edge' });
+  if (edge) results.push({ found: true, id: 'edge', channel: 'msedge', executablePath: edge, label: 'Microsoft Edge' });
 
   const chromium = probeChromium();
-  if (chromium) results.push({ found: true, channel: 'chromium', executablePath: chromium, label: 'Chromium' });
+  if (chromium) results.push({ found: true, id: 'chromium', channel: 'chromium', executablePath: chromium, label: 'Chromium' });
 
   // Brave uses the 'chromium' patchright channel + explicit executablePath.
   // Listed after Chromium so users who have both get native Chromium first.
   const brave = probeBrave();
-  if (brave) results.push({ found: true, channel: 'chromium', executablePath: brave, label: 'Brave Browser' });
+  if (brave) results.push({ found: true, id: 'brave', channel: 'chromium', executablePath: brave, label: 'Brave Browser' });
 
   if (downloadedPath) {
     results.push({
       found: true,
+      id: 'bundled-chromium',
       channel: 'chromium',
       executablePath: downloadedPath,
       label: 'Bundled Chromium',

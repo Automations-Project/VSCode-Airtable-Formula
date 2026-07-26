@@ -3,9 +3,14 @@ import * as path from 'path';
 import * as os from 'os';
 import { fork } from 'child_process';
 import { unlink } from 'node:fs/promises';
-import type { AuthState, BrowserDownloadState } from '@airtable-formula/shared';
+import type {
+  AuthState,
+  BrowserChoiceSummary,
+  BrowserDownloadState,
+  BrowserInfo,
+} from '@airtable-formula/shared';
 import { getSettings } from '../settings.js';
-import { detectBrowser, detectAllBrowsers, type BrowserProbe } from './browser-detect.js';
+import { detectAllBrowsers, type BrowserProbe } from './browser-detect.js';
 import type { BrowserDownloadManager } from './browser-download.js';
 import type { DaemonManager } from './daemon-manager.js';
 import { processStderrChunk } from '../debug/stderr-parser.js';
@@ -101,6 +106,14 @@ export class AuthManager implements vscode.Disposable {
 
   get browser(): BrowserProbe { return this._browser; }
 
+  getDownloadedBrowserExecutablePath(): string | undefined {
+    return this._downloadManager?.getExecutablePath();
+  }
+
+  getBrowserStorageDir(): string | undefined {
+    return this._downloadManager?.getStorageDir();
+  }
+
   /**
    * Re-run the browser probe and update state. Returns the fresh probe.
    * Called at init, before login, and before health checks.
@@ -114,38 +127,64 @@ export class AuthManager implements vscode.Disposable {
     const choice = settings.auth.browserChoice;
     let selected: BrowserProbe;
 
-    if (choice?.mode === 'custom' && choice.executablePath) {
+    if (
+      choice?.mode === 'custom'
+      && choice.detectedId
+      && choice.detectedId !== 'custom-browser'
+    ) {
+      selected = allBrowsers.find(
+        browser => browser.found && browser.id === choice.detectedId,
+      ) ?? allBrowsers[0] ?? { found: false };
+    } else if (choice?.mode === 'custom') {
       selected = {
         found: true,
-        channel: (choice.channel as BrowserProbe['channel']) ?? 'chromium',
+        id: 'custom-browser',
+        channel: choice.channel,
         executablePath: choice.executablePath,
-        label: choice.label ?? 'Custom browser',
+        label: choice.label,
       };
-    } else if (choice?.mode === 'auto' && choice.executablePath) {
-      const match = allBrowsers.find(b => b.executablePath === choice.executablePath);
-      selected = match ?? allBrowsers[0] ?? { found: false };
     } else {
       selected = allBrowsers[0] ?? { found: false };
     }
 
     this._browser = selected;
     this._updateState({
-      browser: {
-        found: selected.found,
-        channel: selected.channel,
-        label: selected.label,
-        downloaded: selected.downloaded,
-        executablePath: selected.executablePath,
-      },
-      availableBrowsers: allBrowsers.map(b => ({
-        found: b.found,
-        channel: b.channel,
-        label: b.label,
-        downloaded: b.downloaded,
-        executablePath: b.executablePath,
-      })),
+      browser: this._toBrowserInfo(selected),
+      availableBrowsers: allBrowsers.map(browser => this._toBrowserInfo(browser)),
+      browserChoice: this._toBrowserChoiceSummary(choice, allBrowsers),
     });
     return selected;
+  }
+
+  private _toBrowserInfo(probe: BrowserProbe): BrowserInfo {
+    if (!probe.found || probe.id === 'custom-browser') {
+      return { found: false };
+    }
+    return {
+      found: true,
+      id: probe.id,
+      channel: probe.channel,
+      label: probe.label,
+      ...(probe.downloaded === undefined ? {} : { downloaded: probe.downloaded }),
+    };
+  }
+
+  private _toBrowserChoiceSummary(
+    choice: import('../settings.js').HostBrowserChoice | undefined,
+    browsers: BrowserProbe[],
+  ): BrowserChoiceSummary {
+    if (!choice || choice.mode === 'auto') {
+      return { mode: 'auto' };
+    }
+    if (choice.detectedId && choice.detectedId !== 'custom-browser') {
+      const match = browsers.find(browser => browser.found && browser.id === choice.detectedId);
+      return {
+        mode: 'detected',
+        browserId: choice.detectedId,
+        label: match?.found ? match.label : choice.label,
+      };
+    }
+    return { mode: 'custom', label: choice.label };
   }
 
   private _getLoginMode(): 'manual' | 'auto' {
