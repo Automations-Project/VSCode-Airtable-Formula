@@ -14,6 +14,22 @@ import {
   BUILTIN_PROFILES,
 } from '../src/tool-config.js';
 
+// Sandbox the WHOLE file: switchProfile()/toggleTool()/toggleCategory() all
+// call save(), which writes tools-config.json. Without this, tests write the
+// LIVE ~/.airtable-user-mcp/tools-config.json — a Windows EPERM rename race
+// when the real daemon holds the file, and they flip the user's real profile.
+const FILE_HOME = join(tmpdir(), `tool-config-test-${process.pid}-${Date.now()}`);
+const PREV_FILE_HOME = process.env.AIRTABLE_USER_MCP_HOME;
+before(async () => {
+  await mkdir(FILE_HOME, { recursive: true });
+  process.env.AIRTABLE_USER_MCP_HOME = FILE_HOME;
+});
+after(async () => {
+  if (PREV_FILE_HOME === undefined) delete process.env.AIRTABLE_USER_MCP_HOME;
+  else process.env.AIRTABLE_USER_MCP_HOME = PREV_FILE_HOME;
+  await rm(FILE_HOME, { recursive: true, force: true });
+});
+
 describe('TOOL_CATEGORIES', () => {
   it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
