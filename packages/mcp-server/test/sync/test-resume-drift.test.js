@@ -11,7 +11,8 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MockClient } from './helpers/mock-client.js';
-import { apply, applyJob, ENGINE_VERSION } from '../../src/sync/index.js';
+import { apply, applyJob, ENGINE_VERSION, fingerprintSchema } from '../../src/sync/index.js';
+import { normalizeSchema } from '../../src/sync/snapshot.js';
 import { savePlan, saveIdmap } from '../../src/sync/idmap.js';
 import { newJournal, recordDone, recordFailed, saveJournal } from '../../src/sync/journal.js';
 
@@ -58,6 +59,39 @@ describe('sync index.apply — journal resume bypasses the drift guard', () => {
     // And it must abort BEFORE touching anything — TableB is not created.
     const names = (await client.getApplicationData(DEST)).data.tableSchemas.map((t) => t.name).sort();
     assert.deepEqual(names, ['TableA'], `no action may run on an aborted resume: ${names}`);
+  });
+
+  // Review reproduction, end to end: the ONLY change between plan and apply is autoNumber's
+  // maxUsedAutoNumber advancing (7 → 8) — a counter the server bumps on row creation, including
+  // by this sync's own records phase. Engine 2d hashed it and aborted DRIFT on an unchanged
+  // schema; a re-apply after any records run would trip its own guard.
+  it('an advanced maxUsedAutoNumber counter alone does NOT abort apply with DRIFT', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-counter-'));
+    const client = new MockClient();
+    // Seed a dest table with an autoNumber field, counter at 7.
+    client.tables.push({
+      id: 'tblD1', name: 'T', primaryColumnId: 'fldD1',
+      columns: [{ id: 'fldD1', name: 'ID', type: 'autoNumber', typeOptions: { maxUsedAutoNumber: 7 }, description: null }],
+      views: [], rows: [],
+    });
+    // Plan against the CURRENT dest state (counter 7), no actions — pure drift-guard exercise.
+    // normalizeSchema takes the FULL response ({data:{tableSchemas}}), same as snapshotBase does.
+    const destAtPlanTime = normalizeSchema(await client.getApplicationData(DEST));
+    savePlan(SRC, DEST, {
+      planId: 'plnCTR', engineVersion: ENGINE_VERSION,
+      destFingerprint: fingerprintSchema({ baseId: DEST, ...destAtPlanTime }),
+      sourceBaseId: SRC, destBaseId: DEST,
+      idmap: { tables: {}, fields: {}, views: {} },
+      actions: [], orphans: [], warnings: [],
+    });
+    saveIdmap(SRC, DEST, { tables: {}, fields: {}, views: {}, records: {}, attachments: {} });
+
+    // Airtable advances the counter before apply runs.
+    client.tables[client.tables.length - 1].columns[0].typeOptions.maxUsedAutoNumber = 8;
+
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnCTR', runStartedAt: 't1' });
+    assert.notEqual(out.machine.aborted, true,
+      `a counter-only change must not read as drift: ${out.human}`);
   });
 
   // A plan from an older engine hashed fewer facets, so its digest can NEVER match. Reporting that

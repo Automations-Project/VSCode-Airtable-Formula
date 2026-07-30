@@ -103,6 +103,34 @@ describe('sync index.plan', () => {
     assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'key order must not be drift');
   });
 
+  it('fingerprintSchema: autoNumber maxUsedAutoNumber is runtime state, NOT drift', () => {
+    // The counter advances whenever a row is created — including by this sync's OWN records
+    // phase — so hashing it made an unchanged schema abort with a phantom DRIFT (review repro:
+    // counter 7 → 8, fingerprint changed, apply aborted). apply.js strips it before every
+    // write for the same reason; the fingerprint must share that knowledge.
+    const mk = (typeOptions) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'ID', type: 'autoNumber', typeOptions },
+    ] }] });
+    assert.equal(
+      fingerprintSchema(mk({ maxUsedAutoNumber: 7 })),
+      fingerprintSchema(mk({ maxUsedAutoNumber: 8 })),
+      'a counter-only change must NOT be drift',
+    );
+    // …but a SEMANTIC typeOptions change on the same field still is.
+    assert.notEqual(
+      fingerprintSchema(mk({ maxUsedAutoNumber: 7, format: 'A' })),
+      fingerprintSchema(mk({ maxUsedAutoNumber: 8, format: 'B' })),
+      'a real typeOptions change must still be drift even with the counter moving',
+    );
+    // And through the REAL normalizer, same asymmetry.
+    const raw = (n, fmt) => ({ data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'ID', type: 'autoNumber', typeOptions: { maxUsedAutoNumber: n, ...(fmt ? { format: fmt } : {}) } }],
+    }] } });
+    assert.equal(fingerprintSchema(normalizeSchema(raw(7))), fingerprintSchema(normalizeSchema(raw(8))));
+    assert.notEqual(fingerprintSchema(normalizeSchema(raw(7, 'A'))), fingerprintSchema(normalizeSchema(raw(8, 'B'))));
+  });
+
   it('fingerprintSchema: a section rename is drift in the DEFAULT mode (mirror prune deletes by id)', () => {
     // pruneSchema deletes dest-only sections by ID. If a section renamed between plan and apply
     // does not read as drift, apply deletes it under its old identity — reproduced by review:

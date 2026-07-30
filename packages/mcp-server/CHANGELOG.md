@@ -9,6 +9,16 @@ External review (PR #19) found both, with a reproduction. Sync's drift guard is 
 two holes that compounded: the fingerprint usually could not see the change, and once a run was
 resuming it stopped looking.
 
+- **Third review round (same day): `2d` hashed autoNumber's runtime counter — fixed as engine `2e`.**
+  `typeOptions.maxUsedAutoNumber` is a read-only counter the server advances whenever a row is
+  created — including by this sync's OWN records phase — so hashing it raw made an unchanged
+  schema abort with a phantom `DRIFT` (review repro: counter 7 → 8, apply aborted), and a
+  re-apply after any records run could trip its own guard. The fingerprint now strips it via
+  `fingerprintTypeOptions()`, the same strip `apply.js` already performs before every write;
+  semantic `typeOptions` changes on the same field still drift. Regressions cover the synthetic
+  shape, the `normalizeSchema` parity path, and a full plan→apply run with only the counter
+  advanced. Plans saved by `2d` abort `PLAN_STALE` with a re-plan instruction. Fails safe
+  either way — the bug refused legitimate applies; it never overwrote anything.
 - **Second review round (same day): the widening itself had three defects, all fixed as engine `2d`.**
   (1) The fingerprint hashed `f.options` — a key NO normalized snapshot carries; the real key is
   `typeOptions` (`normalizeSchema`), so the widening was inert in production while its tests
@@ -45,8 +55,8 @@ resuming it stopped looking.
 - **A plan from an older engine aborts with `PLAN_STALE`, not `DRIFT`.** An older plan hashed
   fewer facets, so its digest can never match a current one. Reporting that as `DRIFT` blamed a
   collaborator; mid-resume it invited the user to wave an overwrite through to fix what was really
-  a version mismatch. `ENGINE_VERSION` is exported (now `2d` — see the second-round entry above),
-  so test fixtures track it instead of pinning a literal that goes stale on the next bump.
+  a version mismatch. `ENGINE_VERSION` is exported (now `2e` — see the rounds above), so test
+  fixtures track it instead of pinning a literal that goes stale on the next bump.
 
 ### Changed (2026-07-30 — `mirror` no longer claims more than it does)
 

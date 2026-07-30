@@ -18,9 +18,29 @@ import { writeSyncJobStatus, readSyncJobStatus } from './job-status.js';
 // passed on synthetic shapes — external review caught it with a live reproduction. 2d hashes
 // `typeOptions` and also folds in table SECTIONS (mirror prune deletes dest-only sections by
 // id, so a renamed section must read as drift, not get deleted under its old identity).
-// A plan saved by an older engine hashed LESS, so its fingerprint can never match a current
-// one — apply detects that by version and says "re-plan", instead of blaming a collaborator.
-export const ENGINE_VERSION = '2d';
+// '2e' exists because 2d hashed typeOptions RAW, including autoNumber's maxUsedAutoNumber —
+// a read-only runtime counter Airtable advances whenever a row is created, including by this
+// sync's OWN records phase. Any row landing between plan and apply (or a re-apply after a
+// records run) produced a phantom DRIFT abort on an unchanged schema. 2e strips it, exactly
+// as apply.js already strips it before every write.
+// A plan saved by an older engine hashed a DIFFERENT basis, so its fingerprint can never match
+// a current one — apply detects that by version and says "re-plan", instead of blaming a
+// collaborator.
+export const ENGINE_VERSION = '2e';
+
+/**
+ * typeOptions as hashed by the drift fingerprint: schema SEMANTICS only, runtime state out.
+ *
+ * `maxUsedAutoNumber` is the one known runtime key — a counter the server advances on row
+ * creation, not something a collaborator edits. apply.js strips it at both of its write
+ * sites for the same reason (the API rejects it); if another runtime key ever surfaces,
+ * add it HERE and THERE together, and bump ENGINE_VERSION.
+ */
+function fingerprintTypeOptions(typeOptions) {
+  if (!typeOptions || typeof typeOptions !== 'object') return typeOptions ?? null;
+  const { maxUsedAutoNumber, ...semantic } = typeOptions;
+  return semantic;
+}
 
 /**
  * Stable JSON — object keys sorted at every depth.
@@ -74,7 +94,7 @@ export function fingerprintSchema(snap, { includeViewConfig = false } = {}) {
     // must construct fields the way normalizeSchema does.
     .map((t) => `${t.id}:${t.name}:`
       + t.fields.map((f) =>
-        `${f.id}=${f.name}=${f.type}=${stableJson(f.typeOptions ?? null)}=${f.description ?? ''}`
+        `${f.id}=${f.name}=${f.type}=${stableJson(fingerprintTypeOptions(f.typeOptions))}=${f.description ?? ''}`
       ).sort().join(',')
       + ';V:' + (t.views || []).map((v) =>
         `${v.id}=${v.name}=${v.type}` + (includeViewConfig ? `=${stableJson(v.config ?? null)}` : '')
