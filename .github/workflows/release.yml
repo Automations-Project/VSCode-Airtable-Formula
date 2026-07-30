@@ -178,13 +178,27 @@ jobs:
           echo "current=${BASE}" >> $GITHUB_OUTPUT
           echo "next=${NEXT}" >> $GITHUB_OUTPUT
 
-          # Write new version to package.json
+          # Write new version to package.json AND to server.json.
+          #
+          # server.json is the MCP Registry manifest and carries its own version in
+          # two places. check-tool-sync asserts server.json.version === package.json
+          # .version, and `pnpm build` runs that guard first — so bumping only
+          # package.json here fails the build on EVERY mcp-server release. It cannot
+          # be worked around by hand-bumping server.json before dispatch either: the
+          # BASE above is max(local, published), so the workflow always lands one
+          # above whatever is committed. The bump has to happen here, together.
           node -e "
             const fs = require('fs');
             const p = '$PKG';
             const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
             pkg.version = '${NEXT}';
             fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+
+            const sp = 'packages/mcp-server/server.json';
+            const srv = JSON.parse(fs.readFileSync(sp, 'utf8'));
+            srv.version = '${NEXT}';
+            for (const entry of srv.packages ?? []) entry.version = '${NEXT}';
+            fs.writeFileSync(sp, JSON.stringify(srv, null, 2) + '\n');
           "
           echo "MCP server: ${BASE} → ${NEXT}"
 
@@ -416,7 +430,9 @@ jobs:
           fi
 
           if [[ "${{ inputs.target }}" == "mcp-server" || "${{ inputs.target }}" == "both" ]]; then
-            git add packages/mcp-server/package.json
+            # server.json is bumped alongside package.json (see the bump step) and
+            # must be committed with it, or the next build fails the version guard.
+            git add packages/mcp-server/package.json packages/mcp-server/server.json
             TARGETS="${TARGETS} mcp-server v${{ steps.mcp_version.outputs.next }}"
             TAGS="${TAGS} mcp-server/v${{ steps.mcp_version.outputs.next }}"
           fi

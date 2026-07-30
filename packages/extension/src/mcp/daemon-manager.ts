@@ -222,8 +222,8 @@ export class DaemonManager implements vscode.Disposable {
       // (!running) OR a STALE lockfile whose daemon pid is dead (status.stale) — the spawned daemon
       // reclaims the stale lock. Without the `|| status.stale`, a crash-orphaned lockfile wedges here.
       if ((!status.running || status.stale) && !spawnedThisCall) {
-        if (options?.implicit && this._userStopped) {
-          throw new Error('Daemon was explicitly stopped by the user; not respawning implicitly.');
+        if (options?.implicit && (this._userStopped || this._stopSentinelPresent())) {
+          throw new Error('Daemon was explicitly stopped; not respawning implicitly.');
         }
         // check-and-set is synchronous (no await between the read and the write), so two callers
         // can't both pass the window check — the second sees the timestamp the first just wrote.
@@ -242,6 +242,30 @@ export class DaemonManager implements vscode.Disposable {
       await this._delay(200);
     }
     throw new Error('Timed out waiting for daemon startup.');
+  }
+
+  /**
+   * Did someone stop the daemon deliberately from OUTSIDE this extension host?
+   *
+   * `_userStopped` only knows about stops that went through this object. A stop
+   * driven by the `manage_daemon` tool runs inside the daemon process and cannot
+   * reach that flag, so without this the next implicit ensureDaemon() — definition
+   * provider, credential handoff, a formula command — respawns the daemon and the
+   * tool's stop was a lie. The daemon writes `<configDir>/daemon.stopped` on its way
+   * out; this is the only channel that crosses the process boundary.
+   *
+   * Safe against wedging a legitimate start, on both counts the sentinel's own
+   * contract requires: the ONLY caller is inside the `!running || stale` branch, so
+   * a live daemon already outranks it; and `startDaemon()` deletes the file as soon
+   * as it takes the lock, so a stale sentinel survives only until the next
+   * intentional start. An explicit (non-implicit) ensureDaemon bypasses this check
+   * entirely, exactly as it already bypasses `_userStopped`.
+   */
+  private _stopSentinelPresent(): boolean {
+    if (!this.configDir) return false;
+    // Presence is the whole signal — the file's contents are diagnostics for
+    // humans, and a corrupt one must never suppress a start.
+    return existsSync(path.join(this.configDir, 'daemon.stopped'));
   }
 
   /**
