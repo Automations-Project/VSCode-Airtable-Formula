@@ -571,3 +571,22 @@ describe('apply: field retypes (M4)', () => {
     assert.ok(!res.warnings.some((w) => w.code === 'RETYPE_GATED'));
   });
 });
+
+describe('apply: updateField (autoNumber — strip read-only maxUsedAutoNumber)', () => {
+  // Regression: the createField path stripped the runtime counter (7754291), but a semantic
+  // typeOptions change on an EXISTING autoNumber field rode the generic scalar update path,
+  // which sent the raw remapped options — maxUsedAutoNumber included — and would 422.
+  it('semantic options update reaches updateFieldConfig without the runtime counter', async () => {
+    const client = new MockClient();
+    const { destSnapshot, fId } = await destWithField(client, 'autoNumber', { maxUsedAutoNumber: 3 });
+    const payloads = [];
+    const orig = client.updateFieldConfig.bind(client);
+    client.updateFieldConfig = async (appId, fldId, cfg) => { payloads.push(cfg); return orig(appId, fldId, cfg); };
+    const res = await runRT(client, retypePlan(fId, { typeOptions: { maxUsedAutoNumber: 9, format: 'B' } }), destSnapshot, false);
+    assert.equal(res.failed, 0, 'update must not fail');
+    const cfg = payloads.find((p) => p.type === 'autoNumber');
+    assert.ok(cfg, 'updateFieldConfig called for the autoNumber field');
+    assert.equal('maxUsedAutoNumber' in (cfg.typeOptions || {}), false, 'runtime counter must not ride the update payload');
+    assert.equal(cfg.typeOptions.format, 'B', 'semantic option still applied');
+  });
+});
