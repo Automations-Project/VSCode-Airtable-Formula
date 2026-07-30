@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-30 review finish — diff detail id, autoNumber update path, test isolation)
+
+- **`sync_base mode=diff` with `detail` but no `diffId` returned `diffId:null` on success.**
+  `diffDetail()` resolves the latest saved diff when the param is omitted, but the tool echoed
+  the caller's absent param — and the detail branch's machine payload carried no id at all.
+  `diffDetail()` now returns the resolved id (top-level and in `machine`) and the tool reports
+  it, so a caller can pin follow-up `detail`/`offset` pages to the exact diff it was served.
+- **A semantic `typeOptions` update on an existing autoNumber field shipped `maxUsedAutoNumber`.**
+  The createField and reconcilePrimary paths already stripped the read-only runtime counter,
+  but the generic updateField options path sent the raw remapped options — counter included —
+  which the API 422s. The strip is now single-sourced (`stripAutoNumberCounter()`, apply.js)
+  and applied at all three send sites.
+- **`test-tool-config.test.js` wrote the LIVE `~/.airtable-user-mcp/tools-config.json`.**
+  `switchProfile()`/`toggleTool()` persist on every call; the suite ran unsandboxed, so tests
+  raced the real daemon for the file (Windows EPERM rename flake) and could flip the user's
+  real active profile. The whole file now runs under an `AIRTABLE_USER_MCP_HOME` temp dir.
+
 ### Fixed (2026-07-30 sync drift detection — two ways a collaborator's edit got overwritten)
 
 External review (PR #19) found both, with a reproduction. Sync's drift guard is what stops
