@@ -751,6 +751,7 @@ export function Settings() {
               <SettingToggle label="Record Write"         desc="create_records, update_records, duplicate_records, upload_attachment — bulk record create / update / duplication / attachment upload (4 tools)" value={settings.mcp.toolProfile.categories.recordWrite}            settingKey="mcp.categories.recordWrite" />
               <SettingToggle label="Record Destructive"   desc="delete_records — batch record deletion (1 tool)"                              value={settings.mcp.toolProfile.categories.recordDestructive}      settingKey="mcp.categories.recordDestructive" />
               <SettingToggle label="Sync"                 desc="sync_base — plan/diff/status are read-only; apply mutates the destination and can delete under policy=mirror (1 tool)" value={settings.mcp.toolProfile.categories.sync}                   settingKey="mcp.categories.sync" />
+              <SettingToggle label="Daemon Control"       desc="manage_daemon — status is read-only diagnostics; start / restart / stop / tunnel / token_rotate control the MCP server process itself (1 tool)" value={settings.mcp.toolProfile.categories.daemon}                 settingKey="mcp.categories.daemon" />
             </div>
           )}
 

@@ -3,12 +3,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 71 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 72 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
 </picture>
 
 # Airtable Formulas, Scripts, Automation, MCP & LSP
 
-**Formula, script & automation editor · MCP server (71 tools + `manage_tools`) · Language server · AI skills**
+**Formula, script & automation editor · MCP server (72 tools + `manage_tools`) · Language server · AI skills**
 
 <table align="center">
 <tr>
@@ -65,12 +65,12 @@
 | **Formula Editor** | Syntax highlighting, IntelliSense, beautify / minify | `.formula`, `.min.formula` |
 | **Script Editor** | Completions, hover docs, diagnostics | `.ats`, `.script` |
 | **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
-| **MCP Server (71 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
+| **MCP Server (72 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
 | **Language Server (LSP)** | Standalone multi-editor support — Neovim, Zed, Helix, OpenCode | All above |
 | **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
 | **AI Skills** | Pre-built Airtable-specific rules and workflows for AI coding assistants | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
-| **Tool Profiles** | `read-only` (12 tools) / `safe-write` (54 tools) / `full` (71 tools) / `custom` permission scopes | — |
+| **Tool Profiles** | `read-only` (12 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` permission scopes | — |
 | **OS Keychain Auth** | Browser-based Airtable login with SSO/2FA — credentials in your OS keychain | — |
 
 ---
@@ -97,7 +97,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| **Total tools** | ~17 | **72** (71 + `manage_tools`) |
+| **Total tools** | ~17 | **73** (72 + `manage_tools`) |
 | **Auth model** | Personal Access Token or OAuth, per-scope setup | **Log in once with your normal Airtable account** (SSO/2FA supported) |
 | **Transport** | HTTP (remote) | stdio (local, private) |
 | **Data never leaves your machine** | ❌ Requests go through `mcp.airtable.com` | ✅ Runs locally against Airtable's API |
@@ -126,7 +126,8 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Form metadata (description, redirect, attribution, branding)** | ❌ | ✅ |
 | **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
 | **Create dashboard pages** | ❌ | ✅ |
-| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (12) / safe-write (54) / full (71) / custom |
+| **Daemon self-diagnosis (session dead? browser busy? daemon gone?)** | ❌ | ✅ `manage_daemon` `action=status`, plus start / restart / stop / tunnel / token rotation |
+| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (12) / safe-write (54) / full (72) / custom |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
 | **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
@@ -191,7 +192,7 @@ This monorepo ships **three products** from one source tree:
 
 ## Features
 
-### MCP Server (71 Tools + `manage_tools`)
+### MCP Server (72 Tools + `manage_tools`)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
@@ -210,8 +211,21 @@ Manage Airtable bases with capabilities **not available through the official RES
 | **Extension Management** | 7 | Create, install, enable/disable, rename, duplicate, remove extensions |
 | **Tool Management** | 1 | List profiles, switch profile, toggle tools/categories (meta-tool, always enabled — not part of any profile) |
 | **Base Sync** | 1 | `sync_base` — copy a base's schema, views, and records to another base. `mode=plan`/`diff`/`status` are read-only; `mode=apply` mutates the destination and, with `policy=mirror` plus the confirmation flags, can delete tables, fields, views, sections and records; `mode=reconcile` updates local mapping state. Drift-guarded and resumable via journal. |
+| **Daemon Control** | 1 | `manage_daemon` — `action=status` is read-only self-diagnosis: daemon liveness, transport, uptime, tunnel URL, and the live session state (dead session, last breaker trip with Airtable's own response body, browser busy queue) that tells "daemon gone" from "session dead" from "browser busy". Also `start` / `restart` / `stop` / `tunnel_enable` / `tunnel_disable` / `token_rotate`. `full` profile only. |
 
 See the full tool reference in [`packages/mcp-server/README.md`](packages/mcp-server/README.md).
+
+#### One shared daemon
+
+The extension starts the shared MCP daemon whenever a tool call needs one, so every VS Code window uses **one**
+Airtable browser session instead of one per window — that duplication is what produced most "session dead" errors.
+A daemon you stop from the dashboard stays stopped, and if it cannot start, the extension falls back to a
+per-window server so your tools keep working.
+
+Because a daemon is usually running, other MCP clients on the same machine (Claude Desktop, Cursor, Cline, Amp)
+attach to it and therefore run under **its** auth mode and HTTP client rather than their own — deliberately, since
+two browsers on one Airtable profile crash. Each such client prints one stderr line saying so. See
+[Sharing one daemon across clients](packages/mcp-server/README.md#sharing-one-daemon-across-clients).
 
 ### LSP Server
 

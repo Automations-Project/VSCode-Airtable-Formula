@@ -20,8 +20,8 @@ Usage:
   npx airtable-user-mcp                  Start MCP server (stdio)
   npx airtable-user-mcp login            Log in via browser
   npx airtable-user-mcp logout           Clear saved session
-  npx airtable-user-mcp status           Show session & browser info
-  npx airtable-user-mcp doctor           Run diagnostics
+  npx airtable-user-mcp status           Show what's on disk (makes no session claim)
+  npx airtable-user-mcp doctor           Run diagnostics + probe whether you're signed in
   npx airtable-user-mcp install-browser  Download Chromium (~170MB)
   npx airtable-user-mcp daemon start                          Start the shared daemon process
   npx airtable-user-mcp daemon stop                           Stop the running daemon

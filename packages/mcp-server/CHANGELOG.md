@@ -2,6 +2,227 @@
 
 ## [Unreleased]
 
+### Added (2026-07-30 `manage_daemon` — model-facing daemon control)
+
+- **New tool `manage_daemon`, in a new `daemon` category, `full` profile only.**
+  Tool counts move **71 → 72** (`read-only` stays 12, `safe-write` stays 54);
+  categories move 15 → 16. Actions: `status`, `start`, `restart`, `stop`,
+  `tunnel_enable`, `tunnel_disable`, `token_rotate`.
+  - `action="status"` is the read-only diagnostic and the reason the tool exists:
+    it reports daemon liveness, **whether this process is the daemon**, transport,
+    uptime, version/provenance and tunnel URL, plus the live session state
+    (`sessionDead`, the last circuit-breaker trip *including Airtable's captured
+    4xx response body*, and the browser/auth busy queue). Those three were
+    previously reachable only by the VS Code extension over HTTP, so a model
+    watching a sync job die could not tell *daemon gone* from *session dead* from
+    *browser busy*. It never launches a browser and never mutates the lockfile.
+  - `stop`/`restart` answer **first** and exit afterwards, from a `res.on('finish')`
+    hook in `daemon/server.js`. Exiting from inside the handler deadlocks: closing
+    the transport clears the request map without resolving the SDK's
+    `enableJsonResponse` promise, so the response never flushes and the socket
+    never closes. `stop` also writes a `daemon.stopped` sentinel, so the VS Code
+    extension does not silently respawn the daemon the model just stopped.
+  - `token_rotate` and `tunnel_*` are **loopback-only** and are refused for callers
+    arriving through the tunnel; `status` is returned to them with host-identifying
+    fields blanked. `/mcp` is the one route a tunnel caller can reach — every other
+    `/daemon/*` route 404s for them — so putting daemon administration on the `/mcp`
+    plane without this guard would have handed back exactly what that allowlist
+    takes away. The bearer token is never returned to any caller, in any mode.
+  - Interactive tunnel setup (`cloudflared login`, creating a named tunnel) is
+    deliberately **not** exposed: readline prompts, an up-to-10-minute block, and a
+    new Cloudflare tunnel per call. Use the CLI or the VS Code dashboard.
+- **Standalone `airtable-user-mcp` npm/CLI users on the `custom` profile will not
+  get `manage_daemon` automatically** — and that is intended. `daemon` is a new
+  category, so it is correctly excluded from the frozen
+  `LEGACY_CATEGORIES_DEFAULT_ON` allowlist and an absent `customTools` key resolves
+  to **disabled**, exactly as `sync` and `record-destructive` did when they shipped.
+  A tool that can stop or restart the server the caller is talking through must
+  never arrive by upgrade alone. **To enable it:** run
+  `manage_tools toggle_category daemon true`, or add an explicit
+  `"manage_daemon": true` to `~/.airtable-user-mcp/tools-config.json`. VS Code
+  extension users are unaffected: `syncSettingsToFile()` always writes an explicit
+  key for every tool, and the new `airtableFormula.mcp.categories.daemon` setting
+  ships **off** by default.
+
+### Fixed (2026-07-30 stale category/tool enumerations)
+
+- **`manage_tools`' own `category` parameter listed 8 of the 15 categories.** It was
+  a hand-written string that nobody updated when a category shipped, so a model had
+  no way to discover that `record-write`, `view-section`, `sync` or `daemon` were
+  toggleable at all. It is now derived from `CATEGORY_LABELS` — both the prose and a
+  real JSON-Schema `enum`, so the list cannot go stale again and clients can
+  validate the argument.
+- **The published MCP Registry manifest (`server.json`) advertised 32 of 72 tools at
+  version 2.1.1 while the package was at 2.4.15.** `mcp-publisher publish` reads this
+  file, so that was the tool list shown on registry.modelcontextprotocol.io. The
+  `tools` array is regenerated (all 72 + `manage_tools`) and both version fields now
+  track `package.json`. `check:tool-sync` guards the tool-name set and the versions
+  from now on; the blurbs stay free prose, so ordinary copy edits do not fail the
+  build.
+
+### Fixed (2026-07-30 cross-client config override is no longer silent)
+
+- **A standalone client that attach-proxies into someone else's daemon now says so,
+  once, on stderr.** Since the daemon is now started on MCP request, a
+  `daemon.lock` exists on essentially every VS Code session — so a standalone client
+  (Claude Desktop, Cursor, Cline, Amp) that finds one attaches to **VS Code's**
+  daemon and every tool call runs under **that** process's environment. The attach
+  path reads only `AIRTABLE_NO_DAEMON` and `AIRTABLE_USER_MCP_HOME` from the
+  client's own env; its configured `AIRTABLE_AUTH_MODE`, `AIRTABLE_HTTP_CLIENT`,
+  browser channel and idle-park tuning were silently void. The attach still
+  happens — refusing it would send the process down the in-process path and put a
+  **second** Chromium on the shared persistent profile, which is the Chrome-exit-21
+  failure this codebase has historically mis-reported as "session dead" — but the
+  mismatch is now named explicitly, with the two ways to opt out
+  (`AIRTABLE_NO_DAEMON=1`, or stop the daemon and let it restart from your env).
+- **`/daemon/health` now reports the daemon's effective `authMode`, `httpClient` and
+  `configDir`**, so a caller can ask "whose settings am I actually running under?"
+  after the fact. `manage_daemon action="status"` reports the same three.
+- **This is deliberate, not a bug to be fixed later.** A standalone client that
+  attaches inherits **that daemon's** auth mode and HTTP client, and its own
+  `AIRTABLE_AUTH_MODE` / `AIRTABLE_HTTP_CLIENT` are not applied — because the whole
+  point of the shared daemon is that exactly **one** browser owns the persistent
+  Chrome profile. Two processes on that profile is the crash class, so the shared
+  configuration wins by design. The stderr line is the discovery mechanism: it is
+  the only place that mismatch is ever announced.
+
+### Changed (2026-07-30 the daemon now starts on an MCP request)
+
+- **An MCP tool call can now bring the daemon up; previously only the VS Code
+  dashboard or a formula command could.** `registration.ts` called a passive
+  `getDaemonStatus()`, so unless the user had already opened the dashboard, *every*
+  session fell through to the stdio branch — and that branch spawns an in-process
+  server **per VS Code window**, each with its own Chromium on the single-owner
+  `.chrome-profile`. That is the Chrome exit-21 collision this project has
+  repeatedly mis-reported as "session dead". Starting the daemon here makes profile
+  collisions **less** likely, not more: one shared daemon replaces N stdio servers.
+  - **What changes for users:** a `daemon.lock` now exists on essentially every VS
+    Code session, browser logins are shared instead of duplicated, and standalone
+    clients on the same machine attach to it (see the cross-client note above).
+  - The start is **implicit**: it preserves the `_userStopped` latch, so a daemon
+    you deliberately stopped is *not* resurrected by the next tool call, and it
+    keeps the spawn-suppression window that closed the runaway-spawn OOM.
+  - **If the daemon cannot start, MCP still works** — the provider falls through to
+    stdio rather than returning no server at all.
+- **`byo` / `direct-login` users no longer get a credential-less stdio server when
+  the daemon is unavailable.** The credential-injection branch used to test the
+  `useDaemon` *setting*; it now tests whether a daemon is *actually serving this
+  registration*. Those were the same thing until the daemon could fail to start.
+  With the old test, a `byo`/`direct-login` user whose daemon failed to start (or
+  who had pressed Stop) got a stdio server with no credentials and no browser to
+  fall back on — `*_CREDENTIALS_MISSING` on every single tool call. When the daemon
+  *is* serving, `/daemon/auth-credentials` remains the single credential channel and
+  secrets are still never duplicated into the child environment.
+
+### Fixed (2026-07-30 daemon lifecycle hardening)
+
+- **A malformed `AIRTABLE_IDLE_PARK_MS` disabled idle parking instead of being
+  ignored.** Anything unparseable — `"30m"`, `"1_800_000"`, a stray quote — fell
+  through to `0`, and `0` means *never park*. So the env var meant to **tune**
+  parking silently **switched it off**, pinning a ~300–600 MB Chromium tree
+  resident forever. Unparseable input now returns the 30-minute default; only an
+  explicit, well-formed `0` (or negative) disables parking.
+- **A cookie-less idle park no longer reads as a stranded browser.** The abort path
+  logs "deferred … will retry when idle again" and is genuinely re-armed by the
+  busy→idle edge, rather than claiming it is "keeping browser up" forever.
+- **The tool-config watcher is awaited at daemon startup.** `startWatching()` only
+  assigns its watcher after an internal `await mkdir`, so the un-awaited call let
+  `stop()` run `stopWatching()` while the handle was still null. The watcher was
+  then created with nobody left to close it, the fs handle kept the process alive
+  past shutdown, and `stopDaemon()` waited out its timeout and escalated to
+  SIGKILL.
+
+### Fixed (2026-07-30 issue #21 — login reported success without checking who was signed in)
+
+- **`login` declared success on the first 2xx and printed `User: undefined` even
+  when it worked** ([#21]). The root cause is counter-intuitive, so state it
+  plainly: **`/v0.3/getUserProperties` carries no identity at all.** Its
+  *authenticated* 200 body is eight feature-flag booleans
+  (`{"gemini":false,"libra":false,…}`) — there is no `userId` in it, anywhere. The
+  `data.data.userId` that every probe read was a **phantom field that never
+  existed**, which is why the success line printed `undefined` on *successful*
+  logins too. The checkmark had never been reporting identity; it was reporting an
+  HTTP status and labelling it a user.
+  - **Consequence for the reporter:** because any 2xx counted, `login` closed the
+    browser roughly 2 s after opening it — before an SSO round trip or a
+    hand-typed 2FA code could possibly finish — and then reported success.
+  - **The fix:** identity now comes from the page bootstrap, where it actually
+    lives (`"sessionUserId":"usr…"` in the served HTML — the SPA reads it there
+    and builds its own `/v0.3/user/<usr…>/…` URLs from it). New module
+    `src/session-user.js` holds the scrape, the predicate, and the single poll
+    loop that `login.js` (×2), `login-runner.js` and `manual-login-runner.js` each
+    used to keep a private copy of. Those copies had already drifted — one polled
+    60 s while the other three polled 300 s — and that divergence is how #21
+    survived this long. All four now poll for the same 5 minutes, which is what
+    SSO plus a typed 2FA code actually needs.
+- **The identity check is STRICT at the login and health probes, ADVISORY at
+  session verify — and that asymmetry is the design, not an inconsistency.**
+  - **STRICT** (`login`, the spawned `health-check`): a real `usr…` id is
+    *required*. A human is waiting on a green light here, and a false green **is**
+    the bug being fixed. A cookieless caller gets `401` from `getUserProperties`,
+    so an accepted call carries real signal — but not conclusive signal: the
+    reporter demonstrably reached a state where a stale/partial profile cookie was
+    still accepted while the session was not usable.
+  - **ADVISORY** (`auth._verifySession` at server init): a missing id is logged and
+    ignored. The cookie has *already* been accepted over direct HTTP by that point,
+    and a missing marker is equally what you see when the wrong page loaded, the
+    render had not finished, or Airtable renamed the key. Gating there would turn
+    one scrape drift into a total outage of all 72 tools.
+  - The same reasoning is why the VS Code extension takes the daemon's verdict as
+    given and does **not** add its own "no userId ⇒ signed out" gate: `byo` and a
+    parked browser may never have had a page to read an id from.
+- **`userId` is never invented and never inherited.** It is dropped on `close()`,
+  so a leftover id from a previous login cannot stand in as proof about a session
+  it knows nothing about; `byo` reports `(user id unavailable — byo has no page to
+  read it from)` instead of a fabricated one. It is read in the same
+  `page.evaluate()` that already scrapes the CSRF token rather than via
+  `page.content()`, which serializes the entire multi-MB DOM over CDP and throws
+  mid-navigation.
+- **`direct-login` can now fail with `DIRECT_LOGIN_UNVERIFIED`.** It fires when the
+  HTTP login flow completes and a `__Host-airtable-session` cookie **is** present,
+  but the page airtable.com then serves carries **no** signed-in user — i.e. a
+  session cookie exists while the sign-in never actually completed (an incomplete
+  SSO or 2FA step). A cookie alone was previously treated as a completed login;
+  that is the same false-green as #21, on the browser-free path. **Remedy:** check
+  `AIRTABLE_EMAIL` / `AIRTABLE_PASSWORD` / `AIRTABLE_TOTP_SECRET`, or switch to
+  `AIRTABLE_AUTH_MODE=browser`.
+  - Deliberately **tri-state**, because getting this wrong breaks working logins:
+    `usr…` = signed in, `null` = the page says nobody is, `undefined` = never read.
+    **Only the middle case raises the error.** This client does not follow
+    redirects, so a perfectly good login whose `GET /` answers `302` hands back an
+    empty body; treating that as "signed out" failed successful logins and, through
+    `_recoverSession`, fed the dead-session breaker that aborts exactly the long
+    unattended jobs this mode exists to serve.
+- **`health-check` probes up to three times instead of once.** The marker arrives
+  with the page bootstrap, so a single shot reports a healthy session as signed out
+  on a slow render — and the extension answers an `expired` verdict by relaunching
+  Chrome, so a false red costs a full launch against the single-owner profile.
+- **`login-runner` is given 330 s by the extension, matching the runner's own
+  5-minute poll.** The previous 120 s default sent it `SIGTERM` mid-poll and threw
+  away the diagnostic it was about to print.
+
+### Changed (2026-07-30 `status` and `doctor` now tell you different, true things)
+
+- **`doctor` actually probes the session.** It previously reported all-green for
+  precisely the broken profile in #21, because it never checked the session at all.
+  It now prints one of `Session: signed in as usr…`, `Session: signed in, user id
+  unavailable in this auth mode`, or `Session: NOT signed in — <reason>`, and says
+  which route it used (`via the running daemon` / `checked directly`).
+  - It **prefers the running daemon** over opening its own browser. The persistent
+    profile is single-owner: launching a second Chromium against it collides
+    (Chrome exit 21), and auth's lock recovery would then kill the live daemon's
+    browser as a "stale holder". Only with no healthy daemon does `doctor` open its
+    own.
+- **`status` stopped lying in the other direction.** It reported
+  `Session: found`/`not found` from the existence of `session.json` — a file
+  nothing has written for several versions, so healthy installs read `not found`.
+  It now reports what the login flow actually produces (`Browser profile: …`,
+  `Daemon: …`) and explicitly claims **nothing** about whether you are signed in:
+  those files exist whether or not the login completed. `doctor` is the command
+  that can answer that, and `status` now says so.
+
+[#21]: https://github.com/Automations-Project/VSCode-Airtable-Formula/issues/21
+
 ### Known limitations (2026-07-25 tool profile safety — standalone CLI users)
 
 - **`LEGACY_CATEGORIES_DEFAULT_ON` is category-granular, not tool-name-granular —

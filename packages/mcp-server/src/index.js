@@ -30,6 +30,43 @@ if (cliArgs.length === 0 && !process.env.AIRTABLE_NO_DAEMON) {
     try {
       const daemon = await ensureDaemon({ configDir, startTimeoutMs: 15_000 });
 
+      // Say ONCE, out loud, when this client's own configuration is not the one
+      // that will actually be used. Attaching means our whole process is a pipe:
+      // every tool call runs inside the daemon, under the daemon's env. Only
+      // AIRTABLE_NO_DAEMON and AIRTABLE_USER_MCP_HOME are read on this side (above);
+      // AIRTABLE_AUTH_MODE, AIRTABLE_HTTP_CLIENT and everything else this client was
+      // configured with are silently void. Since a daemon exists on essentially
+      // every VS Code session, a standalone client (Claude Desktop / Cursor / Cline
+      // / Amp) normally lands here and inherits VS Code's settings without a word.
+      //
+      // We attach anyway, deliberately: refusing would send this process down the
+      // in-process path and put a SECOND Chromium on the shared persistent profile,
+      // which is the Chrome-exit-21 failure this codebase has historically
+      // mis-reported as "session dead". A silent config override is a much smaller
+      // problem than a crash loop — but silent is the part worth fixing, so make it
+      // visible. `manage_daemon action="status"` and /daemon/health report the same
+      // three fields for anyone who reads this later.
+      const mine = {
+        authMode: (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase(),
+        httpClient: process.env.AIRTABLE_HTTP_CLIENT || 'fetch',
+      };
+      const theirs = daemon.health ?? {};
+      const differing = Object.keys(mine).filter(
+        // Only report what the daemon actually told us. An older daemon predating
+        // these health fields returns undefined — unknown is not a mismatch.
+        (k) => theirs[k] !== undefined && theirs[k] !== mine[k],
+      );
+      if (differing.length) {
+        process.stderr.write(
+          `[airtable-mcp] attached to the daemon already running at pid ${daemon.pid} (port ${daemon.port}); ` +
+          `it was started with a different configuration, and ITS settings apply, not this client's: ` +
+          differing.map((k) => `${k}=${theirs[k]} (you configured ${mine[k]})`).join(', ') +
+          `. Daemon configDir=${theirs.configDir ?? 'unknown'}. ` +
+          `To run under your own settings instead, set AIRTABLE_NO_DAEMON=1 for this client, ` +
+          `or stop the daemon (\`npx airtable-user-mcp daemon stop\`) and let it restart from your env.\n`
+        );
+      }
+
       const stdioTransport = new StdioServerTransport(process.stdin, process.stdout);
       const httpTransport = new StreamableHTTPClientTransport(
         new URL(daemon.url + '/mcp'),
@@ -169,11 +206,11 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable bases with 71 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
+      'Manage Airtable bases with 72 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
       'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
       'select field choices with color support, formula validation and file-based bulk editing, ' +
       'record create/update/duplicate/delete plus URL-based attachment uploads, base-to-base schema and record sync, ' +
-      'extension management, and granular tool profile control (read-only / safe-write / full / custom).',
+      'extension management, daemon inspection and control, and granular tool profile control (read-only / safe-write / full / custom).',
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },
@@ -1750,7 +1787,11 @@ const MANAGE_TOOLS_DEF = {
       },
       category: {
         type: 'string',
-        description: 'Category name for toggle_category action (read, table-write, table-destructive, field-write, field-destructive, view-write, view-destructive, extension)',
+        // Derived from CATEGORY_LABELS, not hand-listed: the hand-written list this
+        // replaces named 8 of the then-15 categories and had no way to notice when a
+        // new one shipped, so the model could not discover `sync` or `daemon` existed.
+        enum: Object.keys(CATEGORY_LABELS),
+        description: `Category name for toggle_category action (${Object.keys(CATEGORY_LABELS).join(', ')})`,
       },
       enabled: {
         type: 'boolean',

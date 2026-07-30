@@ -29,7 +29,7 @@
  * cannot separate "not signed in yet" from "signed in", so a real id is
  * required. At server init the cookie has ALREADY been accepted over direct HTTP
  * (fact 2), so a missing id is logged and ignored — see auth._verifySession:
- * gating there turns one scrape drift into a total outage of all 71 tools.
+ * gating there turns one scrape drift into a total outage of every tool.
  *
  * The predicate lives in Node, OUTSIDE page.evaluate(): playwright ships the
  * callback's own source to the browser, so a callback referencing an import

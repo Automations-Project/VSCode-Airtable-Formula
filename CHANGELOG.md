@@ -6,6 +6,104 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added — `manage_daemon` tool and the `Daemon Control` category (2026-07-30)
+
+- **New MCP tool `manage_daemon` in a new `daemon` category.** Tool counts move
+  **71 → 72** (`read-only` 12 and `safe-write` 54 are unchanged; only `full`
+  grows), categories 15 → 16. `action="status"` is a read-only diagnostic that
+  reports daemon liveness/holder/transport/uptime/tunnel plus the live session
+  state — `sessionDead`, the last circuit-breaker trip including Airtable's own
+  captured response body, and the browser busy queue — which is what lets an AI
+  agent tell *daemon gone* from *session dead* from *browser busy*. The remaining
+  actions (`start`, `restart`, `stop`, `tunnel_enable`, `tunnel_disable`,
+  `token_rotate`) administer the daemon process itself.
+- **New setting `airtableFormula.mcp.categories.daemon`, defaulting to `false`.**
+  For a `custom`-profile user that one value is the whole decision, and this tool
+  can stop or restart the very server the agent is talking through — so it is off
+  until explicitly enabled. It is included in the `full` profile only.
+
+### Fixed — "Toggle MCP Tool Categories" showed 8 of 16 categories (2026-07-30)
+
+- **The command-palette category picker had its own hand-written list of 8
+  categories**, so Record Read/Write/Destructive, View Sections (both), Form
+  Metadata, Sync and Daemon Control were simply unreachable from it — and a newly
+  shipped category was invisible until someone noticed. It now enumerates
+  `SETTINGS_TO_CATEGORY` from `tool-profile.ts` (the table `check:tool-sync`
+  already guards) instead of a second copy, so the picker cannot fall behind the
+  category list again.
+
+### Fixed — `check:tool-sync` can no longer pass while a tool is uncallable (2026-07-30)
+
+- **The tool-sync guard now cross-checks `mcp-server/src/index.js` against
+  `tool-config.js` in both directions.** `manage_daemon` shipped with a definition
+  and a handler in `index.js` but **no entry in `TOOL_CATEGORIES`** — and because
+  `enabledToolNames()` iterates that map, a tool absent from it is yielded by
+  nothing and `isToolEnabled()` returns `false` in *every* profile, `full`
+  included. It was registered and permanently uncallable. `check:tool-sync`
+  nevertheless printed green, because every check it performed walked
+  `tool-config.js` and its mirrors — comparing the map against copies of itself,
+  which cannot see a tool that belongs to no category. The guard now also asserts
+  that every tool defined or handled in `index.js` is categorized, and that every
+  categorized tool has both a definition and a handler. It fails loudly if either
+  extraction yields zero tools, so a reformat degrades to a failure rather than to
+  a silent pass.
+
+### Changed — the shared daemon now starts when an MCP tool call needs it (2026-07-30)
+
+- **You no longer have to open the dashboard for the daemon to start.** MCP tool
+  calls now start it themselves. Before this, the extension only *looked* for a
+  running daemon, so unless you had opened the Airtable dashboard (or run a formula
+  command) that session quietly fell back to a per-window server — and **each VS
+  Code window then drove its own Chromium against the same browser profile**. That
+  collision is the failure this extension has historically shown you as "session
+  dead". One shared daemon is the configuration that avoids it.
+- **What you will notice:** one Airtable browser session shared by every window
+  instead of one per window, fewer spurious "session dead" errors, and the daemon
+  appearing in the dashboard without you starting it.
+- **Stop still means stop.** A daemon you stop from the dashboard is not
+  resurrected by the next tool call.
+- **If the daemon cannot start, the extension falls back to the old per-window
+  server** rather than leaving you with no MCP tools.
+- **Fixed alongside it:** on `Bring your own cookie` / `Direct login`, a failed or
+  stopped daemon used to leave the fallback server with no credentials at all —
+  every tool call failed with a missing-credentials error. The fallback is now
+  given credentials exactly when it is the one actually serving you.
+
+### Fixed — login could report success when you were not signed in (issue #21) (2026-07-30)
+
+- **Login declared success as soon as Airtable answered, and showed
+  `User: undefined` even when it had worked.** The endpoint being polled
+  (`getUserProperties`) turns out to carry **no identity whatsoever** — its
+  signed-in response is a list of feature flags — so the user id being read had
+  never existed, and any successful HTTP response counted as "logged in". In
+  practice the login window could close about two seconds after opening, before an
+  SSO redirect or a typed 2FA code could finish, and still report success.
+- **Login now waits for Airtable to actually say who you are**, reading the signed-in
+  user from the page itself, and every login path (dashboard login, CLI login,
+  manual login) waits the same **5 minutes** — enough for SSO plus a hand-typed 2FA
+  code. Previously these paths disagreed, one waiting 1 minute and the others 5.
+- **The dashboard shows your user id only when it genuinely knows it**, and never
+  carries one over from a previous session. In `Bring your own cookie` mode, where
+  there is no page to read it from, it says so instead of showing a stale or made-up
+  id. A missing user id is no longer treated as "signed out" — it is not evidence of
+  anything, and treating it as such would have logged out working sessions.
+- **`Direct login` now fails loudly with `DIRECT_LOGIN_UNVERIFIED`** when the login
+  flow finishes and a session cookie exists but Airtable still serves no signed-in
+  user — the same false success as above, on the browser-free path. It usually means
+  an incomplete SSO or 2FA step: check your email/password/TOTP secret, or switch
+  Auth Mode back to `browser`.
+- **Session health checks retry before declaring a session expired.** The signed-in
+  marker arrives with the page, so a single slow render used to read as "signed out"
+  — and the extension answers that by relaunching the browser, so a false alarm cost
+  a full browser launch. Login is also no longer killed at 2 minutes while it is
+  still legitimately waiting for you to finish signing in.
+- **CLI `doctor` and `status` now tell you different, true things.** `doctor`
+  actually probes the session (`Session: signed in as usr…` / `NOT signed in —
+  <reason>`) and reuses the running daemon's browser rather than opening a second one
+  against the same profile. `status` reports only what is on disk and no longer
+  claims anything about your session — it used to print `Session: not found` on
+  perfectly healthy installs by looking for a file nothing writes any more.
+
 ### Pre-merge hardening pass — tool profiles, sync safety, packaging, transport, proxies, session recovery, logout (2026-07-25)
 
 Pre-merge hardening pass on `feat/base-to-base-sync` before merging base-to-base

@@ -3,12 +3,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 71 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 72 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
 </picture>
 
 # airtable-user-mcp
 
-**Community add-on to the official Airtable MCP — 71 tools + `manage_tools` your AI assistant can't get from the public REST API**
+**Community add-on to the official Airtable MCP — 72 tools + `manage_tools` your AI assistant can't get from the public REST API**
 
 <table align="center">
 <tr>
@@ -85,7 +85,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| Total tools | ~17 | **72** (71 + `manage_tools`) |
+| Total tools | ~17 | **73** (72 + `manage_tools`) |
 | Auth | PAT or OAuth, per-scope | **Log in once with your normal account** (SSO/2FA supported) |
 | Transport | HTTP (remote) | stdio (local, private) |
 | Data routing | Through `mcp.airtable.com` | **Direct from your machine** |
@@ -110,7 +110,8 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Record templates (create, pre-fill, duplicate, apply, delete) | ❌ | ✅ |
 | Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
-| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (12 tools) / `safe-write` (54 tools) / `full` (71 tools) / `custom` |
+| Daemon self-diagnosis (is the session dead, the browser busy, or the daemon gone?) | ❌ | ✅ `manage_daemon` `action=status` — plus start / restart / stop / tunnel / token rotation |
+| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (12 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
 
@@ -136,11 +137,43 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 72 tools (71 Airtable tools + `manage_tools`).
+That's it. Your MCP client connects via **stdio** and gets access to all 73 tools (72 Airtable tools + `manage_tools`).
 
 When the daemon is running (started automatically by the VS Code extension, or via `npx airtable-user-mcp daemon start`),
 subsequent `npx airtable-user-mcp` invocations transparently proxy their stdio to the shared daemon —
 so all clients share one Chromium session. To skip the daemon and run in-process: `AIRTABLE_NO_DAEMON=1 npx airtable-user-mcp`.
+
+### Sharing one daemon across clients
+
+**A client that attaches to a running daemon runs under *that daemon's* configuration, not its own.**
+
+Only `AIRTABLE_NO_DAEMON` and `AIRTABLE_USER_MCP_HOME` are read on the attaching side. Everything else the
+client was configured with — `AIRTABLE_AUTH_MODE`, `AIRTABLE_HTTP_CLIENT`, browser channel, idle-park tuning —
+belongs to the process that actually executes the tool calls, which is the daemon. Since the VS Code extension
+now starts a daemon whenever an MCP tool call needs one, a `daemon.lock` exists on essentially every session,
+and a standalone client (Claude Desktop, Cursor, Cline, Amp) on the same machine will normally attach to it.
+
+This is deliberate. Airtable's persistent browser profile is **single-owner**: a second process driving its own
+Chromium against it crashes (Chrome exit 21, which surfaces confusingly as "session dead"). One shared browser is
+what prevents that, so refusing the attach would trade a configuration surprise for a crash loop.
+
+What you get instead is a notification. On attach, the client prints **one** stderr line naming every setting that
+differs, for example:
+
+```
+[airtable-mcp] attached to the daemon already running at pid 41233 (port 8723); it was started with a
+different configuration, and ITS settings apply, not this client's: authMode=browser (you configured byo).
+Daemon configDir=/home/you/.airtable-user-mcp. To run under your own settings instead, set
+AIRTABLE_NO_DAEMON=1 for this client, or stop the daemon (`npx airtable-user-mcp daemon stop`) and let it
+restart from your env.
+```
+
+To check after the fact which settings are actually in force, `GET /daemon/health` or `manage_daemon`
+`action=status` both report the daemon's effective `authMode`, `httpClient` and `configDir`.
+
+**Two ways to opt out:** set `AIRTABLE_NO_DAEMON=1` for that client (it runs in-process under its own
+settings — do not do this while another browser-mode daemon is live), or stop the daemon and let it restart
+from the environment you want.
 
 ---
 
@@ -259,7 +292,7 @@ Add the `airtable` entry to `mcpServers`:
 }
 ```
 
-Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see all 72 tools.
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see all 73 tools.
 
 </details>
 
@@ -282,7 +315,7 @@ Verify:
 claude mcp list
 ```
 
-You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and all 72 tools are available.
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and all 73 tools are available.
 
 </details>
 
@@ -302,6 +335,9 @@ It will call `list_tables` and return the names and IDs.
 |:--|:--|
 | `doctor` reports `Session: NOT signed in` | Re-run `npx -y airtable-user-mcp login` |
 | `Session invalid (0): airtable.com could not be reached` | Network/TLS/proxy, *not* an expired login — behind a TLS-inspecting proxy set `NODE_EXTRA_CA_CERTS`, else check `HTTPS_PROXY`/`NO_PROXY` |
+| `DIRECT_LOGIN_UNVERIFIED` (auth mode `direct-login`) | The login flow finished and a session cookie exists, but airtable.com then served no signed-in user — a cookie alone does not prove a completed login. Usually an incomplete SSO or 2FA step: check `AIRTABLE_EMAIL` / `AIRTABLE_PASSWORD` / `AIRTABLE_TOTP_SECRET`, or use `AIRTABLE_AUTH_MODE=browser` |
+| `[airtable-mcp] attached to the daemon already running at pid …` on stderr | Not an error — this client attached to a daemon started by another app (usually VS Code) and **that daemon's** auth mode / HTTP client apply, not this client's. See [Sharing one daemon across clients](#sharing-one-daemon-across-clients) |
+| Your configured `AIRTABLE_AUTH_MODE` / `AIRTABLE_HTTP_CLIENT` seems ignored | Same cause as above — you are attached to someone else's daemon. `AIRTABLE_NO_DAEMON=1` runs under your own settings; `manage_daemon action=status` or `/daemon/health` reports whose settings are actually in force |
 | Login window never loads | Check network / firewall, then `doctor` |
 | Browser download fails on Windows | Run PowerShell as Admin once, then retry `install-browser` |
 | Tools don't appear after config change | Fully quit and reopen Claude Desktop (not just the window) |
@@ -328,7 +364,8 @@ $env:AIRTABLE_BROWSER_PATH = "C:\Program Files\Google\Chrome\Application\chrome.
 | `AIRTABLE_NO_BROWSER` | Skip Patchright entirely — uses cached cookies only (CI/headless) |
 | `AIRTABLE_HEADLESS_ONLY` | Run the browser without a visible window |
 | `AIRTABLE_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` |
-| `AIRTABLE_NO_DAEMON` | Skip daemon; run in-process stdio directly (backwards-compatible mode) |
+| `AIRTABLE_NO_DAEMON` | Skip daemon; run in-process stdio directly (backwards-compatible mode). Also opts a standalone client out of attaching to another app's daemon — see [Sharing one daemon across clients](#sharing-one-daemon-across-clients) |
+| `AIRTABLE_BROWSER_IDLE_PARK_MS` | Idle time in **milliseconds** before the browser is parked to reclaim its ~300–600 MB. Default 30 minutes. Only an explicit, well-formed `0` disables parking; anything unparseable (`30m`, `1_800_000`) falls back to the default rather than switching parking off |
 
 ---
 
@@ -376,8 +413,8 @@ Then reference the binary directly in any MCP config:
 npx airtable-user-mcp                  Start MCP server (stdio)   ← what your Claude client runs
 npx airtable-user-mcp login            Log in to Airtable via browser
 npx airtable-user-mcp logout           Clear saved session
-npx airtable-user-mcp status           Show session & browser info
-npx airtable-user-mcp doctor           Run diagnostics
+npx airtable-user-mcp status           Show what's on disk (makes no session claim)
+npx airtable-user-mcp doctor           Run diagnostics + probe whether you're signed in
 npx airtable-user-mcp install-browser  Download Chromium (~170 MB)
 npx airtable-user-mcp --version        Print version
 npx airtable-user-mcp --help           Show this help
@@ -388,9 +425,9 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 ---
 
-## Tools (71 + `manage_tools`)
+## Tools (72 + `manage_tools`)
 
-71 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 72 tools total under the default `full` profile.
+72 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 73 tools total under the default `full` profile.
 
 ### Schema Read (11)
 
@@ -543,6 +580,15 @@ Saved row scaffolds Airtable surfaces under "+ Add record" and the row-create ex
 1. `mode=diff` — compare bases, review the digest. Verdict `converged` means no drift; `identical` means nothing to do.
 2. `mode=plan` — generate the full changeset. Edit `apply:false` on any `changeId` entries you want to skip, or collect their IDs. When `direction=to-source`, the plan is persisted under the swapped base pair, so applying it requires calling `mode=apply` with `sourceAppId` and `destAppId` swapped accordingly.
 3. `mode=apply skip=[...]` — execute the plan minus excluded changes.
+
+### Daemon Control (1)
+
+Administers this server's own process — no Airtable API surface. `full` profile only, and
+the `daemon` category defaults to **off** for existing `custom` profiles.
+
+| Tool | Description |
+|:-----|:------------|
+| `manage_daemon` | Inspect and control the MCP daemon this server runs in. `action=status` is read-only (it never launches a browser or rewrites the lockfile) and is the first thing to check when tools start failing: daemon running / am-I-the-holder, transport, port, uptime, version and build provenance, tunnel URL, plus the live session state — `sessionDead`, the last circuit-breaker trip **including Airtable's own response body** (a bare `403` hides whether it was permission, CSRF or rate limiting), and the browser/auth busy queue. Control actions: `start` (idempotent — attaches to a healthy daemon rather than starting a second one), `restart`, `stop`, `tunnel_enable`, `tunnel_disable`, `token_rotate`. `stop`/`restart` answer first and exit afterwards, so the call returns normally; `stop` writes `~/.airtable-user-mcp/daemon.stopped` so the VS Code extension does not silently respawn what you just stopped. `token_rotate` and `tunnel_*` are loopback-only and are refused for callers arriving over the tunnel; `status` is answered for them with host-identifying fields blanked. The bearer token is never returned to anyone. Interactive tunnel setup (`cloudflared login`, creating a named tunnel) is deliberately **not** here — use `daemon setup-tunnel named` on the CLI or the VS Code dashboard. |
 
 ---
 

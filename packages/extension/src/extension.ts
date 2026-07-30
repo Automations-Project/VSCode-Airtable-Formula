@@ -13,7 +13,7 @@ import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
 import { DaemonManager } from './mcp/daemon-manager.js';
 import { BrowserDownloadManager } from './mcp/browser-download.js';
-import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES } from './mcp/tool-profile.js';
+import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES, SETTINGS_TO_CATEGORY } from './mcp/tool-profile.js';
 import { scriptBeautify, scriptMinify, scriptBeautifyFile, scriptMinifyFile, formatScriptDocument } from './commands/scriptFormatter.js';
 import { uploadFormulaFile, downloadFormulaField } from './commands/formulaFile.js';
 import { registerFileTemplates } from './commands/formulaFileTemplate.js';
@@ -22,7 +22,15 @@ import { registerFileTemplates } from './commands/formulaFileTemplate.js';
 // These must mirror the ToolProfileName / ToolCategories definitions in
 // packages/shared/src/types.ts.
 type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
-type LocalToolCategoryKey = 'read' | 'tableWrite' | 'tableDestructive' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
+type LocalToolCategoryKey =
+    | 'read' | 'recordRead'
+    | 'tableWrite' | 'tableDestructive'
+    | 'fieldWrite' | 'fieldDestructive'
+    | 'viewWrite' | 'viewDestructive'
+    | 'viewSection' | 'viewSectionDestructive'
+    | 'formWrite' | 'extension'
+    | 'recordWrite' | 'recordDestructive'
+    | 'sync' | 'daemon';
 import { getSettings } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
@@ -521,21 +529,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.toggleToolCategory', async () => {
-            const settingsCategoryKeys: LocalToolCategoryKey[] = [
-                'read', 'tableWrite', 'tableDestructive', 'fieldWrite', 'fieldDestructive', 'viewWrite', 'viewDestructive', 'extension'
-            ];
-            // Map settings-side key → on-disk (file-format) category key used by
-            // TOOL_CATEGORIES values and CATEGORY_LABELS keys.
-            const fileKeyBySettingsKey: Record<LocalToolCategoryKey, string> = {
-                read:             'read',
-                tableWrite:       'table-write',
-                tableDestructive: 'table-destructive',
-                fieldWrite:       'field-write',
-                fieldDestructive: 'field-destructive',
-                viewWrite:        'view-write',
-                viewDestructive:  'view-destructive',
-                extension:        'extension',
-            };
+            // Settings-side key → on-disk (file-format) category key used by
+            // TOOL_CATEGORIES values and CATEGORY_LABELS keys. Taken from the
+            // tool-profile mirror rather than re-listed here: the hand-written
+            // list this replaces named 8 of the then-15 categories, so the other
+            // half were unreachable from the command palette and a new category
+            // was invisible until someone noticed.
+            const fileKeyBySettingsKey = SETTINGS_TO_CATEGORY as Record<LocalToolCategoryKey, string>;
+            const settingsCategoryKeys = Object.keys(fileKeyBySettingsKey) as LocalToolCategoryKey[];
             const snapshot = toolProfileManager.getSnapshot();
             const items = settingsCategoryKeys.map(key => {
                 const fileKey = fileKeyBySettingsKey[key];

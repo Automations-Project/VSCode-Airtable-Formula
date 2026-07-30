@@ -26,7 +26,7 @@ function auth(overrides = {}) {
 describe('auth._verifySession — identity is ADVISORY at init, never a gate', () => {
   // The anti-regression that matters most. A throw here propagates through
   // _doInit's catch (which closes the context and nulls page/context), so every
-  // one of the 71 tools fails; via _recoverSession it also counts toward the
+  // tool fails; via _recoverSession it also counts toward the
   // dead-session breaker, turning one scrape drift into a latched outage and a
   // records job into a per-row Chromium relaunch march.
   it('a 200 with NO readable session user must NOT throw, and must not invent a userId', async () => {

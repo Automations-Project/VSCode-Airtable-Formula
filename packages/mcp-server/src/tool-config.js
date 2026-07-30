@@ -117,6 +117,9 @@ export const TOOL_CATEGORIES = {
 
   // Sync (base-to-base schema + record sync — mode=apply mutates the dest and can delete under policy=mirror)
   sync_base:              'sync',
+
+  // Daemon control (inspect/administer the process this server runs in — no Airtable API surface)
+  manage_daemon:          'daemon',
 };
 
 /** Human-readable labels for categories */
@@ -136,6 +139,7 @@ export const CATEGORY_LABELS = {
   'record-write':             'Record Write',
   'record-destructive':       'Record Destructive',
   'sync':                     'Sync',
+  'daemon':                   'Daemon Control',
 };
 
 /**
@@ -147,7 +151,7 @@ export const CATEGORY_LABELS = {
  * predating a given category has NO key at all for that category's tools.
  * `enabledToolNames()` resolves an absent key to enabled only if the tool's
  * category is in this allowlist — so any category added in the future
- * (like `sync`/`record-destructive` were on this branch) automatically
+ * (like `sync`/`record-destructive`/`daemon` were on this branch) automatically
  * defaults to DISABLED for pre-existing custom configs, with zero code
  * changes required here. That's the point: the "don't silently widen a
  * custom profile" invariant is self-maintaining and can't be forgotten by a
@@ -189,14 +193,14 @@ export const BUILTIN_PROFILES = {
     categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'],
   },
   full: {
-    description: 'All tools enabled including destructive ops, form metadata, and extensions',
+    description: 'All tools enabled including destructive ops, form metadata, extensions, and daemon control',
     categories: [
       'read', 'record-read', 'record-write', 'record-destructive',
       'table-write', 'table-destructive',
       'field-write', 'field-destructive',
       'view-write', 'view-destructive',
       'view-section', 'view-section-destructive',
-      'form-write', 'extension', 'sync',
+      'form-write', 'extension', 'sync', 'daemon',
     ],
   },
 };

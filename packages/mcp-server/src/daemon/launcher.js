@@ -100,6 +100,12 @@ function toConnectionInfo(record, health) {
     version: record.version,
     startedAt: record.startedAt,
     tunnelUrl: record.tunnelUrl ?? null,
+    // The /daemon/health payload we already fetched to decide "healthy". Passed
+    // through rather than dropped so callers can read the daemon's EFFECTIVE
+    // runtime config (authMode / httpClient / configDir) without a second
+    // round-trip — the attach-proxy in index.js uses it to warn when the daemon
+    // it is joining was configured differently than this client was.
+    health: health ?? null,
   };
 }
 

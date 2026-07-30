@@ -380,6 +380,23 @@ export async function startDaemonServer(options = {}) {
     uptimeMs: Date.now() - startedAt,
     startedAt: new Date(startedAt).toISOString(),
     tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
+    // The daemon's EFFECTIVE runtime config, reported because it is not
+    // necessarily the caller's. A standalone client (Claude Desktop, Cursor,
+    // Cline, Amp) that finds a lockfile attach-proxies into whichever daemon is
+    // already running — typically VS Code's — and the attach path reads only
+    // AIRTABLE_NO_DAEMON and AIRTABLE_USER_MCP_HOME from the client's own env
+    // (see the attach-proxy prologue in src/index.js). Every other variable that
+    // client was configured with — AIRTABLE_AUTH_MODE, AIRTABLE_HTTP_CLIENT, the
+    // browser channel, idle-park tuning — belongs to the daemon's process, not
+    // theirs, and is silently void. Attaching anyway is deliberate: refusing
+    // would put a second Chromium on the shared persistent profile, which is the
+    // Chrome-exit-21 "session dead" crash class. So the mismatch is made
+    // *visible* instead — one stderr line at attach time, and these fields, which
+    // are the only way a caller can ask "whose settings am I actually running
+    // under?" after the fact.
+    authMode: (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase(),
+    httpClient: process.env.AIRTABLE_HTTP_CLIENT || 'fetch',
+    configDir: options.configDir ?? null,
     // Shared page/auth pipeline busy snapshot (tool name when runInToolContext is set).
     pageBusy: auth?.getBusyState?.() ?? {
       busy: false,

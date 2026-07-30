@@ -661,7 +661,7 @@ export class AirtableAuth {
         // profile is signed out, the wrong page loaded, the render was incomplete,
         // or Airtable renamed the key. Failing here would propagate through
         // _doInit's catch (context closed, page nulled) and _recoverSession's
-        // dead-session breaker, so one scrape drift would take down all 71 tools
+        // dead-session breaker, so one scrape drift would take down every tool
         // and turn a records job into a per-row Chromium relaunch march. Let real
         // API calls fail with real errors instead. Strictness belongs where a
         // human is waiting and a false green IS the bug: the login polls and the

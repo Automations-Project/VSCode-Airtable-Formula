@@ -4,7 +4,7 @@
   "version": "2.1.32",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
-  "description": "Airtable formula, script & automation editor with MCP server (71 tools), language server, and AI skills for VS Code.",
+  "description": "Airtable formula, script & automation editor with MCP server (72 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -527,7 +527,7 @@
           "enumDescriptions": [
             "Schema inspection, formula validation, and record reading only (12 tools)",
             "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (71 tools)",
+            "All tools enabled including destructive ops, form metadata, extensions, and daemon control (72 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -606,6 +606,11 @@
           "type": "boolean",
           "default": false,
           "description": "Sync tools: sync_base (base-to-base schema + record sync). mode=plan/diff/status are read-only; mode=apply mutates the destination and, with policy=mirror plus the confirmation flags, can delete tables, fields, views, sections and records; mode=reconcile updates local mapping state."
+        },
+        "airtableFormula.mcp.categories.daemon": {
+          "type": "boolean",
+          "default": false,
+          "description": "Daemon Control tool: manage_daemon (inspect and administer the MCP daemon itself — not Airtable). action=status is read-only and reports daemon liveness, transport, uptime, tunnel URL and the live session/browser state; start, restart, stop, tunnel_enable, tunnel_disable and token_rotate control the running process. Off by default: this lets an AI agent stop or restart the server it is talking through."
         },
         "airtableFormula.mcp.tools": {
           "type": "object",
@@ -714,7 +719,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 71 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate / upload_attachment), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 72 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate / upload_attachment), extension management, base-to-base sync, and daemon control. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
