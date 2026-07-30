@@ -12,10 +12,15 @@ import { pruneSchema } from './prune-schema.js';
 import { acquireApplyLock } from './apply-lock.js';
 import { writeSyncJobStatus, readSyncJobStatus } from './job-status.js';
 
-// '2c' widened the drift fingerprint (field options/description, optional view config). A plan
-// saved by an older engine hashed LESS, so its fingerprint can never match a current one —
-// apply detects that by version and says "re-plan", instead of blaming a collaborator for DRIFT.
-export const ENGINE_VERSION = '2c';
+// '2c' widened the drift fingerprint (field options/description, optional view config). '2d'
+// exists because 2c hashed a field that does not exist: normalized snapshots expose
+// `typeOptions`, not `options`, so 2c's widening was inert in production while its tests
+// passed on synthetic shapes — external review caught it with a live reproduction. 2d hashes
+// `typeOptions` and also folds in table SECTIONS (mirror prune deletes dest-only sections by
+// id, so a renamed section must read as drift, not get deleted under its old identity).
+// A plan saved by an older engine hashed LESS, so its fingerprint can never match a current
+// one — apply detects that by version and says "re-plan", instead of blaming a collaborator.
+export const ENGINE_VERSION = '2d';
 
 /**
  * Stable JSON — object keys sorted at every depth.
@@ -62,13 +67,23 @@ function stableJson(value) {
  */
 export function fingerprintSchema(snap, { includeViewConfig = false } = {}) {
   const basis = snap.tables
+    // `typeOptions`, NOT `options`: that is the name normalizeSchema() actually emits
+    // (snapshot.js). The first cut of this widening hashed `f.options`, which no snapshot
+    // carries — so it hashed `null` for every field and the guard stayed blind, while the
+    // tests passed on hand-built snapshots using the wrong key. Tests for this function
+    // must construct fields the way normalizeSchema does.
     .map((t) => `${t.id}:${t.name}:`
       + t.fields.map((f) =>
-        `${f.id}=${f.name}=${f.type}=${stableJson(f.options ?? null)}=${f.description ?? ''}`
+        `${f.id}=${f.name}=${f.type}=${stableJson(f.typeOptions ?? null)}=${f.description ?? ''}`
       ).sort().join(',')
       + ';V:' + (t.views || []).map((v) =>
         `${v.id}=${v.name}=${v.type}` + (includeViewConfig ? `=${stableJson(v.config ?? null)}` : '')
-      ).sort().join(','))
+      ).sort().join(',')
+      // Sections ride on the schema-only snapshot (getApplicationData → viewSectionsById),
+      // so hashing them is free — and it is load-bearing: mirror prune deletes dest-only
+      // sections BY ID, so a section renamed between plan and apply must surface as drift
+      // rather than be deleted under its old name.
+      + ';S:' + (t.sections || []).map((s) => stableJson(s)).sort().join(','))
     .sort()
     .join('|');
   return createHash('sha256').update(basis).digest('hex');
@@ -437,7 +452,7 @@ export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedA
   };
 
   Promise.resolve()
-    .then(() => apply({ client, sourceBaseId, destBaseId, planId, runStartedAt: startedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase }))
+    .then(() => apply({ client, sourceBaseId, destBaseId, planId, runStartedAt: startedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase, resumeAfterDrift }))
     .then((rendered) => {
       const m = (rendered && rendered.machine) || {};
       // When the records phase launched, its own onPhase callbacks (records-done/records-failed)

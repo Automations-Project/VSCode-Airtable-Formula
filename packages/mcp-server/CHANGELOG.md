@@ -9,7 +9,19 @@ External review (PR #19) found both, with a reproduction. Sync's drift guard is 
 two holes that compounded: the fingerprint usually could not see the change, and once a run was
 resuming it stopped looking.
 
-- **The drift fingerprint now covers field `options` and `description`.** `fingerprintSchema()`
+- **Second review round (same day): the widening itself had three defects, all fixed as engine `2d`.**
+  (1) The fingerprint hashed `f.options` — a key NO normalized snapshot carries; the real key is
+  `typeOptions` (`normalizeSchema`), so the widening was inert in production while its tests
+  passed on synthetic shapes using the same wrong key. Fixed, and a normalizeSchema-parity test
+  now fingerprints a snapshot produced by the real normalizer so the two can never drift apart
+  again. (2) `applyJob()` accepted `resumeAfterDrift` but never forwarded it to `apply()` —
+  the flag was unusable through `sync_base`, which only calls the background path (failed
+  closed: it refused resumes rather than overwriting). Fixed + a background-path regression
+  test. (3) Table **sections** were in neither fingerprint mode, while mirror prune deletes
+  dest-only sections by id — a section renamed between plan and apply was deleted under its old
+  identity. Sections are now in the DEFAULT fingerprint (they ride on the schema-only snapshot;
+  free). Plans saved by `2c` abort with `PLAN_STALE` and a re-plan instruction.
+- **The drift fingerprint now covers field `typeOptions` and `description`.** `fingerprintSchema()`
   hashed `id=name=type` only. A collaborator could rewrite a formula, retarget a link, add a
   select choice or edit a description and produce a **byte-identical** fingerprint — the guard
   passed and apply overwrote them. Both facets already ride on the schema-only snapshot, so this
@@ -33,8 +45,8 @@ resuming it stopped looking.
 - **A plan from an older engine aborts with `PLAN_STALE`, not `DRIFT`.** An older plan hashed
   fewer facets, so its digest can never match a current one. Reporting that as `DRIFT` blamed a
   collaborator; mid-resume it invited the user to wave an overwrite through to fix what was really
-  a version mismatch. `ENGINE_VERSION` is now `2c` and is exported, so test fixtures track it
-  instead of pinning a literal that goes stale on the next bump.
+  a version mismatch. `ENGINE_VERSION` is exported (now `2d` — see the second-round entry above),
+  so test fixtures track it instead of pinning a literal that goes stale on the next bump.
 
 ### Changed (2026-07-30 — `mirror` no longer claims more than it does)
 

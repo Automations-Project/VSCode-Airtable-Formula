@@ -11,7 +11,7 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MockClient } from './helpers/mock-client.js';
-import { apply } from '../../src/sync/index.js';
+import { apply, applyJob, ENGINE_VERSION } from '../../src/sync/index.js';
 import { savePlan, saveIdmap } from '../../src/sync/idmap.js';
 import { newJournal, recordDone, recordFailed, saveJournal } from '../../src/sync/journal.js';
 
@@ -20,7 +20,7 @@ const DEST = 'appDDDDDDDDDDDDDD';
 
 function twoTablePlan(planId) {
   return {
-    planId, engineVersion: '2c',
+    planId, engineVersion: ENGINE_VERSION,
     // Plan-time fingerprint (empty dest) — run 1's own createTable makes the live dest diverge.
     destFingerprint: 'PLAN-TIME-FINGERPRINT-OF-EMPTY-DEST',
     sourceBaseId: SRC, destBaseId: DEST,
@@ -77,6 +77,39 @@ describe('sync index.apply — journal resume bypasses the drift guard', () => {
       /not a change to your destination/,
       'the message must not blame the destination for a version bump',
     );
+  });
+
+  // The flag has to survive the BACKGROUND path, because that is the only path sync_base exposes:
+  // the tool calls applyJob(), not apply(). The first cut added the parameter to applyJob's
+  // signature and never forwarded it to apply() — a direct apply() test stays green through that
+  // bug, and review reproduced exactly this: resumeAfterDrift:true through the tool still aborted
+  // RESUME_DRIFT. So this test goes through applyJob and polls the job file like a real caller.
+  it('resumeAfterDrift:true survives the applyJob background path (the one sync_base actually uses)', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-job-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, twoTablePlan('plnJOB'));
+
+    const { tableId } = await client.createTable(DEST, 'TableA');
+    const journal = newJournal('plnJOB', 't0');
+    recordDone(journal, 0, 'createTable', tableId);
+    saveJournal(SRC, DEST, journal);
+    saveIdmap(SRC, DEST, { tables: { tA: tableId }, fields: {}, views: {}, records: {}, attachments: {} });
+
+    const { status } = applyJob({
+      client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnJOB', runStartedAt: 't1',
+      resumeAfterDrift: true,
+    });
+    assert.equal(status, 'running');
+
+    // applyJob settles on a microtask chain; poll briefly rather than assuming timing.
+    let names = [];
+    for (let i = 0; i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      names = (await client.getApplicationData(DEST)).data.tableSchemas.map((t) => t.name).sort();
+      if (names.length === 2) break;
+    }
+    assert.deepEqual(names, ['TableA', 'TableB'],
+      'the flag must reach apply() through applyJob — a swallowed flag aborts RESUME_DRIFT and TableB never appears');
   });
 
   it('re-run with a partially-done journal resumes (RESUME_DRIFT_BYPASS) instead of aborting DRIFT', async () => {
