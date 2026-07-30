@@ -38,6 +38,66 @@ describe('sync index.plan', () => {
     assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'permutation 1 must match');
     assert.equal(fingerprintSchema(a), fingerprintSchema(c), 'permutation 2 must match');
   });
+  // The guard used to hash id=name=type ONLY, so everything below produced a BYTE-IDENTICAL
+  // fingerprint: a collaborator could rewrite a formula, retarget a link, add a select choice or
+  // edit a description between plan and apply, the drift check passed, and apply overwrote them.
+  it('fingerprintSchema: a field OPTIONS change is drift (formula text, choices, link target)', () => {
+    const mk = (options) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Calc', type: 'formula', options },
+    ] }] });
+
+    const fp = fingerprintSchema(mk({ formula: 'A + B' }));
+    assert.notEqual(fingerprintSchema(mk({ formula: 'A * B' })), fp, 'a rewritten formula must be drift');
+
+    const sel = (choices) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Status', type: 'select', options: { choices } },
+    ] }] });
+    assert.notEqual(
+      fingerprintSchema(sel({ c1: { name: 'A' }, c2: { name: 'B' } })),
+      fingerprintSchema(sel({ c1: { name: 'A' } })),
+      'an added select choice must be drift',
+    );
+
+    const link = (foreignTableId) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Rel', type: 'foreignKey', options: { foreignTableId } },
+    ] }] });
+    assert.notEqual(fingerprintSchema(link('tblA')), fingerprintSchema(link('tblB')), 'a retargeted link must be drift');
+  });
+
+  it('fingerprintSchema: a description change is drift, and options key ORDER is not', () => {
+    const withDesc = (description) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text', description },
+    ] }] });
+    assert.notEqual(fingerprintSchema(withDesc('before')), fingerprintSchema(withDesc('after')));
+
+    // Same options, different key order — Airtable's JSON key order is not a schema change, and a
+    // guard that cried wolf on re-serialization would get switched off.
+    const a = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'N', type: 'number', options: { precision: 2, symbol: '$', nested: { x: 1, y: 2 } } },
+    ] }] };
+    const b = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'N', type: 'number', options: { symbol: '$', nested: { y: 2, x: 1 }, precision: 2 } },
+    ] }] };
+    assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'key order must not be drift');
+  });
+
+  it('fingerprintSchema: view CONFIG counts only under includeViewConfig (the opt-in read-storm)', () => {
+    const mk = (filters) => ({ tables: [{ id: 't1', name: 'T', fields: [], views: [
+      { id: 'viw1', name: 'Grid', type: 'grid', config: { filters } },
+    ] }] });
+    const a = mk({ filterSet: [{ columnId: 'f1', value: 'x' }] });
+    const b = mk({ filterSet: [{ columnId: 'f1', value: 'y' }] });
+
+    // Default: view config is NOT hashed — apply() uses the cheap schema-only snapshot.
+    assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'default must ignore view config');
+    // Opt-in: the same edit is now drift.
+    assert.notEqual(
+      fingerprintSchema(a, { includeViewConfig: true }),
+      fingerprintSchema(b, { includeViewConfig: true }),
+      'strictDrift must see a changed view filter',
+    );
+  });
+
   it('fingerprintSchema: a genuine field change (add/remove/rename/retype) still changes the fingerprint', () => {
     const base = { tables: [{ id: 't1', name: 'T', fields: [
       { id: 'f1', name: 'Name', type: 'text' },

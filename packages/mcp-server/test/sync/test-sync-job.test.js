@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeSyncJobStatus, readSyncJobStatus } from '../../src/sync/job-status.js';
-import { planJob, applyJob, syncStatus, fingerprintSchema } from '../../src/sync/index.js';
+import { planJob, applyJob, syncStatus, fingerprintSchema, ENGINE_VERSION } from '../../src/sync/index.js';
 import { savePlan, saveIdmap } from '../../src/sync/idmap.js';
 import { writeRecordsJobStatus } from '../../src/sync/records.js';
 import { snapshotBase } from '../../src/sync/snapshot.js';
@@ -206,7 +206,7 @@ describe('applyJob()', () => {
     const dest = await snapshotBase(client, DEST);
     // Empty plan: nothing to apply, fingerprint matches an empty dest → records phase no-ops → done.
     savePlan(SRC, DEST, {
-      planId: 'apJ', engineVersion: '2b', destFingerprint: fingerprintSchema(dest),
+      planId: 'apJ', engineVersion: ENGINE_VERSION, destFingerprint: fingerprintSchema(dest),
       sourceBaseId: SRC, destBaseId: DEST, idmap: { tables: {}, fields: {}, views: {} },
       actions: [], orphans: [], warnings: [],
     });
@@ -226,7 +226,7 @@ describe('applyJob()', () => {
   it('a clean DRIFT abort ends as phase=done carrying the aborted schemaResult (no records phase)', async () => {
     const client = new MockClient();
     savePlan(SRC, DEST, {
-      planId: 'apDrift', engineVersion: '2b', destFingerprint: 'STALE',
+      planId: 'apDrift', engineVersion: ENGINE_VERSION, destFingerprint: 'STALE',
       sourceBaseId: SRC, destBaseId: DEST, idmap: { tables: {}, fields: {}, views: {} },
       actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }], orphans: [], warnings: [],
     });

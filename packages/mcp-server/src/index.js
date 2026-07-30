@@ -1709,11 +1709,13 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
         direction: { type: 'string', enum: ['to-dest', 'to-source'], description: 'Used only by mode="plan": direction of the changeset. "to-dest" (default) brings the destination base up to date with the source. "to-source" swaps the roles so the changeset targets the source base (makes the source match the destination).' },
         skip: { type: 'array', items: { type: 'string' }, description: 'Used only by mode="apply": list of changeIds to skip (actions with a matching changeId are counted as skipped but not applied). Use changeIds from the plan output.' },
-        policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = make dest identical to source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode.' },
+        policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = converge dest toward source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode. NOTE: "mirror" does NOT make the destination byte-identical — two removals are deferred and are reported, not performed: dest-extra LINKED-RECORD entries are never unlinked (Pass 2 only adds), and a source row that CLEARED its attachments leaves the dest attachment cell untouched. Watch for RECORD_LINK_EXTRA / attachment warnings in the result.' },
         policyOverrides: { type: 'object', description: 'Used by mode="apply": per-table reconciliation preset overrides. Maps table name → preset (e.g. { "Games": "preserve" }). Overrides the global policy for the named tables.', additionalProperties: { type: 'string', enum: ['mirror', 'overlay', 'preserve'] } },
         confirmDeletions: { type: 'boolean', description: 'Used by mode="apply" with policy="mirror": must be set to true to actually delete dest-only RECORDS and dest-only FIELDS/VIEWS. Without it, mirror mode reports a DELETION_GATED count and deletes nothing for records; orphan fields/views are reported and kept.' },
         confirmTableDeletions: { type: 'boolean', description: 'Used by mode=apply with policy=mirror: required to delete whole dest-only TABLES. confirmDeletions alone never drops a table; without confirmTableDeletions, orphan tables report TABLE_DELETION_GATED and are kept.' },
         confirmRetypes: { type: 'boolean', description: 'Used by mode=apply: required to apply a matched field\'s SCALAR type change to the destination (source-wins). Without it, a diverging scalar type reports RETYPE_GATED and the field is kept. Non-scalar retypes (to/from formula/rollup/lookup/count/autoNumber/link/attachment) stay RETYPE_DEFERRED.' },
+        strictDrift: { type: 'boolean', description: 'Used by mode=plan: also hash live VIEW CONFIG (filters/sorts/groups/colors/column order) into the plan\'s drift fingerprint, so a collaborator editing a view between plan and apply is detected. Costs one extra ~1s read PER VIEW on every apply of this plan (minutes on a view-heavy base) — which is why it is off by default. Field types, options, choices, formulas and descriptions are ALWAYS covered regardless of this flag. Recorded on the plan; apply reuses the plan\'s setting.' },
+        resumeAfterDrift: { type: 'boolean', description: 'Used by mode=apply: continue a partially-applied plan even though the destination no longer matches the plan\'s fingerprint. A plan with prior progress has already mutated the destination itself, so some divergence is expected — but a collaborator\'s edit is indistinguishable from here, and the remaining actions (including deletions) would overwrite it. Prefer re-running mode=plan. Without this flag such an apply aborts with RESUME_DRIFT instead of silently overwriting.' },
         fieldMappings: { type: 'object', description: 'Field mapping overrides: maps table name → { sourceField: destField } to inject a source field\'s value into a different (writable scalar) dest field during record sync. Example: { "Games": { "Title": "Name" } }. In mode="plan" and mode="diff", fieldMappings are validated against the two schemas (dry-run, no mutation) and errors are returned in fieldMappingErrors.', additionalProperties: { type: 'object', additionalProperties: { type: 'string' } } },
         verbose: { type: 'boolean', description: 'Used only by mode="status": by default planDigest is projected to { human, machineOmitted: true } (the full machine payload can be tens of thousands of lines on a view-heavy base and pushes the useful result fields out of the response — it always stays on disk). Set verbose:true to get the full planDigest.machine back in the response.' },
         debug: debugProp,
@@ -2573,7 +2575,7 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, verbose, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, strictDrift, resumeAfterDrift, verbose, debug }) {
     const sync = await import('./sync/index.js');
     if (mode === 'plan') {
       // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
@@ -2581,7 +2583,7 @@ const handlers = {
       // computed + persisted. Run it as a BACKGROUND job and return the jobId immediately; poll
       // mode=status with this planId to get the plan digest when it lands.
       const id = 'pln' + client._genRandomId();
-      const { jobId, status } = sync.planJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings });
+      const { jobId, status } = sync.planJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings, strictDrift });
       return ok({ jobId, planId: jobId, status, message: 'Plan is computing in the background — poll mode=status with this planId (jobId).' }, { jobId, status }, debug);
     }
     if (mode === 'apply') {
@@ -2591,7 +2593,7 @@ const handlers = {
       // backgrounds records — long enough on a real base to trip the MCP response window. Run the
       // WHOLE apply (schema then records) as a background job and return immediately. Field-mapping
       // validation, DRIFT abort, and APPLY_LOCKED now surface via mode=status (phase='failed'/'done').
-      const { jobId, status } = sync.applyJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys });
+      const { jobId, status } = sync.applyJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, resumeAfterDrift });
       // Forward-looking note: DELETION_GATED warnings are only emitted by the background records
       // job, so they can't appear synchronously. Emit a synchronous advisory when the effective
       // policy would delete dest-only records but confirmDeletions was not set.

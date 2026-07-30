@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { MockClient } from './helpers/mock-client.js';
-import { apply, fingerprintSchema } from '../../src/sync/index.js';
+import { apply, fingerprintSchema, ENGINE_VERSION } from '../../src/sync/index.js';
 import { snapshotBase } from '../../src/sync/snapshot.js';
 import { savePlan } from '../../src/sync/idmap.js';
 import { renderApplyResult } from '../../src/sync/report.js';
@@ -31,7 +31,7 @@ describe('index.apply', () => {
   it('aborts on dest drift (no mutation)', async () => {
     process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'apply-'));
     const client = new MockClient();
-    const plan = { planId: 'plnD', engineVersion: '2b', destFingerprint: 'STALE', sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {} }, actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }], orphans: [], warnings: [] };
+    const plan = { planId: 'plnD', engineVersion: ENGINE_VERSION, destFingerprint: 'STALE', sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {} }, actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }], orphans: [], warnings: [] };
     savePlan('appSSSSSSSSSSSSSS', 'appDDDDDDDDDDDDDD', plan);
     const out = await apply({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnD', runStartedAt: 'ts' });
     assert.match(out.human, /DRIFT/);
@@ -42,7 +42,7 @@ describe('index.apply', () => {
     process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'apply2-'));
     const client = new MockClient();
     const dest = await snapshotBase(client, 'appDDDDDDDDDDDDDD');
-    const plan = { planId: 'plnOK', engineVersion: '2b', destFingerprint: fingerprintSchema(dest), sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {} }, actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }], orphans: [], warnings: [] };
+    const plan = { planId: 'plnOK', engineVersion: ENGINE_VERSION, destFingerprint: fingerprintSchema(dest), sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {} }, actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }], orphans: [], warnings: [] };
     savePlan('appSSSSSSSSSSSSSS', 'appDDDDDDDDDDDDDD', plan);
     const out = await apply({ client, sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', planId: 'plnOK', runStartedAt: 'ts' });
     assert.match(out.human, /created: 1/);
@@ -60,7 +60,7 @@ describe('index: views', () => {
     process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'apply-v-'));
     const client = new MockClient();
     const dest = await snapshotBase(client, 'appDDDDDDDDDDDDDD'); // empty base
-    const plan = { planId: 'plnVI', engineVersion: '2b', destFingerprint: fingerprintSchema(dest), sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {}, views: {} },
+    const plan = { planId: 'plnVI', engineVersion: ENGINE_VERSION, destFingerprint: fingerprintSchema(dest), sourceBaseId: 'appSSSSSSSSSSSSSS', destBaseId: 'appDDDDDDDDDDDDDD', idmap: { tables: {}, fields: {}, views: {} },
       actions: [
         { kind: 'createTable', sourceTableId: 'tS', name: 'T' },
         { kind: 'reconcilePrimary', sourceTableId: 'tS', sourcePrimaryFieldId: 'fS1', toName: 'Name', toType: 'text', toTypeOptions: null },
@@ -81,7 +81,7 @@ describe('index.apply: skip forwarding', () => {
     const dest = await snapshotBase(client, 'appDDDDDDDDDDDDDD');
     const plan = {
       planId: 'plnSKIP',
-      engineVersion: '2b',
+      engineVersion: ENGINE_VERSION,
       destFingerprint: fingerprintSchema(dest),
       sourceBaseId: 'appSSSSSSSSSSSSSS',
       destBaseId: 'appDDDDDDDDDDDDDD',

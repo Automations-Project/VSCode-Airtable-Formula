@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-30 sync drift detection — two ways a collaborator's edit got overwritten)
+
+External review (PR #19) found both, with a reproduction. Sync's drift guard is what stops
+`mode=apply` writing over changes made to the destination between `plan` and `apply`, and it had
+two holes that compounded: the fingerprint usually could not see the change, and once a run was
+resuming it stopped looking.
+
+- **The drift fingerprint now covers field `options` and `description`.** `fingerprintSchema()`
+  hashed `id=name=type` only. A collaborator could rewrite a formula, retarget a link, add a
+  select choice or edit a description and produce a **byte-identical** fingerprint — the guard
+  passed and apply overwrote them. Both facets already ride on the schema-only snapshot, so this
+  costs no extra API calls. Options are hashed with a key-order-stable serializer, so a
+  re-serialization difference is not mistaken for a schema change.
+- **Live view config is opt-in, via `strictDrift:true` on `mode=plan`.** Filters/sorts/groups/
+  colors/column order are *not* in the default fingerprint: `apply` deliberately uses
+  `snapshotSchemaOnly` to skip one ~1s `getView` per view, and folding config in unconditionally
+  would reintroduce that storm on every apply. The plan records which basis built it and `apply`
+  reuses that setting — it cannot infer it, because `plan` snapshots *with* view config and
+  `apply` *without*, so an inferred flag would mismatch every time and abort every apply with a
+  phantom `DRIFT`.
+- **Resuming past drift is now gated by `resumeAfterDrift:true`.** One `done` journal action used
+  to switch the drift guard off for the whole remaining run, silently. Prior progress proves *this
+  plan* mutated the destination; it does not prove a collaborator did not also, and the remaining
+  actions — deletions included — would overwrite them. `apply` now aborts with `RESUME_DRIFT` and
+  says what to do (re-run `mode=plan`, preferred; or pass the flag to overwrite). This matches how
+  every other destructive path here is gated (`confirmDeletions` / `confirmTableDeletions` /
+  `confirmRetypes`). Known limit: still a whole-run decision — per-action preconditions are the
+  tracked follow-up.
+- **A plan from an older engine aborts with `PLAN_STALE`, not `DRIFT`.** An older plan hashed
+  fewer facets, so its digest can never match a current one. Reporting that as `DRIFT` blamed a
+  collaborator; mid-resume it invited the user to wave an overwrite through to fix what was really
+  a version mismatch. `ENGINE_VERSION` is now `2c` and is exported, so test fixtures track it
+  instead of pinning a literal that goes stale on the next bump.
+
+### Changed (2026-07-30 — `mirror` no longer claims more than it does)
+
+- The `policy: "mirror"` description said "make dest identical to source". It does not, and the
+  code already knew: dest-extra **linked-record** entries are never unlinked (Pass 2 only adds),
+  and a source row that **cleared** its attachments leaves the dest attachment cell untouched.
+  Both are reported rather than performed. The preset is now described as "converge dest toward
+  source" with those two exclusions stated inline. Implementing them remains a deferred follow-up;
+  the contract no longer overstates it in the meantime.
+
 ### Added (2026-07-30 `manage_daemon` — model-facing daemon control)
 
 - **New tool `manage_daemon`, in a new `daemon` category, `full` profile only.**
