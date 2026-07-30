@@ -211,7 +211,11 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   if (!savedDiff) {
     return { human: 'no diff found', machine: { error: 'no diff found — run mode=diff first' } };
   }
-  return renderDiff(savedDiff, { detail, offset, limit });
+  const out = renderDiff(savedDiff, { detail, offset, limit });
+  // Surface which diff answered: when the caller omitted diffId this resolved to the LATEST
+  // file, and renderDiff's detail branch doesn't carry an id — echoing the caller's (absent)
+  // param returned diffId:null on a successful detail read.
+  return { ...out, diffId: resolvedDiffId, machine: { diffId: resolvedDiffId, ...out.machine } };
 }
 
 /**

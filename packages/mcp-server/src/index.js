@@ -2669,7 +2669,9 @@ const handlers = {
     if (mode === 'diff') {
       if (detail) {
         const out = sync.diffDetail({ sourceBaseId: sourceAppId, destBaseId: destAppId, diffId, detail, offset, limit });
-        return ok({ diffId: diffId ?? null, summary: out.human }, out.machine, debug);
+        // out.diffId is the RESOLVED id (diffDetail falls back to the latest diff when the
+        // param is omitted) — echoing the raw param here returned diffId:null on success.
+        return ok({ diffId: out.diffId ?? diffId ?? null, summary: out.human }, out.machine, debug);
       }
       const id = diffId || ('dif' + client._genRandomId());
       const out = await sync.diff({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, diffId: id, fieldMappings });
