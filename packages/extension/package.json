@@ -749,11 +749,11 @@
     "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.0.0",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "airtable-user-mcp": "workspace:*",
     "archiver": "^7.0.1",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^3.2.6"
   }
 }
