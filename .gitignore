@@ -50,3 +50,5 @@
 packages/mcp-server/.chrome-profile/
 packages/mcp-server/dev-tools/
 packages/extension/README.md
+packages/webview/.ds-css/
+packages/webview/.ds-src/

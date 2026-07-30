@@ -32,6 +32,7 @@
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { POLL_BUDGET_LABEL, pollForSessionUser } from './session-user.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -205,48 +206,23 @@ async function main() {
       // Continue to poll — user may complete manually or partial automation may succeed
     }
 
-    // Poll for authentication (max 60s for programmatic use)
-    let loggedIn = false;
-    let userId = null;
-    const maxAttempts = 30;
+    // Poll for authentication. A 2xx here is NOT proof of login — only a real
+    // user id is (see session-user.js / issue #21). Budget is the SHARED one:
+    // this loop used to stop at 60s while the other three waited 300s, even
+    // though its own comment says the user may finish the login by hand — and
+    // divergence between the copies is how issue #21 stayed hidden.
+    const { userId, closed, reason } = await pollForSessionUser(page);
 
-    for (let i = 0; i < maxAttempts; i++) {
-      await page.waitForTimeout(2000);
-      try {
-        const result = await page.evaluate(async () => {
-          try {
-            const res = await fetch('/v0.3/getUserProperties', {
-              headers: {
-                'x-airtable-inter-service-client': 'webClient',
-                'x-requested-with': 'XMLHttpRequest',
-              },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              return { ok: true, userId: data?.data?.userId };
-            }
-            return { ok: false, status: res.status };
-          } catch (e) {
-            return { ok: false, error: e.message };
-          }
-        });
-
-        if (result.ok) {
-          loggedIn = true;
-          userId = result.userId;
-          break;
-        }
-      } catch {
-        // Page navigating, keep waiting
-      }
-    }
-
-    if (loggedIn) {
+    if (userId) {
       console.error(`[login-runner] Login verified! User: ${userId}`);
       output({ ok: true, userId });
+    } else if (closed) {
+      console.error('[login-runner] Browser closed before sign-in completed');
+      output({ ok: false, error: 'Browser closed before sign-in completed — run login again and finish signing in.' });
+      process.exit(1);
     } else {
-      console.error('[login-runner] Login not detected after timeout');
-      output({ ok: false, error: 'Login not detected after 60 seconds' });
+      console.error(`[login-runner] Login not detected after ${POLL_BUDGET_LABEL} — ${reason}`);
+      output({ ok: false, error: `Login not detected after ${POLL_BUDGET_LABEL} — ${reason}` });
       process.exit(1);
     }
   } catch (e) {

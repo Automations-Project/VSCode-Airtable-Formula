@@ -6,6 +6,344 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added — `manage_daemon` tool and the `Daemon Control` category (2026-07-30)
+
+- **New MCP tool `manage_daemon` in a new `daemon` category.** Tool counts move
+  **71 → 72** (`read-only` 12 and `safe-write` 54 are unchanged; only `full`
+  grows), categories 15 → 16. `action="status"` is a read-only diagnostic that
+  reports daemon liveness/holder/transport/uptime/tunnel plus the live session
+  state — `sessionDead`, the last circuit-breaker trip including Airtable's own
+  captured response body, and the browser busy queue — which is what lets an AI
+  agent tell *daemon gone* from *session dead* from *browser busy*. The remaining
+  actions (`start`, `restart`, `stop`, `tunnel_enable`, `tunnel_disable`,
+  `token_rotate`) administer the daemon process itself.
+- **New setting `airtableFormula.mcp.categories.daemon`, defaulting to `false`.**
+  For a `custom`-profile user that one value is the whole decision, and this tool
+  can stop or restart the very server the agent is talking through — so it is off
+  until explicitly enabled. It is included in the `full` profile only.
+
+### Fixed — "Toggle MCP Tool Categories" showed 8 of 16 categories (2026-07-30)
+
+- **The command-palette category picker had its own hand-written list of 8
+  categories**, so Record Read/Write/Destructive, View Sections (both), Form
+  Metadata, Sync and Daemon Control were simply unreachable from it — and a newly
+  shipped category was invisible until someone noticed. It now enumerates
+  `SETTINGS_TO_CATEGORY` from `tool-profile.ts` (the table `check:tool-sync`
+  already guards) instead of a second copy, so the picker cannot fall behind the
+  category list again.
+
+### Fixed — `check:tool-sync` can no longer pass while a tool is uncallable (2026-07-30)
+
+- **The tool-sync guard now cross-checks `mcp-server/src/index.js` against
+  `tool-config.js` in both directions.** `manage_daemon` shipped with a definition
+  and a handler in `index.js` but **no entry in `TOOL_CATEGORIES`** — and because
+  `enabledToolNames()` iterates that map, a tool absent from it is yielded by
+  nothing and `isToolEnabled()` returns `false` in *every* profile, `full`
+  included. It was registered and permanently uncallable. `check:tool-sync`
+  nevertheless printed green, because every check it performed walked
+  `tool-config.js` and its mirrors — comparing the map against copies of itself,
+  which cannot see a tool that belongs to no category. The guard now also asserts
+  that every tool defined or handled in `index.js` is categorized, and that every
+  categorized tool has both a definition and a handler. It fails loudly if either
+  extraction yields zero tools, so a reformat degrades to a failure rather than to
+  a silent pass.
+
+### Changed — the shared daemon now starts when an MCP tool call needs it (2026-07-30)
+
+- **You no longer have to open the dashboard for the daemon to start.** MCP tool
+  calls now start it themselves. Before this, the extension only *looked* for a
+  running daemon, so unless you had opened the Airtable dashboard (or run a formula
+  command) that session quietly fell back to a per-window server — and **each VS
+  Code window then drove its own Chromium against the same browser profile**. That
+  collision is the failure this extension has historically shown you as "session
+  dead". One shared daemon is the configuration that avoids it.
+- **What you will notice:** one Airtable browser session shared by every window
+  instead of one per window, fewer spurious "session dead" errors, and the daemon
+  appearing in the dashboard without you starting it.
+- **Stop still means stop.** A daemon you stop from the dashboard is not
+  resurrected by the next tool call.
+- **If the daemon cannot start, the extension falls back to the old per-window
+  server** rather than leaving you with no MCP tools.
+- **Fixed alongside it:** on `Bring your own cookie` / `Direct login`, a failed or
+  stopped daemon used to leave the fallback server with no credentials at all —
+  every tool call failed with a missing-credentials error. The fallback is now
+  given credentials exactly when it is the one actually serving you.
+
+### Fixed — login could report success when you were not signed in (issue #21) (2026-07-30)
+
+- **Login declared success as soon as Airtable answered, and showed
+  `User: undefined` even when it had worked.** The endpoint being polled
+  (`getUserProperties`) turns out to carry **no identity whatsoever** — its
+  signed-in response is a list of feature flags — so the user id being read had
+  never existed, and any successful HTTP response counted as "logged in". In
+  practice the login window could close about two seconds after opening, before an
+  SSO redirect or a typed 2FA code could finish, and still report success.
+- **Login now waits for Airtable to actually say who you are**, reading the signed-in
+  user from the page itself, and every login path (dashboard login, CLI login,
+  manual login) waits the same **5 minutes** — enough for SSO plus a hand-typed 2FA
+  code. Previously these paths disagreed, one waiting 1 minute and the others 5.
+- **The dashboard shows your user id only when it genuinely knows it**, and never
+  carries one over from a previous session. In `Bring your own cookie` mode, where
+  there is no page to read it from, it says so instead of showing a stale or made-up
+  id. A missing user id is no longer treated as "signed out" — it is not evidence of
+  anything, and treating it as such would have logged out working sessions.
+- **`Direct login` now fails loudly with `DIRECT_LOGIN_UNVERIFIED`** when the login
+  flow finishes and a session cookie exists but Airtable still serves no signed-in
+  user — the same false success as above, on the browser-free path. It usually means
+  an incomplete SSO or 2FA step: check your email/password/TOTP secret, or switch
+  Auth Mode back to `browser`.
+- **Session health checks retry before declaring a session expired.** The signed-in
+  marker arrives with the page, so a single slow render used to read as "signed out"
+  — and the extension answers that by relaunching the browser, so a false alarm cost
+  a full browser launch. Login is also no longer killed at 2 minutes while it is
+  still legitimately waiting for you to finish signing in.
+- **CLI `doctor` and `status` now tell you different, true things.** `doctor`
+  actually probes the session (`Session: signed in as usr…` / `NOT signed in —
+  <reason>`) and reuses the running daemon's browser rather than opening a second one
+  against the same profile. `status` reports only what is on disk and no longer
+  claims anything about your session — it used to print `Session: not found` on
+  perfectly healthy installs by looking for a file nothing writes any more.
+
+### Pre-merge hardening pass — tool profiles, sync safety, packaging, transport, proxies, session recovery, logout (2026-07-25)
+
+Pre-merge hardening pass on `feat/base-to-base-sync` before merging base-to-base
+sync into `main`. Covers tool-profile safety, packaging, and — retroactively,
+since it was never documented — the direct-HTTP transport rework this branch
+already shipped.
+
+#### Changed
+- **`safe-write` no longer includes `sync_base`, and two new tool categories
+  now default to *off* for existing `custom`-profile users.** `sync_base`
+  reaches destructive operations (`mode=apply` under `policy=mirror` can
+  delete tables, fields, views, sections and records), so it never belonged
+  in a profile whose own description promises "no deletes" — and `safe-write`
+  is the extension's default profile. It now lives in `full` only;
+  `safe-write` drops from 55 to **54** tools (`read-only` stays 12, `full`
+  stays 71). Separately, `sync` and `recordDestructive` are new categories on
+  this branch, and every `airtableFormula.mcp.categories.*` setting defaulted
+  to `true` — so a user already running the `custom` profile would have
+  silently gained `sync_base` and `delete_records` on upgrade, with no action
+  on their part. Both defaults are now `false`; the other 13 categories are
+  unchanged. The same gap existed server-side: a pre-existing
+  `~/.airtable-user-mcp/tools-config.json` with `activeProfile: "custom"` and
+  no key at all for these newly-introduced tools resolved them to *enabled*
+  (absent key → enabled). An absent key for `sync`/`recordDestructive` now
+  resolves to disabled; a frozen `LEGACY_CATEGORIES_DEFAULT_ON` allowlist of
+  the 13 pre-existing categories keeps their legacy enabled-by-default
+  behavior for absent keys, so this doesn't silently regress the *next*
+  category either. If you want `sync_base`, switch to the `full` profile or
+  opt in explicitly under `custom`.
+- **`sync_base` is now correctly annotated as destructive (`destructiveHint:
+  true`)**, and the "read-only plan mode" wording that described only two of
+  its five modes has been replaced everywhere it appeared (tool description,
+  Settings UI, `CLAUDE.md`) with an accurate summary: `plan`/`diff`/`status`
+  are read-only; `apply` mutates the destination and, with `policy=mirror`
+  plus the confirmation flags, can delete tables, fields, views, sections and
+  records; `reconcile` updates local mapping state only. MCP clients that gate
+  tool calls on `destructiveHint` (auto-approve UIs, etc.) now correctly
+  prompt for `sync_base`. (The Settings UI's "Record Write" row was also
+  under-counting itself — "3 tools" instead of 4 — and missing
+  `upload_attachment` from its list; both are fixed.)
+
+#### Added
+- **Direct-HTTP transport (shipped earlier on this branch — 2026-07-04 —
+  never previously mentioned here).** This is the single biggest behavioral
+  change on this branch for anyone who never touches sync: every Airtable API
+  call used to run inside a headless Chrome page (`page.evaluate(fetch)`);
+  it now goes over a direct Node HTTP client (`fetch` by default, opt-in
+  Chrome-TLS-impersonation via `mcp.httpClient: "impit"`), with the browser
+  demoted to login/credential-capture only. This is why a proxy-only network
+  used to look like a healthy login with every tool call failing as
+  `SESSION_INVALID` (see the proxy fix below) — Chrome used the OS proxy for
+  the browser session, but Node's `fetch` did not for the actual API traffic.
+  It also unlocked two browser-free credential modes exposed via
+  `mcp.authMode`: `byo` (cookie-only, no browser) and `direct-login`
+  (email+password+TOTP replaying Airtable's HTTP login flow). Users on the
+  default `browser` auth mode see no behavior change beyond faster/steadier
+  API calls and the proxy-visibility fix; this entry exists purely to close a
+  documentation gap ahead of merge.
+
+#### Fixed
+- **The VSIX native-binary assertion now verifies the actual machine code, not
+  just its labels.** The previous check validated package name, `package.json`
+  `os`/`cpu`/`version`, filename, and a 4-byte magic number. Only the magic
+  reads the bytes at all, and it distinguishes PE from ELF from Mach-O — that
+  is, the operating system and nothing else. The `cpu` field was read from the
+  vendored package's own manifest, never from the binary. So two whole classes
+  of mis-vendored artifact passed clean, with a green tick: an **x64 binary
+  swapped for an ARM64 one on the same OS**, and a **glibc build swapped for a
+  musl build**. Both were reproduced as controls and both passed before this
+  change. Every `.node` is now hashed and compared against
+  `scripts/native-binary-digests.json`, which records the exact SHA-256 of
+  every binary each platform package ships. Those digests are recorded from
+  tarballs whose SHA-512 was verified against `pnpm-lock.yaml` **before**
+  anything inside was hashed, so the expected values derive from the lockfile
+  and never from the artifact being checked. A mismatch now also names the
+  impostor ("these are the bytes of `impit-darwin-x64`… the binary for
+  `darwin-x64`, not `darwin-arm64`"). A missing or stale pin fails packaging
+  and assertion **closed** rather than falling back to the weaker check.
+- **Vendored native binaries are re-validated on every reuse.** Cached
+  platform packages under `.cache/vsix-platform-packages/` were verified once
+  at download and thereafter trusted via a `.vendored.json` marker — a file
+  living inside the very directory it vouches for, so anything able to alter
+  the binaries could equally rewrite the marker. Cached contents are now
+  re-hashed against the pinned digests before reuse, and a copy that fails is
+  discarded and re-fetched.
+- **The symlink-escape guard now covers foreign platform packages too.**
+  `assertSafeSymlinks` protected the workspace vendoring path but not the
+  registry-tarball path, even though that path unpacks with `tar` (which
+  creates whatever symlinks the archive asks for) and then copies with
+  `dereference: true`. A tarball could therefore have pulled a file from
+  outside the tree into a published VSIX. Both paths now share one guard
+  (`scripts/safe-symlinks.mjs`).
+- **Wording: these are eight target artifact packaging/assertion smokes.**
+  Earlier notes could be read as claiming all eight platform builds are
+  runtime-tested. They are not, and cannot be from one machine: a single host
+  can only `require()` the binding compiled for itself, so **only the host
+  target's binding receives a genuine runtime smoke**. The other seven are
+  verified by exact content — which is the strongest claim available, and why
+  the digests above matter.
+- **`sync_base`'s column-visibility comparison no longer produces a false
+  negative.** Airtable's internal API omits the `visibility` key entirely for
+  a visible column in some responses (absent = visible, explicit `false` =
+  hidden); the sync engine's `apply`/`diff` column-visibility handling
+  (`sync/apply.js`, `sync/remap.js`) previously treated an absent key as
+  *hidden* instead, the opposite of `getView`'s own long-standing semantics.
+  A source column returned without the key therefore compared as hidden
+  against a dest column explicitly `false`, which **matched** — masking real
+  column-visibility drift behind a false `converged`/`identical` verdict —
+  and `apply` never re-showed that column on the destination. The predicate
+  is now unified behind one function (`src/column-visibility.js`) shared by
+  `client.js` and both sync sites. **This is a correctness fix, not a
+  regression:** the drift was always real, just hidden by the comparison
+  bug. A base pair that previously reported `sync_base mode=diff` as
+  `converged`/`identical` may now correctly surface column-visibility drift
+  on the next run — re-run `mode=apply` to converge it.
+- **The daemon's orphan-process sweep (Stop button / `stopDaemon` command) no
+  longer kills unrelated Node processes on a loose command-line match.** The
+  previous kill criteria were an unanchored substring match against
+  `index.mjs … daemon … start`, so any process whose argv merely *contained*
+  those words — another vendor's MCP server, a build watcher, even a text
+  editor with our bundled file open — could be force-killed along with its
+  whole process tree. Kill criteria are now positive-attribution only: the
+  exact bundled `dist/mcp/index.mjs` path **and** the daemon-start argv shape
+  this install actually spawns, or the paired `.airtable-user-mcp` /
+  `.chrome-profile` directories. A process that merely resembles a stray
+  daemon but can't be attributed to this install is left alive and reported
+  in the new `StopResult.skippedUnowned` instead of being killed on a guess.
+- **The packaged VSIX now actually includes the `impit` and `@ngrok/ngrok`
+  native (napi) binaries.** Both packages were correctly kept external by
+  esbuild and their pure-JS loader was vendored into `dist/node_modules/`,
+  but each ships its compiled binding in a *separate* per-platform
+  optionalDependency (e.g. `impit-win32-x64-msvc`,
+  `@ngrok/ngrok-win32-x64-msvc`) that was never copied — so
+  `mcp.httpClient: "impit"` or the ngrok tunnel provider threw "Cannot find
+  native binding" the first time either was used from an installed `.vsix`,
+  even though the setting was selectable and looked present. The extension
+  now ships **one VSIX per platform**, each vendoring exactly its own
+  target's binaries — see the next entry.
+- **The extension is now published as platform-specific VSIXes, one per
+  supported desktop target.** Vendoring the build machine's own native
+  binaries fixes the "Cannot find native binding" crash only for users on
+  the same platform as the release runner — CI builds on `ubuntu-latest`, so
+  a single untargeted VSIX would carry Linux-x64 binaries and leave
+  `mcp.httpClient: "impit"` and the ngrok tunnel provider broken on Windows
+  and macOS. The release workflow now builds and publishes eight targeted
+  artifacts (`win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`,
+  `linux-x64`, `linux-arm64`, `alpine-x64`, `alpine-arm64`) to both the VS
+  Code Marketplace and Open VSX; VS Code installs the one matching each
+  user's machine. The matrix lives in one place
+  (`scripts/vsix-targets.mjs`), foreign-platform packages are fetched as
+  plain tarballs and verified against the **version and integrity hash
+  already recorded in `pnpm-lock.yaml`** (so a published VSIX can never carry
+  an impit/ngrok build other than the tested one), and every artifact is
+  checked by `scripts/assert-vsix-binaries.mjs` before it can be published —
+  which asserts both that the target's expected `.node` files are present and
+  that no other platform's are, since a wrong-platform binary fails exactly
+  like a missing one but looks correct on the build machine.
+  - **No untargeted fallback is published.** An untargeted VSIX is only ever
+    correct on the machine that built it, so shipping one as a catch-all
+    would reintroduce the original bug for everyone else.
+  - **`linux-armhf` (32-bit ARM) is deliberately not published.** `impit`
+    publishes no `arm-gnueabihf` binary, so an armhf build would advertise
+    the `impit` HTTP client in its settings UI and then fail the moment it
+    was selected. VS Code reporting the extension as unavailable on armhf is
+    the honest outcome; the target can be added the day impit ships that
+    artifact.
+  - The standalone npm package `airtable-user-mcp` is **unchanged and stays
+    universal** — npm resolves the correct optional dependency on the user's
+    own machine at install time, so it needs no per-platform publishing.
+  - Local packaging (`pnpm packx`) now also produces a targeted VSIX for the
+    host platform rather than an untargeted one, so what a developer
+    sideloads has the same shape as what users receive.
+- **Logging out now actually stops the daemon serving your session.** The Command-Palette "Airtable: Log out" cleared the OS keychain and tried to delete the browser profile, but never told the running daemon — which keeps the live browser session (browser mode) or the injected cookie/credentials (byo / direct-login) in memory — so tool calls kept working after the user believed they had logged out. Only the dashboard's logout button did part of this. Both entry points now run one path that also releases the daemon's browser and restarts it to drop in-memory credentials. Releasing the browser first also frees the profile directory, so the profile wipe no longer silently fails on Windows. If the daemon cannot be confirmed stopped — it can be alive but slow enough to miss its health probe — logout escalates to a daemon restart/force-stop, and when even that fails it now says so instead of reporting success. The profile wipe is retried after that restart (a profile the daemon's Chromium had locked can only be removed once it is gone), and a profile still on disk is never reported as a cleared session: it holds live Airtable cookies, and the next daemon would authenticate straight from it.
+- **`npx airtable-user-mcp logout` (standalone CLI) got the same treatment**: it stops a running daemon before wiping the profile, and a wipe that genuinely fails is reported as a failure ("Could not clear the browser session at …") instead of the previous, exactly-backwards "No session to clear."
+- **A dead session can be recovered without restarting the daemon.** After repeated rejected requests the server latches a dead-session circuit-breaker that fails every subsequent call fast. In browser mode nothing cleared it: re-logging in from the dashboard left the daemon in the same state, and only a daemon restart helped. It is now cleared whenever a freshly verified session is established — including the browser release the dashboard performs right before an interactive login — while still latching on failures that persist across the server's own internal recovery attempts.
+- **Airtable API calls now honour `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`.** Node's built-in `fetch` deliberately ignores the proxy environment variables that curl, git and Chrome all respect. Since all Airtable traffic moved off the browser page and onto direct HTTP, that produced a uniquely confusing failure on networks that only reach the internet through a proxy: the browser login succeeded (Chrome uses the OS proxy), so the dashboard could show a healthy session, while every MCP tool call failed and was reported as `SESSION_INVALID` — as if the Airtable login had expired. The transport now attaches undici's `EnvHttpProxyAgent` whenever those variables are set, including `NO_PROXY` bypass matching, so tool calls take the same route as the browser. Nothing changes when no proxy is configured. Browser-free login (`AIRTABLE_AUTH_MODE=direct-login`) goes through the same dispatcher.
+- **A failed network call now says what actually failed.** undici collapses every network/TLS error into the message `fetch failed` and hides the real reason in `err.cause`; the daemon logged (and the extension surfaced) only that. The cause chain is now unwrapped into the error, and two common misconfigurations get explicit advice: a rejected certificate points at `NODE_EXTRA_CA_CERTS`, and an unreachable network with no proxy configured points at `HTTPS_PROXY`.
+
+#### Known limitations (tracked, not fixed)
+- **TLS-inspecting proxies still need `NODE_EXTRA_CA_CERTS`.** Routing through the proxy is only half of it: a proxy that re-signs HTTPS with a private root certificate is rejected by Node, which uses its own bundled CA list rather than the OS trust store — so the browser (OS trust store) keeps working while API calls fail with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` / `SELF_SIGNED_CERT_IN_CHAIN`. **Workaround:** set `NODE_EXTRA_CA_CERTS=/path/to/corp-root.pem` in the environment that launches VS Code, then restart it — the extension spawns the daemon with the full inherited environment, so the setting reaches every code path. No code change is planned: Node offers no supported way to read the OS trust store, and the error message now names this fix.
+- **`AIRTABLE_HTTP_CLIENT=impit` does not use the proxy.** The optional impit (Chrome-TLS-impersonation) client takes an explicit proxy URL and has no `NO_PROXY` support, so honouring the environment there would be a partial, misleading implementation. **Workaround:** behind a proxy, leave `mcp.httpClient` on the default `fetch`.
+- **`ALL_PROXY` is not honoured** (neither is it by Node ≥24's own `NODE_USE_ENV_PROXY`). Setting it alone logs a warning naming the fix. **Workaround:** set `HTTPS_PROXY` (plus `NO_PROXY`).
+- **Session health and tool calls can still disagree when the daemon is disabled.** With the daemon on (`airtableFormula.mcp.useDaemon`, default `true`) the dashboard's health check runs over the same HTTP transport as tool calls, so it fails the same way and reports the session as invalid. With the daemon disabled, the extension falls back to a forked browser health check, which uses Chrome's own networking — it can report a valid session while direct-HTTP tool calls fail on a proxy/CA problem. The failure is no longer silent (the tool error names the proxy/CA cause), but the two paths are not unified.
+
+### Formula round-trip + daemon upload fixes (2026-07-09)
+
+#### Fixed
+- **MCP server — formula downloads emit real field names.** `download_base_formulas` / `download_formula_field` used to write Airtable's internal `{column_value_fldXXX}` refs verbatim — unreadable, and rejected by Airtable on re-upload ("Unknown field names"). Refs are now resolved to `{Field Name}` (native syntax); unknown ids fall back to `{fldXXX}`, which the API accepts. Non-field placeholders (`{FOO_PLACEHOLDER}`) pass through untouched.
+- **MCP server — formula writes normalize legacy refs.** All formula write paths (`create_formula_field`, `update_formula_field`, `update_field_config`, `validate_formula`) convert `{column_value_fldXXX}` → `{fldXXX}` before sending, so previously-downloaded files round-trip without manual rewriting.
+- **Extension — "Upload formula" no longer fails with HTTP 406.** The right-click upload/download commands' daemon HTTP client now sends the MCP-spec-required `Accept: application/json, text/event-stream` header, and parses both JSON and SSE-framed responses (older daemons). The daemon side now answers stateless `/mcp` POSTs as plain JSON (`enableJsonResponse`).
+- **MCP server — `list_fields` lightweight by default**: returns `{ id, name, type }`; full `typeOptions` is opt-in via `includeOptions: true` (previously ~350K chars on a wide table). The installed AI-skill template and `server.json` tool listing were updated to match.
+- **Language services — field names with special characters no longer produce false errors.** With downloads now emitting real `{Field Name}` refs, names containing apostrophes (`{Owner's List}`), parentheses (`{Total (USD)}`), or smart quotes (`{Owner’s List}`, common via Airtable UI autocorrect) used to trigger spurious `Unclosed quote` / `Missing closing parenthesis` / `Smart quote` Errors in the `.formula` editor — and the smart-quote quick fix would rename the ref into a dangling reference. The paren/bracket/quote/smart-quote checkers now skip `{…}` field-ref bodies (real errors outside refs still report; an unclosed `{` still reports).
+
+### MCP server — sync_base schema-orphan deletion under mirror (2026-06-21)
+
+#### Added
+- `sync_base mode=apply` — **schema-orphan deletion** (`pruneSchema`): under `policy=mirror`, dest-only fields/views/tables that have no counterpart in the source are deleted from the destination after `applyPlan` completes. Two independent gates: `confirmDeletions:true` is required to delete dest-only **fields and views** (same flag as `pruneRecords`); the new `confirmTableDeletions:true` is required to drop dest-only **tables** — `confirmDeletions` alone never deletes an entire table. Without each gate the operation is a dry-count only (`DELETION_GATED` for fields/views, `TABLE_DELETION_GATED` for tables). Deletion is dependency-safe: fields are deleted without `force` (so no matched field is ever cascade-deleted), orphan→orphan formula dependencies are resolved by retry-until-stable, and a field blocked by a matched-field dependency is kept and reported as `SCHEMA_DELETE_BLOCKED`. Deletion order: views first (no dependents), then fields, then tables (after their content). Applied counts are surfaced in the result as `schemaDeleted` (fields + views) and `tablesDeleted`; failures are continue-on-failure warnings (`SCHEMA_DELETE_FAILED`). Per-table `policyOverrides` are respected — `overlay`/`preserve` tables are never pruned. Module: `src/sync/prune-schema.js`. Deferred: retypes, view-section orphan deletion, attachment-strip (M4).
+
+### MCP server — sync_base natural-key record matching (2026-06-21)
+
+#### Added
+- `sync_base` — **natural-key record matching** (`naturalKeys: { [tableName]: fieldName }`): matches dest↔source records by a shared key field's value (resolved by name per base) and grows `idmap.records` without any write to either base. Add-only + ambiguity-safe: existing mappings are never overwritten, already-mapped dest records are never re-claimed, and ambiguous/duplicate key values are skipped with a `NATURAL_KEY_AMBIGUOUS` warning; a missing key field emits `NATURAL_KEY_FIELD_MISSING`. Runs in two places: (1) **`mode=reconcile`** — after the existence-prune, snapshots source records and calls the matcher, then saves the updated idmap; (2) **`mode=apply` auto pre-pass** — runs before Pass 1 and before `pruneRecords`, so records `mirror` no longer treats real-but-unmapped dest records as orphans and re-syncs no longer duplicate them. The key field must be stable across bases (autoNumber renumbers → bad key; name/email/injected `InjectID` → good key). Single-field keys only; composite keys and value normalization are deferred. A `matched` count is returned in the result.
+
+### MCP server — sync_base reconciliation policy + custom field mappings (2026-06-20)
+
+#### Added
+- `sync_base mode=apply` — **records reconciliation policy**: new `policy` param (`mirror` | `overlay` | `preserve`, default `overlay`) controls two independent axes — **extras** (keep or remove dest-only records) and **conflicts** (source-wins or dest-wins when both bases hold the record). Presets: `mirror` = {remove, source-wins} (make dest identical to source), `overlay` = {keep, source-wins} (default — today's existing behavior), `preserve` = {keep, dest-wins} (never overwrite dest edits). `policyOverrides` (`{ [tableName]: preset }`) overrides the global preset per table.
+- `sync_base mode=apply` — **deletion gate** (`confirmDeletions`): under `mirror` policy (or any table override that removes extras), dest-only orphan records are not deleted unless `confirmDeletions: true`. Without it, `pruneRecords` reports a `DELETION_GATED` warning with the would-delete count and does nothing — poll `mode=status` to see counts, then re-run with `confirmDeletions:true` to apply. Separately, `createTable` unconditionally clears the ~3 blank scaffolding rows it seeds (best-effort; `SCAFFOLDING_ROWS_KEPT` warning if the deletion attempt fails); `pruneRecords` under `mirror`+`confirmDeletions` additionally removes any leftover dest-only blank rows as part of the ordinary orphan prune. Attachment-strip under mirror remains a deferred follow-up (schema-orphan deletion and natural-key matching shipped separately).
+- `sync_base` — **custom field mappings** (`fieldMappings: { [tableName]: { sourceFieldName: destFieldName } }`): inject a source field's value (including computed fields like `autoNumber` or formula) into a different writable scalar dest field during record sync. Classic use: inject a source `autoNumber` field (`Code`) into a writable dest text field (`InjectID`) so a dest primary-key formula can reconstruct original identity across bases. Fail-fast pre-flight validation aborts `mode=apply` synchronously on any error (`FIELD_MAP_INVALID`); `mode=plan` and `mode=diff` run the same validation as a dry check and return errors in `fieldMappingErrors` (machine output). Validation codes: `FIELD_MAP_TABLE_MISSING`, `FIELD_MAP_SOURCE_MISSING`, `FIELD_MAP_TARGET_MISSING`, `FIELD_MAP_TARGET_COMPUTED` (dest must be writable scalar), `FIELD_MAP_TYPE_INCOMPATIBLE` (array-typed source/dest rejected), `FIELD_MAP_COLLISION` (two sources targeting the same dest).
+
+### MCP server — sync_base compare, curatable changeset, selective apply (2026-06-19)
+
+#### Added
+- `sync_base mode=diff` (read-only): comprehensive schema comparison of two bases via a new pure `src/sync/compare.js`. Every difference is classified as **drift** (sync enforces it — table/field/view existence, field type/options/choices, view filters/sorts/groups content, column visibility, colors/cover/frozen/rowHeight, primary, form), **best-effort** (sync applies but doesn't guarantee — field/view/column order, sort/group clause order), or **not-synced** (view sections, now captured by the snapshot). Two verdicts: `identical` (zero diffs) and `converged` (zero drift; best-effort/not-synced may remain). The full diff is persisted to `~/.airtable-user-mcp/sync/<src>__<dest>/diff-<id>.json`; the tool returns a token-budgeted DIGEST (verdicts + class counts + per-table count rollup + a capped driftSample, ≤25). Drill into one table via `mode=diff detail="<table>"` (params: `detail`, `diffId`, `offset`, `limit`).
+- `sync_base mode=plan` now emits a curatable **changeset**: each action carries a stable name-based `changeId` (`<op>|<table>|<target>`), a `class`, and an `apply:true` flag; the digest includes a `sample` + an `editHint`. New `direction` param (`to-dest` default | `to-source`) targets either base as the destination.
+- `sync_base mode=apply` accepts a `skip:[changeId]` list (and honors `apply:false` on changeset entries) → applies everything except the removed changes. Journal-safe; skipped dependencies degrade gracefully to UNRESOLVABLE_REF.
+
+#### Fixed
+- `sync_base mode=apply` field creation — **autoNumber** fields now create. The read-only runtime counter `maxUsedAutoNumber` is stripped from `typeOptions` before `createField` (the internal API rejected it with 422 "options not valid").
+- `sync_base mode=apply` field creation — **count** fields now create. `toWritableComputedOptions` emitted the public-REST key `recordLinkFieldId`, but internal-API snapshots store a count's link under `relationColumnId` (like rollup) and the count create path passes `typeOptions` through untranslated — so every count field 422'd "options not valid". It now reads/emits the internal `relationColumnId`. (Both fixes validated live by converging a full base copy: 5 autoNumber + 3 count fields that previously failed now create cleanly.)
+- `sync_base mode=apply` — **createTable scaffolding rows are now removed** (clean mirror). A new table is seeded with ~3 blank rows (like the 6 default fields); apply already deleted the scaffolding fields but left the rows, so every synced table carried blank rows. The rows are now cleared right after create (best-effort; `SCAFFOLDING_ROWS_KEPT` warning on failure). Live-confirmed: createTable → 3 rows → 0.
+- `sync_base mode=diff` / view convergence — **empty-predicate filter representations no longer report false drift.** Airtable's internal API stores the same emptiness check two equivalent ways (`isNotEmpty`/null ≡ `!=`/"" and `isEmpty`/null ≡ `=`/""): a source base holds the named-operator form, the dest holds the `=`/`!=` form after the sync applied it. `canonFilterSet` now normalizes these (only when the value is genuinely empty — `0`/`false` are preserved), so semantically-equal filters compare equal in the diff report and stop re-emitting `applyViewConfig` every apply.
+
+### MCP server — sync_base record sync (2026-06-17)
+
+#### Added
+- `sync_base mode=apply`: after schema + view sync, launches a **background** record sync and returns a `jobId` immediately. Two-pass: Pass 1 creates/updates scalar + single/multi-select cells (computed fields + computed primary are never written) and fills a persisted `idmap.records` (rec→rec map); Pass 2 writes linked-record cells (remapped via record map, unresolved targets reported). Attachments are then downloaded from source and re-uploaded to dest (deduped by filename+size). Record-referencing view filters that were stripped during view sync are restored once records exist. Throttling is handled by per-request 429 backoff in the auth queue; resumable (records journal, per-chunk persist) and continue-on-failure (per-record errors are warnings, not aborts).
+- `sync_base mode=status`: poll a background record job by planId — returns running/done/failed plus live records-mapped count.
+- `sync_base mode=reconcile`: **prune** dead record-map entries (existence-prune). Per-table natural-key re-match is planned (not yet implemented); reconcile does not de-duplicate records.
+
+### MCP server — sync_base collaborative view sync (2026-06-17)
+
+#### Added
+- `sync_base`: full collaborative-view sync — create views + mirror filters, sorts, group levels, field visibility + column order, frozen columns, color config, cover, calendar date columns, form metadata, and row height, with source→dest field+choice ID remapping, per-view-type anchor validation + grid fallback, applied after fields. Idempotent (convergent canonical compare). Personal views skipped; orphan views reported (not deleted).
+
+### MCP server — sync_base mode=apply (2026-06-16)
+
+#### Added
+- `sync_base mode=apply`: execute a saved base-to-base schema plan against the destination — creates tables, reconciles the primary, creates scalar/link/computed fields (source→dest reference remapping + dest-space formula validation), and applies non-destructive field updates. Drift-guarded (aborts if the destination changed since the plan) and resumable via an on-disk journal. Type-changing retypes, deletions, records, and views are out of scope for this release.
+
 ### LSP server — fix runtime startup + CI bin-link warning (2026-06-12)
 
 - **`airtable-user-lsp` was runtime-broken when executed with Node directly**

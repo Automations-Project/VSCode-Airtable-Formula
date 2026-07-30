@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Automations-Project/airtable-user-mcp",
   "title": "Airtable User MCP",
-  "description": "Manage Airtable bases: schema, field CRUD, views, formula validation, extensions",
-  "version": "2.1.1",
+  "description": "Manage Airtable bases via the internal API: schema inspection, table/field/view CRUD, formula validation and download, record CRUD, sidebar sections, record templates, extensions, base-to-base sync, and daemon control",
+  "version": "2.4.15",
   "websiteUrl": "https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server",
   "repository": {
     "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
@@ -13,14 +13,16 @@
     {
       "src": "https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/extension/images/icon.png",
       "mimeType": "image/png",
-      "sizes": ["128x109"]
+      "sizes": [
+        "128x109"
+      ]
     }
   ],
   "packages": [
     {
       "registryType": "npm",
       "identifier": "airtable-user-mcp",
-      "version": "2.1.1",
+      "version": "2.4.15",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -45,37 +47,297 @@
     }
   ],
   "tools": [
-    { "name": "get_base_schema", "description": "Get full schema of all tables, fields, and views in a base" },
-    { "name": "list_tables", "description": "List all tables in a base with IDs and names" },
-    { "name": "get_table_schema", "description": "Get full schema for a single table including fields and views" },
-    { "name": "list_fields", "description": "List all fields in a table with types and configuration" },
-    { "name": "list_views", "description": "List all views in a table with IDs, names, and types" },
-    { "name": "create_field", "description": "Create a new field including computed types (formula, rollup, lookup, count)" },
-    { "name": "create_formula_field", "description": "Create a formula field (shorthand)" },
-    { "name": "validate_formula", "description": "Validate a formula expression before creating or updating" },
-    { "name": "update_formula_field", "description": "Update the formula text of an existing formula field" },
-    { "name": "update_field_config", "description": "Update configuration of any computed field" },
-    { "name": "update_field_description", "description": "Set or update a field's description text" },
-    { "name": "rename_field", "description": "Rename a field with pre-validation" },
-    { "name": "delete_field", "description": "Delete a field with safety guards and dependency checks" },
-    { "name": "duplicate_field", "description": "Clone a field, optionally copying cell values" },
-    { "name": "create_view", "description": "Create a new view (grid, form, kanban, calendar, gallery, gantt, list)" },
-    { "name": "duplicate_view", "description": "Clone a view with all configuration" },
-    { "name": "rename_view", "description": "Rename a view" },
-    { "name": "delete_view", "description": "Delete a view (cannot delete last view)" },
-    { "name": "update_view_description", "description": "Set or clear a view's description" },
-    { "name": "update_view_filters", "description": "Set filter conditions with AND/OR conjunctions" },
-    { "name": "reorder_view_fields", "description": "Change column order in a view" },
-    { "name": "show_or_hide_view_columns", "description": "Show or hide specific columns in a view" },
-    { "name": "apply_view_sorts", "description": "Set or clear sort conditions on a view" },
-    { "name": "update_view_group_levels", "description": "Set or clear grouping on a view" },
-    { "name": "update_view_row_height", "description": "Change row height (small, medium, large, xlarge)" },
-    { "name": "create_extension", "description": "Register a new extension/block in a base" },
-    { "name": "create_extension_dashboard", "description": "Create a new dashboard page for extensions" },
-    { "name": "install_extension", "description": "Install an extension onto a dashboard page" },
-    { "name": "update_extension_state", "description": "Enable or disable an installed extension" },
-    { "name": "rename_extension", "description": "Rename an installed extension" },
-    { "name": "duplicate_extension", "description": "Clone an installed extension" },
-    { "name": "remove_extension", "description": "Remove an extension from a dashboard" }
+    {
+      "name": "get_base_schema",
+      "description": "Get full schema of all tables, fields, and views in a base"
+    },
+    {
+      "name": "list_tables",
+      "description": "List all tables in a base with IDs and names"
+    },
+    {
+      "name": "get_table_schema",
+      "description": "Get full schema for a single table including fields and views"
+    },
+    {
+      "name": "list_fields",
+      "description": "List all fields in a table with id, name, and type (typeOptions via includeOptions)"
+    },
+    {
+      "name": "list_views",
+      "description": "List all views in a table with IDs, names, and types"
+    },
+    {
+      "name": "get_view",
+      "description": "Read a view's live configuration from the base."
+    },
+    {
+      "name": "create_table",
+      "description": "Create a new table in an Airtable base."
+    },
+    {
+      "name": "rename_table",
+      "description": "Rename a table in an Airtable base."
+    },
+    {
+      "name": "delete_table",
+      "description": "Delete a table from an Airtable base."
+    },
+    {
+      "name": "list_record_templates",
+      "description": "List all record templates for a table."
+    },
+    {
+      "name": "create_record_template",
+      "description": "Create a new record template for a table."
+    },
+    {
+      "name": "rename_record_template",
+      "description": "Rename an existing record template."
+    },
+    {
+      "name": "update_record_template_description",
+      "description": "Set or update the description text of a record template."
+    },
+    {
+      "name": "set_record_template_cell",
+      "description": "Pre-fill a field value on a record template."
+    },
+    {
+      "name": "set_record_template_visible_columns",
+      "description": "Set which columns are shown (pre-fillable) on a record template."
+    },
+    {
+      "name": "duplicate_record_template",
+      "description": "Duplicate a record template within the same or a different table."
+    },
+    {
+      "name": "apply_record_template",
+      "description": "Apply (instantiate) a record template to create a new record pre-filled with the template's field values."
+    },
+    {
+      "name": "delete_record_template",
+      "description": "⚠️ DESTRUCTIVE — Permanently delete a record template."
+    },
+    {
+      "name": "create_field",
+      "description": "Create a new field including computed types (formula, rollup, lookup, count)"
+    },
+    {
+      "name": "create_formula_field",
+      "description": "Create a formula field (shorthand)"
+    },
+    {
+      "name": "validate_formula",
+      "description": "Validate a formula expression before creating or updating"
+    },
+    {
+      "name": "download_formula_field",
+      "description": "Download the formula text of a formula field to a local file."
+    },
+    {
+      "name": "download_base_formulas",
+      "description": "Download ALL formula fields from a base to local .formula files, organized into per-table subfolders."
+    },
+    {
+      "name": "update_field_config",
+      "description": "Update configuration of any computed field"
+    },
+    {
+      "name": "update_formula_field",
+      "description": "Update the formula text of an existing formula field"
+    },
+    {
+      "name": "rename_field",
+      "description": "Rename a field with pre-validation"
+    },
+    {
+      "name": "delete_field",
+      "description": "Delete a field with safety guards and dependency checks"
+    },
+    {
+      "name": "delete_fields",
+      "description": "Delete multiple fields from an Airtable table in a single call."
+    },
+    {
+      "name": "create_view",
+      "description": "Create a new view (grid, form, kanban, calendar, gallery, gantt, list)"
+    },
+    {
+      "name": "duplicate_view",
+      "description": "Clone a view with all configuration"
+    },
+    {
+      "name": "rename_view",
+      "description": "Rename a view"
+    },
+    {
+      "name": "delete_view",
+      "description": "Delete a view (cannot delete last view)"
+    },
+    {
+      "name": "update_view_description",
+      "description": "Set or clear a view's description"
+    },
+    {
+      "name": "update_view_filters",
+      "description": "Set filter conditions with AND/OR conjunctions"
+    },
+    {
+      "name": "reorder_view_fields",
+      "description": "Change column order in a view"
+    },
+    {
+      "name": "show_or_hide_view_columns",
+      "description": "Show or hide specific columns in a view"
+    },
+    {
+      "name": "apply_view_sorts",
+      "description": "Set or clear sort conditions on a view"
+    },
+    {
+      "name": "update_view_group_levels",
+      "description": "Set or clear grouping on a view"
+    },
+    {
+      "name": "update_view_row_height",
+      "description": "Change row height (small, medium, large, xlarge)"
+    },
+    {
+      "name": "list_view_sections",
+      "description": "List all sidebar sections for a table."
+    },
+    {
+      "name": "create_view_section",
+      "description": "Create a new sidebar section in a table."
+    },
+    {
+      "name": "rename_view_section",
+      "description": "Rename a sidebar section."
+    },
+    {
+      "name": "delete_view_section",
+      "description": "Delete a sidebar section."
+    },
+    {
+      "name": "move_view_to_section",
+      "description": "Move a view (or a section itself) within the sidebar."
+    },
+    {
+      "name": "set_view_columns",
+      "description": "One-shot view-column reset: hides every column then shows only `visibleColumnIds` in the given left-to-right order, with optional freeze."
+    },
+    {
+      "name": "show_or_hide_all_columns",
+      "description": "Show or hide every column in a view in one call."
+    },
+    {
+      "name": "move_visible_columns",
+      "description": "Move columns by visible-only index (index 0 = leftmost shown column, hidden columns not counted)."
+    },
+    {
+      "name": "move_overall_columns",
+      "description": "Move one or more columns to a new position in the *overall* index (visible + hidden)."
+    },
+    {
+      "name": "update_frozen_column_count",
+      "description": "Set the frozen-column divider position for a grid view."
+    },
+    {
+      "name": "set_view_cover",
+      "description": "Set the cover-image field and crop/fit mode for Kanban or Gallery views."
+    },
+    {
+      "name": "set_view_color_config",
+      "description": "Apply a color config to a view (Kanban / Gallery / Calendar)."
+    },
+    {
+      "name": "set_view_cell_wrap",
+      "description": "Toggle whether long cell values wrap (multi-line) or truncate (single-line with ellipsis)."
+    },
+    {
+      "name": "set_calendar_date_columns",
+      "description": "Set the date-column ranges shown on a Calendar view."
+    },
+    {
+      "name": "set_form_metadata",
+      "description": "Update one or more legacy-form-view metadata properties in a single call."
+    },
+    {
+      "name": "set_form_submission_notification",
+      "description": "Toggle email-on-submit notifications for a specific user on a form view."
+    },
+    {
+      "name": "update_field_description",
+      "description": "Set or update a field's description text"
+    },
+    {
+      "name": "duplicate_field",
+      "description": "Clone a field, optionally copying cell values"
+    },
+    {
+      "name": "create_extension",
+      "description": "Register a new extension/block in a base"
+    },
+    {
+      "name": "create_extension_dashboard",
+      "description": "Create a new dashboard page for extensions"
+    },
+    {
+      "name": "install_extension",
+      "description": "Install an extension onto a dashboard page"
+    },
+    {
+      "name": "update_extension_state",
+      "description": "Enable or disable an installed extension"
+    },
+    {
+      "name": "rename_extension",
+      "description": "Rename an installed extension"
+    },
+    {
+      "name": "duplicate_extension",
+      "description": "Clone an installed extension"
+    },
+    {
+      "name": "remove_extension",
+      "description": "Remove an extension from a dashboard"
+    },
+    {
+      "name": "query_records",
+      "description": "Read records from an Airtable table view."
+    },
+    {
+      "name": "duplicate_records",
+      "description": "Duplicate one or more existing records within a table."
+    },
+    {
+      "name": "create_records",
+      "description": "Create one or more records in a table."
+    },
+    {
+      "name": "update_records",
+      "description": "Update primitive / single-select cells of existing records via cellValuesByColumnId."
+    },
+    {
+      "name": "upload_attachment",
+      "description": "Upload attachments into an attachment cell by URL."
+    },
+    {
+      "name": "delete_records",
+      "description": "Delete one or more records from a table in a single batch call."
+    },
+    {
+      "name": "sync_base",
+      "description": "Base-to-base schema + record sync."
+    },
+    {
+      "name": "manage_daemon",
+      "description": "Inspect and control the MCP daemon this server runs in."
+    },
+    {
+      "name": "manage_tools",
+      "description": "Control which tools are available: list profiles, switch between read-only / safe-write / full / custom, and toggle individual tools or whole categories. Always enabled regardless of the active profile."
+    }
   ]
 }

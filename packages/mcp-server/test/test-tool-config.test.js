@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,10 +14,26 @@ import {
   BUILTIN_PROFILES,
 } from '../src/tool-config.js';
 
+// Sandbox the WHOLE file: switchProfile()/toggleTool()/toggleCategory() all
+// call save(), which writes tools-config.json. Without this, tests write the
+// LIVE ~/.airtable-user-mcp/tools-config.json — a Windows EPERM rename race
+// when the real daemon holds the file, and they flip the user's real profile.
+const FILE_HOME = join(tmpdir(), `tool-config-test-${process.pid}-${Date.now()}`);
+const PREV_FILE_HOME = process.env.AIRTABLE_USER_MCP_HOME;
+before(async () => {
+  await mkdir(FILE_HOME, { recursive: true });
+  process.env.AIRTABLE_USER_MCP_HOME = FILE_HOME;
+});
+after(async () => {
+  if (PREV_FILE_HOME === undefined) delete process.env.AIRTABLE_USER_MCP_HOME;
+  else process.env.AIRTABLE_USER_MCP_HOME = PREV_FILE_HOME;
+  await rm(FILE_HOME, { recursive: true, force: true });
+});
+
 describe('TOOL_CATEGORIES', () => {
   it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
-    assert.equal(tools.length, 66, `Expected 66 tools, got ${tools.length}`);
+    assert.equal(tools.length, 72, `Expected 72 tools, got ${tools.length}`);
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       assert.ok(CATEGORY_LABELS[cat], `Tool "${tool}" has unknown category "${cat}"`);
     }
@@ -58,9 +74,22 @@ describe('BUILTIN_PROFILES', () => {
   it('safe-write excludes destructive categories', () => {
     const cats = BUILTIN_PROFILES['safe-write'].categories;
     assert.ok(!cats.includes('field-destructive'));
+    assert.ok(!cats.includes('record-destructive'));
     assert.ok(!cats.includes('view-destructive'));
     assert.ok(!cats.includes('table-destructive'));
     assert.ok(!cats.includes('extension'));
+  });
+
+  it('safe-write excludes sync (sync_base can delete tables/fields/views/records via mode=apply)', () => {
+    const cats = BUILTIN_PROFILES['safe-write'].categories;
+    assert.ok(!cats.includes('sync'), 'safe-write must not silently expose sync_base');
+  });
+
+  it('daemon is full-profile only (manage_daemon can stop the server the caller is talking through)', () => {
+    assert.ok(!BUILTIN_PROFILES['read-only'].categories.includes('daemon'));
+    assert.ok(!BUILTIN_PROFILES['safe-write'].categories.includes('daemon'),
+      'safe-write must not expose manage_daemon — stop/restart/token_rotate are not "safe writes"');
+    assert.ok(BUILTIN_PROFILES['full'].categories.includes('daemon'));
   });
 
   it('full includes all categories', () => {
@@ -83,9 +112,9 @@ describe('ToolConfigManager', () => {
       assert.equal(mgr.activeProfile, 'full');
     });
 
-    it('enables all 66 tools on full profile', () => {
+    it('enables all 72 tools on full profile', () => {
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 66);
+      assert.equal(enabled.size, 72);
     });
 
     it('manage_tools is always enabled', () => {
@@ -119,12 +148,16 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('delete_field'));
       assert.ok(!enabled.has('delete_view'));
       assert.ok(!enabled.has('create_extension'));
+      assert.ok(enabled.has('create_records'));
+      assert.ok(enabled.has('update_records'));
+      assert.ok(!enabled.has('delete_records'));
+      assert.ok(!enabled.has('sync_base'), 'sync must not be in safe-write — its mode=apply can delete records/schema');
     });
 
-    it('full enables all 66 tools', async () => {
+    it('full enables all 72 tools', async () => {
       await mgr.switchProfile('full');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 66);
+      assert.equal(enabled.size, 72);
     });
 
     it('unknown profile fails closed to read-only', async () => {
@@ -207,10 +240,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('getToolStatus()', () => {
-    it('returns status for all 66 tools', async () => {
+    it('returns status for all 72 tools', async () => {
       await mgr.switchProfile('full');
       const status = mgr.getToolStatus();
-      assert.equal(status.length, 66);
+      assert.equal(status.length, 72);
       assert.ok(status.every(s => s.enabled === true));
     });
 
@@ -234,5 +267,143 @@ describe('ToolConfigManager', () => {
       assert.ok(names.includes('full'));
       assert.ok(names.includes('custom'));
     });
+  });
+});
+
+describe('record-write tools', () => {
+  it('maps create/update_records to record-write and delete_records to record-destructive', () => {
+    assert.equal(TOOL_CATEGORIES.create_records, 'record-write');
+    assert.equal(TOOL_CATEGORIES.update_records, 'record-write');
+    assert.equal(TOOL_CATEGORIES.delete_records, 'record-destructive');
+  });
+});
+
+describe('sync tools', () => {
+  it('maps sync_base to the sync category', () => {
+    assert.equal(TOOL_CATEGORIES.sync_base, 'sync');
+  });
+});
+
+describe('daemon tools', () => {
+  it('maps manage_daemon to the daemon category', () => {
+    assert.equal(TOOL_CATEGORIES.manage_daemon, 'daemon');
+  });
+});
+
+describe('legacy on-disk custom config — new categories must not silently widen', () => {
+  // Regression coverage for: a ~/.airtable-user-mcp/tools-config.json with
+  // activeProfile:"custom" written before the `sync`, `record-destructive` and
+  // `daemon` categories existed has NO key at all for sync_base /
+  // delete_records / manage_daemon in its customTools map. enabledToolNames()'s
+  // "absent key → enabled" default must not silently grant those tools on
+  // upgrade. This passes because none of those categories is in
+  // LEGACY_CATEGORIES_DEFAULT_ON — that allowlist is frozen deliberately, so
+  // fixing a failure here by adding the new category to it would defeat the
+  // whole guard.
+  const ENV_KEY = 'AIRTABLE_USER_MCP_HOME';
+  let prevHome;
+  let tmpHome;
+
+  beforeEach(async () => {
+    prevHome = process.env[ENV_KEY];
+    tmpHome = join(tmpdir(), `tool-config-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(tmpHome, { recursive: true });
+    process.env[ENV_KEY] = tmpHome;
+  });
+
+  afterEach(async () => {
+    if (prevHome === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = prevHome;
+    await rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it('an old custom config with no sync_base/delete_records/manage_daemon key keeps them disabled', async () => {
+    // Simulate a pre-existing config: activeProfile "custom" with explicit
+    // per-tool overrides for tools that existed at the time it was written,
+    // but no entry whatsoever for sync_base / delete_records.
+    const legacyConfig = {
+      activeProfile: 'custom',
+      customTools: {
+        get_base_schema: true,
+        create_table: true,
+        delete_field: false,
+      },
+    };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+    const enabled = mgr.enabledToolNames();
+
+    assert.ok(!enabled.has('sync_base'), 'sync_base must default to DISABLED for a pre-existing custom config');
+    assert.ok(!enabled.has('delete_records'), 'delete_records must default to DISABLED for a pre-existing custom config');
+    assert.ok(!enabled.has('manage_daemon'), 'manage_daemon must default to DISABLED for a pre-existing custom config');
+
+    // Legacy behavior is preserved for already-known categories: a tool the
+    // user never explicitly toggled (e.g. create_field, part of field-write)
+    // still defaults to enabled, and an explicit false override still wins.
+    assert.ok(enabled.has('create_field'), 'unrelated tools in pre-existing categories must keep defaulting to enabled');
+    assert.ok(enabled.has('get_base_schema'));
+    assert.ok(enabled.has('create_table'));
+    assert.ok(!enabled.has('delete_field'), 'explicit false override must still be honored');
+  });
+
+  it('toggleTool on an absent-key tool reports changed (fires tools/list_changed)', async () => {
+    // Same legacy shape as above: sync_base has no key, so it currently
+    // resolves to disabled. Toggling it to true is a REAL change and must be
+    // notified. With the old `customTools[tool] !== false` computation for
+    // `prev`, an absent key read as `prev = true` (since `undefined !==
+    // false`), so this came out as changed=false and no notification fired
+    // even though the tool became enabled and the change was persisted —
+    // connected MCP clients would keep a stale tool list for the session.
+    const legacyConfig = { activeProfile: 'custom', customTools: { get_base_schema: true } };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+    assert.ok(!mgr.enabledToolNames().has('sync_base'), 'sanity: starts disabled');
+
+    let notifyCount = 0;
+    mgr.bindServer({ sendToolListChanged: () => { notifyCount++; } });
+
+    await mgr.toggleTool('sync_base', true);
+
+    assert.ok(mgr.enabledToolNames().has('sync_base'), 'sync_base is now enabled');
+    assert.equal(notifyCount, 1, 'tools/list_changed must fire — the effective tool set changed');
+  });
+
+  it('toggleTool on an absent-key tool does not fire a spurious notification when the value already matches the resolved default', async () => {
+    // Mirror case named in the finding: toggling an absent-key tool to the
+    // value it already effectively has (false, since sync is not in
+    // LEGACY_CATEGORIES_DEFAULT_ON) is NOT a real change and must not notify.
+    const legacyConfig = { activeProfile: 'custom', customTools: { get_base_schema: true } };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+
+    let notifyCount = 0;
+    mgr.bindServer({ sendToolListChanged: () => { notifyCount++; } });
+
+    await mgr.toggleTool('sync_base', false);
+
+    assert.ok(!mgr.enabledToolNames().has('sync_base'));
+    assert.equal(notifyCount, 0, 'no real change occurred — must not notify');
+  });
+
+  it('toggleCategory on an absent-key category reports changed for a legacy config', async () => {
+    const legacyConfig = { activeProfile: 'custom', customTools: { get_base_schema: true } };
+    await writeFile(join(tmpHome, 'tools-config.json'), JSON.stringify(legacyConfig), 'utf8');
+
+    const mgr = new ToolConfigManager();
+    await mgr.load();
+
+    let notifyCount = 0;
+    mgr.bindServer({ sendToolListChanged: () => { notifyCount++; } });
+
+    await mgr.toggleCategory('sync', true);
+
+    assert.ok(mgr.enabledToolNames().has('sync_base'));
+    assert.equal(notifyCount, 1, 'tools/list_changed must fire — the category actually changed');
   });
 });

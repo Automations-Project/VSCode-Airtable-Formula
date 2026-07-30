@@ -36,8 +36,9 @@ const sharedOptions = {
   format: 'esm',
   platform: 'node',
   target: 'node20',
-  // patchright and @ngrok/ngrok have native NAPI binaries — kept external
-  external: ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok'],
+  // patchright, @ngrok/ngrok and impit have native NAPI (.node) binaries that esbuild
+  // cannot bundle ("No loader is configured for .node files") — kept external + vendored
+  external: ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok', 'impit'],
   banner: { js: cjsRequireBanner },
   logLevel: 'info',
 };

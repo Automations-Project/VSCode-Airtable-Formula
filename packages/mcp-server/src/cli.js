@@ -20,8 +20,8 @@ Usage:
   npx airtable-user-mcp                  Start MCP server (stdio)
   npx airtable-user-mcp login            Log in via browser
   npx airtable-user-mcp logout           Clear saved session
-  npx airtable-user-mcp status           Show session & browser info
-  npx airtable-user-mcp doctor           Run diagnostics
+  npx airtable-user-mcp status           Show what's on disk (makes no session claim)
+  npx airtable-user-mcp doctor           Run diagnostics + probe whether you're signed in
   npx airtable-user-mcp install-browser  Download Chromium (~170MB)
   npx airtable-user-mcp daemon start                          Start the shared daemon process
   npx airtable-user-mcp daemon stop                           Stop the running daemon
@@ -44,6 +44,55 @@ Environment:
 // Kept as a thin wrapper for call-site clarity; the single source of truth is paths.js.
 const getConfigDir = getHomeDir;
 
+/**
+ * A REAL session verdict for `doctor`, in one line.
+ *
+ * doctor used to report all-green for exactly the broken profile in issue #21
+ * because it never probed the session at all — and `status` deliberately refuses
+ * to claim anything from files on disk, which left no trustworthy signal
+ * anywhere and is what blocked the reporter's own diagnosis.
+ *
+ * Prefers the RUNNING daemon: it already holds the browser, and the persistent
+ * profile is single-owner — launching our own Chromium against it would collide
+ * (Chrome exit 21), and auth's lock recovery would then kill the live daemon's
+ * browser as a "stale holder". Only with no healthy daemon do we open our own.
+ */
+async function probeSessionForDoctor() {
+  try {
+    const { getDaemonStatus } = await import('./daemon/launcher.js');
+    const daemon = await getDaemonStatus({ configDir: process.env.AIRTABLE_USER_MCP_HOME });
+    if (daemon.healthy && daemon.record?.port && daemon.record?.bearerToken) {
+      const res = await fetch(`http://127.0.0.1:${daemon.record.port}/daemon/session-health`, {
+        headers: { Authorization: `Bearer ${daemon.record.bearerToken}` },
+      });
+      if (res.ok) return describeSessionHealth(await res.json(), 'via the running daemon');
+      return `could not determine — the daemon answered HTTP ${res.status} (try "daemon stop" then re-run doctor)`;
+    }
+
+    const { AirtableAuth } = await import('./auth.js');
+    const auth = new AirtableAuth();
+    try {
+      return describeSessionHealth(await auth.checkSessionHealth(), 'checked directly');
+    } finally {
+      await auth.close().catch(() => {});
+    }
+  } catch (err) {
+    return `could not determine — ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+/** Render checkSessionHealth()'s verdict. `valid` without a user id is still a
+ *  real signed-in verdict — Airtable accepted the cookie, and browser-free modes
+ *  may simply have no page to read an id from — so say so without inventing one. */
+function describeSessionHealth(health, how) {
+  if (health?.valid) {
+    return health.userId
+      ? `signed in as ${health.userId} (${how})`
+      : `signed in, user id unavailable in this auth mode (${how})`;
+  }
+  return `NOT signed in — ${health?.error || `HTTP ${health?.status ?? '?'}`} (${how}). Run "npx airtable-user-mcp login".`;
+}
+
 export async function runCli(args) {
   const cmd = args[0];
 
@@ -60,13 +109,19 @@ export async function runCli(args) {
   if (cmd === 'status') {
     const fs = await import('node:fs');
     const configDir = getConfigDir();
-    const sessionPath = path.join(configDir, 'session.json');
-    const hasSession = fs.existsSync(sessionPath);
+    const profileDir = getProfileDir();
     process.stdout.write(`airtable-user-mcp v${getVersion()}\n`);
     process.stdout.write(`Config dir: ${configDir}\n`);
     process.stdout.write(`Node: ${process.version}\n`);
     process.stdout.write(`Platform: ${process.platform} ${process.arch}\n`);
-    process.stdout.write(`Session: ${hasSession ? 'found' : 'not found'}\n`);
+    // Report what the login flow ACTUALLY produces (a browser profile / a daemon
+    // lock), not the legacy session.json nothing has written for versions — it
+    // printed "not found" on healthy installs. Neither of these proves the
+    // session is signed in: a profile can hold a cookie Airtable still accepts
+    // while the sign-in never completed (issue #21), so only "login"/"doctor"
+    // can verify.
+    process.stdout.write(`Browser profile: ${fs.existsSync(profileDir) ? 'present (not proof of a signed-in session — run "login" to verify)' : 'none — run "login"'}\n`);
+    process.stdout.write(`Daemon: ${fs.existsSync(path.join(configDir, 'daemon.lock')) ? 'lock present (run "daemon status" for health)' : 'no lock'}\n`);
     return true;
   }
 
@@ -93,6 +148,8 @@ export async function runCli(args) {
       process.stdout.write('OTP support: not available (otpauth not installed)\n');
     }
 
+    process.stdout.write(`Session: ${await probeSessionForDoctor()}\n`);
+
     return true;
   }
 
@@ -105,11 +162,39 @@ export async function runCli(args) {
   if (cmd === 'logout') {
     const fs = await import('node:fs/promises');
     const profileDir = getProfileDir();
+
+    // Stop a running daemon FIRST. It keeps the session in memory (browser mode:
+    // a live Chromium; byo/direct-login: the in-memory cred-store), so leaving it
+    // up means the user is told they logged out while every MCP tool call still
+    // works — and its Chromium holds the profile directory open, which makes the
+    // removal below fail with EBUSY on Windows. force:true so a stale/unhealthy
+    // lock is reclaimed too. Daemon shutdown runs auth.close(), which tears down
+    // the browser tree.
+    try {
+      const { stopDaemon } = await import('./daemon/launcher.js');
+      const result = await stopDaemon({ configDir: process.env.AIRTABLE_USER_MCP_HOME, force: true });
+      if (result?.stopped) process.stdout.write('Stopped the running daemon (it was holding the session).\n');
+    } catch (err) {
+      process.stdout.write(
+        `Warning: a daemon may still be running and serving your Airtable session (${err.message}). ` +
+        'Run "npx airtable-user-mcp daemon stop" to be sure.\n',
+      );
+      process.exitCode = 1;
+    }
+
     try {
       await fs.rm(profileDir, { recursive: true, force: true });
       process.stdout.write('Browser session cleared.\n');
-    } catch {
-      process.stdout.write('No session to clear.\n');
+    } catch (err) {
+      // `force: true` already swallows "directory does not exist", so reaching
+      // this catch means the removal genuinely FAILED (typically a process still
+      // holding the profile). Reporting "No session to clear" there told the user
+      // the opposite of the truth — the session is still on disk.
+      process.stdout.write(
+        `Could not clear the browser session at ${profileDir}: ${err.message}\n` +
+        'The Airtable session is still on disk — close anything using it and retry.\n',
+      );
+      process.exitCode = 1;
     }
     // Also remove legacy session.json if it exists
     try {

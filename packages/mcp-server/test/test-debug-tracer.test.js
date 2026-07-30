@@ -70,6 +70,22 @@ describe('debug-tracer redaction', () => {
     const entry = parseDebugLine(out.trim());
     assert.equal(entry.data.headerValue, '[REDACTED]');
   });
+
+  it('redacts direct-login TOTP and BYO cookie/csrf env keys', () => {
+    const out = captureStderr(() => {
+      trace('auth', 'auth:env', {
+        AIRTABLE_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+        AIRTABLE_COOKIE: 'brw=abc; __Host-airtable-session=deadbeef',
+        AIRTABLE_CSRF: 'csrf-token-xyz',
+        AIRTABLE_EMAIL: 'user@example.com',
+      });
+    });
+    const entry = parseDebugLine(out.trim());
+    assert.equal(entry.data.AIRTABLE_TOTP_SECRET, '[REDACTED]');
+    assert.equal(entry.data.AIRTABLE_COOKIE, '[REDACTED]');
+    assert.equal(entry.data.AIRTABLE_CSRF, '[REDACTED]');
+    assert.equal(entry.data.AIRTABLE_EMAIL, '[REDACTED]');
+  });
 });
 
 describe('debug-tracer safeStringify / circular refs', () => {
@@ -117,5 +133,15 @@ describe('debug-tracer error scrubbing', () => {
     assert.ok(!entry.error.includes('eyJabc123'), `error should not leak bearer token, got: ${entry.error}`);
     assert.ok(!entry.error.includes('hunter2'), `error should not leak password, got: ${entry.error}`);
     assert.ok(entry.error.includes('[REDACTED]'), `error should mark redaction, got: ${entry.error}`);
+  });
+
+  it('scrubs TOTP/cookie env values from the error field', () => {
+    const out = captureStderr(() => {
+      trace('auth', 'auth:error', { tool: 'x' },
+        'login failed: AIRTABLE_TOTP_SECRET=JBSWY3DPEHPK3PXP AIRTABLE_COOKIE=brw=abc; sess=deadbeef');
+    });
+    const entry = parseDebugLine(out.trim());
+    assert.ok(!entry.error.includes('JBSWY3DPEHPK3PXP'), `error should not leak TOTP secret, got: ${entry.error}`);
+    assert.ok(!entry.error.includes('deadbeef'), `error should not leak cookie, got: ${entry.error}`);
   });
 });

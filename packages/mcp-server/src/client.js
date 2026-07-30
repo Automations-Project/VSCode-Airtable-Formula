@@ -1,5 +1,7 @@
 import { SchemaCache } from './cache.js';
-import { randomBytes } from 'node:crypto';
+import { formulaRefsToIds } from './formula-refs.js';
+import { isColumnVisible } from './column-visibility.js';
+import { randomBytes, createHash } from 'node:crypto';
 
 /**
  * Generate an Airtable-style filter ID: "flt" + 14 base62 characters.
@@ -285,7 +287,13 @@ function normalizeChoices(choices) {
 }
 
 function normalizeFieldType(type, typeOptions = {}) {
-  const opts = typeOptions || {};
+  let opts = typeOptions || {};
+  // Downloaded/stored formulas carry {column_value_fldXXX} refs; the write API only
+  // accepts {fldXXX} or {Field Name}. Normalize here so every create/update path
+  // (formula, rollup) round-trips regardless of which form the caller supplies.
+  if (typeof opts.formulaText === 'string') {
+    opts = { ...opts, formulaText: formulaRefsToIds(opts.formulaText) };
+  }
 
   if (type === 'url' || type === 'URL') {
     return { type: 'text', typeOptions: { validatorName: 'url', ...opts } };
@@ -958,7 +966,8 @@ export class AirtableClient {
       config: {
         default: null,
         type: 'formula',
-        typeOptions: { formulaText },
+        // Same normalization as the write path: {column_value_fldX} → {fldX}
+        typeOptions: { formulaText: formulaRefsToIds(formulaText) },
       },
     };
 
@@ -1135,7 +1144,7 @@ export class AirtableClient {
 
     const columnOrder = Array.isArray(viewData.columnOrder) ? viewData.columnOrder : null;
     const visibleColumnOrder = columnOrder
-      ? columnOrder.filter(c => c && c.visibility !== false).map(c => c.columnId)
+      ? columnOrder.filter(isColumnVisible).map(c => c.columnId)
       : null;
 
     return {
@@ -1395,25 +1404,6 @@ export class AirtableClient {
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
       throw new Error(`reorderViewFields failed (${res.status}): ${errBody}`);
-    }
-
-    return res.json();
-  }
-
-  /**
-   * Show or hide all columns in a view.
-   */
-  async showOrHideAllColumns(appId, viewId, visibility) {
-    assertAirtableId(appId, 'appId');
-    assertAirtableId(viewId, 'viewId');
-    const url = `https://airtable.com/v0.3/view/${viewId}/showOrHideAllColumns`;
-    const payload = { visibility };
-
-    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`showOrHideAllColumns failed (${res.status}): ${errBody}`);
     }
 
     return res.json();
@@ -1766,8 +1756,11 @@ export class AirtableClient {
 
     // 1. Hide everything.
     await this.showOrHideAllColumns(appId, viewId, false);
-    // 2. Show the requested set in one batched call.
-    await this.showOrHideColumns(appId, viewId, visibleColumnIds, true);
+    // 2. Show the requested set, verifying via read-back and retrying any columns
+    //    that didn't take. Under a bulk run (100s of views configured back-to-back)
+    //    a single showOrHideColumns can return 200 yet leave columns hidden until the
+    //    backend settles — a one-shot call then silently under-applies. Retry-until-confirmed.
+    await this._showColumnsWithRetry(appId, viewId, visibleColumnIds);
     // 3. Identify the primary column (always index 0, immovable) so we can
     //    exclude it from the move call — including it causes FAILED_STATE_CHECK.
     const view = await this.getView(appId, viewId);
@@ -1783,6 +1776,33 @@ export class AirtableClient {
       await this.updateFrozenColumnCount(appId, viewId, frozenColumnCount);
     }
     return { updated: true, viewId, visibleColumnIds, frozenColumnCount: frozenColumnCount ?? null };
+  }
+
+  /**
+   * Show the given columns, re-reading the view and retrying any that didn't take.
+   * Works around the internal API silently under-applying a large showOrHideColumns
+   * call under sustained bulk load (returns 200 but leaves columns hidden until the
+   * backend settles). Returns the number of columns confirmed visible.
+   */
+  async _showColumnsWithRetry(appId, viewId, columnIds, maxAttempts = 5) {
+    const wanted = Array.from(new Set(columnIds));
+    let remaining = wanted;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await this.showOrHideColumns(appId, viewId, remaining, true);
+      const view = await this.getView(appId, viewId);
+      // Must use the SAME predicate getView uses to build visibleColumnOrder
+      // (isColumnVisible, imported above) — a column with no `visibility` key
+      // is VISIBLE by default. A divergent truthy `c.visibility` check treats
+      // an absent key as hidden, so a freshly-shown column (which the API
+      // often returns without a `visibility` key at all) never reads back as
+      // confirmed — burning every retry attempt for nothing.
+      const visible = new Set((view.columnOrder || []).filter(isColumnVisible).map((c) => c.columnId));
+      remaining = wanted.filter((id) => !visible.has(id));
+      if (remaining.length === 0) return wanted.length;
+      // Let eventual consistency settle before retrying the columns that didn't take.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return wanted.length - remaining.length; // best-effort
   }
 
   // ─── View Presentation (cover image, color rules, cell wrap) ──
@@ -2461,6 +2481,466 @@ export class AirtableClient {
       count: result.pastedRowIds?.length ?? 0,
       rowIds: result.pastedRowIds || [],
     };
+  }
+
+  /**
+   * Create a cross-base data transfer policy (step 1 of server-side attachment copy).
+   *
+   * POSTs to `application/{sourceAppId}/createDataTransferPolicyV2` and returns the
+   * `signedDataTransferPolicy` object needed by `pasteAttachmentsCrossBase`.
+   *
+   * @param {string} sourceAppId
+   * @param {string} tableId            - SOURCE table ID
+   * @param {{rowId:string, columnId:string, attachmentId:string}[]} attachmentIdsWithCellLocation
+   * @returns {Promise<object>}         - signedDataTransferPolicy { version, data }
+   */
+  async createDataTransferPolicy(sourceAppId, tableId, attachmentIdsWithCellLocation) {
+    const payload = { attachmentIdsWithCellLocation, tableId };
+    const url = `https://airtable.com/v0.3/application/${sourceAppId}/createDataTransferPolicyV2`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, sourceAppId), sourceAppId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`createDataTransferPolicy failed (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    return data?.data?.signedDataTransferPolicy;
+  }
+
+  /**
+   * Paste attachments cross-base via server-side transfer (step 2 of cross-base attachment copy).
+   *
+   * POSTs to `table/{destTableId}/pasteCells` using a signed data transfer policy acquired from
+   * `createDataTransferPolicy`. The operation SETS (replaces) the target cells, so re-running is
+   * idempotent — no duplicate attachments accumulate.
+   *
+   * @param {string} destAppId
+   * @param {string} destTableId
+   * @param {object} opts
+   * @param {string}   opts.viewId
+   * @param {string}   opts.sourceAppId
+   * @param {string}   opts.sourceTableId
+   * @param {Array}    opts.sourceColumnConfigs     - [{id, name, type, typeOptions}]
+   * @param {Array}    opts.sourceCellValues2dArray - [rowIdx][colIdx] = attachment array
+   * @param {string[]} opts.targetRowIds
+   * @param {string[]} opts.targetColumnIds
+   * @param {object}   opts.signedDataTransferPolicy
+   * @param {string[]} opts.sourceRowIds
+   * @returns {Promise<object>} - { numUpdatedCells, pastedRowIds, pastedColumnIds, skippedAttachments, ... }
+   */
+  async pasteAttachmentsCrossBase(destAppId, destTableId, {
+    viewId,
+    sourceAppId,
+    sourceTableId,
+    sourceColumnConfigs,
+    sourceCellValues2dArray,
+    targetRowIds,
+    targetColumnIds,
+    signedDataTransferPolicy,
+    sourceRowIds,
+  }) {
+    const payload = {
+      viewId,
+      sourceApplicationId: sourceAppId,
+      sourceTableId,
+      sourceColumnConfigs,
+      sourceCellValues2dArray,
+      targetRowIds,
+      targetColumnIds,
+      signedDataTransferPolicy,
+      isCut: false,
+      sourceRowIds,
+    };
+
+    const url = `https://airtable.com/v0.3/table/${destTableId}/pasteCells`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, destAppId), destAppId);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`pasteAttachmentsCrossBase failed (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    return data?.data || {};
+  }
+
+  /**
+   * Create records (one row per item). The client generates each rowId locally
+   * (Airtable accepts a client-supplied rec ID in the URL), so the returned
+   * rowId is final — no response parsing needed for the ID map.
+   * Per-row isolation: a failing row is collected in `failed`, not thrown.
+   *
+   * @param {string} appId
+   * @param {string} tableId
+   * @param {{cellValuesByColumnId: object, sourceKey?: string}[]} rows
+   * @param {{viewId?: string}} [opts]
+   * @returns {Promise<{created: {rowId:string, sourceKey:any}[], failed: {sourceKey:any, error:string}[]}>}
+   */
+  async createRecords(appId, tableId, rows, { viewId, gate } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new Error('rows must be a non-empty array');
+    }
+    if (viewId) assertAirtableId(viewId, 'viewId');
+    // `gate` wraps each per-row POST so a caller (the records sync) can pace/retry the INNER
+    // requests under a phase-local rate limiter — without throttling the shared auth queue that
+    // also serves interactive tool calls. Defaults to pass-through.
+    const g = gate || ((fn) => fn());
+    let activeViewId = viewId;
+    if (!activeViewId) {
+      const table = await this.resolveTable(appId, tableId);
+      activeViewId = (table.views || [])[0]?.id || null;
+    }
+
+    const created = [];
+    const failed = [];
+    for (const row of rows) {
+      const rowId = 'rec' + this._genRandomId();
+      const payload = { tableId, cellValuesByColumnId: row.cellValuesByColumnId || {} };
+      if (activeViewId) payload.activeViewId = activeViewId;
+      const url = `https://airtable.com/v0.3/row/${rowId}/create`;
+      try {
+        const res = await g(() => this.auth.postForm(url, this._mutationParams(payload, appId), appId));
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          failed.push({ sourceKey: row.sourceKey ?? null, error: `createRecords row failed (${res.status}): ${body}` });
+          continue;
+        }
+        created.push({ rowId, sourceKey: row.sourceKey ?? null });
+      } catch (err) {
+        failed.push({ sourceKey: row.sourceKey ?? null, error: String(err?.message || err) });
+      }
+    }
+    return { created, failed };
+  }
+
+  /**
+   * Update records' PRIMITIVE / single-select cells via updatePrimitiveCell.
+   * Array cells (multi-select / link / attachment) are NOT handled here — the
+   * engine sets those via pasteCells (Milestone 3) where column configs exist.
+   *
+   * @param {string} appId
+   * @param {string} tableId   (kept for symmetry / future routing)
+   * @param {{rowId:string, cellValuesByColumnId:object}[]} updates
+   * @returns {Promise<{updated:{rowId:string}[], failed:{rowId:string, error:string}[]}>}
+   */
+  async updateRecords(appId, tableId, updates, { gate } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new Error('updates must be a non-empty array');
+    }
+    const g = gate || ((fn) => fn()); // see createRecords: paces inner per-cell POSTs when supplied
+    const updated = [];
+    const failed = [];
+    for (const u of updates) {
+      try {
+        assertAirtableId(u.rowId, 'rowId');
+        const entries = Object.entries(u.cellValuesByColumnId || {});
+        if (entries.length === 0) {
+          failed.push({ rowId: u.rowId, error: 'cellValuesByColumnId is empty — nothing to update' });
+          continue;
+        }
+        const url = `https://airtable.com/v0.3/row/${u.rowId}/updatePrimitiveCell`;
+        let rowFailed = null;
+        for (const [columnId, cellValue] of entries) {
+          const res = await g(() => this.auth.postForm(url, this._mutationParams({ columnId, cellValue }, appId), appId));
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            rowFailed = `updatePrimitiveCell ${columnId} failed (${res.status}): ${body}`;
+            break;
+          }
+        }
+        if (rowFailed) failed.push({ rowId: u.rowId, error: rowFailed });
+        else updated.push({ rowId: u.rowId });
+      } catch (err) {
+        failed.push({ rowId: u.rowId ?? '(unknown)', error: String(err?.message || err) });
+      }
+    }
+    return { updated, failed };
+  }
+
+  /**
+   * Delete records in one native batch call (destroyMultipleRows).
+   *
+   * @param {string} appId
+   * @param {string} tableId
+   * @param {string[]} rowIds
+   * @param {{viewId?: string}} [opts]
+   * @returns {Promise<{deleted:number, actionId:string|null}>}
+   * @note deleted count is optimistic (rowIds.length); the server may skip already-deleted rows.
+   */
+  async deleteRecords(appId, tableId, rowIds, { viewId } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(tableId, 'tableId');
+    if (!Array.isArray(rowIds) || rowIds.length === 0) {
+      throw new Error('rowIds must be a non-empty array');
+    }
+    if (viewId) assertAirtableId(viewId, 'viewId');
+    let activeViewId = viewId;
+    if (!activeViewId) {
+      const table = await this.resolveTable(appId, tableId);
+      activeViewId = (table.views || [])[0]?.id || null;
+    }
+    const payload = { rowIds };
+    if (activeViewId) payload.activeViewId = activeViewId;
+    const url = `https://airtable.com/v0.3/table/${tableId}/destroyMultipleRows`;
+    const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`destroyMultipleRows failed (${res.status}): ${body}`);
+    }
+    const data = (await res.json().catch(() => ({})))?.data || {};
+    return { deleted: rowIds.length, actionId: data.actionId || null };
+  }
+
+  /** Raw S3 presigned PUT of file bytes. Returns { ok, etag, error? }. Overridable in tests. */
+  async _putBytes(presignedUrl, bytes, checksumB64) {
+    try {
+      // Captured presigned URL signs only `host;x-amz-checksum-sha256` (X-Amz-SignedHeaders),
+      // so we send exactly that one header — adding others (e.g. Content-Type) is unnecessary
+      // and risks a signature mismatch if S3 ever signs them.
+      const res = await fetch(presignedUrl, {
+        method: 'PUT',
+        body: bytes,
+        headers: { 'x-amz-checksum-sha256': checksumB64 },
+      });
+      if (!res.ok) return { ok: false, error: `S3 PUT failed (${res.status})` };
+      return { ok: true, etag: res.headers.get('etag') || '' };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
+  /**
+   * Upload a file into an attachment cell via the 5-step multipart flow.
+   * Soft-fails (returns {ok:false,error}) instead of throwing, so one bad
+   * attachment doesn't abort a record sync.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {{bytes: Buffer|Uint8Array, filename: string, contentType: string}} file
+   * @returns {Promise<{ok:boolean, attachmentId?:string, url?:string, error?:string}>}
+   */
+  async uploadAttachment(appId, rowId, columnId, { bytes, filename, contentType }) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(rowId, 'rowId');
+    assertAirtableId(columnId, 'columnId');
+    const checksumB64 = createHash('sha256').update(bytes).digest('base64');
+    const post = async (verb, payload) => {
+      const url = `https://airtable.com/v0.3/application/${appId}/${verb}`;
+      const res = await this.auth.postForm(url, this._mutationParams(payload, appId), appId);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`${verb} failed (${res.status}): ${body}`);
+      }
+      return (await res.json().catch(() => ({})))?.data || {};
+    };
+    try {
+      const create = await post('createMultipartUpload', {
+        uploadCandidate: { contentLength: bytes.length, filename, contentType, directUploadUserContentPurpose: 'directUploadAttachment' },
+      });
+      const getUrl = await post('getUrlMultipartUpload', {
+        uploadPartCandidate: { uploadId: create.uploadId, objectKey: create.objectKey, partNumber: 1, checksumSHA256: checksumB64, directUploadUserContentPurpose: 'directUploadAttachment' },
+      });
+      if (!getUrl.presignedUrl) return { ok: false, error: 'getUrlMultipartUpload: no presignedUrl in response' };
+      const put = await this._putBytes(getUrl.presignedUrl, bytes, checksumB64);
+      if (!put.ok) return { ok: false, error: put.error };
+      const complete = await post('completeMultipartUpload', {
+        multipartUploadComplete: {
+          uploadId: create.uploadId, objectKey: create.objectKey,
+          parts: [{ etag: put.etag, partNumber: 1, checksumSHA256: checksumB64 }],
+          directUploadUserContentPurpose: 'directUploadAttachment',
+        },
+      });
+      const attachmentId = 'att' + this._genRandomId();
+      const item = { id: attachmentId, ...complete.propsToAddToAttachmentObj, filename, expiringInitialPreviewUrl: complete.signedUrl };
+      const attachUrl = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+      const res = await this.auth.postForm(attachUrl, this._mutationParams({ columnId, item }, appId), appId);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { ok: false, error: `attach failed (${res.status}): ${body}` };
+      }
+      return { ok: true, attachmentId, url: complete.url };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
+  /**
+   * Attach a file to an attachment cell BY URL — Airtable's servers fetch the
+   * URL (this is the UI's "Add attachment → Add URL", NOT a byte proxy through
+   * this server). Two internal calls:
+   *   A. POST /v0.3/attachments/urlUpload (JSON) — Airtable downloads the URL and
+   *      returns fileUploadResult { propsToAddToAttachmentObj, filename, expiringInitialPreviewUrl }.
+   *   B. POST /v0.3/row/{rowId}/updateArrayTypeCellByAddingItem (form) — append the item.
+   * Soft-fails (returns {ok:false,error}) instead of throwing.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {{url: string, filename?: string}} opts
+   * @returns {Promise<{ok:boolean, attachmentId?:string, url?:string, error?:string}>}
+   */
+  async addAttachmentByUrl(appId, rowId, columnId, { url, filename } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(rowId, 'rowId');
+    assertAirtableId(columnId, 'columnId');
+    if (!url) return { ok: false, error: 'url is required' };
+    try {
+      // Call A — Airtable server-side fetch of the URL.
+      const uploadBody = {
+        url,
+        userId: this.auth.userId,
+        applicationId: appId,
+        enterpriseAccountId: null,
+        directUploadUserContentPurpose: 'directUploadAttachment',
+        // No _csrf here: auth._rawApiCall injects the CURRENT token into every
+        // JSON body at send time (mirrors how form POSTs get theirs from
+        // _mutationParams, which also never sets _csrf). Baking it in this early
+        // would risk shipping a token a concurrent session recovery has since
+        // rotated — the request can sit queued (ensureLoggedIn/backoff) between
+        // this line running and the actual network call.
+      };
+      const upRes = await this.auth.postJSON('https://airtable.com/v0.3/attachments/urlUpload', uploadBody, appId);
+      if (!upRes.ok) {
+        const body = await upRes.text().catch(() => '');
+        return { ok: false, error: `urlUpload failed (${upRes.status}): ${body}` };
+      }
+      const upData = await upRes.json().catch(() => ({}));
+      const fur = upData?.fileUploadResult;
+      if (!upData?.success || !fur?.propsToAddToAttachmentObj) {
+        return { ok: false, error: `urlUpload: unexpected response — ${JSON.stringify(upData).slice(0, 200)}` };
+      }
+      // Call B — append the attachment item to the cell (same as the multipart path).
+      const attachmentId = 'att' + this._genRandomId();
+      const item = {
+        id: attachmentId,
+        ...fur.propsToAddToAttachmentObj,
+        filename: filename || fur.filename,
+        expiringInitialPreviewUrl: fur.expiringInitialPreviewUrl,
+      };
+      const attachUrl = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+      const res = await this.auth.postForm(attachUrl, this._mutationParams({ columnId, item }, appId), appId);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        return { ok: false, error: `attach failed (${res.status}): ${body}` };
+      }
+      return { ok: true, attachmentId, url: fur.url };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
+  /**
+   * Add linked-record items to a link cell via `updateArrayTypeCellByAddingItem`.
+   * Called once per item (Airtable has no SET endpoint for link cells — only APPEND).
+   * Soft-fails (returns {ok:false,error}) instead of throwing, so one bad link
+   * doesn't abort a record sync.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {Array<{foreignRowId:string, foreignRowDisplayName:string}>} items
+   * @returns {Promise<{ok:boolean, added:number, error?:string}>}
+   */
+  async addLinkItems(appId, rowId, columnId, items, { gate } = {}) {
+    const url = `https://airtable.com/v0.3/row/${rowId}/updateArrayTypeCellByAddingItem`;
+    const g = gate || ((fn) => fn()); // see createRecords: paces inner per-item POSTs when supplied
+    let added = 0;
+    try {
+      for (const item of items) {
+        const res = await g(() => this.auth.postForm(url, this._mutationParams({ columnId, item }, appId), appId));
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          return { ok: false, added, error: `addLinkItem failed (${res.status}): ${body}` };
+        }
+        added++;
+      }
+      return { ok: true, added };
+    } catch (err) {
+      return { ok: false, added, error: String(err?.message || err) };
+    }
+  }
+
+  /**
+   * Converge an array-of-ids cell (multiSelect / multiCollaborator) to `desiredIds`.
+   *
+   * Internal API has no SET for these cells — only append/remove:
+   *   POST /v0.3/row/{rowId}/updateArrayTypeCellByAddingItem   { columnId, item }
+   *   POST /v0.3/row/{rowId}/updateArrayTypeCellByRemovingItem { columnId, item }
+   * where `item` is the choice/user id string (not an object).
+   *
+   * Soft-fails (returns {ok:false}) so one bad cell does not abort a table sync.
+   *
+   * @param {string} appId
+   * @param {string} rowId
+   * @param {string} columnId
+   * @param {string[]} desiredIds  target membership (order ignored)
+   * @param {{ currentIds?: string[], gate?: Function }} [opts]
+   * @returns {Promise<{ok:boolean, added:number, removed:number, error?:string}>}
+   */
+  async setArrayChoiceCell(appId, rowId, columnId, desiredIds, { currentIds = [], gate } = {}) {
+    assertAirtableId(appId, 'appId');
+    assertAirtableId(rowId, 'rowId');
+    assertAirtableId(columnId, 'columnId');
+    const g = gate || ((fn) => fn());
+    const want = new Set((desiredIds || []).filter((x) => typeof x === 'string' && x.length > 0));
+    const have = new Set((currentIds || []).filter((x) => typeof x === 'string' && x.length > 0));
+    const toAdd = [...want].filter((id) => !have.has(id));
+    const toRemove = [...have].filter((id) => !want.has(id));
+    let added = 0;
+    let removed = 0;
+    const addUrl = 'https://airtable.com/v0.3/row/' + rowId + '/updateArrayTypeCellByAddingItem';
+    const removeUrl = 'https://airtable.com/v0.3/row/' + rowId + '/updateArrayTypeCellByRemovingItem';
+    try {
+      // Remove first so a full replace never briefly exceeds choice limits.
+      for (const item of toRemove) {
+        try {
+          const res = await g(() =>
+            this.auth.postForm(removeUrl, this._mutationParams({ columnId, item }, appId), appId),
+          );
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            // Idempotent: removing an id that is already gone can 403/404.
+            if (res.status === 403 || res.status === 404) {
+              removed++;
+              continue;
+            }
+            return { ok: false, added, removed, error: 'removeArrayItem failed (' + res.status + '): ' + body };
+          }
+          removed++;
+        } catch (err) {
+          // auth._apiCall throws FIELD_FORBIDDEN on some 403s — treat remove as soft-ok.
+          const msg = String(err && err.message || err);
+          if (/FIELD_FORBIDDEN|403|NOT_FOUND|404/i.test(msg)) {
+            removed++;
+            continue;
+          }
+          return { ok: false, added, removed, error: msg };
+        }
+      }
+      for (const item of toAdd) {
+        try {
+          const res = await g(() =>
+            this.auth.postForm(addUrl, this._mutationParams({ columnId, item }, appId), appId),
+          );
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            return { ok: false, added, removed, error: 'addArrayItem failed (' + res.status + '): ' + body };
+          }
+          added++;
+        } catch (err) {
+          return { ok: false, added, removed, error: String(err && err.message || err) };
+        }
+      }
+      return { ok: true, added, removed };
+    } catch (err) {
+      return { ok: false, added, removed, error: String(err && err.message || err) };
+    }
   }
 
   _genRequestId() {

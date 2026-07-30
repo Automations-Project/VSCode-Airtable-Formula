@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 const NS = 'airtableFormula';
 
 export interface Settings {
-  mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx'; useDaemon: boolean };
+  mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx'; useDaemon: boolean; daemonPort: number; authMode: 'browser' | 'byo' | 'direct-login'; httpClient: 'fetch' | 'impit'; browserIdleParkMinutes: number };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
   script: { beautifyStyle: string; minifyLevel: string };
@@ -20,6 +20,10 @@ export function getSettings(): Settings {
       notifyOnUpdates:        cfg.get('mcp.notifyOnUpdates', true),
       serverSource:           cfg.get('mcp.serverSource', 'bundled') as 'bundled' | 'npx',
       useDaemon:              cfg.get('mcp.useDaemon', true),
+      daemonPort:             cfg.get('mcp.daemonPort', 8723),
+      authMode:               cfg.get('mcp.authMode', 'browser') as 'browser' | 'byo' | 'direct-login',
+      httpClient:             cfg.get('mcp.httpClient', 'fetch') as 'fetch' | 'impit',
+      browserIdleParkMinutes: cfg.get('mcp.browserIdleParkMinutes', 30),
     },
     ai: {
       autoInstallFiles: cfg.get('ai.autoInstallFiles', true),
@@ -50,4 +54,10 @@ export function getSettings(): Settings {
 export async function updateSetting(key: string, value: unknown): Promise<void> {
   const cfg = vscode.workspace.getConfiguration(NS);
   await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+}
+
+/** Convert dashboard minutes setting → AIRTABLE_BROWSER_IDLE_PARK_MS. 0 disables. */
+export function minutesToIdleParkMs(minutes: number): number {
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  return Math.round(minutes * 60_000);
 }

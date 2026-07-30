@@ -10,6 +10,7 @@ import { startDaemonServer } from './server.js';
 import { acquire, getLockfilePath, isStale, read, release, replace } from './lockfile.js';
 import { ensureToken, getTokenPath, readToken } from './token.js';
 import { readTunnelSettings, writeTunnelSettings, getTunnelProvider } from './tunnel-providers/index.js';
+import { clearStopSentinel } from './stop-sentinel.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -60,7 +61,15 @@ async function probeHealth(record, options = {}) {
   }
 }
 
-async function adminRequest(record, path, options) {
+/**
+ * Authenticated loopback call to a daemon's own /daemon/* route, using the
+ * bearer from its lockfile. Exported so `manage_daemon` can drive tunnel and
+ * token administration through the SERVER's routes instead of reimplementing
+ * them — `activeTunnel` and `currentToken` are closure state inside
+ * startDaemonServer, and anything that mutates them from outside leaves the
+ * running server holding a stale handle.
+ */
+export async function adminRequest(record, path, options) {
   const response = await fetch(`http://127.0.0.1:${record.port}${path}`, {
     method: options.method,
     headers: {
@@ -91,6 +100,12 @@ function toConnectionInfo(record, health) {
     version: record.version,
     startedAt: record.startedAt,
     tunnelUrl: record.tunnelUrl ?? null,
+    // The /daemon/health payload we already fetched to decide "healthy". Passed
+    // through rather than dropped so callers can read the daemon's EFFECTIVE
+    // runtime config (authMode / httpClient / configDir) without a second
+    // round-trip — the attach-proxy in index.js uses it to warn when the daemon
+    // it is joining was configured differently than this client was.
+    health: health ?? null,
   };
 }
 
@@ -268,6 +283,12 @@ export async function startDaemon(options = {}) {
       continue;
     }
 
+    // A daemon is starting on purpose, so any "the user stopped this deliberately"
+    // marker is now spent. Clearing it HERE — on the one path every intentional
+    // start goes through — is what stops a stale sentinel from wedging startup
+    // forever; see stop-sentinel.js.
+    clearStopSentinel({ configDir });
+
     let server;
     let lspChild = null;
     let activeTunnel = null;
@@ -333,6 +354,9 @@ export async function startDaemon(options = {}) {
         version,
         configDir,
         bearerToken: token.bearerToken,
+        // Shared host auth so pageBusy / park / tools use one scheduler.
+        auth: options.auth,
+        client: options.client,
         getTools: options.getTools,
         callTool: options.callTool,
         onShutdown: finalize,
@@ -560,6 +584,27 @@ export async function restartDaemon(options = {}) {
   return { stopped, reSpawned: true, connection };
 }
 
+/**
+ * Environment for the detached `daemon start` child.
+ *
+ * Only AIRTABLE_NO_DAEMON is stripped, and only because it is addressed to the
+ * PARENT: it means "don't delegate to a daemon, serve stdio yourself". Inherited
+ * by the child it is self-contradictory — index.js would skip the attach/serve
+ * path in the very process whose job is to BE the daemon.
+ *
+ * AIRTABLE_HEADLESS_ONLY is not an instruction to the parent, it is the host's
+ * display policy: the extension sets it to '1' on every daemon it owns
+ * (registration.ts, daemon-manager.ts, auto-config/index.ts) precisely so no
+ * browser window is ever put on the user's screen. Dropping it made a respawn
+ * quietly louder than the daemon it replaced. It is inherited.
+ */
+export function buildDetachedDaemonEnv(configDir, baseEnv = process.env) {
+  const env = { ...baseEnv };
+  delete env.AIRTABLE_NO_DAEMON;
+  env.AIRTABLE_USER_MCP_HOME = configDir;
+  return env;
+}
+
 export async function spawnDetachedDaemon(options) {
   const configDir = options.configDir ?? getHomeDir();
   const cliEntry = resolveCliEntry();
@@ -568,17 +613,10 @@ export async function spawnDetachedDaemon(options) {
     args.push('--port', String(options.port));
   }
 
-  const env = { ...process.env };
-  delete env.AIRTABLE_NO_DAEMON;
-  delete env.AIRTABLE_HEADLESS_ONLY;
-
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: 'ignore',
-    env: {
-      ...env,
-      AIRTABLE_USER_MCP_HOME: configDir,
-    },
+    env: buildDetachedDaemonEnv(configDir),
   });
   child.unref();
 }

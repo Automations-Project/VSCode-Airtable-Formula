@@ -1,0 +1,200 @@
+// Regression tests: journal resume must be reachable past the drift guard.
+//
+// Audit finding: after a partial apply mutated the dest, re-running the SAME planId always
+// tripped the fingerprint drift guard (the divergence being the sync's own run-1 mutations),
+// so the journal's documented resume/retry path was dead code. When a journal for this planId
+// already has at least one done action, apply must bypass the guard and emit
+// RESUME_DRIFT_BYPASS instead of aborting.
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { MockClient } from './helpers/mock-client.js';
+import { apply, applyJob, ENGINE_VERSION, fingerprintSchema } from '../../src/sync/index.js';
+import { normalizeSchema } from '../../src/sync/snapshot.js';
+import { savePlan, saveIdmap } from '../../src/sync/idmap.js';
+import { newJournal, recordDone, recordFailed, saveJournal } from '../../src/sync/journal.js';
+
+const SRC = 'appSSSSSSSSSSSSSS';
+const DEST = 'appDDDDDDDDDDDDDD';
+
+function twoTablePlan(planId) {
+  return {
+    planId, engineVersion: ENGINE_VERSION,
+    // Plan-time fingerprint (empty dest) — run 1's own createTable makes the live dest diverge.
+    destFingerprint: 'PLAN-TIME-FINGERPRINT-OF-EMPTY-DEST',
+    sourceBaseId: SRC, destBaseId: DEST,
+    idmap: { tables: {}, fields: {}, views: {} },
+    actions: [
+      { kind: 'createTable', sourceTableId: 'tA', name: 'TableA' },
+      { kind: 'createTable', sourceTableId: 'tB', name: 'TableB' },
+    ],
+    orphans: [], warnings: [],
+  };
+}
+
+describe('sync index.apply — journal resume bypasses the drift guard', () => {
+  // The bypass used to be automatic: ONE done action switched the drift guard off for the whole
+  // run. Resuming proves THIS plan already mutated the dest — it does not prove a collaborator
+  // didn't also, and the remaining actions (deletions included) would overwrite them. The
+  // ambiguity is now the caller's to resolve, like every other destructive path in this engine.
+  it('a drifted resume ABORTS with RESUME_DRIFT unless resumeAfterDrift is passed', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-gate-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, twoTablePlan('plnGATE'));
+
+    const { tableId } = await client.createTable(DEST, 'TableA');
+    const journal = newJournal('plnGATE', 't0');
+    recordDone(journal, 0, 'createTable', tableId);
+    saveJournal(SRC, DEST, journal);
+    saveIdmap(SRC, DEST, { tables: { tA: tableId }, fields: {}, views: {}, records: {}, attachments: {} });
+
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnGATE', runStartedAt: 't1' });
+
+    assert.equal(out.machine.aborted, true, `must abort without the flag: ${out.human}`);
+    assert.equal(out.machine.reason, 'RESUME_DRIFT');
+    assert.ok((out.machine.warnings || []).some((w) => w.code === 'RESUME_DRIFT'));
+
+    // And it must abort BEFORE touching anything — TableB is not created.
+    const names = (await client.getApplicationData(DEST)).data.tableSchemas.map((t) => t.name).sort();
+    assert.deepEqual(names, ['TableA'], `no action may run on an aborted resume: ${names}`);
+  });
+
+  // Review reproduction, end to end: the ONLY change between plan and apply is autoNumber's
+  // maxUsedAutoNumber advancing (7 → 8) — a counter the server bumps on row creation, including
+  // by this sync's own records phase. Engine 2d hashed it and aborted DRIFT on an unchanged
+  // schema; a re-apply after any records run would trip its own guard.
+  it('an advanced maxUsedAutoNumber counter alone does NOT abort apply with DRIFT', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-counter-'));
+    const client = new MockClient();
+    // Seed a dest table with an autoNumber field, counter at 7.
+    client.tables.push({
+      id: 'tblD1', name: 'T', primaryColumnId: 'fldD1',
+      columns: [{ id: 'fldD1', name: 'ID', type: 'autoNumber', typeOptions: { maxUsedAutoNumber: 7 }, description: null }],
+      views: [], rows: [],
+    });
+    // Plan against the CURRENT dest state (counter 7), no actions — pure drift-guard exercise.
+    // normalizeSchema takes the FULL response ({data:{tableSchemas}}), same as snapshotBase does.
+    const destAtPlanTime = normalizeSchema(await client.getApplicationData(DEST));
+    savePlan(SRC, DEST, {
+      planId: 'plnCTR', engineVersion: ENGINE_VERSION,
+      destFingerprint: fingerprintSchema({ baseId: DEST, ...destAtPlanTime }),
+      sourceBaseId: SRC, destBaseId: DEST,
+      idmap: { tables: {}, fields: {}, views: {} },
+      actions: [], orphans: [], warnings: [],
+    });
+    saveIdmap(SRC, DEST, { tables: {}, fields: {}, views: {}, records: {}, attachments: {} });
+
+    // Airtable advances the counter before apply runs.
+    client.tables[client.tables.length - 1].columns[0].typeOptions.maxUsedAutoNumber = 8;
+
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnCTR', runStartedAt: 't1' });
+    assert.notEqual(out.machine.aborted, true,
+      `a counter-only change must not read as drift: ${out.human}`);
+  });
+
+  // A plan from an older engine hashed fewer facets, so its digest can NEVER match. Reporting that
+  // as DRIFT blames a collaborator; reporting it mid-resume as RESUME_DRIFT invites the user to
+  // wave through an overwrite to fix what is really a version mismatch.
+  it('a plan from an older engine aborts with PLAN_STALE, not DRIFT', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-stale-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, { ...twoTablePlan('plnOLD'), engineVersion: '2b' });
+
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnOLD', runStartedAt: 't1' });
+
+    assert.equal(out.machine.aborted, true);
+    assert.equal(out.machine.reason, 'PLAN_STALE');
+    assert.match(
+      (out.machine.warnings || []).map((w) => w.message).join(' '),
+      /not a change to your destination/,
+      'the message must not blame the destination for a version bump',
+    );
+  });
+
+  // The flag has to survive the BACKGROUND path, because that is the only path sync_base exposes:
+  // the tool calls applyJob(), not apply(). The first cut added the parameter to applyJob's
+  // signature and never forwarded it to apply() — a direct apply() test stays green through that
+  // bug, and review reproduced exactly this: resumeAfterDrift:true through the tool still aborted
+  // RESUME_DRIFT. So this test goes through applyJob and polls the job file like a real caller.
+  it('resumeAfterDrift:true survives the applyJob background path (the one sync_base actually uses)', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-job-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, twoTablePlan('plnJOB'));
+
+    const { tableId } = await client.createTable(DEST, 'TableA');
+    const journal = newJournal('plnJOB', 't0');
+    recordDone(journal, 0, 'createTable', tableId);
+    saveJournal(SRC, DEST, journal);
+    saveIdmap(SRC, DEST, { tables: { tA: tableId }, fields: {}, views: {}, records: {}, attachments: {} });
+
+    const { status } = applyJob({
+      client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnJOB', runStartedAt: 't1',
+      resumeAfterDrift: true,
+    });
+    assert.equal(status, 'running');
+
+    // applyJob settles on a microtask chain; poll briefly rather than assuming timing.
+    let names = [];
+    for (let i = 0; i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      names = (await client.getApplicationData(DEST)).data.tableSchemas.map((t) => t.name).sort();
+      if (names.length === 2) break;
+    }
+    assert.deepEqual(names, ['TableA', 'TableB'],
+      'the flag must reach apply() through applyJob — a swallowed flag aborts RESUME_DRIFT and TableB never appears');
+  });
+
+  it('re-run with a partially-done journal resumes (RESUME_DRIFT_BYPASS) instead of aborting DRIFT', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, twoTablePlan('plnRES'));
+
+    // Simulate run 1: TableA was created (mutating dest → fingerprint diverges), journal
+    // marks action 0 done, then the run died before action 1.
+    const { tableId } = await client.createTable(DEST, 'TableA');
+    const journal = newJournal('plnRES', 't0');
+    recordDone(journal, 0, 'createTable', tableId);
+    saveJournal(SRC, DEST, journal);
+    saveIdmap(SRC, DEST, { tables: { tA: tableId }, fields: {}, views: {}, records: {}, attachments: {} });
+
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnRES', runStartedAt: 't1', resumeAfterDrift: true });
+
+    assert.notEqual(out.machine.aborted, true, `resume must not abort: ${out.human}`);
+    assert.ok(
+      (out.machine.warnings || []).some((w) => w.code === 'RESUME_DRIFT_BYPASS'),
+      `expected RESUME_DRIFT_BYPASS warning, got: ${JSON.stringify(out.machine.warnings)}`,
+    );
+    // Action 0 skipped (journaled done), action 1 applied.
+    assert.match(out.human, /created: 1/, `TableB must be created on resume: ${out.human}`);
+    const names = (await client.getApplicationData(DEST)).data.tableSchemas.map((t) => t.name).sort();
+    assert.deepEqual(names, ['TableA', 'TableB'], 'dest must hold both tables after resume');
+  });
+
+  it('journal with zero done actions does NOT bypass the drift guard', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-neg-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, twoTablePlan('plnNOB'));
+
+    // Dest was mutated by SOMEONE ELSE (real drift); journal exists but proves no prior progress.
+    await client.createTable(DEST, 'Interloper');
+    const journal = newJournal('plnNOB', 't0');
+    recordFailed(journal, 0, 'createTable', 'transient');
+    saveJournal(SRC, DEST, journal);
+
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnNOB', runStartedAt: 't1' });
+    assert.equal(out.machine.aborted, true, 'real drift with no prior progress must still abort');
+    assert.match(out.human, /DRIFT/);
+  });
+
+  it('no journal + fingerprint mismatch still aborts DRIFT (existing contract)', async () => {
+    process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'resume-drift-none-'));
+    const client = new MockClient();
+    savePlan(SRC, DEST, twoTablePlan('plnNOJ'));
+    await client.createTable(DEST, 'Interloper');
+    const out = await apply({ client, sourceBaseId: SRC, destBaseId: DEST, planId: 'plnNOJ', runStartedAt: 't1' });
+    assert.equal(out.machine.aborted, true);
+    assert.match(out.human, /DRIFT/);
+  });
+});

@@ -30,6 +30,43 @@ if (cliArgs.length === 0 && !process.env.AIRTABLE_NO_DAEMON) {
     try {
       const daemon = await ensureDaemon({ configDir, startTimeoutMs: 15_000 });
 
+      // Say ONCE, out loud, when this client's own configuration is not the one
+      // that will actually be used. Attaching means our whole process is a pipe:
+      // every tool call runs inside the daemon, under the daemon's env. Only
+      // AIRTABLE_NO_DAEMON and AIRTABLE_USER_MCP_HOME are read on this side (above);
+      // AIRTABLE_AUTH_MODE, AIRTABLE_HTTP_CLIENT and everything else this client was
+      // configured with are silently void. Since a daemon exists on essentially
+      // every VS Code session, a standalone client (Claude Desktop / Cursor / Cline
+      // / Amp) normally lands here and inherits VS Code's settings without a word.
+      //
+      // We attach anyway, deliberately: refusing would send this process down the
+      // in-process path and put a SECOND Chromium on the shared persistent profile,
+      // which is the Chrome-exit-21 failure this codebase has historically
+      // mis-reported as "session dead". A silent config override is a much smaller
+      // problem than a crash loop — but silent is the part worth fixing, so make it
+      // visible. `manage_daemon action="status"` and /daemon/health report the same
+      // three fields for anyone who reads this later.
+      const mine = {
+        authMode: (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase(),
+        httpClient: process.env.AIRTABLE_HTTP_CLIENT || 'fetch',
+      };
+      const theirs = daemon.health ?? {};
+      const differing = Object.keys(mine).filter(
+        // Only report what the daemon actually told us. An older daemon predating
+        // these health fields returns undefined — unknown is not a mismatch.
+        (k) => theirs[k] !== undefined && theirs[k] !== mine[k],
+      );
+      if (differing.length) {
+        process.stderr.write(
+          `[airtable-mcp] attached to the daemon already running at pid ${daemon.pid} (port ${daemon.port}); ` +
+          `it was started with a different configuration, and ITS settings apply, not this client's: ` +
+          differing.map((k) => `${k}=${theirs[k]} (you configured ${mine[k]})`).join(', ') +
+          `. Daemon configDir=${theirs.configDir ?? 'unknown'}. ` +
+          `To run under your own settings instead, set AIRTABLE_NO_DAEMON=1 for this client, ` +
+          `or stop the daemon (\`npx airtable-user-mcp daemon stop\`) and let it restart from your env.\n`
+        );
+      }
+
       const stdioTransport = new StdioServerTransport(process.stdin, process.stdout);
       const httpTransport = new StreamableHTTPClientTransport(
         new URL(daemon.url + '/mcp'),
@@ -90,6 +127,13 @@ import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
 import { getPrompts, renderPrompt } from './prompts.js';
+// withToolDispatchContext was used below WITHOUT being imported, so every
+// tools/call on the in-process stdio path (AIRTABLE_NO_DAEMON=1 — the VS Code
+// stdio fallback) died with a ReferenceError before reaching its handler. The
+// daemon path imports it in daemon/server.js and was unaffected, which is why
+// this stayed hidden. currentToolContext is what manage_daemon reads the
+// caller's origin from.
+import { withToolDispatchContext, currentToolContext } from './page-scheduler.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
@@ -97,6 +141,8 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import path from 'path';
 import { stripHeader } from './formula-header.js';
+import { formulaRefsToNames, buildFieldNameMap } from './formula-refs.js';
+import { uploadAttachmentsByUrl } from './attachments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -125,6 +171,31 @@ function resolveServerVersion() {
 }
 const PKG_VERSION = resolveServerVersion();
 
+// Build provenance for `manage_daemon status`. The bundler writes version.json
+// next to the bundle; a source/npx run has no such file and reports null rather
+// than guessing. Answers "which build am I actually talking to", which the model
+// otherwise cannot see at all.
+function resolveProvenance() {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(__dirname, 'version.json'), 'utf8'));
+    return {
+      package: parsed.package ?? null,
+      mcpServer: parsed.mcpServer ?? null,
+      builtAt: parsed.builtAt ?? null,
+      gitSha: parsed.gitSha ?? null,
+      bundled: true,
+    };
+  } catch {
+    return { package: 'airtable-user-mcp', mcpServer: PKG_VERSION, builtAt: null, gitSha: null, bundled: false };
+  }
+}
+const PKG_PROVENANCE = resolveProvenance();
+
+// Set once this process actually becomes the daemon (startDaemon resolves with
+// the uuid it wrote into the lockfile). Stays null in stdio mode, which is
+// exactly what makes the am-I-the-holder check false by construction there.
+let _daemonRuntime = null;
+
 const auth = new AirtableAuth();
 const client = new AirtableClient(auth);
 const toolConfig = new ToolConfigManager();
@@ -135,11 +206,11 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable base structure with 62 tools: schema inspection, table/field/view CRUD, ' +
+      'Manage Airtable bases with 72 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
       'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
       'select field choices with color support, formula validation and file-based bulk editing, ' +
-      'extension management, and granular tool profile control (read-only / safe-write / full / custom). ' +
-      'Record read/write/delete is handled by the official Airtable MCP — this server focuses on schema and structure.',
+      'record create/update/duplicate/delete plus URL-based attachment uploads, base-to-base schema and record sync, ' +
+      'extension management, daemon inspection and control, and granular tool profile control (read-only / safe-write / full / custom).',
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },
@@ -160,6 +231,22 @@ function ok(summary, debugData = null, debug = false) {
 
 function err(message) {
   return { content: [{ type: 'text', text: message }], isError: true };
+}
+
+// Cap the `warnings` array on a sync result so the mode=status response stays inside the MCP window
+// (a view-heavy apply can emit thousands of warnings — the reported 608K-char / truncated blob). The
+// FULL warnings always persist in the on-disk job file; verbose:true returns them inline. Returns a
+// projection: first `cap` warnings + a `warningCount` + `warningsOmitted` pointer, or the original
+// object when small / verbose / not a warnings-bearing result.
+function leanSyncResult(result, verbose, cap = 25) {
+  if (!result || typeof result !== 'object' || !Array.isArray(result.warnings)) return result ?? null;
+  if (verbose || result.warnings.length <= cap) return result;
+  return {
+    ...result,
+    warnings: result.warnings.slice(0, cap),
+    warningCount: result.warnings.length,
+    warningsOmitted: result.warnings.length - cap,
+  };
 }
 
 // ─── Tool Definitions ─────────────────────────────────────────
@@ -213,7 +300,7 @@ const TOOLS = [
   },
   {
     name: 'list_fields',
-    description: 'List fields in a table — returns id, name, type, and typeOptions per field. Use instead of `get_table_schema` when you need fields only (no view data). Use `fieldType` or `nameContains` filters on large tables to reduce context size. Returns [{ id, name, type, typeOptions }].',
+    description: 'List fields in a table — returns id, name, and type per field (lightweight by default). Use instead of `get_table_schema` when you need fields only (no view data). Set includeOptions=true to also return each field\'s full typeOptions (can be very large on wide tables — prefer the default for name/id/type lookups). Use `fieldType` or `nameContains` filters on large tables to reduce context size. Returns [{ id, name, type, typeOptions? }].',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -222,6 +309,7 @@ const TOOLS = [
         tableIdOrName: { type: 'string', description: 'The table ID (tblXXX) or exact name' },
         fieldType: { type: 'string', description: 'Return only fields of this type, e.g. "formula", "text", "number", "checkbox"' },
         nameContains: { type: 'string', description: 'Return only fields whose name contains this substring (case-insensitive)' },
+        includeOptions: { type: 'boolean', description: 'Include full typeOptions per field (default false — the payload can exceed the MCP response window on wide tables)' },
         debug: debugProp,
       },
       required: ['appId', 'tableIdOrName'],
@@ -571,7 +659,7 @@ SELECT CHOICES:
   },
   {
     name: 'download_formula_field',
-    description: 'Download the formula text of a formula field to a local file. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
+    description: 'Download the formula text of a formula field to a local file. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so the file is readable and can be uploaded back unchanged. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -586,7 +674,7 @@ SELECT CHOICES:
   },
   {
     name: 'download_base_formulas',
-    description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
+    description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so files are readable and upload back unchanged. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
@@ -1520,6 +1608,158 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
       required: ['appId', 'tableId', 'viewId', 'sourceRowIds'],
     },
   },
+  {
+    name: 'create_records',
+    description: 'Create one or more records in a table. Each item supplies cellValuesByColumnId (computed fields are read-only and must be omitted). Returns created record IDs. Per-row isolation: a failing row is reported, not fatal.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID to create records in' },
+        viewId: { type: 'string', description: 'Optional view ID used to position new rows within the view\'s row order; defaults to the table\'s first view.' },
+        records: {
+          type: 'array',
+          description: 'Records to create, each { cellValuesByColumnId: { "<fieldId>": <value> }, sourceKey?: <any> }',
+          items: { type: 'object' },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'records'],
+    },
+  },
+  {
+    name: 'update_records',
+    description: 'Update primitive / single-select cells of existing records via cellValuesByColumnId. (Array cells — multi-select, links, attachments — are not set here.) Per-row isolation.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID containing the records' },
+        updates: {
+          type: 'array',
+          description: 'Updates, each { rowId: "recXXX", cellValuesByColumnId: { "<fieldId>": <value> } }',
+          items: { type: 'object' },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'updates'],
+    },
+  },
+  {
+    name: 'upload_attachment',
+    description: "Upload attachments into an attachment cell by URL. Airtable's servers fetch each URL directly (the UI's 'Add attachment → Add URL') — bytes are NOT proxied through this server. Use for multipleAttachments fields, which update_records cannot set. Appends to the cell (calling twice adds two). Per-update isolation: a failing update is reported, not fatal.",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        updates: {
+          type: 'array',
+          description: 'Attachments to upload, each { rowId: "recXXX", columnId: "fldXXX", url: "https://...", filename?: "name.jpg" }. filename defaults to the URL path basename.',
+          items: {
+            type: 'object',
+            properties: {
+              rowId:    { type: 'string', description: 'Record ID (recXXX)' },
+              columnId: { type: 'string', description: 'Field/column ID (fldXXX)' },
+              url:      { type: 'string', description: 'Public URL of the file to fetch and upload' },
+              filename: { type: 'string', description: 'Optional filename override; defaults to the URL path basename' },
+            },
+            required: ['rowId', 'columnId', 'url'],
+          },
+        },
+        debug: debugProp,
+      },
+      required: ['appId', 'updates'],
+    },
+  },
+  {
+    name: 'delete_records',
+    description: 'Delete one or more records from a table in a single batch call. The returned deleted count equals rowIds.length (optimistic) — already-deleted rows are silently skipped by the server.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string', description: 'The Airtable base/application ID' },
+        tableId: { type: 'string', description: 'The table ID containing the records' },
+        rowIds: { type: 'array', description: 'Record IDs to delete (e.g. ["recXXX"])', items: { type: 'string' } },
+        viewId: { type: 'string', description: 'Optional view ID passed as UI context; does NOT filter which records are deleted — rowIds is the sole selector.' },
+        debug: debugProp,
+      },
+      required: ['appId', 'tableId', 'rowIds'],
+    },
+  },
+  // ── Sync Tools ──
+  {
+    name: 'sync_base',
+    description: 'Base-to-base schema + record sync. IMPORTANT: BOTH mode="plan" and mode="apply" run as BACKGROUND JOBS — they return {jobId, planId, status:"running"} IMMEDIATELY (jobId === planId), NOT a synchronous result; poll mode="status" with that planId to get progress and the final result. mode="plan" (read-only, does NOT mutate): computes an ordered plan (tables/fields to create/update + orphans + warnings) by comparing source/dest schema; when the job finishes, mode="status" returns the plan digest in planDigest. mode="apply" (requires planId from a prior plan): executes the saved plan against the destination — creates tables, reconciles the primary, creates scalar/link/computed fields (source->dest reference remapping + formula validation), applies non-destructive field updates, then runs the RECORD sync (two-pass cells + links, attachments, view-filter restore); aborts if the destination drifted since the plan. mode="status" (poll a plan OR apply job by its planId): returns { phase: "planning"|"schema"|"records"|"done"|"failed", status, recordsMapped, summary, schemaResult?, recordsResult?, result?, planDigest? }. planDigest is human-only by default ({ human, machineOmitted: true }) — pass verbose:true for the full planDigest.machine. Field-mapping errors, APPLY_LOCKED, and DRIFT surface HERE (phase="failed" or an aborted schemaResult), not as a synchronous error. mode="reconcile" (SYNCHRONOUS): rebuild/repair the record map — existence-prune dead idmap entries, optional natural-key re-match per table. mode="diff" (SYNCHRONOUS): schema digest comparing source and destination WITHOUT saving a plan; returns a diffId and summary; pass detail=<section> to drill into a section of a prior diff.',
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['plan', 'apply', 'reconcile', 'status', 'diff'], description: '"plan" (BACKGROUND job: computes a plan and returns a jobId immediately — poll mode="status" for the digest), "apply" (BACKGROUND job: runs the schema phase then the record sync, returns a jobId immediately — poll mode="status"), "status" (poll a plan OR apply job by planId for its phase + result), "reconcile" (SYNCHRONOUS: rebuild/repair the record map — existence-prune dead entries, optional natural-key re-match), or "diff" (SYNCHRONOUS: schema digest comparing source and destination without saving a plan; optionally drill into a section with detail=<section>).' },
+        sourceAppId: { type: 'string', description: 'Source base/application ID to copy schema FROM' },
+        destAppId: { type: 'string', description: 'Destination base/application ID to copy schema TO' },
+        planId: { type: 'string', description: 'Required for mode="apply" (the planId from a prior mode="plan" run) and mode="status" (the jobId returned by mode="plan" OR mode="apply" — jobId === planId).' },
+        naturalKeys: { type: 'object', description: 'Map of tableName → fieldName to use as a natural key for record identity matching (e.g. { "Projects": "Name" }). Applies to mode="reconcile" (repairs the record map via natural-key re-match after manual edits) AND mode="apply" (auto pre-pass before Pass 1: matches existing dest records by key so they are updated rather than duplicated; also protects real-but-unmapped dest records from mirror-policy deletion). Omit for existence-prune only (reconcile) or pure ID-based sync (apply). The key field MUST be stable across bases: autoNumber renumbers on creation (bad key); name/email/injected InjectID are good keys.', additionalProperties: { type: 'string' } },
+        detail: { type: 'string', description: 'Used only by mode="diff": section name to drill into (e.g. a table name or action key). Requires diffId.' },
+        diffId: { type: 'string', description: 'Used by mode="diff": ID of a prior diff to retrieve or drill into. If omitted on the initial call, one is generated automatically.' },
+        offset: { type: 'number', description: 'Used by mode="diff" with detail: skip this many entries before returning results.' },
+        limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
+        direction: { type: 'string', enum: ['to-dest', 'to-source'], description: 'Used only by mode="plan": direction of the changeset. "to-dest" (default) brings the destination base up to date with the source. "to-source" swaps the roles so the changeset targets the source base (makes the source match the destination).' },
+        skip: { type: 'array', items: { type: 'string' }, description: 'Used only by mode="apply": list of changeIds to skip (actions with a matching changeId are counted as skipped but not applied). Use changeIds from the plan output.' },
+        policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = converge dest toward source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode. NOTE: "mirror" does NOT make the destination byte-identical — two removals are deferred and are reported, not performed: dest-extra LINKED-RECORD entries are never unlinked (Pass 2 only adds), and a source row that CLEARED its attachments leaves the dest attachment cell untouched. Watch for RECORD_LINK_EXTRA / attachment warnings in the result.' },
+        policyOverrides: { type: 'object', description: 'Used by mode="apply": per-table reconciliation preset overrides. Maps table name → preset (e.g. { "Games": "preserve" }). Overrides the global policy for the named tables.', additionalProperties: { type: 'string', enum: ['mirror', 'overlay', 'preserve'] } },
+        confirmDeletions: { type: 'boolean', description: 'Used by mode="apply" with policy="mirror": must be set to true to actually delete dest-only RECORDS and dest-only FIELDS/VIEWS. Without it, mirror mode reports a DELETION_GATED count and deletes nothing for records; orphan fields/views are reported and kept.' },
+        confirmTableDeletions: { type: 'boolean', description: 'Used by mode=apply with policy=mirror: required to delete whole dest-only TABLES. confirmDeletions alone never drops a table; without confirmTableDeletions, orphan tables report TABLE_DELETION_GATED and are kept.' },
+        confirmRetypes: { type: 'boolean', description: 'Used by mode=apply: required to apply a matched field\'s SCALAR type change to the destination (source-wins). Without it, a diverging scalar type reports RETYPE_GATED and the field is kept. Non-scalar retypes (to/from formula/rollup/lookup/count/autoNumber/link/attachment) stay RETYPE_DEFERRED.' },
+        strictDrift: { type: 'boolean', description: 'Used by mode=plan: also hash live VIEW CONFIG (filters/sorts/groups/colors/column order) into the plan\'s drift fingerprint, so a collaborator editing a view between plan and apply is detected. Costs one extra ~1s read PER VIEW on every apply of this plan (minutes on a view-heavy base) — which is why it is off by default. Field types, options, choices, formulas and descriptions are ALWAYS covered regardless of this flag. Recorded on the plan; apply reuses the plan\'s setting.' },
+        resumeAfterDrift: { type: 'boolean', description: 'Used by mode=apply: continue a partially-applied plan even though the destination no longer matches the plan\'s fingerprint. A plan with prior progress has already mutated the destination itself, so some divergence is expected — but a collaborator\'s edit is indistinguishable from here, and the remaining actions (including deletions) would overwrite it. Prefer re-running mode=plan. Without this flag such an apply aborts with RESUME_DRIFT instead of silently overwriting.' },
+        fieldMappings: { type: 'object', description: 'Field mapping overrides: maps table name → { sourceField: destField } to inject a source field\'s value into a different (writable scalar) dest field during record sync. Example: { "Games": { "Title": "Name" } }. In mode="plan" and mode="diff", fieldMappings are validated against the two schemas (dry-run, no mutation) and errors are returned in fieldMappingErrors.', additionalProperties: { type: 'object', additionalProperties: { type: 'string' } } },
+        verbose: { type: 'boolean', description: 'Used only by mode="status": by default planDigest is projected to { human, machineOmitted: true } (the full machine payload can be tens of thousands of lines on a view-heavy base and pushes the useful result fields out of the response — it always stays on disk). Set verbose:true to get the full planDigest.machine back in the response.' },
+        debug: debugProp,
+      },
+      required: ['mode', 'sourceAppId', 'destAppId'],
+    },
+  },
+
+  // ── Daemon ──
+  {
+    name: 'manage_daemon',
+    description:
+      'Inspect and control the MCP daemon this server runs in. action="status" is the diagnostic to reach for FIRST when tools start failing: it reports whether a daemon is running and whether YOU are it, the transport, uptime, version/provenance, the tunnel URL, and — the part nothing else exposes — the live session state (sessionDead, the last circuit-breaker trip INCLUDING Airtable\'s own response body, and the browser/auth busy queue). That is how you tell "daemon gone" from "session dead" from "browser busy" instead of guessing. ' +
+      'Control actions: start (idempotent; attaches to a healthy daemon rather than starting a second one), restart, stop (writes a sentinel so the VS Code extension does not silently respawn it), tunnel_enable, tunnel_disable, token_rotate. ' +
+      'stop/restart answer first and exit afterwards, so this call returns normally and the daemon goes away a moment later. token_rotate and tunnel_* are loopback-only and are refused for callers arriving through the tunnel; status is returned to them with host-identifying fields blanked. The bearer token is never returned to anyone. ' +
+      'Interactive tunnel setup (cloudflared login, creating a named tunnel) is deliberately NOT here — use the CLI or the VS Code dashboard.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['status', 'start', 'restart', 'stop', 'tunnel_enable', 'tunnel_disable', 'token_rotate'],
+          description: 'What to do. Start with "status" — it is read-only and never launches a browser or touches the lockfile.',
+        },
+        provider: {
+          type: 'string',
+          enum: ['cf-quick', 'cf-named'],
+          description: 'Used only by action="tunnel_enable": which tunnel provider to start. Defaults to the persisted preference (usually "cf-quick"). "ngrok" is not available here — its authtoken lives in VS Code SecretStorage and never reaches the daemon.',
+        },
+        domain: {
+          type: 'string',
+          description: 'Used only by action="tunnel_enable": optional custom hostname for providers that support one.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Used only by action="stop": a short note recorded in the stop sentinel, so a human reading ~/.airtable-user-mcp/daemon.stopped later knows why the daemon is down.',
+        },
+        // No `debug` here: there is no raw Airtable response to dump — the whole
+        // result already IS the diagnostic payload.
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 // ─── Meta-Tool: manage_tools ─────────────────────────────────
@@ -1549,7 +1789,11 @@ const MANAGE_TOOLS_DEF = {
       },
       category: {
         type: 'string',
-        description: 'Category name for toggle_category action (read, table-write, table-destructive, field-write, field-destructive, view-write, view-destructive, extension)',
+        // Derived from CATEGORY_LABELS, not hand-listed: the hand-written list this
+        // replaces named 8 of the then-15 categories and had no way to notice when a
+        // new one shipped, so the model could not discover `sync` or `daemon` existed.
+        enum: Object.keys(CATEGORY_LABELS),
+        description: `Category name for toggle_category action (${Object.keys(CATEGORY_LABELS).join(', ')})`,
       },
       enabled: {
         type: 'boolean',
@@ -1612,13 +1856,15 @@ const handlers = {
     return ok(summary, table, debug);
   },
 
-  async list_fields({ appId, tableIdOrName, fieldType, nameContains, debug }) {
+  async list_fields({ appId, tableIdOrName, fieldType, nameContains, includeOptions, debug }) {
     const table = await client.resolveTable(appId, tableIdOrName);
+    // typeOptions is opt-in: full options for every field can run to hundreds of KB on a
+    // wide table (formula dependency graphs, select choice maps) and blow the MCP window.
     let fields = (table.columns || table.fields || []).map(f => ({
       id: f.id,
       name: f.name,
       type: f.type,
-      typeOptions: f.typeOptions,
+      ...(includeOptions ? { typeOptions: f.typeOptions } : {}),
     }));
     if (fieldType) fields = fields.filter(f => f.type === fieldType);
     if (nameContains) {
@@ -1791,12 +2037,16 @@ const handlers = {
     }
     // Live Airtable internal API stores formula text under typeOptions.formulaTextParsed.
     // typeOptions.formulaText is the historical key kept as a fallback.
-    // Note: formulaTextParsed encodes field refs as {column_value_fldXXX} placeholders.
-    const formulaText = foundField.typeOptions?.formulaTextParsed
-      || foundField.typeOptions?.formulaText
-      || foundField.typeOptions?.formula
-      || foundField.formula
-      || '';
+    // formulaTextParsed encodes field refs as {column_value_fldXXX} placeholders — resolve
+    // them to real field names so the file is readable and round-trips through upload.
+    const formulaText = formulaRefsToNames(
+      foundField.typeOptions?.formulaTextParsed
+        || foundField.typeOptions?.formulaText
+        || foundField.typeOptions?.formula
+        || foundField.formula
+        || '',
+      buildFieldNameMap(tables),
+    );
     const fieldName = foundField.name ?? fieldId;
     const description = foundField.description ?? '';
     const resultType = foundField.typeOptions?.resultType ?? '';
@@ -1818,6 +2068,7 @@ const handlers = {
     const baseDir = outputDir || process.cwd();
     const raw = await client.getApplicationData(appId);
     const tables = raw?.data?.tableSchemas || raw?.data?.tables || [];
+    const fldNames = buildFieldNameMap(tables);
     const written = [];
 
     for (const table of tables) {
@@ -1830,11 +2081,14 @@ const handlers = {
       await mkdir(tableDir, { recursive: true });
 
       for (const field of formulaFields) {
-        const formulaText = field.typeOptions?.formulaTextParsed
-          || field.typeOptions?.formulaText
-          || field.typeOptions?.formula
-          || field.formula
-          || '';
+        const formulaText = formulaRefsToNames(
+          field.typeOptions?.formulaTextParsed
+            || field.typeOptions?.formulaText
+            || field.typeOptions?.formula
+            || field.formula
+            || '',
+          fldNames,
+        );
         const fieldName = field.name ?? field.id;
         const description = field.description ?? '';
         const resultType = field.typeOptions?.resultType ?? '';
@@ -2299,6 +2553,157 @@ const handlers = {
     return ok(result, result, debug);
   },
 
+  async create_records({ appId, tableId, viewId, records, debug }) {
+    const result = await client.createRecords(appId, tableId, records, { viewId });
+    return ok(result, result, debug);
+  },
+
+  async update_records({ appId, tableId, updates, debug }) {
+    const result = await client.updateRecords(appId, tableId, updates);
+    return ok(result, result, debug);
+  },
+
+  async upload_attachment({ appId, updates, debug }) {
+    const result = await uploadAttachmentsByUrl(client, appId, updates || []);
+    return ok(result, result, debug);
+  },
+
+  async delete_records({ appId, tableId, rowIds, viewId, debug }) {
+    const result = await client.deleteRecords(appId, tableId, rowIds, { viewId });
+    return ok(result, result, debug);
+  },
+
+  // ── Sync ──
+
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, strictDrift, resumeAfterDrift, verbose, debug }) {
+    const sync = await import('./sync/index.js');
+    if (mode === 'plan') {
+      // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
+      // which blows past the MCP response window (Connection closed) even though the plan is
+      // computed + persisted. Run it as a BACKGROUND job and return the jobId immediately; poll
+      // mode=status with this planId to get the plan digest when it lands.
+      const id = 'pln' + client._genRandomId();
+      const { jobId, status } = sync.planJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings, strictDrift });
+      return ok({ jobId, planId: jobId, status, message: 'Plan is computing in the background — poll mode=status with this planId (jobId).' }, { jobId, status }, debug);
+    }
+    if (mode === 'apply') {
+      if (!planId) return err('mode="apply" requires planId (from a prior mode="plan" run).');
+      const runStartedAt = new Date().toISOString();
+      // Apply runs the whole schema phase (snapshot + applyPlan + pruneSchema) before it
+      // backgrounds records — long enough on a real base to trip the MCP response window. Run the
+      // WHOLE apply (schema then records) as a background job and return immediately. Field-mapping
+      // validation, DRIFT abort, and APPLY_LOCKED now surface via mode=status (phase='failed'/'done').
+      const { jobId, status } = sync.applyJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, resumeAfterDrift });
+      // Forward-looking note: DELETION_GATED warnings are only emitted by the background records
+      // job, so they can't appear synchronously. Emit a synchronous advisory when the effective
+      // policy would delete dest-only records but confirmDeletions was not set.
+      const { isDeleting: isDeletingPolicy } = await import('./sync/policy.js');
+      const deletingSuffix = isDeletingPolicy(policy, policyOverrides) && !confirmDeletions
+        ? ' Mirror/remove policy set — dest-only records will be reported as DELETION_GATED (deleted nothing); poll mode=status for counts, then re-run with confirmDeletions:true to apply deletions.'
+        : '';
+      return ok({ jobId, planId, status, message: 'Apply running in the background (schema then records) — poll mode=status with this planId.' + deletingSuffix }, { jobId, status }, debug);
+    }
+    if (mode === 'reconcile') {
+      const raw = await sync.reconcile({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, naturalKeys: naturalKeys || {} });
+      const { renderApplyResult } = await import('./sync/report.js');
+      const out = renderApplyResult({ ...raw, planId: 'reconcile' });
+      return ok({ summary: out.human }, out.machine, debug);
+    }
+    if (mode === 'status') {
+      if (!planId) return err('mode="status" requires planId (the jobId returned by mode="plan" or mode="apply").');
+      const s = sync.syncStatus({ sourceBaseId: sourceAppId, destBaseId: destAppId, planId, verbose });
+      const sr = s.schemaResult || {};
+      const rr = s.recordsResult || {};
+      let summary;
+      switch (s.phase) {
+        case 'planning':
+          summary = `Plan ${planId}: computing in the background (started ${s.startedAt})`;
+          break;
+        case 'schema':
+          summary = `Apply ${planId}: schema phase running (started ${s.startedAt})`;
+          break;
+        case 'records':
+          summary = `Apply ${planId}: records phase running — ${s.recordsMapped} records mapped so far ` +
+            `(schema created ${sr.created ?? 0}, updated ${sr.updated ?? 0})`;
+          break;
+        case 'done':
+          summary = s.recordsResult
+            ? `Sync ${planId}: done — ${s.recordsMapped} records mapped ` +
+              `(created ${rr.created ?? 0}, updated ${rr.updated ?? 0}, failed ${rr.failed ?? 0}, warnings ${(rr.warnings || []).length})`
+            : s.planDigest
+              ? `Plan ${planId}: done — ${s.planDigest.human || 'plan computed'}`
+              : sr.aborted
+                ? `Apply ${planId}: aborted (${sr.reason || 'DRIFT'}) — re-run mode=plan`
+                : `Sync ${planId}: done`;
+          break;
+        case 'failed':
+          summary = `Sync ${planId}: FAILED — ${s.error}`;
+          break;
+        case 'unknown':
+        default:
+          summary = `Sync ${planId}: ${s.phase}${s.message ? ' — ' + s.message : ''}`;
+      }
+      // Structured object covering the phase (superset of the M2 records-only shape: planId,
+      // status, recordsMapped, result, summary are preserved; result === recordsResult).
+      // Field order matters here: `summary`/schemaResult/recordsResult/result are the fields a
+      // caller actually needs and are placed BEFORE planDigest, so that if the response is still
+      // truncated (e.g. a verbose planDigest.machine on a view-heavy base), it's the least-useful
+      // field that gets cut, not these. (Object insertion order === JSON key order.)
+      // Cap the (potentially thousands-long) warnings arrays so the response fits the MCP window;
+      // the full results stay on disk in the job file (and return inline with verbose:true). `result`
+      // is the SAME lean object as recordsResult (kept for M2 back-compat), not a second full copy.
+      const leanSchema = leanSyncResult(s.schemaResult ?? null, verbose);
+      const leanRecords = leanSyncResult(s.recordsResult ?? null, verbose);
+      return ok({
+        planId,
+        phase: s.phase,
+        status: s.status,
+        recordsMapped: s.recordsMapped,
+        summary,
+        schemaResult: leanSchema,
+        recordsResult: leanRecords,
+        result: leanRecords,
+        planDigest: s.planDigest ?? null,
+      }, s, debug);
+    }
+    if (mode === 'diff') {
+      if (detail) {
+        const out = sync.diffDetail({ sourceBaseId: sourceAppId, destBaseId: destAppId, diffId, detail, offset, limit });
+        // out.diffId is the RESOLVED id (diffDetail falls back to the latest diff when the
+        // param is omitted) — echoing the raw param here returned diffId:null on success.
+        return ok({ diffId: out.diffId ?? diffId ?? null, summary: out.human }, out.machine, debug);
+      }
+      const id = diffId || ('dif' + client._genRandomId());
+      const out = await sync.diff({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, diffId: id, fieldMappings });
+      return ok({ diffId: id, summary: out.human }, out.machine, debug);
+    }
+    return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", "status", or "diff".`);
+  },
+
+  // ── Meta: Daemon Control ──
+
+  async manage_daemon({ action, provider, domain, reason }) {
+    // Dynamic import so the stdio path never pulls express + the daemon stack
+    // into startup just to have this handler defined.
+    const { manageDaemon } = await import('./daemon/manage.js');
+    const result = await manageDaemon(
+      { action, provider, domain, reason },
+      {
+        auth,
+        runtime: _daemonRuntime,
+        // Set by the daemon's /mcp route; absent on stdio, where the call never
+        // crossed HTTP and is local by construction.
+        origin: currentToolContext()?.origin ?? 'local',
+        version: PKG_VERSION,
+        provenance: PKG_PROVENANCE,
+      },
+    );
+    // A refusal is an honest answer, not a failure — same shape as the rest of
+    // this file's ok() results so the model reads `refused` and `runInstead`
+    // instead of retrying a call that can never work.
+    return ok(result);
+  },
+
   // ── Meta: Tool Management ──
 
   async manage_tools({ action, profile, tool, category, enabled }) {
@@ -2430,34 +2835,37 @@ function _releaseToolSlot() {
   if (_inflightToolCalls > 0) _inflightToolCalls--;
 }
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  // Ambient tool label for PageScheduler busy-state (real MCP tool name).
+  return withToolDispatchContext(request, extra, async () => {
+    const { name, arguments: args } = request.params;
 
-  const handler = handlers[name];
-  if (!handler) {
-    return err(`Unknown tool: ${name}`);
-  }
+    const handler = handlers[name];
+    if (!handler) {
+      return err(`Unknown tool: ${name}`);
+    }
 
-  if (!toolConfig.isToolEnabled(name)) {
-    return err(
-      `Tool "${name}" is currently disabled. Active profile: "${toolConfig.activeProfile}". ` +
-      `Use manage_tools to change profile or re-enable this tool.`
-    );
-  }
+    if (!toolConfig.isToolEnabled(name)) {
+      return err(
+        `Tool "${name}" is currently disabled. Active profile: "${toolConfig.activeProfile}". ` +
+        `Use manage_tools to change profile or re-enable this tool.`
+      );
+    }
 
-  try {
-    await _acquireToolSlot();
-  } catch (slotErr) {
-    return err(slotErr.message);
-  }
-  const traced = traceToolHandler(name, handler);
-  try {
-    return await traced(args || {});
-  } catch (error) {
-    return err(`Error in ${name}: ${error.message}`);
-  } finally {
-    _releaseToolSlot();
-  }
+    try {
+      await _acquireToolSlot();
+    } catch (slotErr) {
+      return err(slotErr.message);
+    }
+    const traced = traceToolHandler(name, handler);
+    try {
+      return await traced(args || {});
+    } catch (error) {
+      return err(`Error in ${name}: ${error.message}`);
+    } finally {
+      _releaseToolSlot();
+    }
+  });
 });
 
 // ─── Prompt Handlers ─────────────────────────────────────────
@@ -2475,9 +2883,22 @@ let activeTransport = null;
 
 async function main() {
   if (isDaemonStart) {
+    // ponytail: optional fixed daemon port; 0/absent => OS-ephemeral (the default)
+    let fixedPort;
+    for (let i = 2; i < cliArgs.length; i++) {
+      const a = cliArgs[i];
+      const raw = a === '--port' ? cliArgs[i + 1] : a.startsWith('--port=') ? a.slice(7) : undefined;
+      if (raw === undefined) continue;
+      const n = Number(raw);
+      if (Number.isInteger(n) && n >= 1 && n <= 65535) fixedPort = n;
+    }
     const { startDaemon } = await import('./daemon/launcher.js');
     const result = await startDaemon({
       configDir: process.env.AIRTABLE_USER_MCP_HOME,
+      port: fixedPort,
+      // One AirtableAuth for health pageBusy, park, and tool handlers.
+      auth,
+      client,
       getTools: (tc) => {
         const enabledTools = tc.filterTools(TOOLS);
         const enabledNames = new Set(enabledTools.map(t => t.name));
@@ -2525,7 +2946,12 @@ async function main() {
         }
       },
     });
-    if (!result.attached) await result.closed;
+    // Only a process that actually acquired the lock is the holder; an attach
+    // means some OTHER process owns the daemon, so leave _daemonRuntime null.
+    if (!result.attached) {
+      _daemonRuntime = { uuid: result.uuid, port: result.port, startedAt: result.startedAt };
+      await result.closed;
+    }
     return;
   }
 

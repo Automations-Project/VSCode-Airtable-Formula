@@ -9,7 +9,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "files": [
     "src/**/*.js",
@@ -63,7 +63,7 @@
   "scripts": {
     "start": "node src/index.js",
     "login": "node src/login.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -75,7 +75,9 @@
   },
   "optionalDependencies": {
     "@ngrok/ngrok": "^1.7.0",
+    "impit": "^0.14.2",
     "otpauth": "^9.5.0",
-    "patchright": "^1.58.2"
+    "patchright": "^1.58.2",
+    "undici": "^7.0.0"
   }
 }

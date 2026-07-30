@@ -15,6 +15,7 @@ const SECRET_PREFIX = 'airtableFormula';
 const SECRET_EMAIL      = `${SECRET_PREFIX}.email`;
 const SECRET_PASSWORD   = `${SECRET_PREFIX}.password`;
 const SECRET_OTP_SECRET = `${SECRET_PREFIX}.otpSecret`;
+const SECRET_COOKIE     = `${SECRET_PREFIX}.cookie`;
 
 const PROFILE_DIR = path.join(os.homedir(), '.airtable-user-mcp', '.chrome-profile');
 const CONFIG_DIR = path.join(os.homedir(), '.airtable-user-mcp');
@@ -32,7 +33,7 @@ export class AuthManager implements vscode.Disposable {
   private readonly _onDidChange = new vscode.EventEmitter<AuthState>();
   public readonly onDidChange = this._onDidChange.event;
 
-  private _state: AuthState = { status: 'unknown', hasCredentials: false };
+  private _state: AuthState = { status: 'unknown', hasCredentials: false, hasCookie: false };
   private _timer: ReturnType<typeof setInterval> | undefined;
   private _initCheckTimer: ReturnType<typeof setTimeout> | undefined;
   private _disposed = false;
@@ -193,6 +194,35 @@ export class AuthManager implements vscode.Disposable {
     return this.secrets.get(SECRET_OTP_SECRET);
   }
 
+  // ─── BYO session cookie (authMode='byo') ─────────────────────
+  //
+  // Stored in the OS keychain like the email/password/otp triplet. The cookie
+  // reaches the MCP server via env (stdio path, getCredentialsEnv) or the
+  // bearer-authenticated /daemon/auth-credentials endpoint (daemon path) — it
+  // is never written to disk (no plaintext credentials.json) and never logged.
+
+  async getCookie(): Promise<string | undefined> {
+    return this.secrets.get(SECRET_COOKIE);
+  }
+
+  // CSRF is not stored: for byo the server auto-scrapes it from the cookie's authed session.
+  async saveCookie(cookie: string): Promise<void> {
+    // Modes are NOT storage-exclusive: any stored email/password (direct-login)
+    // are intentionally preserved so the user can switch between byo and
+    // direct-login without re-entering credentials.
+    await this.secrets.store(SECRET_COOKIE, cookie);
+    this._updateState({ hasCookie: true });
+  }
+
+  async clearCookie(): Promise<void> {
+    await this.secrets.delete(SECRET_COOKIE);
+    this._updateState({ hasCookie: false });
+  }
+
+  async hasCookie(): Promise<boolean> {
+    return !!(await this.getCookie());
+  }
+
   async saveCredentials(email: string, password: string, otpSecret?: string): Promise<void> {
     await this.secrets.store(SECRET_EMAIL, email);
     await this.secrets.store(SECRET_PASSWORD, password);
@@ -204,14 +234,41 @@ export class AuthManager implements vscode.Disposable {
     this._updateState({ hasCredentials: true });
   }
 
-  async clearCredentials(): Promise<void> {
-    await this.secrets.delete(SECRET_EMAIL);
-    await this.secrets.delete(SECRET_PASSWORD);
-    await this.secrets.delete(SECRET_OTP_SECRET);
-    this._updateState({ status: 'unknown', hasCredentials: false, userId: undefined, error: undefined });
-  }
+  // NOTE: a `clearCredentials()` helper used to live here — it deleted the same
+  // four secrets as logout() but never dropped the daemon's copy, and it had zero
+  // call sites. It was removed rather than repaired: a second, subtly weaker
+  // credential-clearing entry point is exactly how the daemon kept serving a
+  // "logged out" session. Use `logout()` (clears secrets AND the daemon session)
+  // or `clearCookie()` (which pairs with dropDaemonCredentials at its call site).
 
-  async logout(): Promise<void> {
+  /**
+   * THE logout path. Every entry point (Command Palette `airtable-formula.logout`
+   * and the dashboard's `action:logout`) must go through this and nothing else:
+   * clearing the keychain alone left a running daemon serving the old session, so
+   * the user believed they had logged out while tool calls kept working.
+   *
+   * Clears, in order:
+   *   1. the auto-refresh timer (so it can't re-launch a browser mid-wipe),
+   *   2. the OS-keychain secrets,
+   *   3. the daemon's live browser session (`/daemon/release-browser`) — this is
+   *      the browser-mode credential drop AND it unlocks the persistent profile
+   *      so the directory removal below can actually succeed on Windows,
+   *   4. the on-disk Chrome profile,
+   *   5. the daemon's in-memory byo/direct-login credentials (daemon restart).
+   *
+   * Step 3 can fail while the daemon is very much alive (its `healthy` flag comes
+   * from a 2 s probe). That must NOT read as a successful logout, so an
+   * unconfirmed release — or a profile wipe blocked by a still-running Chromium —
+   * escalates to a daemon restart/force-stop, which drops the session either way
+   * since daemon shutdown runs `auth.close()`. Step 4 is then retried, because a
+   * surviving profile directory is a live session on disk: the replacement daemon
+   * points at the same `AIRTABLE_PROFILE_DIR` and would authenticate from it.
+   *
+   * @returns `daemonSessionDropped:false` when the daemon may still be serving the
+   *          session the user just logged out of, OR when the profile is still on
+   *          disk. Either way the caller must not claim the session was cleared.
+   */
+  async logout(): Promise<{ daemonSessionDropped: boolean }> {
     // Stop the refresh timer first so it can't race against the profile wipe
     // and immediately re-launch the browser with stale (now-deleted) state.
     this.stopAutoRefresh();
@@ -219,16 +276,132 @@ export class AuthManager implements vscode.Disposable {
     await this.secrets.delete(SECRET_EMAIL);
     await this.secrets.delete(SECRET_PASSWORD);
     await this.secrets.delete(SECRET_OTP_SECRET);
+    await this.secrets.delete(SECRET_COOKIE);
 
+    // Browser mode keeps its session in the daemon's live Chromium (cookies in
+    // memory, profile dir held open). Releasing it drops that session and frees
+    // the profile lock — without this, `fs.rm` below fails on Windows and the
+    // daemon happily keeps answering tool calls with the "logged out" session.
+    const release = await this._releaseDaemonBrowser();
+    if (!release.released) {
+      console.warn(`[AuthManager] daemon browser release not confirmed (${release.reason}) — escalating to a daemon restart`);
+    }
+
+    let profileWiped = await this._wipeBrowserProfile();
+
+    // byo / direct-login creds live in the daemon's memory (cred-store), not on
+    // disk — only a restart drops them. `force` extends that to browser mode when
+    // the session may still be live: either the release was not confirmed, or the
+    // profile could not be removed (something still holds it open, and the
+    // daemon's Chromium is the usual suspect). Restarting is then the only way to
+    // be sure the old session is gone.
+    const dropped = await this.dropDaemonCredentials({ force: !release.released || !profileWiped });
+
+    // Retry the wipe once after the daemon is down: its shutdown runs
+    // auth.close() → _killBrowserTree, so a profile that was locked a moment ago
+    // is free now. This retry is NOT optional — a profile left on disk still holds
+    // live Airtable cookies, and the freshly spawned daemon points at the same
+    // AIRTABLE_PROFILE_DIR, so its next tool call (or the dashboard refresh fired
+    // right after logout) would simply log itself back in.
+    if (!profileWiped) profileWiped = await this._wipeBrowserProfile();
+
+    this._updateState({ status: 'unknown', hasCredentials: false, hasCookie: false, userId: undefined, error: undefined });
+
+    // `release.released` is meaningful evidence ONLY in browser mode: the
+    // /daemon/release-browser handler calls `auth.close()` unconditionally and
+    // reports 2xx whenever the request round-trips, but in byo/direct-login
+    // there is no browser session for it to release — auth.close() there is a
+    // near no-op and never touches the daemon's in-memory credential store.
+    // So `release.released === true` there confirms nothing about whether the
+    // credentials were actually dropped; only `dropped` (which byo/direct-login
+    // ALWAYS drives through a real restart/force-stop, see dropDaemonCredentials)
+    // does. Treating a vacuous release as sufficient — as a plain `release.released
+    // || dropped` would — let a failed restart-plus-force-stop still report a
+    // successful logout. Browser mode is unaffected: there, `release.released`
+    // is a real confirmation the live session is gone, so it keeps standing on
+    // its own exactly as before (including the escalation-succeeds-without-a-
+    // confirmed-release case: a forced restart there also drops a real session).
+    const authMode = getSettings().mcp.authMode;
+    const releaseIsMeaningful = authMode !== 'byo' && authMode !== 'direct-login';
+    const daemonConfirmed = (releaseIsMeaningful && release.released) || dropped;
+    // An un-wiped profile is a live session on disk, so it can never count as
+    // dropped no matter how cleanly the daemon side went.
+    return { daemonSessionDropped: daemonConfirmed && profileWiped };
+  }
+
+  /** Remove the persistent Chrome profile. Returns false if it is still on disk. */
+  private async _wipeBrowserProfile(): Promise<boolean> {
     const fs = await import('fs/promises');
     try {
       await fs.rm(PROFILE_DIR, { recursive: true, force: true });
       console.log('[AuthManager] Browser profile cleared');
+      return true;
     } catch (err) {
+      // `force: true` already swallows "not found", so this is a real failure —
+      // typically EBUSY/EPERM on Windows while a Chromium still holds the dir.
       console.warn('[AuthManager] Failed to clear browser profile:', err);
+      return false;
     }
+  }
 
-    this._updateState({ status: 'unknown', hasCredentials: false, userId: undefined, error: undefined });
+  /**
+   * After the keychain credentials are cleared in a daemon + byo/direct-login
+   * setup, the running daemon still holds the injected credentials in memory.
+   * Restart it so it re-spawns creds-free — with the keychain now empty it has
+   * nothing to load, so the stale in-memory copy is dropped. Fully best-effort:
+   * every await is guarded and nothing throws to the caller.
+   *
+   * Called by `logout()` and by the dashboard's narrower "clear cookie" /
+   * "clear credentials" actions (via DashboardProvider).
+   *
+   * @param opts.force restart regardless of auth mode. Browser mode normally has
+   *        nothing here to drop (the session lives in the daemon's Chromium, which
+   *        `_releaseDaemonBrowser` handles) — but when that release could not be
+   *        confirmed, killing the process is the only remaining guarantee.
+   * @returns true when the daemon is confirmed to no longer hold the session
+   *          (including "there was nothing to drop"); false when it may still.
+   */
+  async dropDaemonCredentials(opts?: { force?: boolean }): Promise<boolean> {
+    try {
+      const settings = getSettings();
+      const authMode = settings.mcp.authMode;
+      if (!settings.mcp.useDaemon) return true;
+      if (!opts?.force && authMode !== 'byo' && authMode !== 'direct-login') return true;
+      const dm = this._daemonManager;
+      if (!dm) return true;
+      const status = await dm.getDaemonStatus();
+      if (!status?.running) return true;
+      try {
+        await dm.restartDaemon();
+        // The restarted daemon runs auth.close() on shutdown, so the old
+        // process's browser session and in-memory credentials are both gone.
+        return true;
+      } catch (restartErr) {
+        // The daemon still holds the (now-cleared) creds in memory. A restart would
+        // drop them but it failed — force-stop so the stale in-memory session dies.
+        console.warn('[AuthManager] daemon restart after credential clear failed:', restartErr instanceof Error ? restartErr.message : 'unknown error');
+        try {
+          const forced = await dm.forceStop();
+          // The sweep never kills a process it cannot attribute to this install; if one was left
+          // alive it may still be serving the cleared session, so say so rather than implying
+          // everything is down.
+          const leftAlive = forced?.skippedUnowned?.length
+            ? ` ${forced.skippedUnowned.length} daemon-like process(es) were left running because ownership could not be verified (PID ${forced.skippedUnowned.map(p => p.pid).join(', ')}) — stop them manually if they are yours.`
+            : '';
+          vscode.window.showErrorMessage(`Credentials were cleared from the keychain, but the running daemon could not be restarted to drop its in-memory session. It was force-stopped — restart it when ready.${leftAlive}`);
+          // Force-stop killed the process (and with it the browser session) — but a
+          // process the sweep could not attribute is still out there serving.
+          return !forced?.skippedUnowned?.length;
+        } catch (stopErr) {
+          console.warn('[AuthManager] daemon force-stop after failed restart also failed:', stopErr instanceof Error ? stopErr.message : 'unknown error');
+          vscode.window.showErrorMessage('Credentials cleared, but the daemon may still hold your session in memory — stop/restart it manually to fully clear it.');
+          return false;
+        }
+      }
+    } catch (err) {
+      console.warn('[AuthManager] daemon restart after credential clear failed:', err instanceof Error ? err.message : 'unknown error');
+      return false;
+    }
   }
 
   async hasCredentials(): Promise<boolean> {
@@ -241,13 +414,16 @@ export class AuthManager implements vscode.Disposable {
    * Read stored credentials from SecretStorage.
    * Returns undefined if no credentials are stored.
    */
-  async getCredentials(): Promise<{ email: string; password: string; otpSecret?: string } | undefined> {
+  async getCredentials(opts?: { ensureDaemon?: boolean }): Promise<{ email: string; password: string; otpSecret?: string } | undefined> {
     // D-02: ensure daemon is running before handing off credentials.
     // Implicit + best-effort: credentials don't require the daemon, and this
     // path runs from provideMcpServerDefinitions — it must neither resurrect
     // a daemon the user explicitly stopped nor block login when the daemon
     // can't start.
-    if (getSettings().mcp.useDaemon && this._daemonManager) {
+    // Callers that push creds TO an already-running daemon (the lockfile-watch / dashboard re-push)
+    // pass { ensureDaemon: false }: they must NOT trigger a spawn here, or a lockfile-watch →
+    // getCredentials → ensureDaemon → spawn → lockfile-write → watch loop runs away (multiple procs).
+    if (opts?.ensureDaemon !== false && getSettings().mcp.useDaemon && this._daemonManager) {
       try {
         await this._daemonManager.ensureDaemon({ implicit: true });
       } catch { /* user-stopped latch or startup failure — proceed without daemon */ }
@@ -261,14 +437,49 @@ export class AuthManager implements vscode.Disposable {
   }
 
   /**
-   * Get credentials as env vars. ONLY for the VS Code MCP stdio definition
-   * (registration.ts), where VS Code owns the spawn and env is the only
-   * channel. Helper scripts we fork ourselves receive credentials over the
-   * IPC channel instead (_spawnScript) so they never appear in the child's
-   * environment (/proc/<pid>/environ, process listings, core dumps).
+   * Get credentials as env vars, shaped for the given auth mode. ONLY for the
+   * VS Code MCP stdio definition (registration.ts), where VS Code owns the
+   * spawn and env is the only channel. Helper scripts we fork ourselves receive
+   * credentials over the IPC channel instead (_spawnScript) so they never
+   * appear in the child's environment (/proc/<pid>/environ, process listings,
+   * core dumps).
+   *
+   *   - 'byo'          → { AIRTABLE_COOKIE } only (CSRF is auto-scraped
+   *                      server-side, never forwarded), or undefined when no
+   *                      cookie is saved.
+   *   - 'direct-login' → { AIRTABLE_EMAIL, AIRTABLE_PASSWORD, AIRTABLE_TOTP_SECRET }
+   *                      (direct-login reads TOTP as AIRTABLE_TOTP_SECRET), or
+   *                      undefined when no credentials are saved.
+   *   - browser / undefined → { AIRTABLE_EMAIL, AIRTABLE_PASSWORD,
+   *                      AIRTABLE_OTP_SECRET } (unchanged legacy behavior).
+   *
+   * NOTE: the daemon transport never uses this — daemon creds go via the
+   * bearer-authenticated /daemon/auth-credentials endpoint (see
+   * DaemonManager.pushAuthCredentials), never the daemon's env.
    */
-  async getCredentialsEnv(): Promise<Record<string, string> | undefined> {
-    const creds = await this.getCredentials();
+  async getCredentialsEnv(authMode?: string): Promise<Record<string, string> | undefined> {
+    if (authMode === 'byo') {
+      const cookie = await this.getCookie();
+      if (!cookie) return undefined;
+      // CSRF is auto-scraped server-side from the cookie session — not forwarded.
+      return { AIRTABLE_COOKIE: cookie };
+    }
+
+    if (authMode === 'direct-login') {
+      // getCredentialsEnv builds env for the STDIO (non-daemon) spawn — it must
+      // never trigger a daemon spawn from a credential read.
+      const creds = await this.getCredentials({ ensureDaemon: false });
+      if (!creds) return undefined;
+      const env: Record<string, string> = {
+        AIRTABLE_EMAIL: creds.email,
+        AIRTABLE_PASSWORD: creds.password,
+      };
+      if (creds.otpSecret) env.AIRTABLE_TOTP_SECRET = creds.otpSecret;
+      return env;
+    }
+
+    // Same rationale as the direct-login branch above.
+    const creds = await this.getCredentials({ ensureDaemon: false });
     if (!creds) return undefined;
 
     const env: Record<string, string> = {
@@ -282,7 +493,32 @@ export class AuthManager implements vscode.Disposable {
   // ─── Health Check ────────────────────────────────────────────
 
   async checkSession(): Promise<AuthState> {
-    // Preflight — no point spawning the child process if no browser exists
+    // Prefer the daemon's SINGLE shared browser. This avoids forking a local
+    // Chrome that would collide with the daemon over the persistent profile
+    // (Chrome exit code 21 → the "session dead / network error" failure), and
+    // it works even when no local browser is installed.
+    const viaDaemon = await this._checkViaDaemon();
+    if (viaDaemon) return viaDaemon;
+
+    // byo / direct-login never touch a browser — the session is minted/refreshed
+    // by the MCP server over direct-HTTP. The daemon check above is the only live
+    // verification for them; with no daemon we can't probe, so surface a neutral
+    // status instead of forking Chrome or reporting 'chrome-missing'.
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      // Neutral 'unknown' state: this isn't an error. The webview renders any
+      // auth.error as a permanent yellow warning, so leave error undefined
+      // (and clear any prior error) rather than putting an informational string there.
+      this._updateState({
+        status: 'unknown',
+        lastChecked: new Date().toISOString(),
+        error: undefined,
+      });
+      return this._state;
+    }
+
+    // No daemon (stdio mode) or a daemon that predates the endpoint — fall back
+    // to forking our own health-check. Preflight: no browser, no point spawning.
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -333,9 +569,139 @@ export class AuthManager implements vscode.Disposable {
     return this._state;
   }
 
+  /**
+   * Verify the session through the daemon's already-open browser.
+   *
+   * Returns the resulting AuthState when the daemon handled the check, or
+   * `null` to signal the caller to fall back to forking a local health-check
+   * (no daemon, daemon disabled, daemon unreachable, or a daemon too old to
+   * expose /daemon/session-health).
+   */
+  private async _checkViaDaemon(): Promise<AuthState | null> {
+    const dm = this._daemonManager;
+    if (!dm || !getSettings().mcp.useDaemon) return null;
+
+    let status: Awaited<ReturnType<DaemonManager['getDaemonStatus']>>;
+    try {
+      status = await dm.getDaemonStatus();
+    } catch {
+      return null;
+    }
+    if (!status.running || !status.healthy || status.port == null || !status.bearerToken) {
+      return null;
+    }
+
+    this._updateState({ status: 'checking' });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const resp = await fetch(`http://127.0.0.1:${status.port}/daemon/session-health`, {
+        headers: { Authorization: `Bearer ${status.bearerToken}` },
+        signal: controller.signal,
+      });
+
+      // Old daemon without the endpoint — fall back to the fork path.
+      if (resp.status === 404) return null;
+
+      const now = new Date().toISOString();
+      if (!resp.ok) {
+        this._updateState({ status: 'expired', lastChecked: now, error: `HTTP ${resp.status}` });
+        return this._state;
+      }
+
+      const result = await resp.json().catch(() => null) as
+        { valid?: boolean; userId?: string | null; status?: number; error?: string } | null;
+
+      // Take the daemon's verdict as given, and do NOT add a "no userId ⇒ signed
+      // out" gate here. The daemon's check is status-based on purpose: Airtable
+      // accepting the session cookie IS the proof (a cookieless caller gets 401),
+      // whereas the user id comes from page/login HTML that byo and a parked
+      // browser may never have read — so a missing id is not evidence of anything.
+      if (result?.valid) {
+        this._updateState({ status: 'valid', userId: result.userId ?? undefined, lastChecked: now, error: undefined });
+      } else {
+        this._updateState({
+          status: 'expired',
+          lastChecked: now,
+          error: result?.error || (result?.status ? `HTTP ${result.status}` : 'Session invalid'),
+        });
+      }
+      return this._state;
+    } catch {
+      // Daemon became unreachable mid-check — fall back rather than show an error.
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Ask the daemon to close its shared browser so an interactive (headful)
+   * login can open the persistent profile exclusively, or — from logout — so it
+   * stops serving the session the user just destroyed.
+   *
+   * For LOGIN this is best-effort: a failure is covered by the login runner's own
+   * exit-21 retry. For LOGOUT the outcome matters, so the result is reported
+   * rather than swallowed: `released:false` means the daemon may still be holding
+   * a live session and the caller must escalate (restart/force-stop) instead of
+   * telling the user they are logged out.
+   *
+   * `released:true` means "confirmed nothing is holding a session" — either the
+   * daemon answered 2xx, or there is no daemon to ask.
+   */
+  private async _releaseDaemonBrowser(): Promise<{ released: boolean; reason?: string }> {
+    const dm = this._daemonManager;
+    if (!dm || !getSettings().mcp.useDaemon) return { released: true };
+
+    let status: Awaited<ReturnType<DaemonManager['getDaemonStatus']>>;
+    try {
+      status = await dm.getDaemonStatus();
+    } catch (err) {
+      // We cannot even tell whether a daemon is running — assume the worst.
+      return { released: false, reason: err instanceof Error ? err.message : 'daemon status unavailable' };
+    }
+    if (!status.running) return { released: true };
+    // Running but unreachable: `healthy` comes from a 2s HTTP probe, so a slow or
+    // busy daemon lands here while still very much alive and serving.
+    if (!status.healthy || status.port == null || !status.bearerToken) {
+      return { released: false, reason: 'the daemon is running but did not answer its health probe' };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const res = await fetch(`http://127.0.0.1:${status.port}/daemon/release-browser`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${status.bearerToken}` },
+        signal: controller.signal,
+      });
+      if (!res.ok) return { released: false, reason: `release-browser returned HTTP ${res.status}` };
+      return { released: true };
+    } catch (err) {
+      return { released: false, reason: err instanceof Error ? err.message : 'release-browser request failed' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   // ─── Login ───────────────────────────────────────────────────
 
   async login(): Promise<AuthState> {
+    // byo / direct-login have no browser login: byo's cookie authenticates
+    // directly and direct-login replays email/password/TOTP server-side. The
+    // stored credentials ARE the login — validate them via checkSession()
+    // (the daemon's direct-HTTP check) instead of launching Chrome.
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      const hasCreds = mode === 'byo' ? await this.hasCookie() : await this.hasCredentials();
+      if (!hasCreds) {
+        this._updateState({ status: 'error', error: 'No credentials saved.' });
+        return this._state;
+      }
+      return this.checkSession();
+    }
+
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -354,11 +720,17 @@ export class AuthManager implements vscode.Disposable {
         return this._state;
       }
       this._updateState({ status: 'logging-in' });
+      // Free the profile: the daemon's shared browser must let go before the
+      // login runner can open the same persistent profile.
+      await this._releaseDaemonBrowser();
       try {
         // Credentials go over the IPC channel, never the child environment.
+        // Explicit 330s, matching manualLogin: the runner polls for 5 minutes
+        // (a user may finish an SSO/2FA step by hand), and the 120s default would
+        // SIGTERM it mid-poll and throw away the diagnostic it was about to print.
         const result = await this._spawnScript('login-runner.mjs', {
           ...this._browserEnv(), ...this._profileEnv(),
-        }, undefined, creds);
+        }, 330_000, creds);
         const now = new Date().toISOString();
         if (result.ok) {
           this._updateState({ status: 'valid', userId: result.userId || undefined, lastLogin: now, lastChecked: now, error: undefined });
@@ -377,6 +749,18 @@ export class AuthManager implements vscode.Disposable {
   }
 
   async manualLogin(): Promise<AuthState> {
+    // byo / direct-login never open a browser — route to the same credential
+    // validation as login() (the cookie / stored creds ARE the login).
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      const hasCreds = mode === 'byo' ? await this.hasCookie() : await this.hasCredentials();
+      if (!hasCreds) {
+        this._updateState({ status: 'error', error: 'No credentials saved.' });
+        return this._state;
+      }
+      return this.checkSession();
+    }
+
     const probe = this.refreshBrowserDetection();
     if (!probe.found) {
       this._updateState({
@@ -387,6 +771,9 @@ export class AuthManager implements vscode.Disposable {
     }
 
     this._updateState({ status: 'logging-in' });
+    // Free the profile: the daemon's shared browser must let go before the
+    // login runner can open the same persistent profile.
+    await this._releaseDaemonBrowser();
 
     try {
       const result = await this._spawnScript(
@@ -459,11 +846,22 @@ export class AuthManager implements vscode.Disposable {
     }
 
     const hasCreds = await this.hasCredentials();
-    const probe = this.refreshBrowserDetection();
-    this._updateState({
-      hasCredentials: hasCreds,
-      ...(probe.found ? {} : { status: 'chrome-missing' as const }),
-    });
+    const hasCookie = await this.hasCookie();
+
+    const mode = getSettings().mcp.authMode;
+    if (mode === 'byo' || mode === 'direct-login') {
+      // No browser in these modes — don't probe or flag 'chrome-missing'. Leave
+      // status 'unknown'; the daemon check (via checkSession / auto-refresh)
+      // verifies the session without launching Chrome.
+      this._updateState({ hasCredentials: hasCreds, hasCookie });
+    } else {
+      const probe = this.refreshBrowserDetection();
+      this._updateState({
+        hasCredentials: hasCreds,
+        hasCookie,
+        ...(probe.found ? {} : { status: 'chrome-missing' as const }),
+      });
+    }
 
     await this._applyPermissions();
     this.startAutoRefresh();
@@ -484,8 +882,13 @@ export class AuthManager implements vscode.Disposable {
     if (this._disposed) return;
     if (this._state.status === 'logging-in' || this._state.status === 'checking') return;
 
-    const probe = this.refreshBrowserDetection();
-    if (!probe.found) return;
+    // Only browser mode needs a local browser to refresh; byo / direct-login
+    // verify via the daemon's direct-HTTP check and must not be blocked here.
+    const mode = getSettings().mcp.authMode;
+    if (mode !== 'byo' && mode !== 'direct-login') {
+      const probe = this.refreshBrowserDetection();
+      if (!probe.found) return;
+    }
 
     const state = await this.checkSession();
 

@@ -8,6 +8,8 @@ const SENSITIVE_KEYS = new Set([
   'cookie', 'cookies', 'set-cookie',
   'password', 'otpSecret', 'otpCode', 'totp',
   'AIRTABLE_PASSWORD', 'AIRTABLE_OTP_SECRET', 'AIRTABLE_EMAIL',
+  // direct-login TOTP + BYO cookie/csrf env keys (mirror debug/exporter.ts on the extension side)
+  'AIRTABLE_TOTP_SECRET', 'AIRTABLE_COOKIE', 'AIRTABLE_CSRF',
   'authorization', 'apiKey', 'api_key', 'token', 'accessToken',
   'refreshToken', 'bearer', 'secret', 'privateKey', 'private_key',
   'key', 'email', 'username',
@@ -81,6 +83,11 @@ const ERROR_SCRUBBERS = [
   /(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi,
   /(authorization[=:"\s]+)[A-Za-z0-9._~+/=-]+/gi,
   /(password[=:"\s]+)\S+/gi,
+  // direct-login TOTP + BYO cookie/csrf env values leaking into error strings
+  /(AIRTABLE_OTP_SECRET[=:"\s]+)\S+/gi,
+  /(AIRTABLE_TOTP_SECRET[=:"\s]+)\S+/gi,
+  /(AIRTABLE_COOKIE[=:"\s]+)[^\r\n]+/gi,
+  /(AIRTABLE_CSRF[=:"\s]+)\S+/gi,
 ];
 function scrubErrorMessage(msg) {
   if (typeof msg !== 'string') return msg;

@@ -13,7 +13,7 @@ import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
 import { DaemonManager } from './mcp/daemon-manager.js';
 import { BrowserDownloadManager } from './mcp/browser-download.js';
-import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES } from './mcp/tool-profile.js';
+import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES, SETTINGS_TO_CATEGORY } from './mcp/tool-profile.js';
 import { scriptBeautify, scriptMinify, scriptBeautifyFile, scriptMinifyFile, formatScriptDocument } from './commands/scriptFormatter.js';
 import { uploadFormulaFile, downloadFormulaField } from './commands/formulaFile.js';
 import { registerFileTemplates } from './commands/formulaFileTemplate.js';
@@ -22,7 +22,15 @@ import { registerFileTemplates } from './commands/formulaFileTemplate.js';
 // These must mirror the ToolProfileName / ToolCategories definitions in
 // packages/shared/src/types.ts.
 type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
-type LocalToolCategoryKey = 'read' | 'tableWrite' | 'tableDestructive' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
+type LocalToolCategoryKey =
+    | 'read' | 'recordRead'
+    | 'tableWrite' | 'tableDestructive'
+    | 'fieldWrite' | 'fieldDestructive'
+    | 'viewWrite' | 'viewDestructive'
+    | 'viewSection' | 'viewSectionDestructive'
+    | 'formWrite' | 'extension'
+    | 'recordWrite' | 'recordDestructive'
+    | 'sync' | 'daemon';
 import { getSettings } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
@@ -82,7 +90,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         /(password[=:"\s]+)\S+/gi,
         /(AIRTABLE_PASSWORD[=:"\s]+)\S+/gi,
         /(AIRTABLE_OTP_SECRET[=:"\s]+)\S+/gi,
+        /(AIRTABLE_TOTP_SECRET[=:"\s]+)\S+/gi,
         /(otpSecret[=:"\s]+)\S+/gi,
+        /(AIRTABLE_COOKIE[=:"\s]+)[^\r\n]+/gi,
+        /(AIRTABLE_CSRF[=:"\s]+)\S+/gi,
         /(set-cookie:?\s*)[^\r\n]+/gi,
         /(cookie:?\s*)[^\r\n]+/gi,
     ];
@@ -474,9 +485,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             'Logout',
           );
           if (confirm !== 'Logout') return;
-          await authManager.logout();
+          const result = await authManager.logout();
           dashboardProvider.refresh();
-          vscode.window.showInformationMessage('Airtable: Logged out and session cleared.');
+          // Never claim the session is cleared when the daemon could not be
+          // confirmed stopped — it may still be serving Airtable with it.
+          if (result.daemonSessionDropped) {
+            vscode.window.showInformationMessage('Airtable: Logged out and session cleared.');
+          } else {
+            vscode.window.showWarningMessage(
+              'Airtable: Logged out locally, but the background MCP service could not be confirmed stopped — it may still be serving your Airtable session. Stop or restart the daemon from the Airtable dashboard.',
+            );
+          }
         }),
         vscode.commands.registerCommand('airtable-formula.status', async () => {
             vscode.window.withProgress(
@@ -510,21 +529,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.toggleToolCategory', async () => {
-            const settingsCategoryKeys: LocalToolCategoryKey[] = [
-                'read', 'tableWrite', 'tableDestructive', 'fieldWrite', 'fieldDestructive', 'viewWrite', 'viewDestructive', 'extension'
-            ];
-            // Map settings-side key → on-disk (file-format) category key used by
-            // TOOL_CATEGORIES values and CATEGORY_LABELS keys.
-            const fileKeyBySettingsKey: Record<LocalToolCategoryKey, string> = {
-                read:             'read',
-                tableWrite:       'table-write',
-                tableDestructive: 'table-destructive',
-                fieldWrite:       'field-write',
-                fieldDestructive: 'field-destructive',
-                viewWrite:        'view-write',
-                viewDestructive:  'view-destructive',
-                extension:        'extension',
-            };
+            // Settings-side key → on-disk (file-format) category key used by
+            // TOOL_CATEGORIES values and CATEGORY_LABELS keys. Taken from the
+            // tool-profile mirror rather than re-listed here: the hand-written
+            // list this replaces named 8 of the then-15 categories, so the other
+            // half were unreachable from the command palette and a new category
+            // was invisible until someone noticed.
+            const fileKeyBySettingsKey = SETTINGS_TO_CATEGORY as Record<LocalToolCategoryKey, string>;
+            const settingsCategoryKeys = Object.keys(fileKeyBySettingsKey) as LocalToolCategoryKey[];
             const snapshot = toolProfileManager.getSnapshot();
             const items = settingsCategoryKeys.map(key => {
                 const fileKey = fileKeyBySettingsKey[key];
@@ -562,11 +574,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await toolProfileManager.openConfigFile();
         }),
         vscode.commands.registerCommand('airtable-formula.stopDaemon', async () => {
-            const result = await daemonManager.stopDaemon();
+            const result = await daemonManager.forceStop();
             if (result.stopped) {
                 vscode.window.showInformationMessage(`Airtable Formula: Daemon stopped.${result.reason ? ` (${result.reason})` : ''}`);
             } else {
                 vscode.window.showErrorMessage(`Airtable Formula: Daemon stop failed — ${result.reason ?? 'daemon did not exit'}.`);
+            }
+            // Ownership-scoped sweep: anything that looked like a stray daemon but could not be
+            // proven to belong to this install was deliberately LEFT RUNNING. Surface it — the
+            // alternative (killing on a guess) is what this warning exists to prevent.
+            if (result.skippedUnowned && result.skippedUnowned.length > 0) {
+                vscode.window.showWarningMessage(
+                    `Airtable Formula: ${result.skippedUnowned.length} daemon-like process(es) left running — ` +
+                    `ownership could not be verified (PID ${result.skippedUnowned.map(p => p.pid).join(', ')}). ` +
+                    `Stop them manually if they are yours.`,
+                );
             }
             dashboardProvider.refresh();
         }),
@@ -690,6 +712,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     dashboardProvider.refresh();
                 }
             }
+
+            // Transport settings (authMode / httpClient / browserIdleParkMinutes) are injected
+            // into the daemon/stdio env at spawn time, so a settings.json or Settings-UI edit
+            // needs the same restart + re-provision the dashboard performs on its own edits.
+            // Route through the shared DashboardProvider method so both paths behave identically.
+            if (e.affectsConfiguration('airtableFormula.mcp.authMode') ||
+                e.affectsConfiguration('airtableFormula.mcp.httpClient') ||
+                e.affectsConfiguration('airtableFormula.mcp.browserIdleParkMinutes')) {
+                await dashboardProvider.applyTransportSettingChange();
+            }
         }),
     );
 
@@ -697,6 +729,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const mcpChanged = new vscode.EventEmitter<void>();
     context.subscriptions.push(mcpChanged);
     registerMcpProvider(context, mcpChanged, authManager, daemonManager);
+    // Let the dashboard re-provision the MCP servers when transport settings change in stdio mode
+    // (no daemon to restart) — see the mcp.authMode/mcp.httpClient handler in DashboardProvider.
+    dashboardProvider.setMcpChanged(mcpChanged);
 
     // ── Auth init & auto-refresh ─────────────────────────────────────────
     await authManager.init();

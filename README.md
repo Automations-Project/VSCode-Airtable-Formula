@@ -3,12 +3,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 66 tools your AI assistant can't get from the official Airtable REST API" width="900" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 72 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
 </picture>
 
 # Airtable Formulas, Scripts, Automation, MCP & LSP
 
-**Formula, script & automation editor · MCP server (66 tools) · Language server · AI skills**
+**Formula, script & automation editor · MCP server (72 tools + `manage_tools`) · Language server · AI skills**
 
 <table align="center">
 <tr>
@@ -65,12 +65,12 @@
 | **Formula Editor** | Syntax highlighting, IntelliSense, beautify / minify | `.formula`, `.min.formula` |
 | **Script Editor** | Completions, hover docs, diagnostics | `.ats`, `.script` |
 | **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
-| **MCP Server (66 tools)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
+| **MCP Server (72 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
 | **Language Server (LSP)** | Standalone multi-editor support — Neovim, Zed, Helix, OpenCode | All above |
 | **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
 | **AI Skills** | Pre-built Airtable-specific rules and workflows for AI coding assistants | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
-| **Tool Profiles** | `read-only` / `safe-write` / `full` / `custom` permission scopes | — |
+| **Tool Profiles** | `read-only` (12 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` permission scopes | — |
 | **OS Keychain Auth** | Browser-based Airtable login with SSO/2FA — credentials in your OS keychain | — |
 
 ---
@@ -97,7 +97,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| **Total tools** | ~17 | **66** |
+| **Total tools** | ~17 | **73** (72 + `manage_tools`) |
 | **Auth model** | Personal Access Token or OAuth, per-scope setup | **Log in once with your normal Airtable account** (SSO/2FA supported) |
 | **Transport** | HTTP (remote) | stdio (local, private) |
 | **Data never leaves your machine** | ❌ Requests go through `mcp.airtable.com` | ✅ Runs locally against Airtable's API |
@@ -126,7 +126,8 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Form metadata (description, redirect, attribution, branding)** | ❌ | ✅ |
 | **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
 | **Create dashboard pages** | ❌ | ✅ |
-| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only / safe-write / full / custom |
+| **Daemon self-diagnosis (session dead? browser busy? daemon gone?)** | ❌ | ✅ `manage_daemon` `action=status`, plus start / restart / stop / tunnel / token rotation |
+| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (12) / safe-write (54) / full (72) / custom |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
 | **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
@@ -191,7 +192,7 @@ This monorepo ships **three products** from one source tree:
 
 ## Features
 
-### MCP Server (66 Tools)
+### MCP Server (72 Tools + `manage_tools`)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
@@ -199,7 +200,8 @@ Manage Airtable bases with capabilities **not available through the official RES
 |:---------|:-----:|:-----------|
 | **Schema Read** | 11 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates; download all formula fields to local files |
 | **Record Read** | 1 | `query_records` — up to 1 000 records/call with resolved field values; `search` param works on lookup/rollup fields (REST API `filterByFormula` doesn't) |
-| **Record Write** | 1 | `duplicate_records` — bulk copy records within a table |
+| **Record Write** | 4 | `create_records` / `update_records` / `duplicate_records` / `upload_attachment` (the only way to write `multipleAttachments` cells by URL) |
+| **Record Destructive** | 1 | `delete_records` — batch-delete records from a table |
 | **Table Management** | 3 | create / rename / delete tables |
 | **Field Management** | 9 | Create formula / rollup / lookup / count fields, validate formulas, update descriptions, delete single or bulk |
 | **View Configuration** | 20 | Filters, sorts, grouping, columns, freezing, row height, covers, color rules, calendar dates, create / duplicate / rename / delete |
@@ -207,9 +209,23 @@ Manage Airtable bases with capabilities **not available through the official RES
 | **Record Templates** | 8 | Create / rename / describe / set cells / set columns / duplicate / apply / delete saved row scaffolds |
 | **Form Metadata** | 2 | Description, redirect URL, attribution, copy-to-respondent, branding (legacy form views) |
 | **Extension Management** | 7 | Create, install, enable/disable, rename, duplicate, remove extensions |
-| **Tool Management** | 1 | List profiles, switch profile, toggle tools/categories (meta-tool, always enabled) |
+| **Tool Management** | 1 | List profiles, switch profile, toggle tools/categories (meta-tool, always enabled — not part of any profile) |
+| **Base Sync** | 1 | `sync_base` — copy a base's schema, views, and records to another base. `mode=plan`/`diff`/`status` are read-only; `mode=apply` mutates the destination and, with `policy=mirror` plus the confirmation flags, can delete tables, fields, views, sections and records; `mode=reconcile` updates local mapping state. Drift-guarded and resumable via journal. |
+| **Daemon Control** | 1 | `manage_daemon` — `action=status` is read-only self-diagnosis: daemon liveness, transport, uptime, tunnel URL, and the live session state (dead session, last breaker trip with Airtable's own response body, browser busy queue) that tells "daemon gone" from "session dead" from "browser busy". Also `start` / `restart` / `stop` / `tunnel_enable` / `tunnel_disable` / `token_rotate`. `full` profile only. |
 
 See the full tool reference in [`packages/mcp-server/README.md`](packages/mcp-server/README.md).
+
+#### One shared daemon
+
+The extension starts the shared MCP daemon whenever a tool call needs one, so every VS Code window uses **one**
+Airtable browser session instead of one per window — that duplication is what produced most "session dead" errors.
+A daemon you stop from the dashboard stays stopped, and if it cannot start, the extension falls back to a
+per-window server so your tools keep working.
+
+Because a daemon is usually running, other MCP clients on the same machine (Claude Desktop, Cursor, Cline, Amp)
+attach to it and therefore run under **its** auth mode and HTTP client rather than their own — deliberately, since
+two browsers on one Airtable profile crash. Each such client prints one stderr line saying so. See
+[Sharing one daemon across clients](packages/mcp-server/README.md#sharing-one-daemon-across-clients).
 
 ### LSP Server
 
@@ -296,7 +312,28 @@ pnpm test             # run all unit tests
 pnpm dev              # start webview dev server (browser preview)
 ```
 
-**How the MCP server is bundled:** `scripts/bundle-mcp.mjs` esbuilds `packages/mcp-server/src/` into `packages/extension/dist/mcp/`. Then `scripts/prepare-package-deps.mjs` vendors `patchright`, `patchright-core`, and `otpauth` into `dist/node_modules/` before `vsce package` runs. The VSIX is fully self-contained.
+**How the MCP server is bundled:** `scripts/bundle-mcp.mjs` esbuilds `packages/mcp-server/src/` into `packages/extension/dist/mcp/`. Then `scripts/prepare-package-deps.mjs` vendors `patchright`, `patchright-core`, `otpauth`, `impit` and `@ngrok/ngrok` into `dist/node_modules/` before `vsce package` runs, so an installed extension needs no `npm install` at runtime.
+
+**Platform-specific VSIXes.** `impit` (the Chrome-TLS HTTP client) and `@ngrok/ngrok` (the ngrok tunnel provider) keep their compiled native binary in separate per-platform npm packages, and only the one matching the build machine is ever installed. A single VSIX therefore *cannot* carry working native binaries for every platform. Instead we publish **one VSIX per platform**, each vendoring only its own binaries — VS Code and Open VSX hand each user the build matching their machine. Supported targets:
+
+| Target | `impit` | `@ngrok/ngrok` |
+| --- | --- | --- |
+| `win32-x64` | `impit-win32-x64-msvc` | `@ngrok/ngrok-win32-x64-msvc` |
+| `win32-arm64` | `impit-win32-arm64-msvc` | `@ngrok/ngrok-win32-arm64-msvc` |
+| `darwin-x64` | `impit-darwin-x64` | `@ngrok/ngrok-darwin-x64` |
+| `darwin-arm64` | `impit-darwin-arm64` | `@ngrok/ngrok-darwin-arm64` |
+| `linux-x64` | `impit-linux-x64-gnu` | `@ngrok/ngrok-linux-x64-gnu` |
+| `linux-arm64` | `impit-linux-arm64-gnu` | `@ngrok/ngrok-linux-arm64-gnu` |
+| `alpine-x64` | `impit-linux-x64-musl` | `@ngrok/ngrok-linux-x64-musl` |
+| `alpine-arm64` | `impit-linux-arm64-musl` | `@ngrok/ngrok-linux-arm64-musl` |
+
+`linux-armhf` (32-bit ARM) is **not published**: `impit` ships no `arm-gnueabihf` build, so an armhf VSIX would advertise `airtableFormula.mcp.httpClient: "impit"` and then fail with "Cannot find native binding". No untargeted fallback is published either, for the same reason.
+
+The matrix is defined once in [`scripts/vsix-targets.mjs`](scripts/vsix-targets.mjs); versions and tarball hashes are pinned to `pnpm-lock.yaml`. `scripts/package-targets.mjs` builds every target and `scripts/assert-vsix-binaries.mjs` verifies each artifact contains exactly its own platform's `.node` files and no other's — **byte-for-byte**, against the SHA-256 digests in [`scripts/native-binary-digests.json`](scripts/native-binary-digests.json), which are recorded from tarballs verified against `pnpm-lock.yaml`'s integrity hashes. Filenames, `package.json` `os`/`cpu`, and a magic number are all labels an artifact carries about itself and cannot distinguish an x64 binary from an ARM64 one, or a glibc build from a musl one; an exact digest can.
+
+Together these are **eight target artifact packaging/assertion smokes** — eight `.vsix` files built and their contents verified on one machine. They are not runtime smokes of eight native bindings: any single host can only load the binding compiled for itself, so **only the host target's binding receives a genuine runtime load**. Verifying the other seven by exact content is the strongest claim a single-host build can make about them.
+
+The standalone npm package [`airtable-user-mcp`](https://www.npmjs.com/package/airtable-user-mcp) is unaffected and stays **universal** — npm resolves the right optional dependency on your own machine at install time.
 
 ---
 

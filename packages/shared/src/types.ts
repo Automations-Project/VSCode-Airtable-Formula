@@ -65,6 +65,8 @@ export interface AuthState {
   lastLogin?:         string;
   error?:             string;
   hasCredentials:     boolean;
+  /** True when a byo session cookie is stored in the OS keychain (authMode='byo'). */
+  hasCookie?:         boolean;
   browser?:           BrowserInfo;
   browserDownload?:   BrowserDownloadState;
   availableBrowsers?: BrowserInfo[];
@@ -99,6 +101,7 @@ export interface ToolCategories {
   tableDestructive:        boolean;
   fieldWrite:              boolean;
   fieldDestructive:        boolean;
+  recordDestructive:       boolean;
   viewWrite:               boolean;
   viewDestructive:         boolean;
   viewSection:             boolean;
@@ -106,6 +109,8 @@ export interface ToolCategories {
   formWrite:               boolean;
   extension:               boolean;
   recordWrite:             boolean;
+  sync:                    boolean;
+  daemon:                  boolean;
 }
 
 export interface ToolProfileSnapshot {
@@ -125,6 +130,9 @@ export interface SettingsSnapshot {
     notifyOnUpdates:        boolean;
     toolProfile:            ToolProfileSnapshot;
     serverSource:           'bundled' | 'npx';
+    daemonPort:             number;
+    authMode:               'browser' | 'byo' | 'direct-login';
+    httpClient:             'fetch' | 'impit';
   };
   ai:      { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2' };

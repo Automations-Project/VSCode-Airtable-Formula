@@ -11,14 +11,43 @@
  * We resolve each package directly via `require.resolve(<pkg>/package.json)`
  * using the mcp-server root as a paths hint, which transparently walks the
  * symlinked store and returns the real on-disk path.
+ *
+ * TARGETED OUTPUT. The tree this produces is specific to ONE vsce target,
+ * selected with `--target=<t>` (or `VSIX_TARGET`, defaulting to this machine's
+ * platform). `impit` and `@ngrok/ngrok` keep their native binary in separate
+ * per-platform packages, and only the target's are vendored — see
+ * `vsix-targets.mjs`. Run this once per target before each `vsce package
+ * --target <t>`; `package-targets.mjs` does exactly that.
  */
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { ALL_TARGETS, hostTarget, isPlatformPackage, targetConfig } from './vsix-targets.mjs';
+import { vendorPlatformPackagesForTarget } from './vendor-platform-packages.mjs';
+import { assertSafeSymlinks, SYMLINK_POLICY } from './safe-symlinks.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+
+// ── Target selection ───────────────────────────────────────────────────────
+const targetArg = process.argv.find((a) => a.startsWith('--target='))?.slice('--target='.length);
+const target = targetArg || process.env.VSIX_TARGET || hostTarget();
+if (!target) {
+  console.error(
+    `Cannot determine a vsce target for ${process.platform}-${process.arch}: it is not a ` +
+    'published target. Pass one explicitly, e.g. --target=linux-x64.\n' +
+    `Published targets: ${ALL_TARGETS.join(', ')}`
+  );
+  process.exit(1);
+}
+try {
+  targetConfig(target); // rejects unknown targets and deliberately-excluded ones
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+console.log(`→ Preparing dist/node_modules for vsce target: ${target}`);
 
 // Anchor: mcp-server workspace package root
 const mcpPkgPath = require.resolve('airtable-user-mcp/package.json');
@@ -26,7 +55,7 @@ const mcpRoot = dirname(mcpPkgPath);
 
 const extensionNodeModules = join(__dirname, '..', 'packages', 'extension', 'dist', 'node_modules');
 
-const packagesToCopy = ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok'];
+const packagesToCopy = ['patchright', 'patchright-core', 'otpauth', '@ngrok/ngrok', 'impit'];
 
 rmSync(extensionNodeModules, { recursive: true, force: true });
 mkdirSync(extensionNodeModules, { recursive: true });
@@ -68,89 +97,102 @@ function resolvePackageRoot(packageName) {
   return undefined;
 }
 
-// ── Symlink-escape guard ─────────────────────────────────────────────────
-// `cpSync(..., { dereference: true })` follows EVERY symlink in the tree and
-// copies its target into the VSIX. A trojanized npm package could ship a
-// symlink pointing at ~/.ssh, CI credentials, etc., and the target file would
-// silently end up inside the published artifact. Before copying, walk the
-// tree (following directory symlinks, cycle-safe) and require every symlink
-// to resolve inside the workspace node_modules tree — pnpm's legitimate
-// nested-dependency links all resolve into <workspace>/node_modules/.pnpm.
+// The symlink-escape guard `copyPackage` applies before every dereferencing
+// copy now lives in `safe-symlinks.mjs`, shared with the foreign-platform
+// vendoring path (`vendor-platform-packages.mjs`) — though the two apply
+// different policies: this path resolves an installed pnpm package (whose own
+// links legitimately point into the workspace node_modules .pnpm store),
+// while the foreign-tarball path allows only that tree's own root.
 
-const workspaceRoot = realpathSync(join(__dirname, '..'));
-
-// Windows paths are case-insensitive; normalize before prefix comparison.
-const normalizeForCompare = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
-const isWithin = (child, parent) => {
-  const c = normalizeForCompare(child);
-  const p = normalizeForCompare(parent);
-  return c === p || c.startsWith(p + sep);
-};
-
-function assertSafeSymlinks(rootDir) {
-  // Both roots must be canonicalized — symlink targets are compared after
-  // realpathSync, so an un-resolved allowlist entry (workspace itself behind
-  // a symlink, e.g. a git worktree) would reject legitimate pnpm links.
-  const allowedRoots = [realpathSync(rootDir), realpathSync(join(workspaceRoot, 'node_modules'))];
-  const visited = new Set();
-  const stack = [realpathSync(rootDir)];
-
-  while (stack.length > 0) {
-    const dir = stack.pop();
-    const dirKey = normalizeForCompare(dir);
-    if (visited.has(dirKey)) continue;
-    visited.add(dirKey);
-
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-
-    for (const entry of entries) {
-      const entryPath = join(dir, entry.name);
-      let stat;
-      try { stat = lstatSync(entryPath); } catch { continue; }
-
-      if (stat.isSymbolicLink()) {
-        let resolved;
-        try {
-          resolved = realpathSync(entryPath);
-        } catch {
-          throw new Error(`Refusing to package: broken symlink ${entryPath}`);
-        }
-        if (!allowedRoots.some((root) => isWithin(resolved, root))) {
-          throw new Error(
-            `Refusing to package: symlink escapes workspace node_modules:\n  ${entryPath}\n  → ${resolved}`
-          );
-        }
-        // dereference:true copies the target's contents too — keep walking
-        // through it so a second-level symlink can't smuggle files out.
-        try {
-          if (lstatSync(resolved).isDirectory()) stack.push(resolved);
-        } catch { /* target vanished — cpSync will surface it */ }
-      } else if (stat.isDirectory()) {
-        stack.push(entryPath);
-      }
-    }
-  }
-}
-
-for (const packageName of packagesToCopy) {
+/**
+ * Resolve + safety-check + copy a single package into dist/node_modules.
+ * Returns true on success, false if the package could not be resolved
+ * (logged as a warning, not fatal — callers decide whether that's expected).
+ */
+function copyPackage(packageName) {
   const realSource = resolvePackageRoot(packageName);
   if (!realSource) {
     console.warn(`⚠ Could not resolve "${packageName}" from ${mcpRoot} — skipping`);
-    continue;
+    return false;
   }
   if (!existsSync(realSource)) {
     console.warn(`⚠ Resolved path for "${packageName}" does not exist: ${realSource} — skipping`);
-    continue;
+    return false;
   }
 
-  assertSafeSymlinks(realSource);
+  // Resolved from an installed pnpm package: its own dependency links
+  // legitimately resolve into the workspace node_modules .pnpm store.
+  assertSafeSymlinks(realSource, SYMLINK_POLICY.ALLOW_WORKSPACE_NODE_MODULES);
 
   const target = join(extensionNodeModules, packageName);
   // dereference: true — follow symlinks and copy real files, required for
   // pnpm's symlinked store to produce a self-contained VSIX.
   cpSync(realSource, target, { recursive: true, dereference: true });
   console.log(`✓ Copied ${packageName} → dist/node_modules/${packageName}  (from ${realSource})`);
+  return true;
+}
+
+/**
+ * Some vendored packages (impit, @ngrok/ngrok, and potentially future
+ * additions) ship their compiled NAPI (.node) binary in SEPARATE per-platform
+ * packages declared as their OWN optionalDependencies (e.g.
+ * impit-win32-x64-msvc, @ngrok/ngrok-darwin-arm64) — pnpm only installs the
+ * variant matching the current build machine. Copying just the parent
+ * package folder copies the pure-JS loader but never the native binary it
+ * `require()`s at runtime, so the feature throws "Cannot find native
+ * binding" in the packaged VSIX despite being selectable/enabled.
+ *
+ * Those platform children are deliberately NOT vendored here: copying
+ * whatever the build host happens to have installed is exactly how an
+ * untargeted VSIX ends up shipping one platform's binary to everyone. They
+ * are vendored per target further below, from the lockfile, by
+ * `vendorPlatformPackagesForTarget`.
+ *
+ * What this function still handles is the OTHER kind of optionalDependency:
+ * genuinely optional runtime extras that are not platform-binary splits (e.g.
+ * patchright declares `fsevents`, a macOS file watcher its own code already
+ * handles being absent). Those are copied when resolvable from this machine —
+ * harmless when they are not. The package's optionalDependencies are read from
+ * dist/node_modules/<name>/package.json, which sidesteps packages with a
+ * strict `exports` map (like otpauth) that don't expose ./package.json via
+ * require.resolve.
+ */
+function vendorOptionalDependencies(packageName) {
+  const pkgJsonPath = join(extensionNodeModules, packageName, 'package.json');
+  if (!existsSync(pkgJsonPath)) return;
+
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'));
+  } catch {
+    return; // malformed — nothing we can do, the parent package is still vendored
+  }
+
+  for (const dep of Object.keys(pkg.optionalDependencies || {})) {
+    // Platform-split children are target-selected, never host-selected.
+    if (isPlatformPackage(dep)) continue;
+    copyPackage(dep);
+  }
+}
+
+for (const packageName of packagesToCopy) {
+  if (copyPackage(packageName)) {
+    vendorOptionalDependencies(packageName);
+  }
+}
+
+// ── Per-target native binaries ─────────────────────────────────────────────
+// Pinned to pnpm-lock.yaml (version AND integrity) and fetched for the chosen
+// target regardless of what this machine runs, so every published VSIX carries
+// exactly the binaries its own platform loads.
+try {
+  await vendorPlatformPackagesForTarget(target, extensionNodeModules);
+} catch (error) {
+  // Surface the reason, not an unhandled-rejection stack — these failures
+  // (integrity mismatch, unreachable registry, missing lockfile entry) all
+  // carry an actionable message.
+  console.error(`\n✗ ${error.message}`);
+  process.exit(1);
 }
 
 // Copy @airtable-formula/language-services (workspace package — not on npm,

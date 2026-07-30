@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import type { IdeId, IdeStatus, AiFiles } from '@airtable-formula/shared';
-import { getSettings } from '../settings.js';
+import { getSettings, minutesToIdleParkMs } from '../settings.js';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
 import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, isMcpTomlConfigured } from './lsp-config.js';
@@ -66,12 +66,29 @@ export function buildServerEntry(_serverPath: string): Record<string, unknown> {
   const choice = settings.auth.browserChoice;
   if (choice?.channel) env.AIRTABLE_BROWSER_CHANNEL = choice.channel;
   if (choice?.executablePath) env.AIRTABLE_BROWSER_PATH = choice.executablePath;
+  applyTransportEnv(env, settings);
 
   return {
     command: 'node',
     args: [LAUNCHER_SCRIPT],
     env,
   };
+}
+
+/**
+ * Propagate the transport/auth-mode settings into an externally-written MCP config so a server
+ * launched by another IDE (Claude Desktop, Cursor, …) starts in the SAME mode the user selected in
+ * the extension — instead of silently defaulting to `browser`. Only non-defaults are injected (the
+ * server's own defaults are `browser` + `fetch`). NOTE: byo/direct-login also need CREDENTIALS —
+ * those reach a RUNNING daemon via its bearer-authed endpoint, and the launcher (`start.mjs`, no
+ * args) attach-proxies external clients to that daemon; a standalone no-daemon server reads them from
+ * `AIRTABLE_*` env or `~/.airtable-user-mcp/{credentials,login}.json`. The extension never writes
+ * plaintext credentials into IDE configs.
+ */
+function applyTransportEnv(env: Record<string, string>, settings: ReturnType<typeof getSettings>): void {
+  if (settings.mcp.authMode && settings.mcp.authMode !== 'browser') env.AIRTABLE_AUTH_MODE = settings.mcp.authMode;
+  if (settings.mcp.httpClient === 'impit') env.AIRTABLE_HTTP_CLIENT = 'impit';
+  env.AIRTABLE_BROWSER_IDLE_PARK_MS = String(minutesToIdleParkMs(settings.mcp.browserIdleParkMinutes));
 }
 
 export function buildNpxServerEntry(): Record<string, unknown> {
@@ -84,6 +101,7 @@ export function buildNpxServerEntry(): Record<string, unknown> {
   const choice = settings.auth.browserChoice;
   if (choice?.channel) env.AIRTABLE_BROWSER_CHANNEL = choice.channel;
   if (choice?.executablePath) env.AIRTABLE_BROWSER_PATH = choice.executablePath;
+  applyTransportEnv(env, settings);
 
   return {
     command: 'npx',

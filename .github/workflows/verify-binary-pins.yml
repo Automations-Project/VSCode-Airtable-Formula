@@ -1,0 +1,90 @@
+name: Verify native-binary pins
+
+# Re-derive every platform package's `.node` digests from the registry and diff
+# them against the committed pin file.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS JOB IS ADVISORY. IT IS NOT THE GATE. READ THIS BEFORE CHANGING EITHER.
+#
+# It is path-filtered, so on most pull requests it does not run at all — and a
+# job that does not run reports as SKIPPED, which a merge queue or a required-
+# check configuration can render as green. **A skipped run is not a
+# verification.** Nothing about a green PR here proves the pins were checked.
+#
+# The authoritative check is the `Verify native-binary digest pins` step in
+# .github/workflows/release.yml, which sits between `pnpm install
+# --frozen-lockfile` and packaging. That one runs unconditionally on every
+# extension release, and nothing publishes or tags if it fails. THAT is the
+# safety boundary.
+#
+# Two consequences, both easy to get wrong later:
+#   - Do NOT promote this workflow to a required status check believing it
+#     gates merges. Path filtering means it will pass by absence.
+#   - Do NOT delete the release-workflow step believing this job covers it.
+#     It does not, and cannot.
+#
+# This was a deliberate trade. The alternatives — a companion always-succeeds
+# job to make the skip explicit, or dropping the `paths` filter so it runs on
+# every PR — each cost more (a permanently-green decoy check, or ~150 MB of
+# tarball downloads on every unrelated PR) than they buy, precisely BECAUSE the
+# release step is already the real gate. What this job buys is early warning for
+# the contributor, in the PR that caused the problem.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY A SEPARATE, PATH-FILTERED WORKFLOW
+#
+# This is the only check in the repo that needs network access and pulls ~150 MB
+# of tarballs, so it is deliberately kept out of `pnpm test` and out of ci.yml's
+# per-OS matrix. It only has anything to say when the pins or the lockfile move,
+# which is exactly what `paths` expresses — and GitHub applies `paths` at the
+# trigger level, hence its own file rather than a job in ci.yml.
+#
+# WHY IT RUNS ON THE PR AS WELL AS AT RELEASE
+#
+# `pnpm-lock.yaml` changing is how an impit / @ngrok/ngrok bump arrives. With
+# only the release-time check, a stale pin surfaces to whoever runs the release
+# — long after the person who bumped the dependency has moved on. Here it
+# surfaces to the author, in the PR that caused it, with the command to fix it.
+# That is a convenience for the contributor, not a second safety boundary.
+#
+# WHAT IT UNIQUELY CATCHES
+#
+# A pin file that is internally consistent — correct version, correct integrity
+# — but carries WRONG DIGESTS. The neighbouring failure modes are already
+# covered offline and never reach here: a stale or missing pin fails closed in
+# `binaryPin()` during vendoring, and a re-published tarball fails the lockfile
+# SHA-512 on download. A poisoned pin file is the residual trust root, and only
+# a fresh re-derivation from the registry can expose it.
+
+on:
+  pull_request:
+    paths:
+      # Any of these can invalidate the pin file — two of them WITHOUT editing it:
+      - 'pnpm-lock.yaml'                          # an impit / @ngrok/ngrok bump
+      - 'scripts/native-binary-digests.json'      # the pins themselves
+      - 'scripts/record-native-binary-digests.mjs' # HOW digests are produced
+      - 'scripts/vsix-targets.mjs'                # WHICH packages are expected at all
+      - 'scripts/safe-symlinks.mjs'                # the symlink-escape guard the check relies on
+      - 'scripts/vendor-platform-packages.mjs'     # tarball fetch/verify/vendor logic the check imports
+      - 'package.json'                             # the `check:binary-digests` script definition itself
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No `pnpm install` on purpose: the checker uses only Node builtins, the
+      # repo's own scripts, `pnpm-lock.yaml` and `tar`. Skipping the install
+      # keeps this job to a fetch and a hash.
+      - name: Re-derive digests from the registry and diff against the pins
+        run: pnpm check:binary-digests

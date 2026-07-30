@@ -19,7 +19,7 @@
  *
  * The managed YAML is treated as provider-owned — hand-edits to add extra
  * ingress rules WILL be silently dropped on the next start() because we
- * serialize only the four canonical keys (tunnel / credentials-file /
+ * serialize only the five canonical keys (protocol / tunnel / credentials-file /
  * hostname / service).
  */
 
@@ -49,6 +49,17 @@ const STOP_GRACE_MS = 3_000;
  * tunnel is routing traffic — that's our "enabled" signal.
  */
 const READY_LINE_REGEX = /Registered tunnel connection/i;
+
+/** cloudflared opens this many HA edge connections by default (--ha-connections). */
+const DEFAULT_TARGET_CONNECTIONS = 4;
+/**
+ * After the FIRST edge connection registers the tunnel can already serve, but
+ * Cloudflare may still route to colos whose connection hasn't registered yet
+ * (→ 502). Wait up to this long for the remaining HA connections to settle
+ * before we advertise the URL as ready. Capped so a network that only ever
+ * establishes 1–2 connections still becomes ready instead of hanging.
+ */
+const DEFAULT_SETTLE_GRACE_MS = 6_000;
 
 /**
  * Build a provider bound to a specific dependency set. The exported
@@ -184,10 +195,12 @@ export const cloudflaredNamedProvider = createCloudflaredNamedProvider();
  *
  * Kept local to this file to avoid refactoring the working quick-tunnel path.
  *
- * @param {{ binaryPath: string, configPath: string, hostname: string, onStateChange: (state: any) => void, spawnImpl: typeof nodeSpawn }} options
+ * @param {{ binaryPath: string, configPath: string, hostname: string, onStateChange: (state: any) => void, spawnImpl: typeof nodeSpawn, targetConnections?: number, settleGraceMs?: number }} options
  * @returns {import('../tunnel.js').StartedTunnel}
  */
-function spawnNamedTunnel(options) {
+export function spawnNamedTunnel(options) {
+  const targetConnections = options.targetConnections ?? DEFAULT_TARGET_CONNECTIONS;
+  const settleGraceMs = options.settleGraceMs ?? DEFAULT_SETTLE_GRACE_MS;
   const args = [
     'tunnel',
     '--no-autoupdate',
@@ -229,10 +242,19 @@ function spawnNamedTunnel(options) {
     rejectReady = reject;
   });
 
-  const handleLine = (line) => {
+  let registered = 0;
+  let settleTimer = null;
+  const clearSettleTimer = () => {
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+  };
+
+  const markReady = () => {
     if (settled) return;
-    if (!READY_LINE_REGEX.test(line)) return;
     settled = true;
+    clearSettleTimer();
     updateState({
       status: 'enabled',
       url: hostnameUrl,
@@ -242,6 +264,20 @@ function spawnNamedTunnel(options) {
     resolveReady(hostnameUrl);
   };
 
+  const handleLine = (line) => {
+    if (settled) return;
+    if (!READY_LINE_REGEX.test(line)) return;
+    registered++;
+    if (registered >= targetConnections) {
+      markReady();
+      return;
+    }
+    // First HA connection up — give the remaining colos a grace window to
+    // register before advertising ready, so Cloudflare doesn't route to a
+    // colo that still 502s.
+    if (!settleTimer) settleTimer = setTimeout(markReady, settleGraceMs);
+  };
+
   const rlStderr = child.stderr ? createInterface({ input: child.stderr }) : null;
   const rlStdout = child.stdout ? createInterface({ input: child.stdout }) : null;
   rlStderr?.on('line', handleLine);
@@ -249,6 +285,7 @@ function spawnNamedTunnel(options) {
   child.on('close', () => { rlStderr?.close(); rlStdout?.close(); });
 
   child.on('error', (error) => {
+    clearSettleTimer();
     if (!settled) {
       settled = true;
       rejectReady(error);
@@ -262,6 +299,7 @@ function spawnNamedTunnel(options) {
   });
 
   child.on('exit', (code, signal) => {
+    clearSettleTimer();
     if (!settled) {
       settled = true;
       rejectReady(
@@ -282,6 +320,7 @@ function spawnNamedTunnel(options) {
   });
 
   const stop = async () => {
+    clearSettleTimer();
     if (stopping) return;
     stopping = true;
 

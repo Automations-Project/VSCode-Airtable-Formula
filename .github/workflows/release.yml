@@ -58,6 +58,30 @@ jobs:
       # scope, so a compromised latest release must not be auto-pulled here.
       - run: pnpm install -wD @vscode/vsce@3.9.2 ovsx@1.0.1
 
+      # Re-derive every native-binary digest from the registry and diff it
+      # against the committed pin file, BEFORE anything is packaged.
+      #
+      # What this uniquely catches: a pin file that is internally consistent —
+      # correct version, correct integrity — but carries WRONG DIGESTS. The two
+      # neighbouring failure modes are already covered offline and would never
+      # reach this step: a stale or missing pin fails closed in `binaryPin()`
+      # during vendoring, and a re-published tarball fails the lockfile SHA-512
+      # on download. A poisoned pin file is the residual trust root, and it is
+      # the one thing only a fresh re-derivation can expose.
+      #
+      # Placed here deliberately: the first publish is far below and the version
+      # bump/commit/tag lower still, so a failure here ships nothing and tags
+      # nothing. Kept OUT of `pnpm test` — it needs the network and pulls ~150 MB.
+      #
+      # THIS STEP IS THE GATE. `.github/workflows/verify-binary-pins.yml` runs
+      # the same check on pull requests, but it is path-filtered and therefore
+      # SKIPPED on most PRs — and a skipped run is not a verification. That
+      # workflow is early warning for the contributor; this step is the safety
+      # boundary. Do not remove it on the grounds that the PR job covers it.
+      - name: Verify native-binary digest pins
+        if: inputs.target == 'extension' || inputs.target == 'both'
+        run: pnpm check:binary-digests
+
       # ── Compute versions ───────────────────────────────────────
       # For each target, we check both package.json AND the registry.
       # We bump from whichever is higher, so we never collide with
@@ -154,13 +178,27 @@ jobs:
           echo "current=${BASE}" >> $GITHUB_OUTPUT
           echo "next=${NEXT}" >> $GITHUB_OUTPUT
 
-          # Write new version to package.json
+          # Write new version to package.json AND to server.json.
+          #
+          # server.json is the MCP Registry manifest and carries its own version in
+          # two places. check-tool-sync asserts server.json.version === package.json
+          # .version, and `pnpm build` runs that guard first — so bumping only
+          # package.json here fails the build on EVERY mcp-server release. It cannot
+          # be worked around by hand-bumping server.json before dispatch either: the
+          # BASE above is max(local, published), so the workflow always lands one
+          # above whatever is committed. The bump has to happen here, together.
           node -e "
             const fs = require('fs');
             const p = '$PKG';
             const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
             pkg.version = '${NEXT}';
             fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+
+            const sp = 'packages/mcp-server/server.json';
+            const srv = JSON.parse(fs.readFileSync(sp, 'utf8'));
+            srv.version = '${NEXT}';
+            for (const entry of srv.packages ?? []) entry.version = '${NEXT}';
+            fs.writeFileSync(sp, JSON.stringify(srv, null, 2) + '\n');
           "
           echo "MCP server: ${BASE} → ${NEXT}"
 
@@ -218,14 +256,25 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-      # ── Package extension VSIX ─────────────────────────────────
-      - name: Package VSIX
+      # ── Package extension VSIX (one per platform target) ───────
+      #
+      # `impit` and `@ngrok/ngrok` keep their compiled .node binary in separate
+      # per-platform npm packages, so a single untargeted VSIX built on this
+      # ubuntu runner would ship Linux-x64 binaries to every user and break
+      # `mcp.httpClient: "impit"` and the ngrok tunnel everywhere else. We build
+      # one VSIX per target instead, each vendoring only its own platform
+      # packages (pinned to pnpm-lock.yaml by version AND integrity), and assert
+      # the contents of every artifact before anything can be published.
+      # The target matrix lives in scripts/vsix-targets.mjs.
+      #
+      # This runs on ONE runner rather than a job matrix: the foreign binaries
+      # are fetched as plain tarballs (nothing is compiled), which avoids
+      # needing arm64/alpine runners and keeps the version-bump → publish →
+      # commit → tag sequence below in a single, ordered job.
+      - name: Package platform-specific VSIXes
         id: vsix
         if: inputs.target == 'extension' || inputs.target == 'both'
         run: |
-          # Prepare deps for VSIX
-          node scripts/prepare-package-deps.mjs
-
           # Copy README: strip SVGs + collapse <picture> to single <img> for VS Code Marketplace
           node -e "
             const fs = require('fs');
@@ -245,19 +294,45 @@ jobs:
             fs.writeFileSync('packages/extension/README.md', readme);
           "
 
-          # Package
-          cd packages/extension
-          pnpm exec vsce package --no-dependencies
-          VSIX=$(ls *.vsix | head -1)
-          echo "file=packages/extension/${VSIX}" >> $GITHUB_OUTPUT
-          echo "Packaged: ${VSIX}"
+          # Eight target artifact packaging/assertion smokes: build one VSIX per
+          # published target and verify the CONTENTS of each — every .node
+          # matched byte-for-byte against scripts/native-binary-digests.json,
+          # which was recorded from tarballs verified against pnpm-lock.yaml.
+          # package-targets.mjs aborts on the first target that fails, so a bad
+          # artifact can never reach a publish step.
+          #
+          # These are packaging smokes, not runtime smokes. A single runner can
+          # only ever `require()` the binding built for itself, so only the host
+          # target's binding could receive a genuine runtime load; the other
+          # seven are verified by exact content, which is what the digests are
+          # for. Nothing here should be described as runtime-loading eight
+          # native bindings.
+          node scripts/package-targets.mjs --out-dir=artifacts
+
+          # Re-assert the finished set: every published target present, no
+          # untargeted artifact, right binaries — byte-exact — in each.
+          node scripts/assert-vsix-binaries.mjs --dir=artifacts
+
+          ls -la artifacts/
 
       # ── Publish extension ──────────────────────────────────────
+      # Every artifact is published; there is deliberately NO untargeted
+      # fallback. A user on a platform we do not build for sees the extension
+      # as unavailable rather than installing one with the wrong binaries.
       - name: Publish extension to VS Code Marketplace
         if: |
           !inputs.dry_run &&
           (inputs.target == 'extension' || inputs.target == 'both')
-        run: pnpm exec vsce publish --packagePath "${{ steps.vsix.outputs.file }}"
+        run: |
+          ARGS=()
+          COUNT=0
+          for f in artifacts/*.vsix; do
+            # Two argv elements per file, so ${#ARGS[@]} is not the build count.
+            ARGS+=(--packagePath "$f")
+            COUNT=$((COUNT + 1))
+          done
+          echo "Publishing ${COUNT} platform builds to the Marketplace..."
+          pnpm exec vsce publish "${ARGS[@]}"
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
@@ -266,26 +341,51 @@ jobs:
           !inputs.dry_run &&
           (inputs.target == 'extension' || inputs.target == 'both')
         run: |
-          pnpm exec ovsx publish "${{ steps.vsix.outputs.file }}" --pat "$OVSX_PAT"
-
-          # Verify the version actually landed (Open VSX indexes asynchronously)
-          VERSION="${{ steps.ext_version.outputs.next }}"
-          echo "Verifying Open VSX indexed v${VERSION}..."
-          for i in $(seq 1 18); do
-            FOUND=$(curl -s "https://open-vsx.org/api/Nskha/airtable-formula/${VERSION}" \
-              | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
-                  try{const p=JSON.parse(d);console.log(p.version||'not-found')}
-                  catch{console.log('error')}
-                })")
-            if [[ "$FOUND" == "$VERSION" ]]; then
-              echo "✓ Open VSX confirmed: v${VERSION}"
-              break
-            fi
-            echo "  not indexed yet (attempt $i/18), waiting 10s..."
-            sleep 10
+          for f in artifacts/*.vsix; do
+            echo "Publishing $(basename "$f") to Open VSX..."
+            pnpm exec ovsx publish "$f" --pat "$OVSX_PAT"
           done
-          if [[ "$FOUND" != "$VERSION" ]]; then
-            echo "::warning::Open VSX did not index v${VERSION} within 3 minutes — indexing may still be in progress (publish succeeded)"
+
+          # Verify each target actually landed (Open VSX indexes asynchronously).
+          # Target list comes from the same source of truth the build used.
+          VERSION="${{ steps.ext_version.outputs.next }}"
+          TARGETS=$(node -e "import('./scripts/vsix-targets.mjs').then(m=>console.log(m.ALL_TARGETS.join(' ')))")
+
+          # ONE wall-clock budget shared by all targets, enforced whether or not
+          # anything has been confirmed yet. A per-target budget would multiply
+          # by the number of targets, so an index that never catches up (queued
+          # publish, namespace problem) would sleep ~24 minutes and emit a
+          # warning per target. This is a best-effort check that never fails the
+          # release, so it must not dominate the job's runtime.
+          VERIFY_BUDGET=180
+          VERIFY_START=$(date +%s)
+          UNVERIFIED=()
+
+          for TARGET in $TARGETS; do
+            echo "Verifying Open VSX indexed v${VERSION} (${TARGET})..."
+            FOUND=""
+            while true; do
+              FOUND=$(curl -s "https://open-vsx.org/api/Nskha/airtable-formula/${TARGET}/${VERSION}" \
+                | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+                    try{const p=JSON.parse(d);console.log(p.version||'not-found')}
+                    catch{console.log('error')}
+                  })")
+              if [ "$FOUND" = "$VERSION" ]; then
+                echo "✓ Open VSX confirmed: v${VERSION} (${TARGET})"
+                break
+              fi
+              if [ $(( $(date +%s) - VERIFY_START )) -ge "$VERIFY_BUDGET" ]; then
+                UNVERIFIED+=("$TARGET")
+                break
+              fi
+              echo "  not indexed yet, waiting 10s..."
+              sleep 10
+            done
+          done
+
+          ELAPSED=$(( $(date +%s) - VERIFY_START ))
+          if [ ${#UNVERIFIED[@]} -gt 0 ]; then
+            echo "::warning::Open VSX did not index v${VERSION} for ${UNVERIFIED[*]} within ${ELAPSED}s — indexing may still be in progress (publish succeeded)"
           fi
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -330,7 +430,9 @@ jobs:
           fi
 
           if [[ "${{ inputs.target }}" == "mcp-server" || "${{ inputs.target }}" == "both" ]]; then
-            git add packages/mcp-server/package.json
+            # server.json is bumped alongside package.json (see the bump step) and
+            # must be committed with it, or the next build fails the version guard.
+            git add packages/mcp-server/package.json packages/mcp-server/server.json
             TARGETS="${TARGETS} mcp-server v${{ steps.mcp_version.outputs.next }}"
             TAGS="${TAGS} mcp-server/v${{ steps.mcp_version.outputs.next }}"
           fi
@@ -358,8 +460,9 @@ jobs:
           !inputs.dry_run &&
           (inputs.target == 'extension' || inputs.target == 'both')
         run: |
+          # Attach every platform build so users can sideload the right one.
           gh release create "extension/v${{ steps.ext_version.outputs.next }}" \
-            "${{ steps.vsix.outputs.file }}" \
+            artifacts/*.vsix \
             --title "Extension v${{ steps.ext_version.outputs.next }}" \
             --generate-notes \
             --target main
@@ -402,6 +505,13 @@ jobs:
           fi
           if [[ "${{ inputs.target }}" == "extension" || "${{ inputs.target }}" == "both" ]]; then
             echo "- Extension: ${{ steps.ext_version.outputs.current }} → **${{ steps.ext_version.outputs.next }}**" >> $GITHUB_STEP_SUMMARY
+            if [[ -d artifacts ]]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "  Platform builds (no untargeted fallback is published):" >> $GITHUB_STEP_SUMMARY
+              for f in artifacts/*.vsix; do
+                echo "  - \`$(basename "$f")\`" >> $GITHUB_STEP_SUMMARY
+              done
+            fi
           fi
           if [[ "${{ inputs.target }}" == "mcp-server" || "${{ inputs.target }}" == "both" ]]; then
             echo "- MCP Server: ${{ steps.mcp_version.outputs.current }} → **${{ steps.mcp_version.outputs.next }}**" >> $GITHUB_STEP_SUMMARY

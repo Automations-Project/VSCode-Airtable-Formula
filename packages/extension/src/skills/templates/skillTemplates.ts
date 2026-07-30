@@ -304,7 +304,7 @@ When user wants to convert an Excel formula to Airtable.
 export const MCP_TOOLS_GUIDE = `# Airtable MCP — Tools Guide
 
 > **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
-> **Tools**: 66 tools across 13 categories + \`manage_tools\`
+> **Tools**: 72 tools across 16 categories + \`manage_tools\`
 
 ---
 
@@ -327,6 +327,7 @@ Two MCPs are available and designed to work together:
 | Manage **form metadata** and submission notifications | **airtable-user-mcp** |
 | Manage **extensions / blocks** | **airtable-user-mcp** |
 | Manage **record templates** | **airtable-user-mcp** |
+| **Diagnose why calls are failing** (daemon down? session dead? browser busy?) | **airtable-user-mcp** \`manage_daemon\` \`action=status\` |
 
 ### Common combined workflow
 \`\`\`
@@ -358,7 +359,7 @@ Read-only. Safe to call at any time. Always call a read tool before mutating.
 | \`get_base_schema\` | Full schema of all tables, fields, and views. Use first when exploring an unknown base. |
 | \`list_tables\` | Lightweight table ID + name listing. Prefer over \`get_base_schema\` when you only need table names. |
 | \`get_table_schema\` | Full schema for one table (fields + views). Use when you know the table. |
-| \`list_fields\` | All fields with types and typeOptions. Call before creating formulas or mutations. |
+| \`list_fields\` | All fields with id, name, type (lightweight). Pass \`includeOptions: true\` for full typeOptions, or use \`get_table_schema\`. Call before creating formulas or mutations. |
 | \`list_views\` | All views with IDs, names, types. Call before modifying views. |
 | \`get_view\` | Live view state: filters, sorts, groups, column order, frozen cols, color config. |
 | \`validate_formula\` | **Always call before** \`create_formula_field\` or \`update_formula_field\`. Returns validity + result type. |
@@ -622,11 +623,43 @@ Configure legacy form views (public-facing, so gated separately from other view-
 
 ---
 
-### Category 13: Record Write (1 tool)
+### Category 13: Record Write (4 tools)
 
 | Tool | When to Use |
 |------|-------------|
 | \`duplicate_records\` | Duplicate one or more existing records within the same table. Pass \`sourceRowIds\` array. Returns new record IDs. |
+| \`create_records\` | Create one or more records via \`cellValuesByColumnId\` (computed fields are read-only — omit them). Prefer this over the Official MCP when a source field needs a value the Official MCP can't write. |
+| \`update_records\` | Update primitive / single-select cells via \`cellValuesByColumnId\`. Does NOT set array cells (multi-select, links, attachments) — those need \`upload_attachment\` or an Official MCP record update. |
+| \`upload_attachment\` | Set a \`multipleAttachments\` cell by URL — Airtable fetches the URL server-side. The only tool that can write attachment cells; \`update_records\` cannot. |
+
+---
+
+### Category 14: Record Destructive (1 tool)
+
+⚠️ Always confirm with the user before calling.
+
+| Tool | When to Use |
+|------|-------------|
+| \`delete_records\` | Batch-delete one or more records from a table in a single call. |
+
+---
+
+### Category 15: Sync (1 tool)
+
+⚠️ \`mode=apply\` mutates the destination base and can be destructive — always confirm with the user first, especially with \`policy=mirror\`.
+
+| Tool | When to Use |
+|------|-------------|
+| \`sync_base\` | Copy a base's schema, views, and records to another base. \`mode=plan\`/\`diff\`/\`status\` are read-only; \`mode=apply\` mutates the destination and, with \`policy=mirror\` plus the confirmation flags (\`confirmDeletions\`, \`confirmTableDeletions\`, \`confirmRetypes\`), can delete tables, fields, views, sections and records; \`mode=reconcile\` updates local mapping state. Typical flow: \`mode=diff\` to review, \`mode=plan\` to generate a curatable changeset, \`mode=apply\` to execute it. |
+
+### Category 16: Daemon Control (1 tool)
+
+Administers the MCP server process itself — nothing here touches Airtable data.
+Off unless the \`full\` profile is active.
+
+| Tool | When to Use |
+|------|-------------|
+| \`manage_daemon\` | **Reach for \`action=status\` FIRST when tools start failing.** It is read-only and reports whether a daemon is running and whether this process is it, the transport, uptime, version, tunnel URL, and the live session state — \`sessionDead\`, the last circuit-breaker trip *including Airtable's own response body*, and the browser/auth busy queue. That is how you tell "daemon gone" from "session dead" from "browser busy" instead of guessing or retrying blindly. Control actions: \`start\`, \`restart\`, \`stop\` (answers first, exits after; writes a sentinel so the VS Code extension does not silently respawn it), \`tunnel_enable\`, \`tunnel_disable\`, \`token_rotate\`. Ask the user before \`stop\`/\`restart\` — you are turning off the server you are talking through. |
 
 ---
 
@@ -738,7 +771,7 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 
 - **Name**: airtable-user-mcp  |  **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (JSON-RPC 2.0)
-- **Tools**: 66 tools across 13 categories + \`manage_tools\`
+- **Tools**: 72 tools across 16 categories + \`manage_tools\`
 - **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ## Mandatory Workflows
@@ -772,8 +805,10 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 
 ## Safety Rules
 
-- **NEVER** call any delete tool (\`delete_field\`, \`delete_view\`, \`delete_table\`, \`delete_record_template\`, \`delete_view_section\`, \`remove_extension\`) without explicit user confirmation
+- **NEVER** call any delete tool (\`delete_field\`, \`delete_view\`, \`delete_table\`, \`delete_record_template\`, \`delete_view_section\`, \`remove_extension\`, \`delete_records\`) without explicit user confirmation
+- **NEVER** call \`sync_base\` with \`mode=apply\` — especially with \`policy=mirror\` plus the confirmation flags — without explicit user confirmation; it mutates (and can delete from) the destination base
 - **NEVER** set \`force: true\` on \`delete_field\` before showing the user the returned dependencies
+- **NEVER** call \`manage_daemon\` with \`action=stop\`/\`restart\`/\`token_rotate\` without explicit user confirmation — you are turning off or re-keying the server carrying this conversation. \`action=status\` is read-only and always safe
 - **ALWAYS** validate formulas before creating or updating formula fields
 - **ALWAYS** use read tools to discover IDs — never guess or fabricate Airtable IDs
 - **PREFER** lightweight reads: \`list_tables\` over \`get_base_schema\` when only table names are needed

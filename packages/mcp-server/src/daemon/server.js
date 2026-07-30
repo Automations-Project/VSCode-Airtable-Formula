@@ -17,7 +17,11 @@ import express from 'express';
 import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
-import { ensureToken, rotateToken, getTokenPath } from './token.js';
+import { withToolDispatchContext } from '../page-scheduler.js';
+import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
+import { takeDaemonExit } from './exit-intent.js';
+import { clearStopSentinel, writeStopSentinel } from './stop-sentinel.js';
+import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
 import {
   runCloudflaredLogin,
@@ -56,22 +60,44 @@ const FETCH_BLOCKED_PORTS = new Set([
   6697, 10080,
 ]);
 
-async function listenAvoidingBlockedPorts(server, requestedPort, host) {
-  const maxAttempts = requestedPort === 0 ? 5 : 1;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise((resolve, reject) => {
-      const onError = (error) => {
-        server.removeListener('listening', onListening);
-        reject(error);
-      };
-      const onListening = () => {
-        server.removeListener('error', onError);
-        resolve();
-      };
-      server.once('error', onError);
-      server.once('listening', onListening);
-      server.listen(requestedPort, host);
-    });
+// Bind failures on a NON-ZERO fixed port that should degrade to an ephemeral port instead of
+// crashing the daemon: the port is already in use (EADDRINUSE), sits in a Windows reserved/excluded
+// port range or is otherwise permission-denied (EACCES — the "listen EACCES 127.0.0.1:8723" case
+// that killed every startup when the default port landed in an excluded range), or is not assignable
+// (EADDRNOTAVAIL). Any of these on a fixed port → retry on port 0.
+const FIXED_PORT_FALLBACK_CODES = new Set(['EADDRINUSE', 'EACCES', 'EADDRNOTAVAIL']);
+
+export async function listenAvoidingBlockedPorts(server, requestedPort, host) {
+  // A fixed port (requestedPort > 0) gets one shot; if it's unavailable (in use, excluded/denied,
+  // not assignable) or turns out to be a browser-blocked port, we fall back to an OS-assigned
+  // ephemeral port so the daemon always starts. The bound port is read back and persisted to the
+  // lockfile, so clients still discover it. With requestedPort 0 we simply retry on ephemeral ports
+  // until one is not browser-blocked.
+  let port = requestedPort;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const onError = (error) => {
+          server.removeListener('listening', onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.removeListener('error', onError);
+          resolve();
+        };
+        server.once('error', onError);
+        server.once('listening', onListening);
+        server.listen(port, host);
+      });
+    } catch (error) {
+      if (port !== 0 && FIXED_PORT_FALLBACK_CODES.has(error?.code)) {
+        // fixed port unavailable (taken/excluded/denied) → fall back to an ephemeral port
+        console.error(`[airtable-user-mcp] fixed daemon port ${port} unavailable (${error.code}) — falling back to an automatic port.`);
+        port = 0;
+        continue;
+      }
+      throw error;
+    }
 
     const boundPort = getBoundPort(server);
     if (!FETCH_BLOCKED_PORTS.has(boundPort)) {
@@ -79,7 +105,14 @@ async function listenAvoidingBlockedPorts(server, requestedPort, host) {
     }
 
     await new Promise((resolve) => server.close(() => resolve()));
+    port = 0; // blocked port → next attempt uses an ephemeral port
   }
+
+  // Unreachable in practice — the first fallback sets port=0 and OS ephemeral ports (>=32768) are
+  // never in FETCH_BLOCKED_PORTS (all <=10080), so iteration 2 always binds and returns. But do NOT
+  // fall through returning undefined with the server closed/unbound: the caller reads getBoundPort()
+  // and would throw the misleading "Daemon server is not listening on a TCP port." Fail clearly.
+  throw new Error(`Daemon could not bind a usable (non-browser-blocked) port after 5 attempts (requested port ${requestedPort}).`);
 }
 
 function getBoundPort(server) {
@@ -101,7 +134,7 @@ function getBoundPort(server) {
  * @param {import('express').Request} req
  * @returns {boolean}
  */
-function isTunnelRequest(req) {
+export function isTunnelRequest(req) {
   if (req.headers?.['x-forwarded-for']) return true;
   if (req.headers?.['cf-connecting-ip']) return true;
   const ip = req.socket?.remoteAddress ?? '';
@@ -205,6 +238,14 @@ export async function startDaemonServer(options = {}) {
     : ensureToken({ tokenPath });
 
   let currentToken = initialToken;
+  // A rotation driven through the module-level rotateToken() — CLI, a tool
+  // handler, anything that is not POST /daemon/rotate-token — cannot reach this
+  // closure on its own. Subscribing makes adoption unconditional, so no rotation
+  // can strand this process on a bearer nobody will present again.
+  const unsubscribeTokenRotate = onTokenRotate((record, rotatedPath) => {
+    if (rotatedPath !== tokenPath) return; // another configDir's daemon, not ours
+    currentToken = record;
+  });
   let closed = false;
   let activeTunnel = null;
 
@@ -215,8 +256,11 @@ export async function startDaemonServer(options = {}) {
   let burstWindowStart = Date.now();
   let tunnelAutoDisabled = false;
 
-  let auth;
-  let client;
+  // Prefer a shared auth/client from the host process (index.js) so /daemon/health
+  // pageBusy, release-browser, and MCP tool calls all share one PageScheduler.
+  // Without this, health reports a second idle AirtableAuth while tools use another.
+  let auth = options.auth || null;
+  let client = options.client || null;
   let clientInitPromise = null;
 
   const getClient = async () => {
@@ -224,7 +268,14 @@ export async function startDaemonServer(options = {}) {
     if (!client) { client = new AirtableClient(auth); }
     if (!clientInitPromise) {
       const pending = auth.init();
-      pending.catch(() => { client = undefined; clientInitPromise = null; });
+      pending.catch(() => {
+        // Only clear lazily-created instances — shared host auth must survive a failed init.
+        if (!options.auth) {
+          auth = undefined;
+          client = undefined;
+        }
+        clientInitPromise = null;
+      });
       clientInitPromise = pending;
     }
     await clientInitPromise;
@@ -233,7 +284,12 @@ export async function startDaemonServer(options = {}) {
 
   const toolConfig = new ToolConfigManager();
   await toolConfig.load();
-  toolConfig.startWatching();
+  // Awaited, not fire-and-forget: startWatching() only assigns `_watcher` after an
+  // internal `await mkdir`, so an un-awaited call lets stop() run stopWatching()
+  // while `_watcher` is still null. The watcher is then created with nobody left to
+  // close it, and the fs handle keeps the process alive after the daemon has shut
+  // down — stopDaemon() waits out its timeout and escalates to SIGKILL.
+  await toolConfig.startWatching();
   const startedAt = Date.now();
   const sseClients = new Set();
   const activeMcpClosers = new Set();
@@ -324,6 +380,31 @@ export async function startDaemonServer(options = {}) {
     uptimeMs: Date.now() - startedAt,
     startedAt: new Date(startedAt).toISOString(),
     tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
+    // The daemon's EFFECTIVE runtime config, reported because it is not
+    // necessarily the caller's. A standalone client (Claude Desktop, Cursor,
+    // Cline, Amp) that finds a lockfile attach-proxies into whichever daemon is
+    // already running — typically VS Code's — and the attach path reads only
+    // AIRTABLE_NO_DAEMON and AIRTABLE_USER_MCP_HOME from the client's own env
+    // (see the attach-proxy prologue in src/index.js). Every other variable that
+    // client was configured with — AIRTABLE_AUTH_MODE, AIRTABLE_HTTP_CLIENT, the
+    // browser channel, idle-park tuning — belongs to the daemon's process, not
+    // theirs, and is silently void. Attaching anyway is deliberate: refusing
+    // would put a second Chromium on the shared persistent profile, which is the
+    // Chrome-exit-21 "session dead" crash class. So the mismatch is made
+    // *visible* instead — one stderr line at attach time, and these fields, which
+    // are the only way a caller can ask "whose settings am I actually running
+    // under?" after the fact.
+    authMode: (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase(),
+    httpClient: process.env.AIRTABLE_HTTP_CLIENT || 'fetch',
+    configDir: options.configDir ?? null,
+    // Shared page/auth pipeline busy snapshot (tool name when runInToolContext is set).
+    pageBusy: auth?.getBusyState?.() ?? {
+      busy: false,
+      active: null,
+      queued: 0,
+      delaying: false,
+      updatedAt: new Date().toISOString(),
+    },
   });
 
   app.get('/daemon/health', requireBearer, (_req, res) => {
@@ -347,6 +428,98 @@ export async function startDaemonServer(options = {}) {
       ? req.body.clientId
       : 'daemon-client';
     res.json({ ok: true, clientId });
+  });
+
+  // Session health — verified through the daemon's SINGLE shared browser.
+  // The extension calls this instead of forking its own health-check Chrome;
+  // two Chromes on one persistent profile collide (Chrome exit code 21), which
+  // is the root cause of the "session dead / network error" failure mode.
+  app.get('/daemon/session-health', requireBearer, async (_req, res) => {
+    try {
+      if (options.getSessionHealth) {
+        res.json(await options.getSessionHealth());
+        return;
+      }
+      await getClient();              // ensure the shared browser is initialized
+      res.json(await auth.checkSessionHealth());
+    } catch (error) {
+      // init/verify threw (e.g. session expired → login redirect) — report it
+      // as an invalid session rather than a 500 so the dashboard shows the
+      // right state and offers re-login.
+      res.json({ valid: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Release the shared browser so an interactive (headful) login can open the
+  // persistent profile exclusively. The next getClient()/session-health call
+  // re-initializes it, picking up the freshly-written session cookies.
+  app.post('/daemon/release-browser', requireBearer, async (_req, res) => {
+    try {
+      if (auth) await auth.close().catch(() => {});
+    } finally {
+      // Only drop LAZILY-created instances. A shared host auth/client (options.auth —
+      // the pageBusy fix) MUST keep its reference so MCP tools, /daemon/health pageBusy,
+      // and idle-park all stay on ONE PageScheduler. Nulling it would spawn a SECOND
+      // AirtableAuth on the next getClient()/session-health call — the dual-auth bug this
+      // workstream fixes. close() above already freed the browser; the next call re-inits
+      // the SAME shared instance (which re-arms the idle-park busy listener in _doInit).
+      if (!options.auth) { auth = undefined; client = undefined; }
+      clientInitPromise = null;
+    }
+    res.json({ ok: true });
+  });
+
+  // POST /daemon/auth-credentials (C2) — runtime credential channel.
+  // The extension pushes byo/direct-login creds here instead of via env/disk
+  // (the daemon deliberately gets no creds in its environment). The body is
+  // stored IN MEMORY ONLY (src/daemon/cred-store.js) — NEVER persisted, NEVER
+  // logged. Do not console.log / trace the body or any field value below.
+  app.post('/daemon/auth-credentials', requireBearer, async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const { authMode } = body;
+      if (authMode !== 'byo' && authMode !== 'direct-login') {
+        res.status(400).json({ ok: false, error: "authMode must be 'byo' or 'direct-login'" });
+        return;
+      }
+      // Basic shape validation only — string-typed secrets, values never
+      // inspected/logged (avoid leaking a secret into an error message).
+      for (const key of ['cookie', 'csrf', 'email', 'password', 'totpSecret']) {
+        if (body[key] !== undefined && typeof body[key] !== 'string') {
+          res.status(400).json({ ok: false, error: `${key} must be a string` });
+          return;
+        }
+      }
+
+      setInjectedCredentials({
+        authMode,
+        cookie: body.cookie,
+        csrf: body.csrf,
+        email: body.email,
+        password: body.password,
+        totpSecret: body.totpSecret,
+      });
+
+      // Invalidate the CURRENT auth session so the next API call re-inits and
+      // picks up the freshly-injected creds. Mirror getClient()'s lazy pattern
+      // (create auth if absent), then reset the session state. AirtableAuth has
+      // no single reset method that also clears _credentials, so we reset the
+      // fields directly: for byo/direct-login, ensureLoggedIn() re-runs
+      // _doInit whenever _credentials is null (which re-reads cred-store first);
+      // isLoggedIn=false covers the browser path. We do NOT launch the browser
+      // here — clearing clientInitPromise only marks the client stale so the
+      // NEXT getClient() (i.e. the next MCP tool call) rebuilds it.
+      if (!auth) { auth = new AirtableAuth(); }
+      auth.isLoggedIn = false;
+      auth._credentials = null;
+      auth.csrfToken = null;
+      auth.resetSessionHealth?.(); // clear the dead-session circuit-breaker
+      clientInitPromise = null;
+
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.post('/daemon/rotate-token', requireBearer, async (_req, res, next) => {
@@ -510,8 +683,51 @@ export async function startDaemonServer(options = {}) {
     } catch (err) { next(err); }
   });
 
+  // Carry out an exit intent staged by a tool handler (manage_daemon stop/restart).
+  // Called only from the response's 'finish' event — see the /mcp route below and
+  // exit-intent.js for the SDK deadlock that makes anything earlier unsafe.
+  const runExitIntent = async (intent) => {
+    try {
+      if (intent.action === 'stop') {
+        // Written HERE, not in the handler: only a stop that actually reached
+        // the exit is a stop, and the extension's implicit ensureDaemon() reads
+        // this file to know it must not respawn.
+        writeStopSentinel({
+          configDir: options.configDir,
+          pid: process.pid,
+          uuid: options.uuid ?? null,
+          by: intent.by ?? 'manage_daemon',
+          reason: intent.reason ?? null,
+        });
+      } else {
+        clearStopSentinel({ configDir: options.configDir });
+      }
+      await stop();
+      if (intent.action === 'restart') {
+        // After stop(): onShutdown → finalize() has released the lockfile and
+        // closeIdleConnections has freed the port, so the replacement can take
+        // both. Dynamic import breaks the launcher↔server module cycle;
+        // options.spawnDaemon is the test seam (a real detached child would
+        // outlive the test run).
+        const spawnDaemon = options.spawnDaemon ?? (await import('./launcher.js')).spawnDetachedDaemon;
+        await spawnDaemon({ configDir: options.configDir, host, port: requestedPort });
+      }
+    } catch (error) {
+      console.error(`[airtable-mcp] daemon ${intent.action} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   app.all('/mcp', requireBearer, async (req, res, next) => {
     try {
+      // 'finish' fires after the response body has been handed to the OS — the
+      // only point at which shutting the process down cannot truncate the answer
+      // the model is waiting for. Registered BEFORE handleRequest so it is armed
+      // no matter how fast the handler completes; a no-op when nothing staged.
+      res.on('finish', () => {
+        const intent = takeDaemonExit();
+        if (intent) void runExitIntent(intent);
+      });
+
       const mcpServer = new Server(
         { name: 'airtable-user-mcp', version },
         { capabilities: { tools: { listChanged: true }, prompts: {} } },
@@ -520,11 +736,19 @@ export async function startDaemonServer(options = {}) {
       mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: options.getTools ? await options.getTools(toolConfig) : [],
       }));
-      mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+      mcpServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         if (!options.callTool) {
           return { content: [{ type: 'text', text: 'Daemon not fully initialized' }], isError: true };
         }
-        return options.callTool(request, getClient, toolConfig);
+        // Ambient tool label for PageScheduler busy-state (real MCP tool name),
+        // plus the caller's origin. /mcp is the ONE route a tunnel caller can
+        // reach (the allowlist 404s the rest), so a tool that administers the
+        // daemon needs to know which side of that line it is answering — reusing
+        // isTunnelRequest rather than inventing a second notion of "remote".
+        return withToolDispatchContext(request, extra, () =>
+          options.callTool(request, getClient, toolConfig),
+          { origin: isTunnelRequest(req) ? 'tunnel' : 'local' },
+        );
       });
       mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: getPrompts() }));
       mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
@@ -532,7 +756,25 @@ export async function startDaemonServer(options = {}) {
         return renderPrompt(name, args ?? {});
       });
 
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      // Stateless (new Server per request) — nothing is ever streamed mid-call, so answer
+      // POSTs with plain application/json instead of an SSE stream.
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+
+      // Postel shim: the SDK 406s any client whose Accept header doesn't list BOTH
+      // application/json and text/event-stream. Responses here are plain JSON
+      // (enableJsonResponse above), so upgrade lenient clients (curl, n8n HTTP nodes,
+      // hand-rolled fetch) instead of failing their call with a cryptic 406.
+      const accept = String(req.headers.accept || '');
+      if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
+        const upgraded = 'application/json, text/event-stream';
+        req.headers.accept = upgraded;
+        // The SDK builds its web-standard Request from rawHeaders, not req.headers.
+        const raw = req.rawHeaders;
+        for (let i = raw.length - 2; i >= 0; i -= 2) {
+          if (String(raw[i]).toLowerCase() === 'accept') raw.splice(i, 2);
+        }
+        raw.push('Accept', upgraded);
+      }
 
       let cleanedUp = false;
       const cleanup = async () => {
@@ -576,7 +818,17 @@ export async function startDaemonServer(options = {}) {
     if (closed) return;
     closed = true;
 
+    unsubscribeTokenRotate();
     try { toolConfig.stopWatching(); } catch { /* best-effort */ }
+
+    // Close shared browser + tree-kill orphan Chromium before lock release.
+    // Without this, Windows leaves chrome.exe holding the profile after stop.
+    await runShutdownStep('auth-close', async () => {
+      if (auth) await auth.close().catch(() => {});
+      auth = undefined;
+      client = undefined;
+      clientInitPromise = null;
+    });
 
     // Stop tunnel before closing SSE clients — tunnel stop may publish a final event
     await runShutdownStep('tunnel-stop', () => activeTunnel?.stop().catch(() => undefined));
@@ -596,6 +848,12 @@ export async function startDaemonServer(options = {}) {
     await runShutdownStep('on-shutdown', () => options.onShutdown?.() ?? undefined);
 
     if (httpServer) {
+      // httpServer.close() only stops NEW connections; an idle keep-alive socket
+      // (every client that just got a response) holds it open until
+      // keepAliveTimeout — 5s of the daemon still owning port 8723, which is long
+      // enough for a restart's replacement to lose the fixed port and silently
+      // fall back to an ephemeral one.
+      httpServer.closeIdleConnections?.();
       await runShutdownStep('http-close', () =>
         new Promise((resolve, reject) => {
           httpServer.close((error) => {

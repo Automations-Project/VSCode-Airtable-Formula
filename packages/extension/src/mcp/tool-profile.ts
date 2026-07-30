@@ -28,7 +28,8 @@ type ExtraCategoryKey =
   | 'view-write' | 'view-destructive'
   | 'view-section' | 'view-section-destructive'
   | 'form-write'
-  | 'record-read' | 'record-write';
+  | 'record-read' | 'record-write' | 'record-destructive'
+  | 'sync' | 'daemon';
 export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategoryKey> = {
   // Read-only / inspection
   get_base_schema:           'read',
@@ -107,8 +108,17 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   rename_extension:          'extension',
   duplicate_extension:       'extension',
   remove_extension:          'extension',
-  // Record write (duplicate via pasteCells)
+  // Record write (duplicate via pasteCells + direct CRUD)
   duplicate_records:         'record-write',
+  create_records:            'record-write',
+  update_records:            'record-write',
+  upload_attachment:         'record-write',
+  // Record destructive (batch record deletion)
+  delete_records:            'record-destructive',
+  // Sync (base-to-base schema sync)
+  sync_base:                 'sync',
+  // Daemon control (administers this server's own process, not Airtable)
+  manage_daemon:             'daemon',
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -125,6 +135,9 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'form-write':               'Form Metadata',
   'extension':                'Extension Management',
   'record-write':             'Record Write',
+  'record-destructive':       'Record Destructive',
+  'sync':                     'Sync',
+  'daemon':                   'Daemon Control',
 };
 
 interface ProfileDef {
@@ -137,25 +150,30 @@ export const BUILTIN_PROFILES: Record<'read-only' | 'safe-write' | 'full', Profi
   'read-only': { description: 'Schema inspection, formula validation, and record reading only', categories: ['read', 'record-read'] },
   'safe-write':{ description: 'Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates (no deletes, no form metadata)',
                  categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'] },
-  full:        { description: 'All tools enabled including destructive ops, form metadata, and extensions',
+  full:        { description: 'All tools enabled including destructive ops, form metadata, extensions, and daemon control',
                  categories: [
-                   'read', 'record-read', 'record-write',
+                   'read', 'record-read', 'record-write', 'record-destructive',
                    'table-write', 'table-destructive',
                    'field-write', 'field-destructive',
                    'view-write', 'view-destructive',
                    'view-section', 'view-section-destructive',
-                   'form-write', 'extension',
+                   'form-write', 'extension', 'sync', 'daemon',
                  ] },
 };
 
-// Settings key suffix → file-format category key
-const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
+// Settings key suffix → file-format category key.
+// Exported so extension.ts's "Toggle MCP Tool Categories" command can enumerate
+// categories from here instead of keeping a second hand-written list (that list
+// had drifted to 8 of 15 categories, silently hiding half of them from the
+// command palette).
+export const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
   read:                    'read',
   recordRead:              'record-read',
   tableWrite:              'table-write',
   tableDestructive:        'table-destructive',
   fieldWrite:              'field-write',
   fieldDestructive:        'field-destructive',
+  recordDestructive:       'record-destructive',
   viewWrite:               'view-write',
   viewDestructive:         'view-destructive',
   viewSection:             'view-section',
@@ -163,6 +181,8 @@ const SETTINGS_TO_CATEGORY: Record<keyof ToolCategories, string> = {
   formWrite:               'form-write',
   extension:               'extension',
   recordWrite:             'record-write',
+  sync:                    'sync',
+  daemon:                  'daemon',
 };
 
 // Inverse: file-format category key → settings key suffix
@@ -258,6 +278,7 @@ export class ToolProfileManager implements vscode.Disposable {
       tableDestructive:       cfg.get('mcp.categories.tableDestructive',       true),
       fieldWrite:             cfg.get('mcp.categories.fieldWrite',             true),
       fieldDestructive:       cfg.get('mcp.categories.fieldDestructive',       true),
+      recordDestructive:      cfg.get('mcp.categories.recordDestructive',      false),
       viewWrite:              cfg.get('mcp.categories.viewWrite',              true),
       viewDestructive:        cfg.get('mcp.categories.viewDestructive',        true),
       viewSection:            cfg.get('mcp.categories.viewSection',            true),
@@ -265,6 +286,8 @@ export class ToolProfileManager implements vscode.Disposable {
       formWrite:              cfg.get('mcp.categories.formWrite',              true),
       extension:              cfg.get('mcp.categories.extension',              true),
       recordWrite:            cfg.get('mcp.categories.recordWrite',            true),
+      sync:                   cfg.get('mcp.categories.sync',                   false),
+      daemon:                 cfg.get('mcp.categories.daemon',                 false),
     };
     return {
       profile,
@@ -319,7 +342,9 @@ export class ToolProfileManager implements vscode.Disposable {
       'view-section', 'view-section-destructive',
       'form-write',
       'extension',
-      'record-write',
+      'record-write', 'record-destructive',
+      'sync',
+      'daemon',
     ];
     for (const cat of categoryOrder) {
       const label = CATEGORY_LABELS[cat] ?? cat;

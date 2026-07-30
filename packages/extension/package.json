@@ -1,10 +1,10 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.0.94",
+  "version": "2.1.32",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
-  "description": "Airtable formula, script & automation editor with MCP server (66 tools), language server, and AI skills for VS Code.",
+  "description": "Airtable formula, script & automation editor with MCP server (72 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -397,6 +397,41 @@
           "default": true,
           "description": "Start and use a shared daemon process for MCP server. Disable to use a direct per-session process (legacy behavior)."
         },
+        "airtableFormula.mcp.daemonPort": {
+          "type": "number",
+          "default": 8723,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Fixed TCP port for the shared MCP daemon's HTTP server. Defaults to 8723 so the daemon keeps the same port across restarts (stable MCP client config, predictable process to find/kill). Change it to any free port, or set 0 for an automatic OS-assigned port. Takes effect on the next daemon restart; if the chosen port is already in use, the daemon falls back to an automatic port."
+        },
+        "airtableFormula.mcp.authMode": {
+          "type": "string",
+          "default": "browser",
+          "enum": ["browser", "byo", "direct-login"],
+          "enumDescriptions": [
+            "Log in through a bundled headless Chrome, then run all API calls over direct HTTP (default). The browser only mints/refreshes the session cookie.",
+            "Bring your own cookie — no browser. Paste a session cookie into ~/.airtable-user-mcp/credentials.json (or set the AIRTABLE_COOKIE env var); the CSRF token is scraped automatically.",
+            "Browser-free login via email + password + TOTP. Set them in ~/.airtable-user-mcp/login.json (or AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_TOTP_SECRET). SSO/Google accounts must use 'browser'."
+          ],
+          "description": "How the MCP server authenticates to Airtable's internal API. All modes send API calls over direct HTTP; only 'browser' launches Chrome (for login). 'byo' and 'direct-login' run with no browser at all. Takes effect on the next daemon/server restart."
+        },
+        "airtableFormula.mcp.httpClient": {
+          "type": "string",
+          "default": "fetch",
+          "enum": ["fetch", "impit"],
+          "enumDescriptions": [
+            "Node's built-in fetch (default) — verified to work against Airtable's internal API with no TLS impersonation.",
+            "impit with Chrome TLS impersonation — a fallback if Airtable ever fingerprints non-browser clients. Requires the optional 'impit' package to be available to the server."
+          ],
+          "description": "HTTP client for direct Airtable API calls. Leave as 'fetch' unless requests start getting blocked; 'impit' impersonates Chrome's TLS fingerprint. Takes effect on the next daemon/server restart."
+        },
+        "airtableFormula.mcp.browserIdleParkMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Minutes of idle time before the shared daemon parks (closes) its Chromium browser to free ~300–600 MB RSS. Cookie-based HTTP keeps working; the browser is only relaunched if session recovery needs it. Set 0 to disable. Takes effect on the next daemon/server restart."
+        },
+
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",
@@ -491,8 +526,8 @@
           ],
           "enumDescriptions": [
             "Schema inspection, formula validation, and record reading only (12 tools)",
-            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (51 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (66 tools)",
+            "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
+            "All tools enabled including destructive ops, form metadata, extensions, and daemon control (72 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -560,7 +595,22 @@
         "airtableFormula.mcp.categories.recordWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Record Write tool: duplicate_records (bulk record duplication via pasteCells)."
+          "description": "Record Write tools: create_records, update_records, duplicate_records, upload_attachment (bulk record create/update/duplication and URL-based attachment uploads)."
+        },
+        "airtableFormula.mcp.categories.recordDestructive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Record Destructive tools: delete_records (batch record deletion)."
+        },
+        "airtableFormula.mcp.categories.sync": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sync tools: sync_base (base-to-base schema + record sync). mode=plan/diff/status are read-only; mode=apply mutates the destination and, with policy=mirror plus the confirmation flags, can delete tables, fields, views, sections and records; mode=reconcile updates local mapping state."
+        },
+        "airtableFormula.mcp.categories.daemon": {
+          "type": "boolean",
+          "default": false,
+          "description": "Daemon Control tool: manage_daemon (inspect and administer the MCP daemon itself — not Airtable). action=status is read-only and reports daemon liveness, transport, uptime, tunnel URL and the live session/browser state; start, restart, stop, tunnel_enable, tunnel_disable and token_rotate control the running process. Off by default: this lets an AI agent stop or restart the server it is talking through."
         },
         "airtableFormula.mcp.tools": {
           "type": "object",
@@ -669,7 +719,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 66 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 72 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate / upload_attachment), extension management, base-to-base sync, and daemon control. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
@@ -677,8 +727,9 @@
     "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\" && node scripts/patch-esm-meta.mjs",
     "build:mcp": "node ../../scripts/bundle-mcp.mjs",
     "prepare:deps": "node ../../scripts/prepare-package-deps.mjs",
-    "package": "vsce package --no-dependencies",
-    "package:vsix": "npm run build && npm run build:mcp && npm run prepare:deps && node -e \"let r=require('fs').readFileSync('../../README.md','utf8');r=r.replace(/<img src=\\\"[^\\\"]*\\\\.svg\\\"[^/]*\\\\/>/g,'');require('fs').writeFileSync('README.md',r)\" && npm run package",
+    "package": "node ../../scripts/package-targets.mjs --targets=host",
+    "package:all-targets": "node ../../scripts/package-targets.mjs",
+    "package:vsix": "npm run build && npm run build:mcp && node -e \"let r=require('fs').readFileSync('../../README.md','utf8');r=r.replace(/<img src=\\\"[^\\\"]*\\\\.svg\\\"[^/]*\\\\/>/g,'');require('fs').writeFileSync('README.md',r)\" && npm run package",
     "packx": "node scripts/package-vsix.cjs",
     "packx:no-bump": "node scripts/package-vsix.cjs --no-bump",
     "version:bump": "node scripts/bump-version.cjs",

@@ -11,7 +11,20 @@ export interface FriendlyError {
 
 const PATTERNS: Array<{ test: RegExp; message: string; hint?: string }> = [
   {
-    test: /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|fetch failed|network/i,
+    // Browser-profile contention (Chrome exit code 21) — a second Chrome tried
+    // to open the shared persistent profile that another process already holds.
+    // MUST precede the network rule: the raw Chrome launch log contains the
+    // flag `--disable-background-networking`, which a bare /network/ match would
+    // mis-classify as a connectivity problem and send the user chasing VPNs.
+    test: /launchPersistentContext|exit ?code ?21|exitCode=21|Target page, context or browser has been closed|ProcessSingleton|user-data-dir/i,
+    message: 'Another program is using the Airtable browser profile.',
+    hint: 'Close other Airtable/MCP sessions (or wait a moment) and try again — the extension shares one browser profile.',
+  },
+  {
+    // Genuine connectivity failures only: Node errno codes, undici "fetch
+    // failed", and Chromium net:: navigation errors. A bare "network" was
+    // removed because it false-matched Chrome command-line flags.
+    test: /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|fetch failed|net::ERR|NetworkError/i,
     message: 'Network error while contacting the service.',
     hint: 'Check your internet connection (or proxy/VPN) and try again.',
   },
@@ -29,11 +42,6 @@ const PATTERNS: Array<{ test: RegExp; message: string; hint?: string }> = [
     test: /429|rate.?limit/i,
     message: 'Airtable is rate-limiting requests.',
     hint: 'Wait a minute and try again.',
-  },
-  {
-    test: /exit code 21|launchPersistentContext|Target page, context or browser has been closed/i,
-    message: 'The browser could not start (its profile may be locked).',
-    hint: 'Close any leftover Chrome windows from a previous login and retry.',
   },
   {
     test: /No supported browser|executable doesn't exist|chrome-missing/i,

@@ -93,3 +93,45 @@ describe('formulaDiagnostics — result shape', () => {
     expect(diags).toHaveLength(0);
   });
 });
+
+describe('formulaDiagnostics — field names with special characters (2026-07-09 name-form refs)', () => {
+  // download_base_formulas now emits real {Field Name} refs; names may legally contain
+  // apostrophes, parentheses, or smart quotes. Pristine downloads must produce zero errors.
+  it('apostrophe in a field name produces zero diagnostics', () => {
+    expect(formulaDiagnostics("LEN({Owner's List})")).toHaveLength(0);
+  });
+
+  it('parentheses in a field name produce zero diagnostics', () => {
+    expect(formulaDiagnostics('LEN({1) First})')).toHaveLength(0);
+    expect(formulaDiagnostics('LEN({Total (USD)})')).toHaveLength(0);
+  });
+
+  it('smart quote in a field name is NOT flagged (fixing it would corrupt the ref)', () => {
+    const diags = formulaDiagnostics('LEN({Owner’s List})');
+    expect(diags.filter(d => d.code === 'smart-quote')).toHaveLength(0);
+  });
+
+  it('smart quote OUTSIDE a field ref is still flagged', () => {
+    const diags = formulaDiagnostics('IF({Game} = “x”, 1, 0)');
+    expect(diags.filter(d => d.code === 'smart-quote').length).toBeGreaterThan(0);
+  });
+
+  it('real unbalanced paren outside refs is still reported', () => {
+    const diags = formulaDiagnostics("LEN({Owner's List}");
+    expect(diags.some(d => d.message.includes('Missing closing parenthesis'))).toBe(true);
+  });
+
+  it('real unclosed quote outside refs is still reported', () => {
+    const diags = formulaDiagnostics('IF({Game} = "x, 1, 0)');
+    expect(diags.some(d => d.message.includes('Unclosed double quote'))).toBe(true);
+  });
+
+  it('brace ref inside a string literal is still treated as string content', () => {
+    expect(formulaDiagnostics('CONCATENATE("{not a ref (", {Game}, ")")')).toHaveLength(0);
+  });
+
+  it('unclosed field ref is still reported as a missing bracket', () => {
+    const diags = formulaDiagnostics('LEN({Game');
+    expect(diags.some(d => d.message.includes('Missing closing bracket'))).toBe(true);
+  });
+});

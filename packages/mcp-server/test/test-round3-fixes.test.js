@@ -101,16 +101,23 @@ describe('auth queue cap (H4)', () => {
     auth = new AirtableAuth();
     // The cap bounds PENDING items (the in-flight one is already shifted out).
     // So cap=1 means: 1 in-flight + 1 pending is OK; a 3rd enqueue rejects.
+    // NOTE: runExclusive checks the SCHEDULER's maxQueue (captured at construction), so set it
+    // there — assigning only auth._maxQueueSize is a no-op (the scheduler keeps its default 64),
+    // which left the 3rd enqueue queued instead of rejected → assert.rejects hung forever.
     auth._maxQueueSize = 1;
+    auth._scheduler.maxQueue = 1;
   });
 
   it('rejects new enqueues with a clear message once saturated', async () => {
-    // Block the queue with a never-resolving task so subsequent enqueues sit
-    // in _queue rather than run immediately.
+    // Block the queue with a held task so subsequent enqueues sit in _queue rather than run.
     let resolveFirst;
     const blocker = new Promise(r => (resolveFirst = r));
 
     const p1 = auth._enqueue(() => blocker);      // in-flight
+    // Let p1 become the ACTIVE op before enqueuing p2 (matches test-page-scheduler's saturation
+    // test). Enqueuing back-to-back synchronously leaves the scheduler's fire-and-forget pump()
+    // run() chain mid-flight when the test returns, which node:test flags as a pending promise.
+    await new Promise((r) => setTimeout(r, 5));
     const p2 = auth._enqueue(async () => 'two');  // pending (1/1)
     // A 3rd enqueue hits the cap because _queue.length === 1.
     await assert.rejects(
@@ -118,9 +125,10 @@ describe('auth queue cap (H4)', () => {
       /Auth queue saturated/,
     );
 
-    // Clean up so the test doesn't hang.
+    // Clean up so the test doesn't hang: release the held op and let both queued ops drain fully.
     resolveFirst('done');
-    await Promise.all([p1, p2]);
+    await p1;
+    await p2;
   });
 });
 
