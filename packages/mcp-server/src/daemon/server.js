@@ -19,6 +19,8 @@ import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { withToolDispatchContext } from '../page-scheduler.js';
 import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
+import { takeDaemonExit } from './exit-intent.js';
+import { clearStopSentinel, writeStopSentinel } from './stop-sentinel.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
 import {
@@ -132,7 +134,7 @@ function getBoundPort(server) {
  * @param {import('express').Request} req
  * @returns {boolean}
  */
-function isTunnelRequest(req) {
+export function isTunnelRequest(req) {
   if (req.headers?.['x-forwarded-for']) return true;
   if (req.headers?.['cf-connecting-ip']) return true;
   const ip = req.socket?.remoteAddress ?? '';
@@ -282,7 +284,12 @@ export async function startDaemonServer(options = {}) {
 
   const toolConfig = new ToolConfigManager();
   await toolConfig.load();
-  toolConfig.startWatching();
+  // Awaited, not fire-and-forget: startWatching() only assigns `_watcher` after an
+  // internal `await mkdir`, so an un-awaited call lets stop() run stopWatching()
+  // while `_watcher` is still null. The watcher is then created with nobody left to
+  // close it, and the fs handle keeps the process alive after the daemon has shut
+  // down — stopDaemon() waits out its timeout and escalates to SIGKILL.
+  await toolConfig.startWatching();
   const startedAt = Date.now();
   const sseClients = new Set();
   const activeMcpClosers = new Set();
@@ -659,8 +666,51 @@ export async function startDaemonServer(options = {}) {
     } catch (err) { next(err); }
   });
 
+  // Carry out an exit intent staged by a tool handler (manage_daemon stop/restart).
+  // Called only from the response's 'finish' event — see the /mcp route below and
+  // exit-intent.js for the SDK deadlock that makes anything earlier unsafe.
+  const runExitIntent = async (intent) => {
+    try {
+      if (intent.action === 'stop') {
+        // Written HERE, not in the handler: only a stop that actually reached
+        // the exit is a stop, and the extension's implicit ensureDaemon() reads
+        // this file to know it must not respawn.
+        writeStopSentinel({
+          configDir: options.configDir,
+          pid: process.pid,
+          uuid: options.uuid ?? null,
+          by: intent.by ?? 'manage_daemon',
+          reason: intent.reason ?? null,
+        });
+      } else {
+        clearStopSentinel({ configDir: options.configDir });
+      }
+      await stop();
+      if (intent.action === 'restart') {
+        // After stop(): onShutdown → finalize() has released the lockfile and
+        // closeIdleConnections has freed the port, so the replacement can take
+        // both. Dynamic import breaks the launcher↔server module cycle;
+        // options.spawnDaemon is the test seam (a real detached child would
+        // outlive the test run).
+        const spawnDaemon = options.spawnDaemon ?? (await import('./launcher.js')).spawnDetachedDaemon;
+        await spawnDaemon({ configDir: options.configDir, host, port: requestedPort });
+      }
+    } catch (error) {
+      console.error(`[airtable-mcp] daemon ${intent.action} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   app.all('/mcp', requireBearer, async (req, res, next) => {
     try {
+      // 'finish' fires after the response body has been handed to the OS — the
+      // only point at which shutting the process down cannot truncate the answer
+      // the model is waiting for. Registered BEFORE handleRequest so it is armed
+      // no matter how fast the handler completes; a no-op when nothing staged.
+      res.on('finish', () => {
+        const intent = takeDaemonExit();
+        if (intent) void runExitIntent(intent);
+      });
+
       const mcpServer = new Server(
         { name: 'airtable-user-mcp', version },
         { capabilities: { tools: { listChanged: true }, prompts: {} } },
@@ -673,9 +723,14 @@ export async function startDaemonServer(options = {}) {
         if (!options.callTool) {
           return { content: [{ type: 'text', text: 'Daemon not fully initialized' }], isError: true };
         }
-        // Ambient tool label for PageScheduler busy-state (real MCP tool name).
+        // Ambient tool label for PageScheduler busy-state (real MCP tool name),
+        // plus the caller's origin. /mcp is the ONE route a tunnel caller can
+        // reach (the allowlist 404s the rest), so a tool that administers the
+        // daemon needs to know which side of that line it is answering — reusing
+        // isTunnelRequest rather than inventing a second notion of "remote".
         return withToolDispatchContext(request, extra, () =>
           options.callTool(request, getClient, toolConfig),
+          { origin: isTunnelRequest(req) ? 'tunnel' : 'local' },
         );
       });
       mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: getPrompts() }));
@@ -776,6 +831,12 @@ export async function startDaemonServer(options = {}) {
     await runShutdownStep('on-shutdown', () => options.onShutdown?.() ?? undefined);
 
     if (httpServer) {
+      // httpServer.close() only stops NEW connections; an idle keep-alive socket
+      // (every client that just got a response) holds it open until
+      // keepAliveTimeout — 5s of the daemon still owning port 8723, which is long
+      // enough for a restart's replacement to lose the fixed port and silently
+      // fall back to an ephemeral one.
+      httpServer.closeIdleConnections?.();
       await runShutdownStep('http-close', () =>
         new Promise((resolve, reject) => {
           httpServer.close((error) => {

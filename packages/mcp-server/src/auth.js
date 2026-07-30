@@ -77,7 +77,13 @@ function resolveIdleParkMs() {
   const trimmed = String(raw).trim();
   if (trimmed === '') return 30 * 60_000;
   const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed <= 0) return 0;
+  // Only an explicit, well-formed 0 (or negative) disables parking. Garbage used to
+  // land here too, so a typo — "30m", "1_800_000", a stray quote — silently pinned a
+  // ~300-600MB Chromium tree resident forever, and the env var that was meant to tune
+  // parking switched it off instead. Unparseable now means "I didn't understand you,
+  // keep the default", which is the safe direction to fail.
+  if (!Number.isInteger(parsed)) return 30 * 60_000;
+  if (parsed <= 0) return 0;
   return parsed;
 }
 
@@ -836,7 +842,15 @@ export class AirtableAuth {
       // Without a cookie header, cookie-only park would leave isLoggedIn true
       // with no HTTP path and force a full Chromium relaunch next call.
       if (!this._credentials?.cookieHeader) {
-        console.error('[auth] idle park aborted — no cookie snapshot available; keeping browser up.');
+        // Bailing here does NOT strand the browser, though it reads like it does:
+        // scheduleIdlePark() nulled _parkTimer before calling us, so nothing is armed
+        // at this instant. The re-arm comes from _subscribeBusy — we are inside
+        // runBarrier, so the scheduler is busy now and fires a busy→idle edge the
+        // moment this returns, which calls scheduleIdlePark() again. Retry is
+        // automatic; an explicit re-arm here is redundant, not defensive.
+        // Pinned by "a cookie-less park RE-ARMS the timer" in test-auth-idle-park —
+        // that test fails only if BOTH paths are gone, which is the real invariant.
+        console.error('[auth] idle park deferred — no cookie snapshot available; will retry when idle again.');
         return;
       }
 

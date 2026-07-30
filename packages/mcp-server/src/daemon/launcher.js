@@ -10,6 +10,7 @@ import { startDaemonServer } from './server.js';
 import { acquire, getLockfilePath, isStale, read, release, replace } from './lockfile.js';
 import { ensureToken, getTokenPath, readToken } from './token.js';
 import { readTunnelSettings, writeTunnelSettings, getTunnelProvider } from './tunnel-providers/index.js';
+import { clearStopSentinel } from './stop-sentinel.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -60,7 +61,15 @@ async function probeHealth(record, options = {}) {
   }
 }
 
-async function adminRequest(record, path, options) {
+/**
+ * Authenticated loopback call to a daemon's own /daemon/* route, using the
+ * bearer from its lockfile. Exported so `manage_daemon` can drive tunnel and
+ * token administration through the SERVER's routes instead of reimplementing
+ * them — `activeTunnel` and `currentToken` are closure state inside
+ * startDaemonServer, and anything that mutates them from outside leaves the
+ * running server holding a stale handle.
+ */
+export async function adminRequest(record, path, options) {
   const response = await fetch(`http://127.0.0.1:${record.port}${path}`, {
     method: options.method,
     headers: {
@@ -267,6 +276,12 @@ export async function startDaemon(options = {}) {
       await delay(retryDelayMs);
       continue;
     }
+
+    // A daemon is starting on purpose, so any "the user stopped this deliberately"
+    // marker is now spent. Clearing it HERE — on the one path every intentional
+    // start goes through — is what stops a stale sentinel from wedging startup
+    // forever; see stop-sentinel.js.
+    clearStopSentinel({ configDir });
 
     let server;
     let lspChild = null;

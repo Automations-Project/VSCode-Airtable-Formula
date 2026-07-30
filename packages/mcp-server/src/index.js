@@ -90,6 +90,13 @@ import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
 import { getPrompts, renderPrompt } from './prompts.js';
+// withToolDispatchContext was used below WITHOUT being imported, so every
+// tools/call on the in-process stdio path (AIRTABLE_NO_DAEMON=1 — the VS Code
+// stdio fallback) died with a ReferenceError before reaching its handler. The
+// daemon path imports it in daemon/server.js and was unaffected, which is why
+// this stayed hidden. currentToolContext is what manage_daemon reads the
+// caller's origin from.
+import { withToolDispatchContext, currentToolContext } from './page-scheduler.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
@@ -126,6 +133,31 @@ function resolveServerVersion() {
   return 'unknown';
 }
 const PKG_VERSION = resolveServerVersion();
+
+// Build provenance for `manage_daemon status`. The bundler writes version.json
+// next to the bundle; a source/npx run has no such file and reports null rather
+// than guessing. Answers "which build am I actually talking to", which the model
+// otherwise cannot see at all.
+function resolveProvenance() {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(__dirname, 'version.json'), 'utf8'));
+    return {
+      package: parsed.package ?? null,
+      mcpServer: parsed.mcpServer ?? null,
+      builtAt: parsed.builtAt ?? null,
+      gitSha: parsed.gitSha ?? null,
+      bundled: true,
+    };
+  } catch {
+    return { package: 'airtable-user-mcp', mcpServer: PKG_VERSION, builtAt: null, gitSha: null, bundled: false };
+  }
+}
+const PKG_PROVENANCE = resolveProvenance();
+
+// Set once this process actually becomes the daemon (startDaemon resolves with
+// the uuid it wrote into the lockfile). Stays null in stdio mode, which is
+// exactly what makes the am-I-the-holder check false by construction there.
+let _daemonRuntime = null;
 
 const auth = new AirtableAuth();
 const client = new AirtableClient(auth);
@@ -1652,6 +1684,43 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
       required: ['mode', 'sourceAppId', 'destAppId'],
     },
   },
+
+  // ── Daemon ──
+  {
+    name: 'manage_daemon',
+    description:
+      'Inspect and control the MCP daemon this server runs in. action="status" is the diagnostic to reach for FIRST when tools start failing: it reports whether a daemon is running and whether YOU are it, the transport, uptime, version/provenance, the tunnel URL, and — the part nothing else exposes — the live session state (sessionDead, the last circuit-breaker trip INCLUDING Airtable\'s own response body, and the browser/auth busy queue). That is how you tell "daemon gone" from "session dead" from "browser busy" instead of guessing. ' +
+      'Control actions: start (idempotent; attaches to a healthy daemon rather than starting a second one), restart, stop (writes a sentinel so the VS Code extension does not silently respawn it), tunnel_enable, tunnel_disable, token_rotate. ' +
+      'stop/restart answer first and exit afterwards, so this call returns normally and the daemon goes away a moment later. token_rotate and tunnel_* are loopback-only and are refused for callers arriving through the tunnel; status is returned to them with host-identifying fields blanked. The bearer token is never returned to anyone. ' +
+      'Interactive tunnel setup (cloudflared login, creating a named tunnel) is deliberately NOT here — use the CLI or the VS Code dashboard.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['status', 'start', 'restart', 'stop', 'tunnel_enable', 'tunnel_disable', 'token_rotate'],
+          description: 'What to do. Start with "status" — it is read-only and never launches a browser or touches the lockfile.',
+        },
+        provider: {
+          type: 'string',
+          enum: ['cf-quick', 'cf-named'],
+          description: 'Used only by action="tunnel_enable": which tunnel provider to start. Defaults to the persisted preference (usually "cf-quick"). "ngrok" is not available here — its authtoken lives in VS Code SecretStorage and never reaches the daemon.',
+        },
+        domain: {
+          type: 'string',
+          description: 'Used only by action="tunnel_enable": optional custom hostname for providers that support one.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Used only by action="stop": a short note recorded in the stop sentinel, so a human reading ~/.airtable-user-mcp/daemon.stopped later knows why the daemon is down.',
+        },
+        // No `debug` here: there is no raw Airtable response to dump — the whole
+        // result already IS the diagnostic payload.
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 // ─── Meta-Tool: manage_tools ─────────────────────────────────
@@ -2566,6 +2635,30 @@ const handlers = {
     return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", "status", or "diff".`);
   },
 
+  // ── Meta: Daemon Control ──
+
+  async manage_daemon({ action, provider, domain, reason }) {
+    // Dynamic import so the stdio path never pulls express + the daemon stack
+    // into startup just to have this handler defined.
+    const { manageDaemon } = await import('./daemon/manage.js');
+    const result = await manageDaemon(
+      { action, provider, domain, reason },
+      {
+        auth,
+        runtime: _daemonRuntime,
+        // Set by the daemon's /mcp route; absent on stdio, where the call never
+        // crossed HTTP and is local by construction.
+        origin: currentToolContext()?.origin ?? 'local',
+        version: PKG_VERSION,
+        provenance: PKG_PROVENANCE,
+      },
+    );
+    // A refusal is an honest answer, not a failure — same shape as the rest of
+    // this file's ok() results so the model reads `refused` and `runInstead`
+    // instead of retrying a call that can never work.
+    return ok(result);
+  },
+
   // ── Meta: Tool Management ──
 
   async manage_tools({ action, profile, tool, category, enabled }) {
@@ -2808,7 +2901,12 @@ async function main() {
         }
       },
     });
-    if (!result.attached) await result.closed;
+    // Only a process that actually acquired the lock is the holder; an attach
+    // means some OTHER process owns the daemon, so leave _daemonRuntime null.
+    if (!result.attached) {
+      _daemonRuntime = { uuid: result.uuid, port: result.port, startedAt: result.startedAt };
+      await result.closed;
+    }
     return;
   }
 
