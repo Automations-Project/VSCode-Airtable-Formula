@@ -613,6 +613,11 @@ export class AuthManager implements vscode.Disposable {
       const result = await resp.json().catch(() => null) as
         { valid?: boolean; userId?: string | null; status?: number; error?: string } | null;
 
+      // Take the daemon's verdict as given, and do NOT add a "no userId ⇒ signed
+      // out" gate here. The daemon's check is status-based on purpose: Airtable
+      // accepting the session cookie IS the proof (a cookieless caller gets 401),
+      // whereas the user id comes from page/login HTML that byo and a parked
+      // browser may never have read — so a missing id is not evidence of anything.
       if (result?.valid) {
         this._updateState({ status: 'valid', userId: result.userId ?? undefined, lastChecked: now, error: undefined });
       } else {
@@ -720,9 +725,12 @@ export class AuthManager implements vscode.Disposable {
       await this._releaseDaemonBrowser();
       try {
         // Credentials go over the IPC channel, never the child environment.
+        // Explicit 330s, matching manualLogin: the runner polls for 5 minutes
+        // (a user may finish an SSO/2FA step by hand), and the 120s default would
+        // SIGTERM it mid-poll and throw away the diagnostic it was about to print.
         const result = await this._spawnScript('login-runner.mjs', {
           ...this._browserEnv(), ...this._profileEnv(),
-        }, undefined, creds);
+        }, 330_000, creds);
         const now = new Date().toISOString();
         if (result.ok) {
           this._updateState({ status: 'valid', userId: result.userId || undefined, lastLogin: now, lastChecked: now, error: undefined });

@@ -50,6 +50,18 @@ function makeFakeImpit(script) {
 
 const CREDS = { email: 'user@example.com', password: 'hunter2' };
 
+/**
+ * A real AUTHED Airtable homepage carries the signed-in user id in its bootstrap
+ * as "sessionUserId":"usr…" — the only place it appears anywhere (the API's
+ * getUserProperties answers with 8 feature-flag booleans and no identity at all:
+ * live probes against airtable.com, 2026-07). directLogin now requires it as the
+ * proof that the login completed, because a __Host-airtable-session cookie in the
+ * jar proves only that Airtable set one (issue #21).
+ */
+const AUTHED_USER_ID = 'usrDIRECT00000000';
+const authedHome = (csrfToken) =>
+  `<html><script>{"csrfToken":"${csrfToken}","sessionUserId":"${AUTHED_USER_ID}"}</script></html>`;
+
 function bodyParams(call) {
   return new URLSearchParams(call.options.body);
 }
@@ -66,7 +78,7 @@ describe('directLogin — happy path WITH 2FA', () => {
       // 4. verify2faCode → success, session rotated
       { status: 302, location: '/', setCookies: ['__Host-airtable-session=SESS2; Path=/'] },
       // 5. authed GET / — fresh csrf after session rotation
-      { status: 200, body: '<html><script>{"csrfToken":"CSRF-2"}</script></html>' },
+      { status: 200, body: authedHome('CSRF-2') },
     ]);
 
     let totpArg = null;
@@ -107,6 +119,9 @@ describe('directLogin — happy path WITH 2FA', () => {
 
     // csrf re-scraped from the authed GET /.
     assert.equal(out.csrfToken, 'CSRF-2');
+    // …and so is the signed-in user, which is what auth.userId now reports in
+    // direct-login mode instead of leaving it null.
+    assert.equal(out.userId, AUTHED_USER_ID);
   });
 });
 
@@ -116,7 +131,7 @@ describe('directLogin — happy path WITHOUT 2FA', () => {
       { status: 200, body: '{"csrfToken":"CSRF-A"}', setCookies: ['brw=B1; Path=/'] },
       { status: 200, body: JSON.stringify({ loginType: 'password' }) },
       { status: 302, location: '/', setCookies: ['__Host-airtable-session=SESSA; Path=/', '__Host-airtable-session.sig=SIGA; Path=/'] },
-      { status: 200, body: '{"csrfToken":"CSRF-B"}' },
+      { status: 200, body: authedHome('CSRF-B') },
     ]);
 
     const out = await directLogin({ ...CREDS, impitFactory: () => impit });
@@ -126,6 +141,52 @@ describe('directLogin — happy path WITHOUT 2FA', () => {
     assert.ok(!impit.calls.some((c) => /verify2faCode/.test(c.url)));
     assert.ok(out.cookieHeader.includes('__Host-airtable-session=SESSA'));
     assert.equal(out.csrfToken, 'CSRF-B');
+  });
+});
+
+describe('directLogin — a non-2xx final GET / is not a signed-out verdict', () => {
+  // This client does NOT follow redirects, so a perfectly good login whose final
+  // GET / answers 302 hands us an empty body — which scrapes to null, the same
+  // value a genuinely signed-out 200 page produces. Gating on that failed a
+  // SUCCESSFUL login and, through _recoverSession, fed the dead-session breaker
+  // that aborts long unattended records jobs. Only a 2xx page we actually read
+  // can say "nobody is signed in". Every other fixture in this file returns
+  // 200-with-sessionUserId, which is exactly why the suite once passed with this
+  // regression in the tree.
+  for (const final of [
+    { status: 302, body: 'Found. Redirecting to /workspaces', label: '302 redirect' },
+    { status: 429, body: '', label: '429 throttle' },
+    { status: 503, body: '<html>upstream unavailable</html>', label: '503 interstitial' },
+  ]) {
+    it(`${final.label} → login succeeds, userId is left unknown`, async () => {
+      const impit = makeFakeImpit([
+        { status: 200, body: '{"csrfToken":"CSRF-A"}', setCookies: ['brw=B1; Path=/'] },
+        { status: 200, body: JSON.stringify({ loginType: 'password' }) },
+        { status: 302, location: '/', setCookies: ['__Host-airtable-session=SESSA; Path=/', '__Host-airtable-session.sig=SIGA; Path=/'] },
+        final,
+      ]);
+
+      const out = await directLogin({ ...CREDS, impitFactory: () => impit });
+
+      assert.ok(out.cookieHeader.includes('__Host-airtable-session=SESSA'));
+      // The login-flow csrf survives — the re-scrape is best-effort, not a gate.
+      assert.equal(out.csrfToken, 'CSRF-A');
+      assert.equal(out.userId, null);
+    });
+  }
+
+  it('a 2xx page that really carries no signed-in user still throws', async () => {
+    const impit = makeFakeImpit([
+      { status: 200, body: '{"csrfToken":"CSRF-A"}', setCookies: ['brw=B1; Path=/'] },
+      { status: 200, body: JSON.stringify({ loginType: 'password' }) },
+      { status: 302, location: '/', setCookies: ['__Host-airtable-session=SESSA; Path=/', '__Host-airtable-session.sig=SIGA; Path=/'] },
+      { status: 200, body: '<html><script>{"csrfToken":"CSRF-B"}</script></html>' },
+    ]);
+
+    await assert.rejects(
+      () => directLogin({ ...CREDS, impitFactory: () => impit }),
+      /DIRECT_LOGIN_UNVERIFIED/,
+    );
   });
 });
 
@@ -180,6 +241,42 @@ describe('directLogin — failure branches', () => {
     );
   });
 
+  // The reporter's own "cookie presence proves nothing" bullet (issue #21):
+  // jar.has('__Host-airtable-session') used to be the ONLY check here, and
+  // _doInitDirectLogin then set isLoggedIn=true with no verification at all.
+  it('session cookie set but the authed page serves NO signed-in user → throws DIRECT_LOGIN_UNVERIFIED', async () => {
+    const impit = makeFakeImpit([
+      { status: 200, body: '{"csrfToken":"CSRF-1"}', setCookies: ['brw=B; Path=/'] },
+      { status: 200, body: JSON.stringify({ loginType: 'password' }) },
+      { status: 302, location: '/', setCookies: ['__Host-airtable-session=S; Path=/'] },
+      // A cookie was set, but this is a signed-out page.
+      { status: 200, body: '<html><body>Sign in</body></html>' },
+    ]);
+    await assert.rejects(
+      () => directLogin({ ...CREDS, impitFactory: () => impit }),
+      /DIRECT_LOGIN_UNVERIFIED/,
+    );
+  });
+
+  // The other half of the tri-state: an UNREADABLE page is not a verdict. Reading
+  // "could not fetch" as "signed out" is the exact conflation that turned a scrape
+  // miss into a total outage at init, so direct-login must not repeat it — a
+  // transport blip during the best-effort csrf refresh keeps the login.
+  it('a failed authed GET / is NOT read as signed out — login stands, userId unknown', async () => {
+    const impit = makeFakeImpit([
+      { status: 200, body: '{"csrfToken":"CSRF-1"}', setCookies: ['brw=B; Path=/'] },
+      { status: 200, body: JSON.stringify({ loginType: 'password' }) },
+      { status: 302, location: '/', setCookies: ['__Host-airtable-session=S; Path=/'] },
+    ]);
+    const boom = { async fetch(url, options) {
+      if (new URL(url).pathname === '/' && options.method === 'GET') throw new Error('ECONNRESET');
+      return impit.fetch(url, options);
+    } };
+    const out = await directLogin({ ...CREDS, impitFactory: () => boom });
+    assert.equal(out.csrfToken, 'CSRF-1', 'keeps the login-flow token, as before');
+    assert.equal(out.userId, null);
+  });
+
   it('login completes but no session cookie was set → throws DIRECT_LOGIN_NO_SESSION', async () => {
     const impit = makeFakeImpit([
       { status: 200, body: '{"csrfToken":"CSRF-1"}', setCookies: ['brw=B; Path=/'] },
@@ -222,7 +319,7 @@ describe('directLogin — credential resolution', () => {
       { status: 200, body: '{"csrfToken":"C1"}', setCookies: ['brw=B; Path=/'] },
       { status: 200, body: JSON.stringify({ loginType: 'password' }) },
       { status: 302, location: '/', setCookies: ['__Host-airtable-session=S; Path=/'] },
-      { status: 200, body: '{"csrfToken":"C2"}' },
+      { status: 200, body: authedHome('C2') },
     ]);
     const out = await directLogin({ impitFactory: () => impit });
     assert.equal(bodyParams(impit.calls[1]).get('email'), 'env@example.com');
@@ -262,7 +359,7 @@ describe('directLogin — injected in-memory store (daemon runtime channel)', ()
       { status: 200, body: JSON.stringify({ loginType: 'password' }) },
       { status: 302, location: '/2fa/tfaINJ', setCookies: ['__Host-airtable-session=S1; Path=/'] },
       { status: 302, location: '/', setCookies: ['__Host-airtable-session=S2; Path=/'] },
-      { status: 200, body: '{"csrfToken":"C2"}' },
+      { status: 200, body: authedHome('C2') },
     ]);
 
     let totpArg = null;
@@ -287,7 +384,7 @@ describe('directLogin — injected in-memory store (daemon runtime channel)', ()
       { status: 200, body: '{"csrfToken":"C1"}', setCookies: ['brw=B; Path=/'] },
       { status: 200, body: JSON.stringify({ loginType: 'password' }) },
       { status: 302, location: '/', setCookies: ['__Host-airtable-session=S; Path=/'] },
-      { status: 200, body: '{"csrfToken":"C2"}' },
+      { status: 200, body: authedHome('C2') },
     ]);
     const out = await directLogin({ impitFactory: () => impit });
     assert.equal(bodyParams(impit.calls[1]).get('email'), 'env@example.com');
@@ -451,7 +548,8 @@ function makeCsrfAwareAirtable({ rotateSecretAtPasswordAuth = false } = {}) {
             })],
           });
         case '/':
-          return fakeResponse({ body: page(tokens.home) });
+          // Authed homepage: carries the signed-in user id, as a real one does.
+          return fakeResponse({ body: authedHome(tokens.home) });
         default:
           throw new Error(`fake Airtable: unexpected request ${options.method} ${pathname}`);
       }

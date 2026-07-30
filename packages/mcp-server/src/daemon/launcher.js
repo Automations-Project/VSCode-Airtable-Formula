@@ -563,6 +563,27 @@ export async function restartDaemon(options = {}) {
   return { stopped, reSpawned: true, connection };
 }
 
+/**
+ * Environment for the detached `daemon start` child.
+ *
+ * Only AIRTABLE_NO_DAEMON is stripped, and only because it is addressed to the
+ * PARENT: it means "don't delegate to a daemon, serve stdio yourself". Inherited
+ * by the child it is self-contradictory — index.js would skip the attach/serve
+ * path in the very process whose job is to BE the daemon.
+ *
+ * AIRTABLE_HEADLESS_ONLY is not an instruction to the parent, it is the host's
+ * display policy: the extension sets it to '1' on every daemon it owns
+ * (registration.ts, daemon-manager.ts, auto-config/index.ts) precisely so no
+ * browser window is ever put on the user's screen. Dropping it made a respawn
+ * quietly louder than the daemon it replaced. It is inherited.
+ */
+export function buildDetachedDaemonEnv(configDir, baseEnv = process.env) {
+  const env = { ...baseEnv };
+  delete env.AIRTABLE_NO_DAEMON;
+  env.AIRTABLE_USER_MCP_HOME = configDir;
+  return env;
+}
+
 export async function spawnDetachedDaemon(options) {
   const configDir = options.configDir ?? getHomeDir();
   const cliEntry = resolveCliEntry();
@@ -571,17 +592,10 @@ export async function spawnDetachedDaemon(options) {
     args.push('--port', String(options.port));
   }
 
-  const env = { ...process.env };
-  delete env.AIRTABLE_NO_DAEMON;
-  delete env.AIRTABLE_HEADLESS_ONLY;
-
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: 'ignore',
-    env: {
-      ...env,
-      AIRTABLE_USER_MCP_HOME: configDir,
-    },
+    env: buildDetachedDaemonEnv(configDir),
   });
   child.unref();
 }

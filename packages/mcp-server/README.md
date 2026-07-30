@@ -224,10 +224,12 @@ A browser window opens on [airtable.com/login](https://airtable.com/login). Sign
 Verify the session landed:
 
 ```bash
-npx -y airtable-user-mcp status
+npx -y airtable-user-mcp doctor
 ```
 
-You should see `Session: found`.
+You should see `Session: signed in as usrXXXXXXXXXXXXXX`. `doctor` actually probes Airtable, so it is the command that can tell you whether you are signed in.
+
+`status` is a quick inventory of what is on disk (`Browser profile: present`, `Daemon: …`) and deliberately makes no claim about the session — the files exist whether or not the login completed.
 
 ### 4. Configure your Claude client
 
@@ -298,7 +300,8 @@ It will call `list_tables` and return the names and IDs.
 
 | Symptom | Fix |
 |:--|:--|
-| `Session: not found` | Re-run `npx -y airtable-user-mcp login` |
+| `doctor` reports `Session: NOT signed in` | Re-run `npx -y airtable-user-mcp login` |
+| `Session invalid (0): airtable.com could not be reached` | Network/TLS/proxy, *not* an expired login — behind a TLS-inspecting proxy set `NODE_EXTRA_CA_CERTS`, else check `HTTPS_PROXY`/`NO_PROXY` |
 | Login window never loads | Check network / firewall, then `doctor` |
 | Browser download fails on Windows | Run PowerShell as Admin once, then retry `install-browser` |
 | Tools don't appear after config change | Fully quit and reopen Claude Desktop (not just the window) |

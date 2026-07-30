@@ -16,6 +16,7 @@
  */
 import path from 'path';
 import { getProfileDir } from './paths.js';
+import { POLL_BUDGET_LABEL, pollForSessionUser } from './session-user.js';
 
 const profileDir = getProfileDir();
 const browserChannel = process.env.AIRTABLE_BROWSER_CHANNEL || 'chrome';
@@ -61,48 +62,23 @@ async function main() {
 
     console.error('[manual-login] Browser opened. Waiting for user to log in...');
 
-    // Poll for authentication (5-minute timeout)
-    let loggedIn = false;
-    let userId = null;
-    const maxAttempts = 150; // 150 * 2s = 300s = 5 minutes
+    // A 2xx here is NOT proof of login — only a real user id is (see
+    // session-user.js / issue #21), so an anonymous answer keeps polling
+    // instead of ending the loop 2s in.
+    const { userId, closed, reason } = await pollForSessionUser(page);
 
-    for (let i = 0; i < maxAttempts; i++) {
-      await page.waitForTimeout(2000);
-      try {
-        const result = await page.evaluate(async () => {
-          try {
-            const res = await fetch('/v0.3/getUserProperties', {
-              headers: {
-                'x-airtable-inter-service-client': 'webClient',
-                'x-requested-with': 'XMLHttpRequest',
-              },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              return { ok: true, userId: data?.data?.userId };
-            }
-            return { ok: false, status: res.status };
-          } catch (e) {
-            return { ok: false, error: e.message };
-          }
-        });
-
-        if (result.ok) {
-          loggedIn = true;
-          userId = result.userId;
-          break;
-        }
-      } catch {
-        // Page navigating, keep waiting
-      }
-    }
-
-    if (loggedIn) {
+    if (userId) {
       console.error(`[manual-login] Login verified! User: ${userId}`);
       output({ ok: true, userId });
+    } else if (closed) {
+      // Closing the window is how a user abandons a login — a normal outcome,
+      // still a failure.
+      console.error('[manual-login] Browser closed before sign-in completed');
+      output({ ok: false, error: 'Browser closed before sign-in completed — run login again and finish signing in.' });
+      process.exit(1);
     } else {
-      console.error('[manual-login] Login not detected after 5 minutes');
-      output({ ok: false, error: 'Login not detected after 5 minutes' });
+      console.error(`[manual-login] Login not detected after ${POLL_BUDGET_LABEL} — ${reason}`);
+      output({ ok: false, error: `Login not detected after ${POLL_BUDGET_LABEL} — ${reason}` });
       process.exit(1);
     }
   } catch (e) {

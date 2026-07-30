@@ -78,6 +78,26 @@ describe('loadByoCredentials', () => {
     assert.equal(creds.csrfToken, 'SCRAPED-CSRF-42');
     assert.equal(seenReq.url, 'https://airtable.com/');
     assert.equal(seenReq.opts.headers.Cookie, 'brw=9');
+    // No sessionUserId in this fixture, so identity stays unknown — and that is
+    // fine: in byo it is advisory (issue #21), never a gate on the credentials.
+    assert.equal(creds.userId, null);
+  });
+
+  it('picks the signed-in user id out of the SAME scraped HTML, for free', async () => {
+    // The only place the id ever appears: the API's getUserProperties answers with
+    // 8 feature-flag booleans and no identity at all (live probes, 2026-07).
+    process.env.AIRTABLE_COOKIE = 'brw=9';
+    const html = '<html><script>{"csrfToken":"C","sessionUserId":"usrBYO00000000000"}</script></html>';
+    const creds = await loadByoCredentials({ fetchImpl: async () => ({ text: async () => html }) });
+    assert.equal(creds.csrfToken, 'C');
+    assert.equal(creds.userId, 'usrBYO00000000000');
+  });
+
+  it('a supplied csrf skips the fetch, so userId is simply unknown — never invented', async () => {
+    process.env.AIRTABLE_COOKIE = 'brw=9';
+    process.env.AIRTABLE_CSRF = 'ENV-CSRF';
+    const creds = await loadByoCredentials({ fetchImpl: async () => { throw new Error('should not fetch'); } });
+    assert.equal(creds.userId, null);
   });
 
   it('file source: reads cookie + csrf from ~/.airtable-user-mcp/credentials.json', async () => {

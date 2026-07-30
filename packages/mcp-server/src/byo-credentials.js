@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getHomeDir } from './paths.js';
 import { getInjectedCredentials } from './daemon/cred-store.js';
+import { scrapeSessionUserId } from './session-user.js';
 
 /** Path to the BYO credentials file. */
 export function getCredentialsPath() {
@@ -52,11 +53,16 @@ export function scrapeCsrf(html) {
  * @param {object}   [opts]
  * @param {Function} [opts.fetchImpl] test seam — overrides global fetch for the
  *                                    csrf-scrape GET.
- * @returns {Promise<{cookieHeader: string, csrfToken: string|null}>}
+ * @returns {Promise<{cookieHeader: string, csrfToken: string|null, userId: string|null}>}
  */
 export async function loadByoCredentials({ fetchImpl } = {}) {
   let cookieHeader = null;
   let csrfToken = null;
+  // Advisory only, and only when the csrf scrape below actually fetches HTML —
+  // that page is the sole place a signed-in user id appears (getUserProperties
+  // returns 8 feature-flag booleans and no identity: live probes, 2026-07). Null
+  // is normal here (a supplied csrf means no fetch happens) and must never gate.
+  let userId = null;
 
   // 0. Injected in-memory store — the daemon's runtime credential channel
   //    (POST /daemon/auth-credentials; never env/disk). Highest priority so a
@@ -111,6 +117,7 @@ export async function loadByoCredentials({ fetchImpl } = {}) {
       const res = await fetchFn('https://airtable.com/', { headers: { Cookie: cookieHeader } });
       const html = await res.text();
       csrfToken = scrapeCsrf(html);
+      userId = scrapeSessionUserId(html);
     } catch (err) {
       console.error(`[byo] Failed to fetch airtable.com for csrf scrape: ${err.message}`);
     }
@@ -122,5 +129,5 @@ export async function loadByoCredentials({ fetchImpl } = {}) {
     }
   }
 
-  return { cookieHeader, csrfToken: csrfToken ?? null };
+  return { cookieHeader, csrfToken: csrfToken ?? null, userId };
 }

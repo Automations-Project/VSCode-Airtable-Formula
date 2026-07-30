@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import { startDaemonServer } from '../src/daemon/server.js';
+import { rotateToken } from '../src/daemon/token.js';
 import { getInjectedCredentials, clearInjectedCredentials } from '../src/daemon/cred-store.js';
 
 let tmpDir;
@@ -217,6 +218,65 @@ describe('POST /daemon/auth-credentials', () => {
     const response = await fetch(url(), authed({ authMode: 'byo', cookie: 12345 }));
     assert.strictEqual(response.status, 400);
     assert.equal(getInjectedCredentials(), null);
+  });
+});
+
+describe('module-level rotateToken against a live server', () => {
+  let s3;
+  let tmp3;
+
+  before(async () => {
+    tmp3 = join(tmpdir(), 'test-airtable-token-adopt-' + process.pid);
+    mkdirSync(tmp3, { recursive: true });
+    s3 = await startDaemonServer({ port: 0, configDir: tmp3 });
+  });
+
+  after(async () => {
+    if (s3) await s3.stop().catch(() => {});
+    rmSync(tmp3, { recursive: true, force: true });
+  });
+
+  it('adopts a rotation performed through the module function, not the route', async () => {
+    const before = s3.bearerToken;
+    const rotated = rotateToken({ tokenPath: s3.tokenPath });
+    assert.notStrictEqual(rotated.bearerToken, before, 'rotation should mint a new bearer');
+
+    // Before the fix the server kept authenticating against `before`, so the caller
+    // that just rotated could never talk to the daemon again — and getDaemonStatus,
+    // whose heal path only retries with the on-disk token it already matched, was
+    // stuck reporting {running:true, healthy:false} for the life of the process.
+    assert.strictEqual(s3.bearerToken, rotated.bearerToken);
+    const response = await fetch(`http://127.0.0.1:${s3.port}/daemon/health`, {
+      headers: { Authorization: `Bearer ${rotated.bearerToken}` },
+    });
+    assert.strictEqual(response.status, 200);
+  });
+
+  it('stops honouring the pre-rotation bearer', async () => {
+    const stale = s3.bearerToken;
+    const rotated = rotateToken({ tokenPath: s3.tokenPath });
+    assert.notStrictEqual(rotated.bearerToken, stale);
+    const response = await fetch(`http://127.0.0.1:${s3.port}/daemon/health`, {
+      headers: { Authorization: `Bearer ${stale}` },
+    });
+    assert.strictEqual(response.status, 401);
+  });
+
+  it('ignores a rotation of some other config dir\'s token file', async () => {
+    const mine = s3.bearerToken;
+    rotateToken({ tokenPath: join(tmp3, 'someone-elses.token') });
+    assert.strictEqual(s3.bearerToken, mine);
+  });
+
+  it('unsubscribes on stop — a stopped server never adopts', async () => {
+    const tmp4 = join(tmpdir(), 'test-airtable-token-unsub-' + process.pid);
+    mkdirSync(tmp4, { recursive: true });
+    const s4 = await startDaemonServer({ port: 0, configDir: tmp4 });
+    const atStop = s4.bearerToken;
+    await s4.stop();
+    rotateToken({ tokenPath: s4.tokenPath });
+    assert.strictEqual(s4.bearerToken, atStop);
+    rmSync(tmp4, { recursive: true, force: true });
   });
 });
 

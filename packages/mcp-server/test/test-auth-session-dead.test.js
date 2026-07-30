@@ -51,6 +51,24 @@ describe('AirtableAuth — throttle backoff vs. recovery', () => {
     assert.equal(a._sessionDead, false);
     assert.equal(a._recoveryStreak, 0);
   });
+
+  // A status-0 transport failure has NO response body, so the trip body — the field
+  // a records-job abort reason embeds specifically to state the REAL reason — was
+  // arriving empty for exactly the failures (CA cert / proxy / DNS) that cannot be
+  // diagnosed any other way. And the headline called it an expired login.
+  it('a status-0 network failure carries its transport error in BOTH the trip body and the message', async () => {
+    const a = fakeAuth();
+    a._rawApiCall = async () => ({
+      status: 0,
+      error: 'fetch failed: unable to get local issuer certificate (set NODE_EXTRA_CA_CERTS)',
+    });
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), (err) => {
+      assert.match(err.message, /unable to get local issuer certificate/, 'the CA advice reaches the caller');
+      assert.match(err.message, /network\/TLS\/proxy, not an expired login/);
+      return true;
+    });
+    assert.match(a.getLastTrip().body, /unable to get local issuer certificate/);
+  });
 });
 
 // A latched breaker used to be unrecoverable in browser mode: _apiCall short-circuits on

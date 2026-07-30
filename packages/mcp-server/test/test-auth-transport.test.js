@@ -297,7 +297,8 @@ describe('auth AIRTABLE_AUTH_MODE=byo', () => {
     process.env.AIRTABLE_COOKIE = 'brw=byo; __Host-airtable-session=sess';
     process.env.AIRTABLE_CSRF = 'BYO-CSRF'; // avoids a network scrape
     const transport = fakeTransport();
-    transport.next = { status: 200, body: JSON.stringify({ data: { userId: 'usr999' } }) };
+    // Real authenticated body shape: feature flags, no identity anywhere.
+    transport.next = { status: 200, body: '{"gemini":false,"libra":false}' };
     try {
       const auth = byoAuth(transport);
       await auth.init();
@@ -305,7 +306,10 @@ describe('auth AIRTABLE_AUTH_MODE=byo', () => {
       assert.equal(auth.context, null);
       assert.equal(auth.page, null);
       assert.equal(auth.isLoggedIn, true);
-      assert.equal(auth.userId, 'usr999');
+      // byo learns the id only from the HTML loadByoCredentials fetches for a csrf
+      // scrape, and AIRTABLE_CSRF above skips that fetch — so identity is
+      // unavailable here (issue #21): null, never invented, and never a gate.
+      assert.equal(auth.userId, null);
       // The verify GET carried the byo cookie via the direct-HTTP transport.
       assert.equal(transport.calls[0].method, 'GET');
       assert.match(transport.calls[0].url, /getUserProperties/);
@@ -375,6 +379,26 @@ describe('auth AIRTABLE_AUTH_MODE=byo', () => {
       const auth = byoAuth(transport);
       await auth.init();
       await assert.rejects(() => auth._recoverSession(), /BYO_CREDENTIALS_EXPIRED/);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a byo recovery that failed on TRANSPORT says so, instead of blaming the cookie alone', async () => {
+    // Its sibling at init already carried this detail. Without it, a
+    // TLS-inspecting-proxy failure tells a byo user to re-paste a cookie that was
+    // never the problem.
+    process.env.AIRTABLE_COOKIE = 'brw=old';
+    process.env.AIRTABLE_CSRF = 'c';
+    const transport = fakeTransport();
+    let n = 0;
+    transport.next = () => (++n === 1
+      ? { status: 200, body: '{"gemini":false}' }
+      : { status: 0, error: 'fetch failed: self-signed certificate in certificate chain' });
+    try {
+      const auth = byoAuth(transport);
+      await auth.init();
+      await assert.rejects(() => auth._recoverSession(), /self-signed certificate in certificate chain/);
     } finally {
       restore();
     }

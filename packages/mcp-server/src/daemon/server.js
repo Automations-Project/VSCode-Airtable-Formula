@@ -18,7 +18,7 @@ import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { withToolDispatchContext } from '../page-scheduler.js';
-import { ensureToken, rotateToken, getTokenPath } from './token.js';
+import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
 import {
@@ -236,6 +236,14 @@ export async function startDaemonServer(options = {}) {
     : ensureToken({ tokenPath });
 
   let currentToken = initialToken;
+  // A rotation driven through the module-level rotateToken() — CLI, a tool
+  // handler, anything that is not POST /daemon/rotate-token — cannot reach this
+  // closure on its own. Subscribing makes adoption unconditional, so no rotation
+  // can strand this process on a bearer nobody will present again.
+  const unsubscribeTokenRotate = onTokenRotate((record, rotatedPath) => {
+    if (rotatedPath !== tokenPath) return; // another configDir's daemon, not ours
+    currentToken = record;
+  });
   let closed = false;
   let activeTunnel = null;
 
@@ -738,6 +746,7 @@ export async function startDaemonServer(options = {}) {
     if (closed) return;
     closed = true;
 
+    unsubscribeTokenRotate();
     try { toolConfig.stopWatching(); } catch { /* best-effort */ }
 
     // Close shared browser + tree-kill orphan Chromium before lock release.

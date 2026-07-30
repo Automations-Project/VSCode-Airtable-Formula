@@ -18,6 +18,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getProfileDir } from './paths.js';
+import { POLL_BUDGET_LABEL, pollForSessionUser } from './session-user.js';
 
 dotenv.config();
 
@@ -94,40 +95,22 @@ async function mainManual(profileDir) {
     const page = context.pages()[0] || await context.newPage();
     await page.goto('https://airtable.com/login', { waitUntil: 'domcontentloaded' });
 
-    let loggedIn = false;
-    let attempts = 0;
-    while (!loggedIn && attempts < 150) {
-      attempts++;
-      await page.waitForTimeout(2000);
-      try {
-        const result = await page.evaluate(async () => {
-          try {
-            const res = await fetch('/v0.3/getUserProperties', {
-              headers: {
-                'x-airtable-inter-service-client': 'webClient',
-                'x-requested-with': 'XMLHttpRequest',
-              },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              return { ok: true, userId: data?.data?.userId };
-            }
-            return { ok: false, status: res.status };
-          } catch (e) {
-            return { ok: false, error: e.message };
-          }
-        });
-        if (result.ok) {
-          loggedIn = true;
-          console.log('✅ Login verified! User:', result.userId);
-        }
-      } catch {
-        // Page navigating, keep waiting
-      }
+    // A 2xx from the probe is NOT proof of login — only a real user id is (see
+    // session-user.js / issue #21), so an anonymous answer keeps polling.
+    const { userId, closed, reason } = await pollForSessionUser(page);
+
+    if (closed) {
+      // Closing the window is how a user abandons a login — a normal exit, not
+      // an unhandled waitForTimeout rejection. Still a FAILURE: exiting 0 here
+      // reintroduced issue #21 through the exit code, so `login && daemon start`
+      // would march on as though somebody had signed in.
+      console.log('\nBrowser closed before sign-in completed. Run login again to finish signing in.');
+      process.exitCode = 1;
+      return;
     }
+    if (!userId) throw new Error(`Login not detected after ${POLL_BUDGET_LABEL} — ${reason}`);
 
-    if (!loggedIn) throw new Error('Login not detected after 5 minutes');
-
+    console.log('✅ Login verified! User:', userId);
     console.log('\nSession stored in Chrome profile.');
     console.log('MCP server will use this session headlessly.');
     console.log('\nClosing browser...');
@@ -229,47 +212,27 @@ async function main() {
   }
 
   // ─── Poll for authentication ──────────────────────────────────
-  let loggedIn = false;
-  let attempts = 0;
+  // A 2xx from the probe is NOT proof of login — only a real user id is (see
+  // session-user.js / issue #21), so an anonymous answer keeps polling.
+  const { userId, closed, reason } = await pollForSessionUser(page);
 
-  while (!loggedIn && attempts < 150) {
-    attempts++;
-    await page.waitForTimeout(2000);
-
-    try {
-      const result = await page.evaluate(async () => {
-        try {
-          const res = await fetch('/v0.3/getUserProperties', {
-            headers: {
-              'x-airtable-inter-service-client': 'webClient',
-              'x-requested-with': 'XMLHttpRequest',
-            },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            return { ok: true, userId: data?.data?.userId };
-          }
-          return { ok: false, status: res.status };
-        } catch (e) {
-          return { ok: false, error: e.message };
-        }
-      });
-
-      if (result.ok) {
-        loggedIn = true;
-        console.log('✅ Login verified! User:', result.userId);
-      }
-    } catch {
-      // Page navigating, keep waiting
-    }
+  if (closed) {
+    // Closing the window is how a user abandons a login — a normal exit, not an
+    // unhandled waitForTimeout rejection. Still a FAILURE: exiting 0 here
+    // reintroduced issue #21 through the exit code, so `login && daemon start`
+    // would march on as though somebody had signed in.
+    console.log('\nBrowser closed before sign-in completed. Run login again to finish signing in.');
+    process.exitCode = 1;
+    return;
   }
 
-  if (!loggedIn) {
+  if (!userId) {
     // Throw so the outer finally closes the browser, then the top-level
     // main().catch sets exit code 1.
-    throw new Error('Login not detected after 5 minutes');
+    throw new Error(`Login not detected after ${POLL_BUDGET_LABEL} — ${reason}`);
   }
 
+  console.log('✅ Login verified! User:', userId);
   console.log('\nSession stored in Chrome profile.');
   console.log('MCP server will use this session headlessly.');
   console.log('\nClosing browser...');

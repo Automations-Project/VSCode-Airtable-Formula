@@ -121,8 +121,10 @@ describe('AirtableAuth._doInit — profile-lock recovery end-to-end', () => {
       async waitForSelector() { return {}; },
       async waitForFunction() { return true; },
       async waitForTimeout() {},
-      // _extractCsrf uses page.evaluate; return a token so it "finds" CSRF.
-      async evaluate() { return 'CSRF-FROM-FAKE'; },
+      // _extractCsrf reads BOTH page-only credentials in one evaluate: the csrf
+      // token and the signed-in user id from the page bootstrap (getUserProperties
+      // never carries an identity — issue #21).
+      async evaluate() { return { csrfToken: 'CSRF-FROM-FAKE', sessionUserId: 'usrFAKE0000000000' }; },
       context() {
         return {
           cookies: async () => [{ name: 'brw', value: '1', domain: '.airtable.com' }],
@@ -151,7 +153,8 @@ describe('AirtableAuth._doInit — profile-lock recovery end-to-end', () => {
     // Stub the direct-HTTP verify so _verifySession sees a valid session
     // without any network. _snapshotCredentials runs for real over the fake
     // page cookies, then _verifySession issues this GET.
-    auth._rawApiCall = async () => ({ status: 200, body: JSON.stringify({ data: { userId: 'usrFAKE' } }) });
+    // Real authenticated body shape: feature flags, no identity anywhere.
+    auth._rawApiCall = async () => ({ status: 200, body: '{"gemini":false,"libra":false}' });
     return auth;
   }
 
@@ -174,7 +177,7 @@ describe('AirtableAuth._doInit — profile-lock recovery end-to-end', () => {
     assert.equal(killed, 1, 'stale holder killed exactly once');
     assert.equal(auth.context, ctx);
     assert.equal(auth.isLoggedIn, true);
-    assert.equal(auth.userId, 'usrFAKE');
+    assert.equal(auth.userId, 'usrFAKE0000000000');
   });
 
   it('init() with a clean launch never kills (default path unchanged)', async () => {
