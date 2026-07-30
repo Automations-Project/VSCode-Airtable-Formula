@@ -3,7 +3,7 @@
   "name": "io.github.Automations-Project/airtable-user-mcp",
   "title": "Airtable User MCP",
   "description": "Manage Airtable bases via the internal API: schema inspection, table/field/view CRUD, formula validation and download, record CRUD, sidebar sections, record templates, extensions, base-to-base sync, and daemon control",
-  "version": "2.4.15",
+  "version": "2.5.0",
   "websiteUrl": "https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server",
   "repository": {
     "url": "https://github.com/Automations-Project/VSCode-Airtable-Formula",
@@ -22,7 +22,7 @@
     {
       "registryType": "npm",
       "identifier": "airtable-user-mcp",
-      "version": "2.4.15",
+      "version": "2.5.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"

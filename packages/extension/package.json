@@ -1,7 +1,7 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.1.32",
+  "version": "2.2.0",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
   "description": "Airtable formula, script & automation editor with MCP server (72 tools), language server, and AI skills for VS Code.",
@@ -407,7 +407,11 @@
         "airtableFormula.mcp.authMode": {
           "type": "string",
           "default": "browser",
-          "enum": ["browser", "byo", "direct-login"],
+          "enum": [
+            "browser",
+            "byo",
+            "direct-login"
+          ],
           "enumDescriptions": [
             "Log in through a bundled headless Chrome, then run all API calls over direct HTTP (default). The browser only mints/refreshes the session cookie.",
             "Bring your own cookie — no browser. Paste a session cookie into ~/.airtable-user-mcp/credentials.json (or set the AIRTABLE_COOKIE env var); the CSRF token is scraped automatically.",
@@ -418,7 +422,10 @@
         "airtableFormula.mcp.httpClient": {
           "type": "string",
           "default": "fetch",
-          "enum": ["fetch", "impit"],
+          "enum": [
+            "fetch",
+            "impit"
+          ],
           "enumDescriptions": [
             "Node's built-in fetch (default) — verified to work against Airtable's internal API with no TLS impersonation.",
             "impit with Chrome TLS impersonation — a fallback if Airtable ever fingerprints non-browser clients. Requires the optional 'impit' package to be available to the server."
@@ -431,7 +438,6 @@
           "minimum": 0,
           "description": "Minutes of idle time before the shared daemon parks (closes) its Chromium browser to free ~300–600 MB RSS. Cookie-based HTTP keeps working; the browser is only relaunched if session recovery needs it. Set 0 to disable. Takes effect on the next daemon/server restart."
         },
-
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",
