@@ -335,7 +335,52 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
     // the schema is clean before record sync begins. Mutates `result` in-place.
     if (!result.aborted) {
-      await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
+      // Re-validate the orphan list against the LIVE source before deleting anything.
+      //
+      // The drift guard above fingerprints only the DESTINATION, but `plan.orphans` is a
+      // statement about the SOURCE ("this dest object has no source counterpart"). A
+      // source-side ADDITION between plan and apply is therefore completely invisible:
+      // the dest is untouched so the fingerprint matches, no DRIFT fires, applyPlan has
+      // no create action for the new field (the plan predates it) — and pruneSchema then
+      // deletes the dest field that now legitimately matches, taking its data with it.
+      // deleteField's expectedName guard cannot help: the dest field kept its name.
+      //
+      // Only pay for the extra read when we are actually going to delete something.
+      let prunePlan = fullPlan;
+      const orphanList = fullPlan.orphans || [];
+      if (orphanList.length && (confirmDeletions || confirmTableDeletions)) {
+        try {
+          const srcNow = await snapshotSchemaOnly(client, sourceBaseId);
+          const srcTablesByName = new Map((srcNow.tables || []).map((t) => [t.name, t]));
+          const stillOrphaned = orphanList.filter((o) => {
+            if (o.kind === 'table') return !srcTablesByName.has(o.name);
+            const st = srcTablesByName.get(o.tableName);
+            if (!st) return true; // whole source table gone → its children are still orphans
+            const pool = o.kind === 'field' ? (st.fields || [])
+              : o.kind === 'view' ? (st.views || [])
+              : (st.sections || []);
+            return !pool.some((x) => x.name === o.name);
+          });
+          for (const o of orphanList.filter((o) => !stillOrphaned.includes(o))) {
+            result.warnings.push({
+              code: 'ORPHAN_STALE_SKIPPED',
+              message: `${o.kind} "${o.name}"${o.tableName ? ` in "${o.tableName}"` : ''} was planned for deletion but now has a source counterpart — the source changed after plan ${planId}. Kept. Re-run mode=plan to sync it.`,
+            });
+          }
+          if (stillOrphaned.length !== orphanList.length) prunePlan = { ...fullPlan, orphans: stillOrphaned };
+        } catch (e) {
+          // Cannot prove the orphan list is current → do not delete on a stale one.
+          prunePlan = { ...fullPlan, orphans: [] };
+          result.warnings.push({
+            code: 'ORPHAN_RECHECK_FAILED',
+            message: `Could not re-read the source to confirm ${orphanList.length} planned deletion(s) are still orphans (${e.message ?? e}); skipped all schema deletions this run.`,
+          });
+        }
+      }
+
+      // fieldMappings is threaded through so pruneSchema never deletes a mapping
+      // TARGET — those are dest-only by construction and therefore always orphans.
+      await pruneSchema({ client, destAppId: destBaseId, plan: prunePlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result, fieldMappings });
 
       // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
       // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single

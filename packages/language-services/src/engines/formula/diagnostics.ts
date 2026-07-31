@@ -120,11 +120,35 @@ function getExclusionRanges(text: string): Array<{ start: number; end: number }>
   return ranges;
 }
 
+/**
+ * Is `position` inside one of the excluded spans?
+ *
+ * Called once per CHARACTER by checkParentheses, checkQuotes and checkBrackets, and
+ * once per match by five more checkers. `ranges.some(...)` made that chars × refs —
+ * on this repo's own largest shipped example (38,830 chars / 741 field refs) that is
+ * ~29M comparisons of blocked extension host per keystroke, with no debounce and no
+ * size cap on either entry point (registration.ts's onDidChangeTextDocument and the
+ * LSP's onDidChangeContent, which in --tcp mode is shared by every attached editor).
+ *
+ * getFieldRefRanges scans left to right and does not nest, so `ranges` is already
+ * sorted and non-overlapping — binary search is a drop-in, allocation-free swap.
+ */
 function isInsideExclusionRange(
   position: number,
-  ranges: Array<{ start: number; end: number }>
+  ranges: Array<{ start: number; end: number }>,
+  startPad = 0,
+  endPad = 0
 ): boolean {
-  return ranges.some(range => position >= range.start && position < range.end);
+  let lo = 0;
+  let hi = ranges.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const range = ranges[mid];
+    if (position < range.start + startPad) hi = mid - 1;
+    else if (position >= range.end + endPad) lo = mid + 1;
+    else return true;
+  }
+  return false;
 }
 
 // Spans of complete {…} field references, computed outside string literals (no nesting).
@@ -302,7 +326,11 @@ function checkBrackets(text: string, uri?: string): LsDiagnostic[] {
   for (let i = 0; i < text.length; i++) {
     // Skip the INTERIOR of complete {…} refs (a quote in a field name must not flip
     // string state) but still see the braces themselves so balance-checking works.
-    const interior = fieldRefRanges.some(r => i > r.start && i < r.end - 1);
+    // Binary search, not .some() — this runs once per character (see the note on
+    // isInsideExclusionRange). Shrinking the span by one at each end reproduces the
+    // old strict `i > r.start && i < r.end - 1` predicate: the braces stay visible so
+    // balance-checking still works, only the field NAME is skipped.
+    const interior = isInsideExclusionRange(i, fieldRefRanges, 1, -1);
     if (interior) continue;
 
     if (

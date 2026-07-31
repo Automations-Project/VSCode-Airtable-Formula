@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-31 — sync prune could delete data it had not replaced)
+
+- **`pruneRecords` had only a RUN-wide failure gate.** The "don't prune after a failed run" check
+  was `failed > 0 && created === 0 && updated === 0 && skipped === 0` against global accumulators,
+  so a single converged row in *any other table* (counted as `skipped`) disarmed it. A
+  `FIELD_FORBIDDEN` 403 is a per-field permission property that fails every row of exactly one
+  table by design, so "one table wholly failed, the rest fine" is routine — and under
+  `mirror` + `confirmDeletions` that table's pre-existing dest rows were deleted while their
+  replacement data was never written, with the job reporting `phase='done'`. Pass 1 now records
+  per-table outcomes (`result.perTable`) and `pruneRecords` skips any table with
+  `failed > 0 && created + updated + skipped === 0`, emitting `RECORDS_FAILED_PRUNE_SKIPPED` —
+  the same shape as the existing truncation guard.
+- **`pruneSchema` deleted the `fieldMappings` targets `apply()` had just validated.** A mapping
+  target must exist on the dest and be writable but is *not* required to exist on the source — the
+  documented injection pattern (source autoNumber `Code` → dest text field `InjectID`) is dest-only
+  by construction and therefore always classified an orphan. `apply()` validated the mappings, then
+  called `pruneSchema` without them and deleted the target; the background records job then
+  re-validated, threw `FIELD_MAP_INVALID` and synced zero records. Net effect: a destination column
+  destroyed and no data written. `fieldMappings` is now threaded through and targets are kept with
+  `FIELD_MAP_TARGET_PROTECTED`.
+- **The drift guard fingerprints only the DESTINATION, but `plan.orphans` is a statement about the
+  SOURCE.** A source-side *addition* between plan and apply was invisible: the dest was untouched so
+  the fingerprint matched, no `DRIFT`/`RESUME_DRIFT` fired, `applyPlan` had no create action for the
+  new field (the plan predates it) — and `pruneSchema` then deleted the dest field that now
+  legitimately matched, taking its data with it. `deleteField`'s `expectedName` guard cannot help,
+  because the dest field kept its name. `apply()` now re-reads the source before any schema deletion
+  and drops orphans that have regained a counterpart (`ORPHAN_STALE_SKIPPED`); if that read fails it
+  skips all schema deletion for the run rather than trusting a stale list (`ORPHAN_RECHECK_FAILED`).
+  The extra read is only paid when deletions are actually confirmed.
+
+### Fixed (2026-07-31 — force-stop could kill an unrelated process; converged re-syncs re-posted every cell)
+
+- **`stopDaemon --force` SIGKILLed a pid read from the lockfile with no identity check.** The only
+  thing establishing that the pid was the daemon was `isStale()`'s bare `process.kill(pid, 0)`
+  liveness probe, which cannot distinguish our daemon from a process that recycled the pid after an
+  unclean death. In that state the lock persists with a live-but-foreign pid, the 10s wait never
+  clears, and the force branch signalled a stranger — on Windows `SIGTERM` maps to
+  `TerminateProcess`, so even the "graceful" first step is an unsavable hard kill. Now mirrors the
+  extension's `_verifyDaemonIdentity`: probe `/daemon/health` and require the uuid to echo the
+  lockfile's. Unproven ⇒ release the stale lock, leave the process alone, and say so.
+- **`buildUpdateCells` performed no comparison against the destination.** `updateRecords` issues one
+  serialized HTTP POST *per cell*, and every mapped writable scalar was re-posted on every re-sync
+  even when nothing had changed — 1000 rows × 20 fields = 20,000 sequential requests for a run that
+  changes nothing. Converged cells are now skipped, which collapses most rows to zero cells and lets
+  the existing empty-row skip drop them entirely. Cleared-cell propagation is unaffected.
+
 ### Fixed (2026-07-31 — tunnel revocation reached only half the cases)
 
 - **The daemon held TWO independent `activeTunnel` handles**, one in `daemon/server.js` (filled by

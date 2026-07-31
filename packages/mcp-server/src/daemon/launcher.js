@@ -561,6 +561,36 @@ export async function stopDaemon(options = {}) {
   }
 
   const pid = recordForShutdown.pid;
+
+  // NEVER signal a pid we have not PROVEN is our daemon.
+  //
+  // isStale()'s liveness probe is a bare `process.kill(pid, 0)` — it cannot tell our
+  // daemon from an unrelated process that recycled the pid after an unclean death.
+  // In that state the lock persists with a live-but-foreign pid, so status is
+  // running/unhealthy, the 10s wait never clears, and this branch used to SIGTERM
+  // then SIGKILL a stranger's process. On Windows `process.kill(pid,'SIGTERM')` maps
+  // to TerminateProcess, so even the "graceful" step is an unsavable hard kill.
+  // The extension already gates its equivalent on _verifyDaemonIdentity; this
+  // mirrors it — probe /daemon/health and require the uuid to echo the lockfile's.
+  let provenOurDaemon = false;
+  try {
+    const health = await adminRequest(recordForShutdown, '/daemon/health', { method: 'GET' });
+    provenOurDaemon = !!recordForShutdown.uuid && health?.uuid === recordForShutdown.uuid;
+  } catch { /* unreachable → unproven, fall through */ }
+
+  if (!provenOurDaemon) {
+    // Release the lock so a fresh daemon can start, but leave the process alone.
+    try {
+      release({ lockPath: getLockfilePath(configDir), expectedUuid: recordForShutdown.uuid });
+    } catch { /* best-effort */ }
+    return {
+      stopped: false,
+      forced: false,
+      pid,
+      reason: `Refusing to force-kill pid ${pid}: it did not answer /daemon/health with this lockfile's uuid, so it cannot be shown to be our daemon — the pid may have been recycled by an unrelated process. The stale lock was released, so a new daemon can start normally. If you are certain pid ${pid} is a hung airtable-user-mcp daemon, end it yourself.`,
+    };
+  }
+
   let signalled = false;
   try {
     process.kill(pid, 'SIGTERM');

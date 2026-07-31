@@ -349,9 +349,39 @@ export function buildUpdateCells(srcFields, srcCells, destCells, idmap, warnings
       continue;
     }
     if (Array.isArray(coerced.value)) continue; // defensive: no array must ever enter the row payload
+    // Skip cells the destination already agrees with. updateRecords issues ONE
+    // serialized HTTP POST per CELL (client.js `updatePrimitiveCell`), and without
+    // this comparison every mapped scalar cell of every mapped row was re-posted on
+    // every re-sync even when nothing had changed — 1000 rows x 20 fields = 20,000
+    // sequential requests for a no-op run. On a converged table this collapses most
+    // rows to zero cells, which the existing empty-row skip then drops entirely.
+    if (destCells && sameCellValue(destCells[mapping.destFld], coerced.value)) continue;
     cells[mapping.destFld] = coerced.value;
   }
   return cells;
+}
+
+/**
+ * Value equality for the Pass-1 update diff.
+ *
+ * Only ever sees scalars here — array-shaped cells returned earlier, and the
+ * Array.isArray guard above is belt-and-braces — so strict equality covers the
+ * common case and a structural compare covers the object-shaped ones (select
+ * choices, dates carrying a timezone wrapper). Deliberately conservative: when in
+ * doubt it reports "different" and we simply write the cell as before.
+ */
+function sameCellValue(a, b) {
+  if (a === b) return true;
+  // An absent dest cell and an explicit null/'' source cell are not worth a request
+  // apart, but only treat them equal when BOTH sides are empty-ish.
+  const empty = (v) => v === undefined || v === null || v === '';
+  if (empty(a) && empty(b)) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -558,6 +588,17 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
   for (const srcTable of orderedTables) {
     // A session death latched by a prior table/chunk aborts the whole job — never start a new table.
     if (client.auth?.isSessionDead?.()) { markAborted(client, result); return; }
+    // Per-table write outcome, derived by diffing the run-wide counters across this
+    // iteration. pruneRecords needs it: the only "don't prune after a failure" gate
+    // used to be RUN-wide (failed>0 && created===0 && updated===0 && skipped===0), so a
+    // single converged row anywhere in the run disarmed it — and a table whose every
+    // write failed (a FIELD_FORBIDDEN 403 is a schema-level property that fails every
+    // row of one table by design) then had its pre-existing dest rows deleted under
+    // mirror while the replacement data was never written.
+    const countsBefore = {
+      created: result.created, updated: result.updated,
+      skipped: result.skipped, failed: result.failed,
+    };
     const destTableId = idmap.tables[srcTable.id];
     if (!destTableId) continue; // table not matched → skip
 
@@ -711,6 +752,16 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
       }
       persist(idmap, journal);
     }
+
+    // Record what this table actually achieved, for pruneRecords' per-table gate.
+    // Tables that `continue` above never reach here — they attempted no writes, so
+    // the absence of an entry correctly reads as "nothing failed".
+    (result.perTable ??= {})[srcTable.name] = {
+      created: result.created - countsBefore.created,
+      updated: result.updated - countsBefore.updated,
+      skipped: result.skipped - countsBefore.skipped,
+      failed: result.failed - countsBefore.failed,
+    };
   }
 }
 
@@ -1702,6 +1753,24 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
         message: `Table "${t.name}": snapshot capped at 1000 rows — cannot safely distinguish ` +
           `dest-only orphans from records beyond the limit; skipping mirror deletion to avoid data loss ` +
           `(>1000-row pagination is a follow-up).`,
+      });
+      continue;
+    }
+
+    // Per-table write-failure gate. Deleting dest-only rows in a table whose every
+    // write failed destroys the existing data AND leaves nothing in its place — the
+    // run-wide RECORDS_ALL_FAILED gate cannot catch it, because one converged row in
+    // any other table (counted as `skipped`) disarms it. A FIELD_FORBIDDEN 403 is a
+    // per-field permission property, so "every row of exactly one table failed" is a
+    // routine outcome, not an exotic one.
+    const tableCounts = result.perTable?.[t.name];
+    if (tableCounts && tableCounts.failed > 0
+        && tableCounts.created === 0 && tableCounts.updated === 0 && tableCounts.skipped === 0) {
+      result.warnings.push({
+        code: 'RECORDS_FAILED_PRUNE_SKIPPED',
+        message: `Table "${t.name}": all ${tableCounts.failed} record write(s) failed — skipping mirror ` +
+          `deletion so dest-only rows are not destroyed while their replacement data was never written. ` +
+          `Fix the cause (see warnings) and re-run mode=apply with the same planId.`,
       });
       continue;
     }

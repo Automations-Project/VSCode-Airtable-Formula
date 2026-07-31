@@ -6,6 +6,19 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed — formula diagnostics were quadratic, blocking the editor on every keystroke (2026-07-31)
+
+- **`isInsideExclusionRange` was a linear scan run once per character.** `ranges.some(...)` is
+  O(field refs) and is called per character by `checkParentheses`, `checkQuotes` and
+  `checkBrackets`, plus once per match by five more checkers — so cost was chars × refs, with no
+  debounce and no size cap on either entry point (`registration.ts`'s `onDidChangeTextDocument`
+  and the LSP's `onDidChangeContent`, which in `--tcp` daemon mode is shared by every attached
+  editor). `getFieldRefRanges` emits ascending, non-overlapping spans, so this is now a binary
+  search. Measured on this repo's own largest shipped example
+  (`examples/[IGD-JSON]~[Payload]~[Formula].formula`, 38,830 chars / 741 refs):
+  **83.3 ms → 9.6 ms** per run. On an 87 KB / 4,000-ref synthetic: **592 ms → 10 ms**. Diagnostic
+  output is byte-identical before and after.
+
 ### Fixed — Unconfigure destroyed unrelated config in Codex / Helix files (2026-07-31)
 
 - **`unconfigureMcpToml` and `unconfigureHelix` truncated the user's config file from our marker
