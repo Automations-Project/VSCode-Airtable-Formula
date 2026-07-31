@@ -6,6 +6,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed — formatter tokenizers silently corrupted formulas / hung the extension host (2026-07-31)
+
+Found by audit, both reproduced before fixing.
+
+- **The default (v2) beautifier and minifier deleted lowercase function names and wrote the
+  result to disk.** Airtable function names are case-insensitive, but both v2 tokenizers matched
+  `/[A-Z_]/` with **no `/i` flag**, so every `a`–`z` character fell through to the operator
+  chain's `else { i++ }` catch-all and vanished from the token stream. Measured before the fix:
+  `lower({Email})` → `({Email})`, `IF({A}, lower({B}), 0)` → `IF({A}, ({B}), 0)`,
+  `if({A},1,0)` →(minify)→ `({A},1,0)`, `If({A},1,0)` →(minify)→ `I({A},1,0)`. Because the
+  mangled output still *parses*, `beautify()`'s try/catch never fired and no diagnostic was
+  raised — so Shift+Alt+F and `editor.formatOnSave` corrupted the buffer silently, and the bulk
+  `beautifyFilesWithStyle` path wrote unopened files directly with no undo stack. Both
+  tokenizers now match case-insensitively and canonicalise only for the `FUNCTIONS`/`CONSTANTS`
+  lookup, so **the casing you typed is preserved** in the output.
+- **The v1 beautifier and minifier hung the extension host on an unrecognized character.** The
+  identifier fallback was the only branch of the tokenizer loop with no unconditional advance:
+  a character matched by no branch (`;`, `%`, `[`, `}`, a smart quote pasted from a doc, any
+  non-ASCII letter) matched zero characters, left the cursor unmoved, and spun the loop
+  allocating until V8 aborted (`Ineffective mark-compacts`, ~2 s). Both now **throw** rather
+  than skip, which engages the callers' existing try/catch — an untokenizable formula is
+  returned unchanged instead of being emitted with characters deleted.
+- Pinned by `packages/extension/src/test/formatter-tokenizer.test.ts` (21 cases).
+
 ### Added — `manage_daemon` tool and the `Daemon Control` category (2026-07-30)
 
 - **New MCP tool `manage_daemon` in a new `daemon` category.** Tool counts move

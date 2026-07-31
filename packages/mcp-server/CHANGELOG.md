@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Security (2026-07-31 — row-template IDs were missing the path-traversal guard)
+
+- **All seven row-template client methods interpolated a caller-supplied `templateId` into the
+  API URL path with no `assertAirtableId`.** `client.js` defines `AIRTABLE_ID_RE` with the
+  comment "Prevents path traversal" and applies it at 128 call sites — but
+  `renameRowTemplate`, `updateRowTemplateDescription`, `setRowTemplateCell`,
+  `setRowTemplateVisibleColumns`, `duplicateRowTemplate`, `applyRowTemplate` and
+  `deleteRowTemplate` validated only `appId`. Since the value reaches the client straight from
+  tool arguments and `auth._rawApiCall` passes an absolute URL through unchanged (WHATWG parsing
+  collapses `..` before the request), a crafted id reached arbitrary internal endpoints under
+  the live session cookie — same-origin authorization bypass, not exfiltration, since the host
+  is a literal. Notably `applyRowTemplate`'s request body is byte-identical to what
+  `deleteTable` posts to `table/{id}/destroy`, so a `table-write`-only caller could destroy a
+  table while skipping `deleteTable`'s `expectedName` confirmation. `createRowTemplate` was
+  never affected — it generates its own id.
+
 ### Security (2026-07-31 — undici bumped past the TLS certificate-validation bypass)
 
 - **`undici` floor raised `^7.0.0` → `^7.28.0`** (resolves 7.29.0). 7.24.5 was in range for

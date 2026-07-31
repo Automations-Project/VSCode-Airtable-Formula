@@ -267,17 +267,23 @@ class EnhancedFormulaMinifier {
         continue;
       }
       
-      // Identifiers and functions
-      if (/[A-Z_]/.test(formula[i])) {
+      // Identifiers and functions. The /i flag is load-bearing — see the same
+      // fix in formula-beautifier-v2.js. Without it lowercase characters fell
+      // through to the operator catch-all and were dropped, so `if({A},1,0)`
+      // minified to `({A},1,0)` and `If({A},1,0)` to `I({A},1,0)`.
+      if (/[A-Z_]/i.test(formula[i])) {
         let value = '';
-        while (i < formula.length && /[A-Z0-9_]/.test(formula[i])) {
+        while (i < formula.length && /[A-Z0-9_]/i.test(formula[i])) {
           value += formula[i];
           i++;
         }
-        
-        if (FUNCTIONS.has(value)) {
+
+        // Match case-insensitively; emit the casing the user typed.
+        const canonical = value.toUpperCase();
+
+        if (FUNCTIONS.has(canonical)) {
           tokens.push({ type: 'FUNCTION', value });
-        } else if (CONSTANTS.has(value)) {
+        } else if (CONSTANTS.has(canonical)) {
           // TRUE and FALSE are boolean constants, not functions
           tokens.push({ type: 'CONSTANT', value });
         } else {
