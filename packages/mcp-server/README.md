@@ -111,7 +111,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
 | Daemon self-diagnosis (is the session dead, the browser busy, or the daemon gone?) | ❌ | ✅ `manage_daemon` `action=status` — plus start / restart / stop / tunnel / token rotation |
-| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (12 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` |
+| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (10 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
 

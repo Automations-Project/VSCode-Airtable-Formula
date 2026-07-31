@@ -304,7 +304,7 @@ When user wants to convert an Excel formula to Airtable.
 export const MCP_TOOLS_GUIDE = `# Airtable MCP — Tools Guide
 
 > **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
-> **Tools**: 72 tools across 16 categories + \`manage_tools\`
+> **Tools**: 72 tools across 17 categories + \`manage_tools\`
 
 ---
 
@@ -771,7 +771,7 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 
 - **Name**: airtable-user-mcp  |  **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (JSON-RPC 2.0)
-- **Tools**: 72 tools across 16 categories + \`manage_tools\`
+- **Tools**: 72 tools across 17 categories + \`manage_tools\`
 - **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ## Mandatory Workflows

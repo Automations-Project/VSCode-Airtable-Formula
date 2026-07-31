@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed (2026-08-01 — new `local-write` category; read-only is 12 → 10 tools)
+
+- **`download_formula_field` and `download_base_formulas` moved out of `read` into a new
+  `local-write` category.** They READ from Airtable but WRITE .formula files to a path the caller
+  chooses, so a profile advertised as "Schema inspection, formula validation, and record reading
+  only" had no business containing them — the annotation fix in the previous entry restored the
+  client's consent prompt, but the profile itself was still mislabelled. `local-write` is included
+  in **safe-write** and **full**, so those tool sets are UNCHANGED (54 / 72); only **read-only**
+  changes, 12 → 10. Deliberately NOT added to `LEGACY_CATEGORIES_DEFAULT_ON`, so a pre-existing
+  `custom` profile does not silently widen to include it. New setting:
+  `airtableFormula.mcp.categories.localWrite` (default true).
+
 ### Fixed (2026-07-31 — sync prune could delete data it had not replaced)
 
 - **`pruneRecords` had only a RUN-wide failure gate.** The "don't prune after a failed run" check
