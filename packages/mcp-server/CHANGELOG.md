@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Security (2026-07-31 — undici bumped past the TLS certificate-validation bypass)
+
+- **`undici` floor raised `^7.0.0` → `^7.28.0`** (resolves 7.29.0). 7.24.5 was in range for
+  GHSA-level advisories including a **TLS certificate validation bypass via dropped
+  `requestTls`** — and that is not a theoretical transitive: `src/proxy.js` builds undici's
+  `EnvHttpProxyAgent` for every proxied environment, which is the exact affected path. A
+  corporate-proxy user could have had certificate validation silently skipped.
+- **This shipped inside the extension, not just to npm users.** `undici` is not in the esbuild
+  `external` list (`scripts/bundle-mcp.mjs`), so the vulnerable copy was compiled into
+  `dist/mcp/index.mjs` and frozen into all 8 platform VSIXes — extension users could not have
+  fixed it by updating a dependency. Reaching them requires a rebuild + republish.
+- Deliberately **not** bumped: the `hono` / `@hono/node-server` advisories carried by
+  `@modelcontextprotocol/sdk`. Their vulnerable code is `serve-static`, the CORS middleware and
+  JSX; the SDK only uses `@hono/node-server`'s request/response conversion
+  (`server/streamableHttp.js`), so none are reachable. Bumping them in-range pulled 24 unrelated
+  upgrades (including `patchright` 1.59.4 → 1.61.1, the Chromium driver behind the default auth
+  path) for zero security gain, so the change was reverted to an undici-only diff.
+
 ### Added (2026-07-31 daemon — secret-URL token for claude.ai custom connectors)
 
 - **Daemon accepts the bearer token as `?token=` in the URL.** claude.ai custom connectors
