@@ -247,7 +247,8 @@ async function writeTextAtomic(filePath: string, content: string): Promise<void>
   const tmp = `${filePath}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   try {
-    await fs.promises.writeFile(tmp, content, 'utf8');
+    // 0600 for the same reason as writeConfigAtomic — these configs can carry a token.
+    await fs.promises.writeFile(tmp, content, { encoding: 'utf8', mode: 0o600 });
     await fs.promises.rename(tmp, filePath);
   } catch (err) {
     await fs.promises.unlink(tmp).catch(() => {});

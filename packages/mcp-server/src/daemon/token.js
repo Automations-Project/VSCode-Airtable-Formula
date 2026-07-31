@@ -84,7 +84,10 @@ export function rotateToken(options = {}) {
 function writeToken(record, options = {}) {
   const tokenPath = options.tokenPath ?? getTokenPath();
   const normalized = normalizeRecord(record);
-  mkdirSync(dirname(tokenPath), { recursive: true });
+  // 0700: this directory holds the daemon token AND the hand-authored
+  // credentials.json / login.json. The files are chmod 0600 individually, but the
+  // containing directory was created traversable. No-op on Windows.
+  mkdirSync(dirname(tokenPath), { recursive: true, mode: 0o700 });
   const tmp = tokenPath + '.tmp';
   writeFileSync(tmp, JSON.stringify(normalized, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   renameSync(tmp, tokenPath);

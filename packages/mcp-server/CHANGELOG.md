@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Fixed (2026-08-01 — audit low-severity sweep)
+
+- **Credentials.** `logout` wiped the browser profile, printed "Browser session cleared." and exited
+  0 while `credentials.json` / `login.json` still held a live session — the next server start read
+  them and was logged straight back in. It now reports those files and exits non-zero rather than
+  claiming a cleared session (they are user-authored, so it does not delete them). `login` no longer
+  accepts `--password` / `--otp-secret`: argv lands in world-readable `/proc/<pid>/cmdline` and shell
+  history for the ~5-minute login poll, and a captured base32 TOTP seed is a permanent 2FA bypass —
+  use the env vars or `login.json`. The config directory is created 0700 (it holds those files), and
+  the session-backup archive 0600 (it contains the cookie jar, `daemon.token` and `daemon.lock`).
+  IDE config writes that carry an Airtable PAT are 0600 — the atomic rename replaces the destination
+  inode, so without a mode any restrictive permissions the user had set were reset. All no-ops on Windows.
+- **`sync_base` ids are validated.** `planId`/`diffId` are interpolated into on-disk filenames and
+  `join()` normalises `..`, so `diffId: "x/../../tools-config"` overwrote
+  `~/.airtable-user-mcp/tools-config.json` — which `ToolConfigManager.load()` then merges over a
+  `defaultConfig()` whose `activeProfile` is `full`.
+- **An unverifiable view no longer reads as "clean".** `snapshotViewFiltered` is the only signal that
+  suppresses `pruneRecords`, and it was set only when every candidate view's filter state was KNOWN —
+  a `getView` that threw left the view `unknown` and the row set was treated as complete, so mirror
+  could delete real records as false orphans. Unverified picks are now flagged (`unverified: true`).
+- **Attachment fetch checks `r.ok`.** A 403/404 body was uploaded to the destination cell as the file,
+  counted as success, and written into the persisted dedupe map — so a re-run SKIPPED the corrupted
+  cell instead of repairing it. Source signed URLs expire mid-job, which is exactly when this happened.
+- **An unreadable `daemon.lock` is no longer deleted.** `acquire()` publishes the file with
+  `openSync(...,'wx')` and fills it a moment later, so it legitimately exists with zero bytes in
+  between — and the parse-failure branch removed it with no liveness check, letting a racing acquirer
+  evict a lock a live daemon was mid-write. It now fails the attempt and lets the retry loop re-probe.
+- **`apply.lock` no longer wedges forever on a recycled pid**, and the `APPLY_LOCKED` error finally
+  names the lock file's path.
+- **The daemon exit-intent slot** only consumes an intent staged during the current request, so a
+  concurrent `/mcp` response no longer truncates a stop/restart caller's confirmation. (Narrowed, not
+  closed — see the `ponytail:` note; the exact fix needs request identity threaded through.)
+- **`offsetToPosition` no longer rescans from offset 0 for every diagnostic.** `makeRange` calls it
+  twice per diagnostic, so N diagnostics cost O(N x document). Line starts are memoised per document
+  and binary-searched: `')'.repeat(20000)` **~1000 ms → 28 ms**, `'IF('.repeat(10000)` **~3500 ms → 484 ms**.
+- **`showToolStatus` reuses one OutputChannel** instead of minting a new identically-named one per
+  invocation and never disposing it.
+
 ### Changed (2026-08-01 — new `local-write` category; read-only is 12 → 10 tools)
 
 - **`download_formula_field` and `download_base_formulas` moved out of `read` into a new

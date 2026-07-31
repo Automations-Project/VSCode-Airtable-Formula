@@ -50,14 +50,27 @@ async function getOtpauth() {
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
+  // Secrets are NOT accepted on the command line. Anything in argv lands in
+  // /proc/<pid>/cmdline — which is world-readable, unlike /proc/<pid>/environ —
+  // and in shell history, for the whole ~5 minute login poll. A captured base32
+  // TOTP seed is a permanent 2FA bypass. The rest of the codebase already avoids
+  // this deliberately: login-runner.js invented an IPC protocol so credentials
+  // "never enter this process's environment".
+  //
+  // Supply them via AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET, or
+  // via login.json as direct-login.js reads it. Email is not a secret and stays.
+  const REJECTED = new Set(['--password', '--otp-secret']);
   for (let i = 0; i < args.length; i++) {
+    if (REJECTED.has(args[i])) {
+      process.stderr.write(
+        `${args[i]} is not supported: command-line arguments are world-readable via the process list.\n` +
+        'Set AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET in the environment, or use ~/.airtable-user-mcp/login.json.\n',
+      );
+      process.exit(2);
+    }
     if (args[i] === '--email' && args[i + 1]) opts.email = args[++i];
-    else if (args[i] === '--password' && args[i + 1]) opts.password = args[++i];
-    else if (args[i] === '--otp-secret' && args[i + 1]) opts.otpSecret = args[++i];
     else if (args[i] === '--profile' && args[i + 1]) opts.profile = args[++i];
-    // Legacy positional args support
     else if (!opts.email) opts.email = args[i];
-    else if (!opts.password) opts.password = args[i];
   }
   return {
     email: opts.email || process.env.AIRTABLE_EMAIL,

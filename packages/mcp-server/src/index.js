@@ -2613,6 +2613,18 @@ const handlers = {
 
   async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, strictDrift, resumeAfterDrift, verbose, debug }) {
     const sync = await import('./sync/index.js');
+    // planId/diffId are interpolated into on-disk filenames (`plan-<id>.json`,
+    // `diff-<id>.json`, `sync-job-<id>.json`) and join() normalises `..`, so an id
+    // like "x/../../tools-config" wrote a sync blob over
+    // ~/.airtable-user-mcp/tools-config.json — which ToolConfigManager.load() then
+    // merges over defaultConfig(), whose activeProfile is 'full'. That is a gap in
+    // this project's own anti-traversal control (AIRTABLE_ID_RE, "Prevents path
+    // traversal"), so close it the same way.
+    for (const [label, value] of [['planId', planId], ['diffId', diffId]]) {
+      if (value != null && !/^[A-Za-z0-9_-]+$/.test(String(value))) {
+        return err(`${label} must contain only letters, digits, "-" and "_" (got ${JSON.stringify(String(value))})`);
+      }
+    }
     if (mode === 'plan') {
       // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
       // which blows past the MCP response window (Connection closed) even though the plan is

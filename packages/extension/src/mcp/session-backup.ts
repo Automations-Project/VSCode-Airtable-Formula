@@ -22,11 +22,15 @@ const MAX_UNZIPPED_BYTES    = 500 * 1024 * 1024;    // 500 MB post-extraction
 export async function backupSession(destPath: string, password?: string): Promise<void> {
   const zipBuffer = await createZipBuffer(CONFIG_DIR);
 
+  // 0600: the archive contains the Chrome cookie jar, daemon.token and daemon.lock
+  // (both hold the plaintext bearer). Those files are hardened individually and
+  // secureDirectory() runs after RESTORE — but not after backup, so the archive was
+  // created 0666&~umask. No-op on Windows.
   if (password) {
     const encrypted = encrypt(zipBuffer, password);
-    await fs.writeFile(destPath, encrypted);
+    await fs.writeFile(destPath, encrypted, { mode: 0o600 });
   } else {
-    await fs.writeFile(destPath, zipBuffer);
+    await fs.writeFile(destPath, zipBuffer, { mode: 0o600 });
   }
 }
 

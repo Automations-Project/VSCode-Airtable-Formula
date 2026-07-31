@@ -21,13 +21,40 @@ import {
 // Position helpers (replace document.positionAt / new vscode.Range)
 // ---------------------------------------------------------------------------
 
-function offsetToPosition(text: string, offset: number): { line: number; character: number } {
-  let line = 0;
-  let lastNewline = -1;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text[i] === '\n') { line++; lastNewline = i; }
+/**
+ * Line-start offsets for one document, memoised on the document text.
+ *
+ * offsetToPosition used to walk from offset 0 on EVERY call, and makeRange calls it
+ * twice per diagnostic — so emitting N diagnostics cost O(N x document). Measured
+ * before: `')'.repeat(20000)` took ~1.0s and `'IF('.repeat(10000)` ~3.5s. Only one
+ * document is ever in flight per call, so a single-entry cache is enough; keeping it
+ * keyed on the text means a stale entry is impossible.
+ */
+let lineStartsText: string | null = null;
+let lineStartsCache: number[] = [];
+
+function lineStarts(text: string): number[] {
+  if (lineStartsText === text) return lineStartsCache;
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') starts.push(i + 1);
   }
-  return { line, character: offset - lastNewline - 1 };
+  lineStartsText = text;
+  lineStartsCache = starts;
+  return starts;
+}
+
+function offsetToPosition(text: string, offset: number): { line: number; character: number } {
+  const starts = lineStarts(text);
+  // Binary search for the last line start <= offset.
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return { line: lo, character: offset - starts[lo] };
 }
 
 function makeRange(text: string, start: number, end: number): LsRange {

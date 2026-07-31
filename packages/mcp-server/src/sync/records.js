@@ -919,6 +919,13 @@ export async function applyRecordsPass2({ client, srcSnapshot, destSnapshot, idm
 // ──────────────────────────────────────────────────────────────────────────────
 async function defaultFetchBytes(url) {
   const r = await fetch(url);
+  // Without this check a 403/404 BODY was uploaded to the destination cell as if it
+  // were the file, counted in attachmentsUploaded, and written into the persisted
+  // idmap.attachments dedupe map — so a re-run SKIPPED the corrupted cell instead of
+  // repairing it. Source-base signed airtableusercontent URLs expire mid-job, which
+  // is exactly when this happens. Throwing lets the caller's existing catch record an
+  // ATTACHMENT_FAILED warning and leave no dedupe entry behind.
+  if (!r.ok) throw new Error(`attachment fetch failed (${r.status} ${r.statusText})`);
   return { bytes: Buffer.from(await r.arrayBuffer()), contentType: r.headers.get('content-type') };
 }
 

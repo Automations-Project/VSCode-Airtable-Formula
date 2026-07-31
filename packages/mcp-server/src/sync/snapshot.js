@@ -163,8 +163,18 @@ export async function snapshotTableRecords(client, appId, table) {
     firstFiltered ??= v;
   }
   const view = unfiltered || unknown || firstFiltered;
-  if (!unfiltered && !unknown) {
-    table.snapshotViewFiltered = { viewId: view.id, viewName: view.name ?? null };
+  // `snapshotViewFiltered` is the ONLY signal that adds this table to truncatedTables
+  // and so suppresses pruneRecords. It used to be set only when every candidate's
+  // filter state was KNOWN — a getView that threw left the view `unknown`, and the row
+  // set was then treated as complete with no warning of any kind, so mirror could
+  // delete real records as false orphans. An unverified pick is not proof of anything:
+  // treat it as unsafe, exactly like a known-filtered one.
+  if (!unfiltered) {
+    table.snapshotViewFiltered = {
+      viewId: view.id,
+      viewName: view.name ?? null,
+      unverified: view === unknown,
+    };
   }
   const res = await client.queryRecords(appId, table.id, view.id, { limit: 1000 });
   return (res?.summary?.rows || []).map((r) => ({ id: r.id, cellValuesByColumnId: r.fields || {} }));

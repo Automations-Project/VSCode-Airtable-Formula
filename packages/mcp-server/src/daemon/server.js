@@ -19,7 +19,7 @@ import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { withToolDispatchContext } from '../page-scheduler.js';
 import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
-import { takeDaemonExit } from './exit-intent.js';
+import { takeDaemonExit, peekDaemonExit } from './exit-intent.js';
 import { clearStopSentinel, writeStopSentinel } from './stop-sentinel.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
@@ -745,9 +745,23 @@ export async function startDaemonServer(options = {}) {
       // only point at which shutting the process down cannot truncate the answer
       // the model is waiting for. Registered BEFORE handleRequest so it is armed
       // no matter how fast the handler completes; a no-op when nothing staged.
+      // Only consume an intent that appeared DURING this request. The slot is a
+      // process-global single slot with no association to the request that staged
+      // it, so a concurrent /mcp response finishing in the window between
+      // stageExit() and the stop/restart caller's own flush ran the exit on the
+      // wrong hook and truncated the stop caller's confirmation.
+      // ponytail: comparing against the pre-handler snapshot closes the common case
+      // (an intent staged before we started is not ours) but not the exact one — a
+      // request that began earlier still wins a same-instant stage. Threading the
+      // request identity through requestDaemonExit (AsyncLocalStorage) is the real
+      // fix; the residual window is sub-millisecond and browser-mode stop() awaits
+      // Chromium teardown before touching activeMcpClosers, so the response wins.
+      const intentBefore = peekDaemonExit();
       res.on('finish', () => {
-        const intent = takeDaemonExit();
-        if (intent) void runExitIntent(intent);
+        const intent = peekDaemonExit();
+        if (intent && intent !== intentBefore) {
+          void runExitIntent(takeDaemonExit());
+        }
       });
 
       const mcpServer = new Server(
