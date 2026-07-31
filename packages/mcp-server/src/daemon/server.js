@@ -358,7 +358,17 @@ export async function startDaemonServer(options = {}) {
     const header = req.headers?.authorization ?? '';
     const match = header.match(/^Bearer\s+(.+)$/i);
     const provided = match ? match[1] : null;
-    if (!tokensMatch(provided, currentToken.bearerToken)) {
+    // Claude.ai custom connectors can't send an Authorization header (OAuth or
+    // no-auth only), so the token may ride the URL instead: /mcp?token=<bearer>.
+    // Same secret, same timing-safe compare — the Zapier/n8n secret-URL pattern.
+    const queryToken = typeof req.query?.token === 'string' ? req.query.token : null;
+    if (queryToken !== null) {
+      // The URL carries the secret on this path — keep it out of referrers and caches.
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Cache-Control', 'no-store');
+    }
+    if (!tokensMatch(provided, currentToken.bearerToken)
+      && !tokensMatch(queryToken, currentToken.bearerToken)) {
       track401Burst(req);  // 401-burst tripwire (D-06)
       const wantHtml = (req.headers?.accept ?? '').includes('text/html');
       if (wantHtml) {

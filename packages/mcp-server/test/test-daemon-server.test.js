@@ -102,6 +102,23 @@ describe('GET /daemon/health', () => {
     const body = await response.json();
     assert.strictEqual(body.error, 'Unauthorized');
   });
+
+  it('accepts the token as ?token= query param (claude.ai secret-URL path)', async () => {
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/daemon/health?token=${encodeURIComponent(server.bearerToken)}`
+    );
+    assert.strictEqual(response.status, 200);
+    const body = await response.json();
+    assert.strictEqual(body.ok, true);
+    // Secret rode the URL — response must be uncacheable and never leak via Referer.
+    assert.strictEqual(response.headers.get('referrer-policy'), 'no-referrer');
+    assert.strictEqual(response.headers.get('cache-control'), 'no-store');
+  });
+
+  it('returns 401 when ?token= is wrong', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/daemon/health?token=wrong-token`);
+    assert.strictEqual(response.status, 401);
+  });
 });
 
 describe('GET /daemon/session-health', () => {
