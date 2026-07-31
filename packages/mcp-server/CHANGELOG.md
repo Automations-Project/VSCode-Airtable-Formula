@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added (2026-07-31 daemon — secret-URL token for claude.ai custom connectors)
+
+- **Daemon accepts the bearer token as `?token=` in the URL.** claude.ai custom connectors
+  support only OAuth or no-auth — there is no header field, so a bearer-only server made
+  Claude attempt OAuth discovery/registration against endpoints that don't exist
+  ("Couldn't register with …'s sign-in service"). `requireBearer` now also checks
+  `req.query.token` (same secret, same timing-safe compare, 401-burst tripwire unchanged),
+  so a tunnel URL like `https://<host>/mcp?token=<bearer>` connects as a no-auth connector —
+  the Zapier/n8n secret-URL pattern. Requests that present a query token get
+  `Referrer-Policy: no-referrer` + `Cache-Control: no-store` so the URL never leaks via
+  referrer or cache. The token rides the URL, so treat the URL as the secret (edge/proxy
+  access logs will see it); `manage_daemon action=token_rotate` invalidates it.
+
 ### Fixed (2026-07-30 review finish — diff detail id, autoNumber update path, test isolation)
 
 - **`sync_base mode=diff` with `detail` but no `diffId` returned `diffId:null` on success.**

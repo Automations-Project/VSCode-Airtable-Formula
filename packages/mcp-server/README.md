@@ -684,6 +684,11 @@ do not need to change their configuration when the daemon is present.
 
 The daemon stores its port and bearer token in `~/.airtable-user-mcp/daemon.lock`.
 
+Clients that cannot send an `Authorization` header — e.g. claude.ai custom connectors, which
+only support OAuth or no-auth — can pass the token in the URL instead:
+`https://<tunnel-host>/mcp?token={token}`. The URL then IS the secret: share it only with the
+client, and rotate via `manage_daemon action=token_rotate` if it leaks.
+
 ## Protocol
 
 | | |
