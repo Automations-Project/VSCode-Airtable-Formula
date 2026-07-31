@@ -339,6 +339,18 @@ export async function startDaemonServer(options = {}) {
       const ip = req.headers?.['cf-connecting-ip']
         ?? req.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
         ?? null;
+      // Stop the tunnel HERE, on the one handle this module owns. The launcher's
+      // onTunnelAutoDisable callback used to be the only thing that stopped it,
+      // and it could only see a tunnel the LAUNCHER had started at boot — so a
+      // tunnel enabled from the dashboard (which fills this closure instead)
+      // survived the tripwire entirely: `tunnelAutoDisabled` latched, the UI said
+      // "Auto-disabled", and cloudflared kept serving the public hostname.
+      // The callback is now bookkeeping only (settings + lockfile).
+      if (activeTunnel) {
+        const stopping = activeTunnel;
+        activeTunnel = null;
+        void stopping.stop().catch(() => undefined);
+      }
       publishEvent('daemon:tunnel-auto-disabled', { failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
       options.onTunnelAutoDisable?.({ failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
     }
@@ -886,5 +898,24 @@ export async function startDaemonServer(options = {}) {
     stop,
     publishEvent,
     getHealth,
+    /**
+     * Hand a tunnel started elsewhere (the launcher's boot auto-start) to this
+     * module, so there is exactly ONE owner of the running tunnel.
+     *
+     * Without this the launcher kept its own `activeTunnel` that this closure
+     * could not see, and the three paths that stop a tunnel each reached only
+     * half the cases: `/daemon/disable-tunnel` was a silent no-op on a
+     * boot-started tunnel (it reported ok and nulled the lockfile while
+     * cloudflared kept serving), `/daemon/enable-tunnel`'s stop-the-existing
+     * guard missed it and orphaned a second cloudflared, and the 401-burst
+     * tripwire could only stop boot-started ones.
+     */
+    adoptTunnel(handle) {
+      activeTunnel = handle;
+    },
+    /** The tunnel handle this module currently owns (read-only; null when none). */
+    getActiveTunnel() {
+      return activeTunnel;
+    },
   };
 }

@@ -6,6 +6,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed — Unconfigure destroyed unrelated config in Codex / Helix files (2026-07-31)
+
+- **`unconfigureMcpToml` and `unconfigureHelix` truncated the user's config file from our marker
+  to EOF.** Both did `existing.slice(0, indexOf(MARKER))`, discarding everything below our block
+  rather than removing only our block. Since `configureMcpToml` appends at EOF and `codex mcp add`
+  does too, any second MCP server or `[model_providers.*]` section the user added after running
+  Setup sat below ours — and clicking **Unconfigure** in the dashboard (no confirmation prompt)
+  destroyed it silently, with no backup and no error. Measured against the old code, a
+  `config.toml` holding one extra MCP server was reduced to a **single newline**.
+  Both now remove only the sections we own, preserving everything else verbatim.
+  Note `HELIX_BLOCK` is *four* top-level tables, not one, so a naive "delete to the next `[`
+  header" would have orphaned three `[[language]]` blocks; the header matcher is also strict
+  enough not to mistake a continuation line of a multi-line array (`matrix = [\n[1,2],\n]`) for a
+  table header. Pinned by `src/test/lsp-config-toml.test.ts`.
+
 ### Fixed — formatter tokenizers silently corrupted formulas / hung the extension host (2026-07-31)
 
 Found by audit, both reproduced before fixing.

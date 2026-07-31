@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Fixed (2026-07-31 — tunnel revocation reached only half the cases)
+
+- **The daemon held TWO independent `activeTunnel` handles**, one in `daemon/server.js` (filled by
+  `POST /daemon/enable-tunnel`) and one in `daemon/launcher.js` (filled by the boot auto-start).
+  Neither closure could see the other, so every path that stops a tunnel reached only half the
+  cases: `POST /daemon/disable-tunnel` was a **silent no-op on a boot-started tunnel** — it
+  skipped `stop()`, nulled the lockfile `tunnelUrl`, published `daemon:tunnel-stopped` and
+  returned `{ok:true}` while cloudflared kept serving the public hostname; the **401-burst
+  tripwire** delegated to the launcher's callback and so could never stop a dashboard-enabled
+  tunnel (it latched `tunnelAutoDisabled`, the UI showed "Auto-disabled", the URL stayed live);
+  and `enable-tunnel`'s stop-the-existing guard was equally blind, leaving **two cloudflared
+  children and two public URLs**. `getHealth()` reads the server closure, so `/daemon/health` and
+  `manage_daemon action=status` corroborated the false state. `/mcp` still required the 256-bit
+  timing-safe bearer throughout, so this was a **failed revocation control**, not open access —
+  but with `/mcp?token=` secret URLs the URL *is* the shared credential. `startDaemonServer()` now
+  exposes `adoptTunnel()`/`getActiveTunnel()`, the launcher hands its boot-started handle over,
+  and the tripwire stops that single handle directly. Pinned by `test/test-tunnel-ownership.test.js`.
+- **A boot-auto-started tunnel could kill the daemon by unhandled rejection.** `waitUntilReady` is
+  created eagerly in `tunnel.js` and rejected when cloudflared exits before publishing a URL
+  (offline boot, blocked egress, a trycloudflare 429). Nothing consumed it and the repo installs
+  no `process.on('unhandledRejection')`, so Node's default throw took the daemon down ~1s after it
+  began serving, killing in-flight MCP requests and orphaning the non-detached LSP child. Now
+  consumed and logged.
+
+### Security (2026-07-31 — `download_*` tools declared read-only while writing files)
+
+- **`download_formula_field` and `download_base_formulas` were annotated `readOnlyHint: true`,
+  `destructiveHint: false`** while writing (and overwriting) files at a caller-supplied path.
+  `readOnlyHint` is exactly the signal MCP clients use to **auto-approve a call without
+  prompting**, so the annotation removed the user's consent step from a filesystem write. Both are
+  now `readOnlyHint: false, destructiveHint: true`. *(Their `read` category is unchanged and
+  remains a judgement call — see the note below.)*
+- **A table named `..` escaped the chosen output directory.** The filename sanitiser stripped
+  separators (`/\:*?"<>|`) but not `.`, so `download_base_formulas` wrote every formula file one
+  directory *above* `outputDir`. Table and field names come from the base, so they are attacker
+  influenced by anyone who can edit a base the user can read. Both segments now go through
+  `confineToDir()`, which rejects dot-only segments and asserts the resolved path stays under the
+  chosen directory.
+- **`fieldName` was interpolated into the `# AT:` header with only quotes escaped**, so a newline
+  in a field name injected arbitrary header lines (`description` was already stripped). Both sites
+  now use `headerSafe()`.
+- Not changed: `outputPath`/`outputDir` themselves are still honoured as given. They are the
+  user's explicit choice, and confining them to `cwd` would break legitimate "save to my Desktop"
+  use; the consent step is restored by the annotation fix instead.
+
 ### Security (2026-07-31 — row-template IDs were missing the path-traversal guard)
 
 - **All seven row-template client methods interpolated a caller-supplied `templateId` into the

@@ -364,7 +364,12 @@ export async function startDaemon(options = {}) {
           syncLockfile(nextToken.bearerToken);
         },
         onTunnelAutoDisable: async ({ failures, windowMs, ip }) => {
-          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl
+          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl.
+          // The SERVER now stops the tunnel before invoking this — it owns the
+          // single handle, so it reaches dashboard-enabled tunnels too, which
+          // this callback never could. The stop below is a defensive no-op
+          // (tunnel.js stop() returns early once `stopping` is set); it stays so
+          // the mirror is cleared and an un-adopted handle is still torn down.
           if (activeTunnel) {
             await activeTunnel.stop().catch(() => undefined);
             activeTunnel = null;
@@ -452,6 +457,23 @@ export async function startDaemon(options = {}) {
                 writeTunnelSettings(configDir, { enabled: false });
               }
             },
+          });
+
+          // Hand ownership to the server. Until this existed, a boot-started
+          // tunnel lived ONLY in this closure, so /daemon/disable-tunnel saw
+          // null, skipped stop(), and still returned ok + nulled the lockfile —
+          // the public URL kept serving while every UI surface said "off".
+          server.adoptTunnel?.(activeTunnel);
+
+          // waitUntilReady is created eagerly in tunnel.js and rejected when
+          // cloudflared exits before publishing a URL (offline boot, blocked
+          // egress, trycloudflare 429). Nothing consumed it, and there is no
+          // process-level unhandledRejection handler, so Node's default throw
+          // killed the daemon ~1s after it began serving.
+          activeTunnel?.waitUntilReady?.catch?.((err) => {
+            console.error(
+              `[airtable-mcp] tunnel never became ready: ${err instanceof Error ? err.message : String(err)}`,
+            );
           });
         } catch (err) {
           // Non-fatal: daemon continues without tunnel (D-04: no auto-restart)

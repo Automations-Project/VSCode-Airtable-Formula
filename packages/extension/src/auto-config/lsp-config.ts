@@ -80,10 +80,16 @@ async function unconfigureHelix(configPath: string): Promise<void> {
   let existing = '';
   try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
   if (!existing.includes(HELIX_MARKER)) return;
-  // Remove everything from HELIX_MARKER to the next blank-line-separated section
-  const idx = existing.indexOf(HELIX_MARKER);
-  const before = existing.slice(0, idx).trimEnd();
-  await writeTextAtomic(configPath, before + '\n');
+  // HELIX_BLOCK is FOUR top-level tables, not one: the language-server plus a
+  // [[language]] per file type. Remove each of ours and nothing else — a
+  // "delete to the next header" cut would orphan the three [[language]] blocks,
+  // and the old "delete to EOF" cut destroyed the user's own config below ours.
+  const next = removeTomlSections(existing, (s) => {
+    if (s.header === null) return false;
+    if (s.header === HELIX_MARKER) return true;
+    return s.header === '[[language]]' && s.text.includes(`language-servers = ["${LSP_SERVER_KEY}"]`);
+  });
+  await writeTextAtomic(configPath, next);
 }
 
 async function isHelixConfigured(configPath: string): Promise<boolean> {
@@ -175,9 +181,12 @@ export async function unconfigureMcpToml(configPath: string): Promise<void> {
   let existing = '';
   try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
   if (!existing.includes(CODEX_MARKER)) return;
-  const idx = existing.indexOf(CODEX_MARKER);
-  const before = existing.slice(0, idx).trimEnd();
-  await writeTextAtomic(configPath, before + '\n');
+  // Remove only our own table. This used to truncate the file from the marker to
+  // EOF — and since both `configureMcpToml` and `codex mcp add` append at EOF,
+  // any MCP server or [model_providers.*] block the user added after Setup sat
+  // below ours and was silently destroyed by clicking Unconfigure.
+  const next = removeTomlSections(existing, (s) => s.header === CODEX_MARKER);
+  await writeTextAtomic(configPath, next);
 }
 
 export async function isMcpTomlConfigured(configPath: string): Promise<boolean> {
@@ -185,6 +194,51 @@ export async function isMcpTomlConfigured(configPath: string): Promise<boolean> 
     const raw = await fs.promises.readFile(configPath, 'utf8');
     return raw.includes(CODEX_MARKER);
   } catch { return false; }
+}
+
+// ── Shared TOML section surgery ─────────────────────────────────────────────
+
+/**
+ * A complete top-level TOML table header on its own line: `[table]`, `[[array]]`,
+ * optionally dotted/quoted, optionally trailing comment.
+ *
+ * Deliberately strict. A loose `/^\s*\[/` also matches a continuation line of a
+ * multi-line array (`matrix = [\n[1,2],\n]`), which would split a user's value in
+ * half and corrupt the file — the exact class of bug this helper exists to fix.
+ */
+const TOML_HEADER_RE = /^[ \t]*\[\[?[A-Za-z0-9_.\-"' ]+\]\]?[ \t]*(?:#.*)?$/;
+
+interface TomlSection { header: string | null; text: string }
+
+/** Split a TOML document into a preamble plus one entry per top-level header. */
+function splitTomlSections(text: string): TomlSection[] {
+  const sections: TomlSection[] = [];
+  let current: TomlSection = { header: null, text: '' };
+  for (const line of text.split('\n')) {
+    if (TOML_HEADER_RE.test(line)) {
+      sections.push(current);
+      current = { header: line.trim(), text: line + '\n' };
+    } else {
+      current.text += line + '\n';
+    }
+  }
+  sections.push(current);
+  return sections.filter((s, i) => i === 0 || s.header !== null);
+}
+
+/**
+ * Drop only the sections we own, preserving everything else verbatim.
+ *
+ * The previous implementation did `existing.slice(0, indexOf(MARKER))` — i.e. it
+ * truncated the user's file from our marker to EOF, destroying any config that
+ * happened to sit below ours. Since `configureMcpToml` appends at EOF and
+ * `codex mcp add` does too, a second MCP server added after Setup was silently
+ * deleted by clicking Unconfigure.
+ */
+function removeTomlSections(text: string, isOurs: (s: TomlSection) => boolean): string {
+  const kept = splitTomlSections(text).filter((s) => !isOurs(s));
+  const out = kept.map((s) => s.text).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
+  return out === '' ? '' : out + '\n';
 }
 
 // ── Shared text-file atomic writer ──────────────────────────────────────────
