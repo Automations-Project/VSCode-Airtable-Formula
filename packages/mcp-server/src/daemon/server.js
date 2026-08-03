@@ -19,7 +19,7 @@ import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { withToolDispatchContext } from '../page-scheduler.js';
 import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
-import { takeDaemonExit, withDaemonExitOwner } from './exit-intent.js';
+import { discardDaemonExit, takeDaemonExit, withDaemonExitOwner } from './exit-intent.js';
 import { clearStopSentinel, writeStopSentinel } from './stop-sentinel.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
@@ -752,6 +752,16 @@ export async function startDaemonServer(options = {}) {
       res.on('finish', () => {
         const intent = takeDaemonExit(exitOwner);
         if (intent) void runExitIntent(intent);
+      });
+      // Owner-death scavenging: 'close' without 'finish' means this response
+      // aborted before its body flushed. Discard — never execute — any intent
+      // THIS response staged: its caller never received the confirmation, and
+      // since requestDaemonExit refuses overwrites, a slot left owned by a
+      // response that can no longer finish would otherwise be wedged forever.
+      // Node also fires 'close' after 'finish' on normal completion, hence the
+      // writableFinished guard.
+      res.on('close', () => {
+        if (!res.writableFinished) discardDaemonExit(exitOwner);
       });
 
       const mcpServer = new Server(

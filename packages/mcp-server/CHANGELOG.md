@@ -33,7 +33,10 @@
   names the lock file's path.
 - **The daemon exit-intent slot** is now tied to its originating request with
   `AsyncLocalStorage`, so an older concurrent `/mcp` response cannot consume it and truncate the
-  stop/restart caller's confirmation.
+  stop/restart caller's confirmation. Staging refuses to overwrite a still-pending intent (the
+  second `manage_daemon stop`/`restart` gets a refusal naming the staged action), and an intent
+  whose staging response closed without flushing is discarded — a confirmed stop can neither be
+  stolen nor orphaned.
 - **`offsetToPosition` no longer rescans from offset 0 for every diagnostic.** `makeRange` calls it
   twice per diagnostic, so N diagnostics cost O(N x document). Line starts are memoised per document
   and binary-searched: `')'.repeat(20000)` **~1000 ms → 28 ms**, `'IF('.repeat(10000)` **~3500 ms → 484 ms**.

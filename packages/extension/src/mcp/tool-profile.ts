@@ -278,6 +278,16 @@ export class ToolProfileManager implements vscode.Disposable {
       if (e.affectsConfiguration('airtableFormula.mcp.toolProfile') ||
           e.affectsConfiguration('airtableFormula.mcp.categories') ||
           e.affectsConfiguration('airtableFormula.mcp.tools')) {
+        // Native Settings UI / settings.json edits never route through
+        // toggleCategory, so a stale per-tool override (e.g. seeded by the
+        // legacy migration) would silently win over an explicit category edit
+        // in both the file write and the effective set. Drop the changed
+        // categories' overrides first. Skip while suppressed: programmatic
+        // multi-key writers (toggleCategory, syncFileToSettings) manage
+        // overrides themselves and must not have them cleared mid-flight.
+        if (!this._suppressSettingsSync) {
+          await this._clearOverridesForChangedCategories(e);
+        }
         await this.syncSettingsToFile();
       }
     });
@@ -337,7 +347,6 @@ export class ToolProfileManager implements vscode.Disposable {
   /** Toggle a single category. Auto-switches profile to 'custom' if not already there. */
   async toggleCategory(category: keyof ToolCategories, enabled: boolean): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('airtableFormula');
-    const wasSuppressed = this._suppressSettingsSync;
     this._suppressSettingsSync = true;
     try {
       const currentProfile = cfg.get<string>('mcp.toolProfile', 'full');
@@ -361,13 +370,23 @@ export class ToolProfileManager implements vscode.Disposable {
       }
       await cfg.update(`mcp.categories.${category}`, enabled, vscode.ConfigurationTarget.Global);
     } finally {
-      this._suppressSettingsSync = wasSuppressed;
+      // Always end unsuppressed — never restore a captured prior value.
+      // syncFileToSettings' one-shot 200ms unsuppress timer can fire (and
+      // consume itself) while our cfg.update calls are awaited, and two
+      // overlapping toggles would restore each other's in-flight state; either
+      // way a restored `true` has no timer left to clear it and every later
+      // syncSettingsToFile() silently no-ops. A stale pending timer setting
+      // false again after us is harmless.
+      this._suppressSettingsSync = false;
     }
 
     // Configuration-change events are intentionally suppressed while the
     // profile, overrides, and category move as one unit. Persist the final state
-    // once rather than exposing transient combinations to the MCP server.
-    if (!wasSuppressed) await this.syncSettingsToFile();
+    // once rather than exposing transient combinations to the MCP server — and
+    // persist unconditionally: the toggle is a deliberate user action and the
+    // file write is its point, even when it started inside another suppression
+    // window.
+    await this.syncSettingsToFile();
   }
 
   async openConfigFile(): Promise<void> {
@@ -528,6 +547,35 @@ export class ToolProfileManager implements vscode.Disposable {
       }
     }
     return enabled;
+  }
+
+  /**
+   * A category edited outside toggleCategory (native Settings UI, settings.json)
+   * is still an explicit choice for every tool in it — drop that category's
+   * per-tool overrides so the edit wins over values imported during the legacy
+   * migration. Overrides in untouched categories are left alone: per-tool
+   * values remain the final authority there, which is their purpose. The
+   * mcp.tools update below echoes one more configuration-change event; its
+   * handler pass finds no changed category and degrades to an idempotent
+   * full-state file write.
+   */
+  private async _clearOverridesForChangedCategories(e: vscode.ConfigurationChangeEvent): Promise<void> {
+    const changedCategories = new Set<string>();
+    for (const [settingsKey, fileCat] of Object.entries(SETTINGS_TO_CATEGORY) as [keyof ToolCategories, string][]) {
+      if (e.affectsConfiguration(`airtableFormula.mcp.categories.${settingsKey}`)) changedCategories.add(fileCat);
+    }
+    if (changedCategories.size === 0) return;
+
+    const cfg = vscode.workspace.getConfiguration('airtableFormula');
+    const overrides = { ...cfg.get<Record<string, boolean>>('mcp.tools', {}) };
+    let overridesChanged = false;
+    for (const [tool, category] of Object.entries(TOOL_CATEGORIES)) {
+      if (!changedCategories.has(category) || !(tool in overrides)) continue;
+      delete overrides[tool];
+      overridesChanged = true;
+    }
+    if (!overridesChanged) return;
+    await cfg.update('mcp.tools', overrides, vscode.ConfigurationTarget.Global);
   }
 
   private _hasExplicitSetting(cfg: vscode.WorkspaceConfiguration, key: string): boolean {

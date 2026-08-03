@@ -12,8 +12,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   treated absent tools in post-legacy categories as disabled, but extension startup rewrote the
   same file from VS Code's package defaults first — silently enabling `local-write`. Startup and
   file-to-settings sync now preserve the server's fail-closed semantics, including mixed per-tool
-  states, and a later category toggle clears those imported overrides before applying the user's
-  explicit choice.
+  states, and a later category change clears those imported overrides before applying the user's
+  explicit choice — from the dashboard toggle or a native settings.json / Settings UI edit alike
+  (the imported overrides previously won over a native edit silently, in both the written file and
+  the effective tool set). The dashboard toggle also always persists its result and can no longer
+  latch settings→file sync off for the session when it races the file watcher's suppression window.
 - **Record-prune failure accounting now follows destination table IDs.** Per-table write results
   were stored under the source table name but read back under the destination table name, so a
   renamed matched table could lose the all-writes-failed no-prune guard. A regression test runs the
@@ -21,7 +24,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Daemon exit intents have request ownership.** An older concurrent `/mcp` response could finish
   after `manage_daemon stop` staged its process-wide intent, steal it, and begin shutdown before the
   stop confirmation flushed. `AsyncLocalStorage` now binds the intent to the response that staged
-  it, with a deterministic two-request regression test.
+  it, with a deterministic two-request regression test. A second stop/restart arriving while one is
+  already staged is refused (naming the staged action) instead of silently overwriting it, and an
+  intent whose staging response died before flushing is discarded — so a flushed "stopping"
+  confirmation is always followed by the exit and the single slot can never be orphaned.
 - **Session restore no longer bundles vulnerable `adm-zip` 0.5.x.** A tiny crafted archive could
   declare a multi-gigabyte uncompressed entry and crash the extension host before CRC validation.
   The bundled parser is now 0.6.0, the restore picker size-checks before reading only the encryption
