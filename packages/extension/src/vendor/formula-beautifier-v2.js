@@ -337,18 +337,27 @@ class EnhancedFormulaBeautifier {
         continue;
       }
       
-      // Function names
-      if (/[A-Z_]/.test(formula[i])) {
+      // Function names. Airtable function names are case-INSENSITIVE, so these
+      // character classes must carry the /i flag: without it every a-z char
+      // fell through to the operator chain's `else { i++ }` catch-all and was
+      // silently DELETED from the token stream — `lower({Email})` beautified to
+      // `({Email})`, and because that still parses, the try/catch in beautify()
+      // never fired and the corrupted text was written back to the user's file.
+      if (/[A-Z_]/i.test(formula[i])) {
         let value = '';
-        while (i < formula.length && /[A-Z0-9_]/.test(formula[i])) {
+        while (i < formula.length && /[A-Z0-9_]/i.test(formula[i])) {
           value += formula[i];
           i++;
         }
-        
+
+        // Match case-insensitively, but emit the value the user actually typed —
+        // reformatting must not silently rewrite their casing.
+        const canonical = value.toUpperCase();
+
         // Check if it's a known function or boolean constant
-        if (FUNCTIONS.has(value)) {
+        if (FUNCTIONS.has(canonical)) {
           tokens.push({ type: 'FUNCTION', value });
-        } else if (value === 'TRUE' || value === 'FALSE') {
+        } else if (canonical === 'TRUE' || canonical === 'FALSE') {
           // TRUE and FALSE are boolean constants
           tokens.push({ type: 'CONSTANT', value });
         } else {

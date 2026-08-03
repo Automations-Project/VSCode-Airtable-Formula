@@ -180,7 +180,19 @@ class CompactFormulaBeautifier {
         name += formula[i];
         i++;
       }
-      
+
+      // This is the ONLY branch of the tokenizer loop with no unconditional
+      // advance. A character matched by no branch above (`;`, `%`, `[`, `}`, a
+      // smart quote pasted from a doc, any non-ASCII letter) matches zero
+      // characters here, leaves `i` unmoved, and spins the outer `while`
+      // allocating tokens until V8 dies with "Ineffective mark-compacts" —
+      // taking the extension host with it. Throw instead of skipping: beautify()
+      // catches and returns the ORIGINAL text, so a formula we cannot tokenize
+      // is left alone rather than silently emitted with characters deleted.
+      if (name === '') {
+        throw new Error(`Unexpected character ${JSON.stringify(formula[i])} at position ${i}`);
+      }
+
       // Look ahead for function call
       let j = i;
       while (j < formula.length && WHITESPACE_RE.test(formula[j])) j++;

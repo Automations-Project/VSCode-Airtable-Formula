@@ -79,20 +79,29 @@ describe('snapshot.snapshotTableRecords — filtered-view avoidance', () => {
     assert.equal(out.length, 1, 'records are still returned (partial is better than nothing)');
   });
 
-  it('keeps legacy behavior (first collaborative view, no flag) when the client has no getView', async () => {
+  // These two used to assert "cannot verify → no flag". That was the defect:
+  // snapshotViewFiltered is the ONLY signal that adds a table to truncatedTables and
+  // suppresses pruneRecords, so treating an UNVERIFIED view as clean let mirror
+  // delete real records as false orphans when the row set was actually filtered.
+  // Unverified is now flagged (with unverified:true to distinguish it from a
+  // known-filtered view); the records are still returned either way.
+  it('flags an unverifiable view as unsafe when the client has no getView', async () => {
     const client = queryClient([]);
     const table = { id: 'tbl1', views: [{ id: 'viwP', personalForUserId: 'usr1' }, { id: 'viw1', name: 'Grid' }] };
     await snapshotTableRecords(client, 'app1', table);
     assert.deepEqual(client.seen, ['viw1']);
-    assert.equal(table.snapshotViewFiltered, undefined, 'cannot verify → no flag');
+    assert.ok(table.snapshotViewFiltered, 'cannot verify → must NOT be treated as prunable');
+    assert.equal(table.snapshotViewFiltered.viewId, 'viw1');
+    assert.equal(table.snapshotViewFiltered.unverified, true);
   });
 
-  it('keeps legacy behavior when getView probing fails (view state unknown)', async () => {
+  it('flags an unverifiable view as unsafe when getView probing fails', async () => {
     const client = queryClient([], { getView: async () => { throw new Error('boom'); } });
     const table = { id: 'tbl1', views: [{ id: 'viw1', name: 'Grid' }] };
     await snapshotTableRecords(client, 'app1', table);
     assert.deepEqual(client.seen, ['viw1']);
-    assert.equal(table.snapshotViewFiltered, undefined);
+    assert.ok(table.snapshotViewFiltered, 'a swallowed probe error must not read as "clean"');
+    assert.equal(table.snapshotViewFiltered.unverified, true);
   });
 });
 

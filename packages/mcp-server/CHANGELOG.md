@@ -2,6 +2,191 @@
 
 ## [Unreleased]
 
+### Fixed (2026-08-01 — audit low-severity sweep)
+
+- **Credentials.** `logout` wiped the browser profile, printed "Browser session cleared." and exited
+  0 while `credentials.json` / `login.json` still held a live session — the next server start read
+  them and was logged straight back in. It now reports those files and exits non-zero rather than
+  claiming a cleared session (they are user-authored, so it does not delete them). `login` no longer
+  accepts `--password` / `--otp-secret`: argv lands in world-readable `/proc/<pid>/cmdline` and shell
+  history for the ~5-minute login poll, and a captured base32 TOTP seed is a permanent 2FA bypass —
+  use environment variables (the separate `direct-login` mode reads `login.json`). The config directory is created 0700 (it holds those files), and
+  the session-backup archive 0600 (it contains the cookie jar, `daemon.token` and `daemon.lock`).
+  IDE config writes that carry an Airtable PAT are 0600 — the atomic rename replaces the destination
+  inode, so without a mode any restrictive permissions the user had set were reset. All no-ops on Windows.
+- **`sync_base` ids are validated.** `planId`/`diffId` are interpolated into on-disk filenames and
+  `join()` normalises `..`, so `diffId: "x/../../tools-config"` overwrote
+  `~/.airtable-user-mcp/tools-config.json` — which `ToolConfigManager.load()` then merges over a
+  `defaultConfig()` whose `activeProfile` is `full`.
+- **An unverifiable view no longer reads as "clean".** `snapshotViewFiltered` is the only signal that
+  suppresses `pruneRecords`, and it was set only when every candidate view's filter state was KNOWN —
+  a `getView` that threw left the view `unknown` and the row set was treated as complete, so mirror
+  could delete real records as false orphans. Unverified picks are now flagged (`unverified: true`).
+- **Attachment fetch checks `r.ok`.** A 403/404 body was uploaded to the destination cell as the file,
+  counted as success, and written into the persisted dedupe map — so a re-run SKIPPED the corrupted
+  cell instead of repairing it. Source signed URLs expire mid-job, which is exactly when this happened.
+- **An unreadable `daemon.lock` is no longer deleted.** `acquire()` publishes the file with
+  `openSync(...,'wx')` and fills it a moment later, so it legitimately exists with zero bytes in
+  between — and the parse-failure branch removed it with no liveness check, letting a racing acquirer
+  evict a lock a live daemon was mid-write. It now fails the attempt and lets the retry loop re-probe.
+- **`apply.lock` no longer wedges forever on a recycled pid**, and the `APPLY_LOCKED` error finally
+  names the lock file's path.
+- **The daemon exit-intent slot** is now tied to its originating request with
+  `AsyncLocalStorage`, so an older concurrent `/mcp` response cannot consume it and truncate the
+  stop/restart caller's confirmation. Staging refuses to overwrite a still-pending intent (the
+  second `manage_daemon stop`/`restart` gets a refusal naming the staged action), and an intent
+  whose staging response closed without flushing is discarded — a confirmed stop can neither be
+  stolen nor orphaned.
+- **`offsetToPosition` no longer rescans from offset 0 for every diagnostic.** `makeRange` calls it
+  twice per diagnostic, so N diagnostics cost O(N x document). Line starts are memoised per document
+  and binary-searched: `')'.repeat(20000)` **~1000 ms → 28 ms**, `'IF('.repeat(10000)` **~3500 ms → 484 ms**.
+- **`showToolStatus` reuses one OutputChannel** instead of minting a new identically-named one per
+  invocation and never disposing it.
+- **The transitive Ajv URI parser is patched in place.** `fast-uri` 3.1.0 → 3.1.5 clears four
+  production audit findings without pulling an MCP SDK or browser-auth upgrade. No repository path
+  accepts caller-supplied schemas or `$id` values, but the bundled parser no longer carries the
+  advisory regardless.
+
+### Changed (2026-08-01 — new `local-write` category; read-only is 12 → 10 tools)
+
+- **`download_formula_field` and `download_base_formulas` moved out of `read` into a new
+  `local-write` category.** They READ from Airtable but WRITE .formula files to a path the caller
+  chooses, so a profile advertised as "Schema inspection, formula validation, and record reading
+  only" had no business containing them — the annotation fix in the previous entry restored the
+  client's consent prompt, but the profile itself was still mislabelled. `local-write` is included
+  in **safe-write** and **full**, so those tool sets are UNCHANGED (54 / 72); only **read-only**
+  changes, 12 → 10. Deliberately NOT added to `LEGACY_CATEGORIES_DEFAULT_ON`, so a pre-existing
+  `custom` profile does not silently widen to include it, including when the VS Code extension
+  imports or rewrites an older profile file. New setting:
+  `airtableFormula.mcp.categories.localWrite` (default true).
+
+### Fixed (2026-07-31 — sync prune could delete data it had not replaced)
+
+- **`pruneRecords` had only a RUN-wide failure gate.** The "don't prune after a failed run" check
+  was `failed > 0 && created === 0 && updated === 0 && skipped === 0` against global accumulators,
+  so a single converged row in *any other table* (counted as `skipped`) disarmed it. A
+  `FIELD_FORBIDDEN` 403 is a per-field permission property that fails every row of exactly one
+  table by design, so "one table wholly failed, the rest fine" is routine — and under
+  `mirror` + `confirmDeletions` that table's pre-existing dest rows were deleted while their
+  replacement data was never written, with the job reporting `phase='done'`. Pass 1 now records
+  per-table outcomes (`result.perTable`) and `pruneRecords` skips any table with
+  `failed > 0 && created + updated + skipped === 0`, emitting `RECORDS_FAILED_PRUNE_SKIPPED` —
+  the same shape as the existing truncation guard. The accounting is keyed by matched destination
+  table ID; using source/destination names made the guard disappear when a matched table had been
+  renamed between bases.
+- **`pruneSchema` deleted the `fieldMappings` targets `apply()` had just validated.** A mapping
+  target must exist on the dest and be writable but is *not* required to exist on the source — the
+  documented injection pattern (source autoNumber `Code` → dest text field `InjectID`) is dest-only
+  by construction and therefore always classified an orphan. `apply()` validated the mappings, then
+  called `pruneSchema` without them and deleted the target; the background records job then
+  re-validated, threw `FIELD_MAP_INVALID` and synced zero records. Net effect: a destination column
+  destroyed and no data written. `fieldMappings` is now threaded through and targets are kept with
+  `FIELD_MAP_TARGET_PROTECTED`.
+- **The drift guard fingerprints only the DESTINATION, but `plan.orphans` is a statement about the
+  SOURCE.** A source-side *addition* between plan and apply was invisible: the dest was untouched so
+  the fingerprint matched, no `DRIFT`/`RESUME_DRIFT` fired, `applyPlan` had no create action for the
+  new field (the plan predates it) — and `pruneSchema` then deleted the dest field that now
+  legitimately matched, taking its data with it. `deleteField`'s `expectedName` guard cannot help,
+  because the dest field kept its name. `apply()` now re-reads the source before any schema deletion
+  and drops orphans that have regained a counterpart (`ORPHAN_STALE_SKIPPED`); if that read fails it
+  skips all schema deletion for the run rather than trusting a stale list (`ORPHAN_RECHECK_FAILED`).
+  The extra read is only paid when deletions are actually confirmed.
+
+### Fixed (2026-07-31 — force-stop could kill an unrelated process; converged re-syncs re-posted every cell)
+
+- **`stopDaemon --force` SIGKILLed a pid read from the lockfile with no identity check.** The only
+  thing establishing that the pid was the daemon was `isStale()`'s bare `process.kill(pid, 0)`
+  liveness probe, which cannot distinguish our daemon from a process that recycled the pid after an
+  unclean death. In that state the lock persists with a live-but-foreign pid, the 10s wait never
+  clears, and the force branch signalled a stranger — on Windows `SIGTERM` maps to
+  `TerminateProcess`, so even the "graceful" first step is an unsavable hard kill. Now mirrors the
+  extension's `_verifyDaemonIdentity`: probe `/daemon/health` and require the uuid to echo the
+  lockfile's. Unproven ⇒ release the stale lock, leave the process alone, and say so.
+- **`buildUpdateCells` performed no comparison against the destination.** `updateRecords` issues one
+  serialized HTTP POST *per cell*, and every mapped writable scalar was re-posted on every re-sync
+  even when nothing had changed — 1000 rows × 20 fields = 20,000 sequential requests for a run that
+  changes nothing. Converged cells are now skipped, which collapses most rows to zero cells and lets
+  the existing empty-row skip drop them entirely. Cleared-cell propagation is unaffected.
+
+### Fixed (2026-07-31 — tunnel revocation reached only half the cases)
+
+- **The daemon held TWO independent `activeTunnel` handles**, one in `daemon/server.js` (filled by
+  `POST /daemon/enable-tunnel`) and one in `daemon/launcher.js` (filled by the boot auto-start).
+  Neither closure could see the other, so every path that stops a tunnel reached only half the
+  cases: `POST /daemon/disable-tunnel` was a **silent no-op on a boot-started tunnel** — it
+  skipped `stop()`, nulled the lockfile `tunnelUrl`, published `daemon:tunnel-stopped` and
+  returned `{ok:true}` while cloudflared kept serving the public hostname; the **401-burst
+  tripwire** delegated to the launcher's callback and so could never stop a dashboard-enabled
+  tunnel (it latched `tunnelAutoDisabled`, the UI showed "Auto-disabled", the URL stayed live);
+  and `enable-tunnel`'s stop-the-existing guard was equally blind, leaving **two cloudflared
+  children and two public URLs**. `getHealth()` reads the server closure, so `/daemon/health` and
+  `manage_daemon action=status` corroborated the false state. `/mcp` still required the 256-bit
+  timing-safe bearer throughout, so this was a **failed revocation control**, not open access —
+  but with `/mcp?token=` secret URLs the URL *is* the shared credential. `startDaemonServer()` now
+  exposes `adoptTunnel()`/`getActiveTunnel()`, the launcher hands its boot-started handle over,
+  and the tripwire stops that single handle directly. Pinned by `test/test-tunnel-ownership.test.js`.
+- **A boot-auto-started tunnel could kill the daemon by unhandled rejection.** `waitUntilReady` is
+  created eagerly in `tunnel.js` and rejected when cloudflared exits before publishing a URL
+  (offline boot, blocked egress, a trycloudflare 429). Nothing consumed it and the repo installs
+  no `process.on('unhandledRejection')`, so Node's default throw took the daemon down ~1s after it
+  began serving, killing in-flight MCP requests and orphaning the non-detached LSP child. Now
+  consumed and logged.
+
+### Security (2026-07-31 — `download_*` tools declared read-only while writing files)
+
+- **`download_formula_field` and `download_base_formulas` were annotated `readOnlyHint: true`,
+  `destructiveHint: false`** while writing (and overwriting) files at a caller-supplied path.
+  `readOnlyHint` is exactly the signal MCP clients use to **auto-approve a call without
+  prompting**, so the annotation removed the user's consent step from a filesystem write. Both are
+  now `readOnlyHint: false, destructiveHint: true`. *(Their `read` category is unchanged and
+  remains a judgement call — see the note below.)*
+- **A table named `..` escaped the chosen output directory.** The filename sanitiser stripped
+  separators (`/\:*?"<>|`) but not `.`, so `download_base_formulas` wrote every formula file one
+  directory *above* `outputDir`. Table and field names come from the base, so they are attacker
+  influenced by anyone who can edit a base the user can read. Both segments now go through
+  `confineToDir()`, which rejects dot-only segments and asserts the resolved path stays under the
+  chosen directory.
+- **`fieldName` was interpolated into the `# AT:` header with only quotes escaped**, so a newline
+  in a field name injected arbitrary header lines (`description` was already stripped). Both sites
+  now use `headerSafe()`.
+- Not changed: `outputPath`/`outputDir` themselves are still honoured as given. They are the
+  user's explicit choice, and confining them to `cwd` would break legitimate "save to my Desktop"
+  use; the consent step is restored by the annotation fix instead.
+
+### Security (2026-07-31 — row-template IDs were missing the path-traversal guard)
+
+- **All seven row-template client methods interpolated a caller-supplied `templateId` into the
+  API URL path with no `assertAirtableId`.** `client.js` defines `AIRTABLE_ID_RE` with the
+  comment "Prevents path traversal" and applies it at 128 call sites — but
+  `renameRowTemplate`, `updateRowTemplateDescription`, `setRowTemplateCell`,
+  `setRowTemplateVisibleColumns`, `duplicateRowTemplate`, `applyRowTemplate` and
+  `deleteRowTemplate` validated only `appId`. Since the value reaches the client straight from
+  tool arguments and `auth._rawApiCall` passes an absolute URL through unchanged (WHATWG parsing
+  collapses `..` before the request), a crafted id reached arbitrary internal endpoints under
+  the live session cookie — same-origin authorization bypass, not exfiltration, since the host
+  is a literal. Notably `applyRowTemplate`'s request body is byte-identical to what
+  `deleteTable` posts to `table/{id}/destroy`, so a `table-write`-only caller could destroy a
+  table while skipping `deleteTable`'s `expectedName` confirmation. `createRowTemplate` was
+  never affected — it generates its own id.
+
+### Security (2026-07-31 — undici bumped past the TLS certificate-validation bypass)
+
+- **`undici` floor raised `^7.0.0` → `^7.28.0`** (resolves 7.29.0). 7.24.5 was in range for
+  GHSA-level advisories including a **TLS certificate validation bypass via dropped
+  `requestTls`** — and that is not a theoretical transitive: `src/proxy.js` builds undici's
+  `EnvHttpProxyAgent` for every proxied environment, which is the exact affected path. A
+  corporate-proxy user could have had certificate validation silently skipped.
+- **This shipped inside the extension, not just to npm users.** `undici` is not in the esbuild
+  `external` list (`scripts/bundle-mcp.mjs`), so the vulnerable copy was compiled into
+  `dist/mcp/index.mjs` and frozen into all 8 platform VSIXes — extension users could not have
+  fixed it by updating a dependency. Reaching them requires a rebuild + republish.
+- Deliberately **not** bumped: the `hono` / `@hono/node-server` advisories carried by
+  `@modelcontextprotocol/sdk`. Their vulnerable code is `serve-static`, the CORS middleware and
+  JSX; the SDK only uses `@hono/node-server`'s request/response conversion
+  (`server/streamableHttp.js`), so none are reachable. Bumping them in-range pulled 24 unrelated
+  upgrades (including `patchright` 1.59.4 → 1.61.1, the Chromium driver behind the default auth
+  path) for zero security gain, so the change was reverted to an undici-only diff.
+
 ### Added (2026-07-31 daemon — secret-URL token for claude.ai custom connectors)
 
 - **Daemon accepts the bearer token as `?token=` in the URL.** claude.ai custom connectors

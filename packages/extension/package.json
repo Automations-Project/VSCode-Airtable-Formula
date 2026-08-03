@@ -531,7 +531,7 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection, formula validation, and record reading only (12 tools)",
+            "Schema inspection, formula validation, and record reading only (10 tools)",
             "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
             "All tools enabled including destructive ops, form metadata, extensions, and daemon control (72 tools)",
             "User-defined per-tool selection"
@@ -541,7 +541,7 @@
         "airtableFormula.mcp.categories.read": {
           "type": "boolean",
           "default": true,
-          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections."
+          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections, list_record_templates."
         },
         "airtableFormula.mcp.categories.tableWrite": {
           "type": "boolean",
@@ -617,6 +617,11 @@
           "type": "boolean",
           "default": false,
           "description": "Daemon Control tool: manage_daemon (inspect and administer the MCP daemon itself — not Airtable). action=status is read-only and reports daemon liveness, transport, uptime, tunnel URL and the live session/browser state; start, restart, stop, tunnel_enable, tunnel_disable and token_rotate control the running process. Off by default: this lets an AI agent stop or restart the server it is talking through."
+        },
+        "airtableFormula.mcp.categories.localWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Local File Write tools: download_formula_field, download_base_formulas. These READ from Airtable but WRITE .formula files to a path the caller chooses, so they are not part of the read-only profile. Included in safe-write and full."
         },
         "airtableFormula.mcp.tools": {
           "type": "object",
@@ -755,7 +760,7 @@
     "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.0.0",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "airtable-user-mcp": "workspace:*",
     "archiver": "^7.0.1",
     "tsup": "^8.0.0",

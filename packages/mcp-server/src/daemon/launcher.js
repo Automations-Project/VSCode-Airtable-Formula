@@ -364,7 +364,12 @@ export async function startDaemon(options = {}) {
           syncLockfile(nextToken.bearerToken);
         },
         onTunnelAutoDisable: async ({ failures, windowMs, ip }) => {
-          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl
+          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl.
+          // The SERVER now stops the tunnel before invoking this — it owns the
+          // single handle, so it reaches dashboard-enabled tunnels too, which
+          // this callback never could. The stop below is a defensive no-op
+          // (tunnel.js stop() returns early once `stopping` is set); it stays so
+          // the mirror is cleared and an un-adopted handle is still torn down.
           if (activeTunnel) {
             await activeTunnel.stop().catch(() => undefined);
             activeTunnel = null;
@@ -453,6 +458,23 @@ export async function startDaemon(options = {}) {
               }
             },
           });
+
+          // Hand ownership to the server. Until this existed, a boot-started
+          // tunnel lived ONLY in this closure, so /daemon/disable-tunnel saw
+          // null, skipped stop(), and still returned ok + nulled the lockfile —
+          // the public URL kept serving while every UI surface said "off".
+          server.adoptTunnel?.(activeTunnel);
+
+          // waitUntilReady is created eagerly in tunnel.js and rejected when
+          // cloudflared exits before publishing a URL (offline boot, blocked
+          // egress, trycloudflare 429). Nothing consumed it, and there is no
+          // process-level unhandledRejection handler, so Node's default throw
+          // killed the daemon ~1s after it began serving.
+          activeTunnel?.waitUntilReady?.catch?.((err) => {
+            console.error(
+              `[airtable-mcp] tunnel never became ready: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
         } catch (err) {
           // Non-fatal: daemon continues without tunnel (D-04: no auto-restart)
           console.error(`[airtable-mcp] Tunnel auto-start failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -539,6 +561,36 @@ export async function stopDaemon(options = {}) {
   }
 
   const pid = recordForShutdown.pid;
+
+  // NEVER signal a pid we have not PROVEN is our daemon.
+  //
+  // isStale()'s liveness probe is a bare `process.kill(pid, 0)` — it cannot tell our
+  // daemon from an unrelated process that recycled the pid after an unclean death.
+  // In that state the lock persists with a live-but-foreign pid, so status is
+  // running/unhealthy, the 10s wait never clears, and this branch used to SIGTERM
+  // then SIGKILL a stranger's process. On Windows `process.kill(pid,'SIGTERM')` maps
+  // to TerminateProcess, so even the "graceful" step is an unsavable hard kill.
+  // The extension already gates its equivalent on _verifyDaemonIdentity; this
+  // mirrors it — probe /daemon/health and require the uuid to echo the lockfile's.
+  let provenOurDaemon = false;
+  try {
+    const health = await adminRequest(recordForShutdown, '/daemon/health', { method: 'GET' });
+    provenOurDaemon = !!recordForShutdown.uuid && health?.uuid === recordForShutdown.uuid;
+  } catch { /* unreachable → unproven, fall through */ }
+
+  if (!provenOurDaemon) {
+    // Release the lock so a fresh daemon can start, but leave the process alone.
+    try {
+      release({ lockPath: getLockfilePath(configDir), expectedUuid: recordForShutdown.uuid });
+    } catch { /* best-effort */ }
+    return {
+      stopped: false,
+      forced: false,
+      pid,
+      reason: `Refusing to force-kill pid ${pid}: it did not answer /daemon/health with this lockfile's uuid, so it cannot be shown to be our daemon — the pid may have been recycled by an unrelated process. The stale lock was released, so a new daemon can start normally. If you are certain pid ${pid} is a hung airtable-user-mcp daemon, end it yourself.`,
+    };
+  }
+
   let signalled = false;
   try {
     process.kill(pid, 'SIGTERM');

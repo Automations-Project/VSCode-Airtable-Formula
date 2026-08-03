@@ -24,7 +24,7 @@ export function acquire(record, options = {}) {
   const lockPath = options.lockPath ?? getLockfilePath();
   const normalized = normalizeRecord(record);
 
-  mkdirSync(dirname(lockPath), { recursive: true });
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
 
   for (let attempt = 0; attempt < 2; attempt++) {
     let fd;
@@ -65,12 +65,14 @@ function tryReclaimStale(lockPath) {
   try {
     existing = read({ lockPath });
   } catch {
-    try {
-      rmSync(lockPath, { force: true });
-      return true;
-    } catch {
-      return false;
-    }
+    // Do NOT delete an unreadable lockfile. `acquire()` publishes the file with
+    // openSync(...,'wx') and only fills it a moment later, so between those two
+    // steps it legitimately exists with ZERO bytes — and read() throws on that.
+    // Deleting here (with no liveness check at all) let a racing acquirer evict a
+    // lock that a live daemon was in the middle of writing, so both callers
+    // returned true. Fail this attempt instead and let startDaemon's existing
+    // retry loop re-probe once the winner has finished writing.
+    return false;
   }
   if (!isStale(existing)) {
     return false;
@@ -121,7 +123,7 @@ export function replace(record, options = {}) {
     }
   }
 
-  mkdirSync(dirname(lockPath), { recursive: true });
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
   safeAtomicWriteFileSync(lockPath, serialize(normalized), { encoding: 'utf8', mode: 0o600 });
   applyPrivatePermissions(lockPath);
   return true;

@@ -19,31 +19,91 @@
  * response's own 'finish' event, which fires strictly after the body is handed
  * to the OS. Express owns the exit, the handler owns the answer.
  *
- * ponytail: a module-global single slot, not a per-request map — an exit is
- * process-wide by definition and there is exactly one daemon per process, so
- * two concurrent stop requests collapsing into one exit is the correct outcome.
+ * The intent remains process-wide, but it carries the identity of the HTTP
+ * request that staged it. Without that ownership, an unrelated response that
+ * happened to finish first could consume the slot and begin shutdown before the
+ * stop/restart caller received its confirmation.
+ *
+ * Two more rules close the overwrite/orphan race. A still-pending intent is
+ * never OVERWRITTEN: `requestDaemonExit` answers `staged:false` and the handler
+ * turns that into an honest refusal — re-owning the slot would let an
+ * overwriter that aborts before its response flushes strand the intent under an
+ * owner whose 'finish' can never fire, while the first caller already holds a
+ * flushed "stopping" confirmation the process then never honors. And an owner
+ * that dies unflushed cannot wedge the slot: server.js calls
+ * `discardDaemonExit` from the response's 'close' event when 'finish' never
+ * fired, dropping (never executing) the intent so a retried stop can stage.
  */
+
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /** @typedef {{ action: 'stop'|'restart', by?: string, reason?: string|null }} DaemonExitIntent */
 
-/** @type {DaemonExitIntent|null} */
+/** @typedef {{ intent: DaemonExitIntent, owner: symbol|null }} PendingDaemonExit */
+
+const requestOwner = new AsyncLocalStorage();
+
+/** @type {PendingDaemonExit|null} */
 let pending = null;
 
-/** @param {DaemonExitIntent} intent */
-export function requestDaemonExit(intent) {
-  pending = intent;
+/**
+ * Associate any exit staged while `fn` runs with one /mcp response.
+ * @template T
+ * @param {symbol} owner
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withDaemonExitOwner(owner, fn) {
+  return requestOwner.run(owner, fn);
 }
 
-/** Read-and-clear. @returns {DaemonExitIntent|null} */
-export function takeDaemonExit() {
-  const intent = pending;
+/** @typedef {{ staged: true } | { staged: false, pending: DaemonExitIntent }} StageDaemonExitResult */
+
+/**
+ * Stage an exit — unless one is already pending, in which case the caller is
+ * refused (see the header): the first request's ownership must survive to its
+ * own 'finish' hook, and the pending intent is echoed back so the refusal can
+ * say what is already staged.
+ * @param {DaemonExitIntent} intent
+ * @returns {StageDaemonExitResult}
+ */
+export function requestDaemonExit(intent) {
+  if (pending) return { staged: false, pending: { ...pending.intent } };
+  pending = { intent, owner: requestOwner.getStore() ?? null };
+  return { staged: true };
+}
+
+/**
+ * Read-and-clear, optionally only when the caller owns the intent.
+ * @param {symbol} [owner]
+ * @returns {DaemonExitIntent|null}
+ */
+export function takeDaemonExit(owner) {
+  if (!pending || (owner !== undefined && pending.owner !== owner)) return null;
+  const { intent } = pending;
   pending = null;
   return intent;
 }
 
+/**
+ * Owner-death scavenging: drop a still-pending intent iff `owner` staged it.
+ * The exit is NEVER executed on this path — a scavenge means the owner's
+ * response closed without flushing, so its caller never received the
+ * confirmation. Called by server.js from the response's 'close' event when
+ * 'finish' never fired; without it an aborted staging request would leave the
+ * slot owned by a response that can no longer finish, wedging it forever.
+ * @param {symbol|null} owner
+ * @returns {boolean} true when a pending intent was discarded
+ */
+export function discardDaemonExit(owner) {
+  if (!pending || pending.owner !== owner) return false;
+  pending = null;
+  return true;
+}
+
 /** Non-consuming peek — for tests and for a handler that wants to report what it just staged. */
 export function peekDaemonExit() {
-  return pending;
+  return pending?.intent ?? null;
 }
 
 /** Drop a staged intent (e.g. the action failed validation after staging). */

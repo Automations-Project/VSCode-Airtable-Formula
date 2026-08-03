@@ -71,6 +71,22 @@ function refusal(action, why, instead) {
 }
 
 /**
+ * Another in-flight request already staged this process's exit and its response
+ * owns the slot. exit-intent.js refuses overwrites — an overwriter that aborts
+ * before its response flushes would orphan the slot while the first caller
+ * already holds a flushed confirmation — so answer honestly instead of
+ * pretending to have staged anything.
+ */
+function exitAlreadyStaged(action, pending) {
+  const pendingAction = pending?.action ?? 'stop or restart';
+  return refusal(
+    action,
+    `A daemon ${pendingAction} is already staged by another in-flight request; this process exits as soon as that response flushes.`,
+    `Wait a moment, then check manage_daemon action="status" — retry "${action}" only if the daemon is still running.`,
+  );
+}
+
+/**
  * @param {{action:string, provider?:string, domain?:string, reason?:string}} params
  * @param {{
  *   configDir?: string,
@@ -299,7 +315,8 @@ async function doStop(state, params, deps) {
     // The handler MUST return normally. server.js fires the exit from the
     // response's 'finish' event — see exit-intent.js for the deadlock this
     // avoids.
-    stageExit({ action: 'stop', by: 'manage_daemon', reason: params.reason ?? null });
+    const staged = stageExit({ action: 'stop', by: 'manage_daemon', reason: params.reason ?? null });
+    if (staged?.staged === false) return exitAlreadyStaged('stop', staged.pending);
     return {
       action: 'stop', ok: true, stopping: true,
       pid: process.pid,
@@ -334,7 +351,8 @@ async function doRestart(state, deps) {
 
   if (isHolder) {
     // No sentinel: a restart is not a stop. server.js clears any stale one.
-    stageExit({ action: 'restart', by: 'manage_daemon' });
+    const staged = stageExit({ action: 'restart', by: 'manage_daemon' });
+    if (staged?.staged === false) return exitAlreadyStaged('restart', staged.pending);
     return {
       action: 'restart', ok: true, restarting: true,
       pid: process.pid,

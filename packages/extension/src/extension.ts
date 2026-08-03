@@ -161,6 +161,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Live-stream debug events to the VS Code Output panel
     const debugOutput = vscode.window.createOutputChannel('Airtable Formula: Debug Log');
     context.subscriptions.push(debugOutput);
+
+    // Created once here, not per invocation: VS Code mints a DISTINCT channel per
+    // createOutputChannel call, so creating it inside the showToolStatus handler
+    // left one identically-named entry in the Output dropdown per invocation and
+    // never disposed any of them.
+    const toolStatusChannel = vscode.window.createOutputChannel('Airtable Formula: MCP Tools', 'markdown');
+    context.subscriptions.push(toolStatusChannel);
     debugCollector.onEvent = (ev) => {
         const time = ev.ts.slice(11, 23); // HH:MM:SS.mmm
         const tag = `[${ev.source}] ${ev.event}`;
@@ -565,7 +572,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.showToolStatus', async () => {
-            const channel = vscode.window.createOutputChannel('Airtable Formula: MCP Tools', 'markdown');
+            // Created once and reused. VS Code mints a DISTINCT channel per
+            // createOutputChannel call, so doing this inside the handler left N
+            // identically-named entries in the Output dropdown with no way to tell
+            // which was current — the channel.clear() below shows reuse was intended.
+            const channel = toolStatusChannel;
             channel.clear();
             channel.appendLine(toolProfileManager.renderStatusReport());
             channel.show();

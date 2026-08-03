@@ -70,7 +70,7 @@
 | **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
 | **AI Skills** | Pre-built Airtable-specific rules and workflows for AI coding assistants | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
-| **Tool Profiles** | `read-only` (12 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` permission scopes | — |
+| **Tool Profiles** | `read-only` (10 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` permission scopes | — |
 | **OS Keychain Auth** | Browser-based Airtable login with SSO/2FA — credentials in your OS keychain | — |
 
 ---
@@ -127,7 +127,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
 | **Create dashboard pages** | ❌ | ✅ |
 | **Daemon self-diagnosis (session dead? browser busy? daemon gone?)** | ❌ | ✅ `manage_daemon` `action=status`, plus start / restart / stop / tunnel / token rotation |
-| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (12) / safe-write (54) / full (72) / custom |
+| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (10) / safe-write (54) / full (72) / custom |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
 | **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
@@ -198,7 +198,8 @@ Manage Airtable bases with capabilities **not available through the official RES
 
 | Category | Tools | Highlights |
 |:---------|:-----:|:-----------|
-| **Schema Read** | 11 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates; download all formula fields to local files |
+| **Schema Read** | 9 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates |
+| **Local File Write** | 2 | Download one formula field or every formula in a base to caller-chosen `.formula` files; excluded from `read-only` |
 | **Record Read** | 1 | `query_records` — up to 1 000 records/call with resolved field values; `search` param works on lookup/rollup fields (REST API `filterByFormula` doesn't) |
 | **Record Write** | 4 | `create_records` / `update_records` / `duplicate_records` / `upload_attachment` (the only way to write `multipleAttachments` cells by URL) |
 | **Record Destructive** | 1 | `delete_records` — batch-delete records from a table |

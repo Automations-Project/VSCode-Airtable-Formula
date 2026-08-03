@@ -19,7 +19,7 @@ import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { withToolDispatchContext } from '../page-scheduler.js';
 import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
-import { takeDaemonExit } from './exit-intent.js';
+import { discardDaemonExit, takeDaemonExit, withDaemonExitOwner } from './exit-intent.js';
 import { clearStopSentinel, writeStopSentinel } from './stop-sentinel.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
@@ -339,6 +339,18 @@ export async function startDaemonServer(options = {}) {
       const ip = req.headers?.['cf-connecting-ip']
         ?? req.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
         ?? null;
+      // Stop the tunnel HERE, on the one handle this module owns. The launcher's
+      // onTunnelAutoDisable callback used to be the only thing that stopped it,
+      // and it could only see a tunnel the LAUNCHER had started at boot — so a
+      // tunnel enabled from the dashboard (which fills this closure instead)
+      // survived the tripwire entirely: `tunnelAutoDisabled` latched, the UI said
+      // "Auto-disabled", and cloudflared kept serving the public hostname.
+      // The callback is now bookkeeping only (settings + lockfile).
+      if (activeTunnel) {
+        const stopping = activeTunnel;
+        activeTunnel = null;
+        void stopping.stop().catch(() => undefined);
+      }
       publishEvent('daemon:tunnel-auto-disabled', { failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
       options.onTunnelAutoDisable?.({ failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
     }
@@ -733,9 +745,23 @@ export async function startDaemonServer(options = {}) {
       // only point at which shutting the process down cannot truncate the answer
       // the model is waiting for. Registered BEFORE handleRequest so it is armed
       // no matter how fast the handler completes; a no-op when nothing staged.
+      // AsyncLocalStorage associates stageExit() with this request. A concurrent
+      // response cannot consume an intent it did not stage, even if it began
+      // earlier and finishes in the stage-to-flush window.
+      const exitOwner = Symbol('mcp-request');
       res.on('finish', () => {
-        const intent = takeDaemonExit();
+        const intent = takeDaemonExit(exitOwner);
         if (intent) void runExitIntent(intent);
+      });
+      // Owner-death scavenging: 'close' without 'finish' means this response
+      // aborted before its body flushed. Discard — never execute — any intent
+      // THIS response staged: its caller never received the confirmation, and
+      // since requestDaemonExit refuses overwrites, a slot left owned by a
+      // response that can no longer finish would otherwise be wedged forever.
+      // Node also fires 'close' after 'finish' on normal completion, hence the
+      // writableFinished guard.
+      res.on('close', () => {
+        if (!res.writableFinished) discardDaemonExit(exitOwner);
       });
 
       const mcpServer = new Server(
@@ -797,7 +823,7 @@ export async function startDaemonServer(options = {}) {
       res.on('close', () => { void cleanup(); });
 
       await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      await withDaemonExitOwner(exitOwner, () => transport.handleRequest(req, res, req.body));
     } catch (error) {
       next(error);
     }
@@ -886,5 +912,24 @@ export async function startDaemonServer(options = {}) {
     stop,
     publishEvent,
     getHealth,
+    /**
+     * Hand a tunnel started elsewhere (the launcher's boot auto-start) to this
+     * module, so there is exactly ONE owner of the running tunnel.
+     *
+     * Without this the launcher kept its own `activeTunnel` that this closure
+     * could not see, and the three paths that stop a tunnel each reached only
+     * half the cases: `/daemon/disable-tunnel` was a silent no-op on a
+     * boot-started tunnel (it reported ok and nulled the lockfile while
+     * cloudflared kept serving), `/daemon/enable-tunnel`'s stop-the-existing
+     * guard missed it and orphaned a second cloudflared, and the 401-burst
+     * tripwire could only stop boot-started ones.
+     */
+    adoptTunnel(handle) {
+      activeTunnel = handle;
+    },
+    /** The tunnel handle this module currently owns (read-only; null when none). */
+    getActiveTunnel() {
+      return activeTunnel;
+    },
   };
 }
