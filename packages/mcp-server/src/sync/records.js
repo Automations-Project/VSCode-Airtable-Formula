@@ -756,7 +756,11 @@ export async function applyRecordsPass1({ client, srcSnapshot, destSnapshot, idm
     // Record what this table actually achieved, for pruneRecords' per-table gate.
     // Tables that `continue` above never reach here — they attempted no writes, so
     // the absence of an entry correctly reads as "nothing failed".
-    (result.perTable ??= {})[srcTable.name] = {
+    // Key by the matched DESTINATION id, not either table name. Source and
+    // destination names can legitimately differ, while pruneRecords iterates the
+    // destination snapshot; a name key made the all-writes-failed guard disappear
+    // exactly when a matched table had been renamed.
+    (result.perTable ??= {})[destTableId] = {
       created: result.created - countsBefore.created,
       updated: result.updated - countsBefore.updated,
       skipped: result.skipped - countsBefore.skipped,
@@ -1770,7 +1774,7 @@ export async function pruneRecords({ client, destSnapshot, idmap, policy, policy
     // any other table (counted as `skipped`) disarms it. A FIELD_FORBIDDEN 403 is a
     // per-field permission property, so "every row of exactly one table failed" is a
     // routine outcome, not an exotic one.
-    const tableCounts = result.perTable?.[t.name];
+    const tableCounts = result.perTable?.[t.id];
     if (tableCounts && tableCounts.failed > 0
         && tableCounts.created === 0 && tableCounts.updated === 0 && tableCounts.skipped === 0) {
       result.warnings.push({

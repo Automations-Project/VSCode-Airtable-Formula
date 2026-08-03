@@ -10,7 +10,7 @@
   claiming a cleared session (they are user-authored, so it does not delete them). `login` no longer
   accepts `--password` / `--otp-secret`: argv lands in world-readable `/proc/<pid>/cmdline` and shell
   history for the ~5-minute login poll, and a captured base32 TOTP seed is a permanent 2FA bypass —
-  use the env vars or `login.json`. The config directory is created 0700 (it holds those files), and
+  use environment variables (the separate `direct-login` mode reads `login.json`). The config directory is created 0700 (it holds those files), and
   the session-backup archive 0600 (it contains the cookie jar, `daemon.token` and `daemon.lock`).
   IDE config writes that carry an Airtable PAT are 0600 — the atomic rename replaces the destination
   inode, so without a mode any restrictive permissions the user had set were reset. All no-ops on Windows.
@@ -31,14 +31,18 @@
   evict a lock a live daemon was mid-write. It now fails the attempt and lets the retry loop re-probe.
 - **`apply.lock` no longer wedges forever on a recycled pid**, and the `APPLY_LOCKED` error finally
   names the lock file's path.
-- **The daemon exit-intent slot** only consumes an intent staged during the current request, so a
-  concurrent `/mcp` response no longer truncates a stop/restart caller's confirmation. (Narrowed, not
-  closed — see the `ponytail:` note; the exact fix needs request identity threaded through.)
+- **The daemon exit-intent slot** is now tied to its originating request with
+  `AsyncLocalStorage`, so an older concurrent `/mcp` response cannot consume it and truncate the
+  stop/restart caller's confirmation.
 - **`offsetToPosition` no longer rescans from offset 0 for every diagnostic.** `makeRange` calls it
   twice per diagnostic, so N diagnostics cost O(N x document). Line starts are memoised per document
   and binary-searched: `')'.repeat(20000)` **~1000 ms → 28 ms**, `'IF('.repeat(10000)` **~3500 ms → 484 ms**.
 - **`showToolStatus` reuses one OutputChannel** instead of minting a new identically-named one per
   invocation and never disposing it.
+- **The transitive Ajv URI parser is patched in place.** `fast-uri` 3.1.0 → 3.1.5 clears four
+  production audit findings without pulling an MCP SDK or browser-auth upgrade. No repository path
+  accepts caller-supplied schemas or `$id` values, but the bundled parser no longer carries the
+  advisory regardless.
 
 ### Changed (2026-08-01 — new `local-write` category; read-only is 12 → 10 tools)
 
@@ -49,7 +53,8 @@
   client's consent prompt, but the profile itself was still mislabelled. `local-write` is included
   in **safe-write** and **full**, so those tool sets are UNCHANGED (54 / 72); only **read-only**
   changes, 12 → 10. Deliberately NOT added to `LEGACY_CATEGORIES_DEFAULT_ON`, so a pre-existing
-  `custom` profile does not silently widen to include it. New setting:
+  `custom` profile does not silently widen to include it, including when the VS Code extension
+  imports or rewrites an older profile file. New setting:
   `airtableFormula.mcp.categories.localWrite` (default true).
 
 ### Fixed (2026-07-31 — sync prune could delete data it had not replaced)
@@ -63,7 +68,9 @@
   replacement data was never written, with the job reporting `phase='done'`. Pass 1 now records
   per-table outcomes (`result.perTable`) and `pruneRecords` skips any table with
   `failed > 0 && created + updated + skipped === 0`, emitting `RECORDS_FAILED_PRUNE_SKIPPED` —
-  the same shape as the existing truncation guard.
+  the same shape as the existing truncation guard. The accounting is keyed by matched destination
+  table ID; using source/destination names made the guard disappear when a matched table had been
+  renamed between bases.
 - **`pruneSchema` deleted the `fieldMappings` targets `apply()` had just validated.** A mapping
   target must exist on the dest and be writable but is *not* required to exist on the source — the
   documented injection pattern (source autoNumber `Code` → dest text field `InjectID`) is dest-only

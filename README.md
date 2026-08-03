@@ -198,7 +198,8 @@ Manage Airtable bases with capabilities **not available through the official RES
 
 | Category | Tools | Highlights |
 |:---------|:-----:|:-----------|
-| **Schema Read** | 11 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates; download all formula fields to local files |
+| **Schema Read** | 9 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates |
+| **Local File Write** | 2 | Download one formula field or every formula in a base to caller-chosen `.formula` files; excluded from `read-only` |
 | **Record Read** | 1 | `query_records` — up to 1 000 records/call with resolved field values; `search` param works on lookup/rollup fields (REST API `filterByFormula` doesn't) |
 | **Record Write** | 4 | `create_records` / `update_records` / `duplicate_records` / `upload_attachment` (the only way to write `multipleAttachments` cells by URL) |
 | **Record Destructive** | 1 | `delete_records` — batch-delete records from a table |

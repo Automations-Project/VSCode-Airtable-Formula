@@ -541,7 +541,7 @@
         "airtableFormula.mcp.categories.read": {
           "type": "boolean",
           "default": true,
-          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections."
+          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections, list_record_templates."
         },
         "airtableFormula.mcp.categories.tableWrite": {
           "type": "boolean",
@@ -760,7 +760,7 @@
     "@types/vscode": "^1.100.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.0.0",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "airtable-user-mcp": "workspace:*",
     "archiver": "^7.0.1",
     "tsup": "^8.0.0",

@@ -350,7 +350,7 @@ Most schema tools require \`appId\` (e.g. \`"appXXX"\`) as their first parameter
 
 ---
 
-### Category 1: Read / Inspect (11 tools)
+### Category 1: Read / Inspect (9 tools)
 
 Read-only. Safe to call at any time. Always call a read tool before mutating.
 
@@ -365,8 +365,6 @@ Read-only. Safe to call at any time. Always call a read tool before mutating.
 | \`validate_formula\` | **Always call before** \`create_formula_field\` or \`update_formula_field\`. Returns validity + result type. |
 | \`list_view_sections\` | List sidebar view sections (groups) in a table. |
 | \`list_record_templates\` | List record templates defined in a table. |
-| \`download_formula_field\` | Download a formula field to a local \`.formula\` file with \`AT:\` header. Pass \`outputPath\` to save, or omit to read inline. |
-| \`download_base_formulas\` | Download ALL formula fields in a base to \`.formula\` files, organised into per-table subfolders. |
 
 ---
 
@@ -660,6 +658,18 @@ Off unless the \`full\` profile is active.
 | Tool | When to Use |
 |------|-------------|
 | \`manage_daemon\` | **Reach for \`action=status\` FIRST when tools start failing.** It is read-only and reports whether a daemon is running and whether this process is it, the transport, uptime, version, tunnel URL, and the live session state — \`sessionDead\`, the last circuit-breaker trip *including Airtable's own response body*, and the browser/auth busy queue. That is how you tell "daemon gone" from "session dead" from "browser busy" instead of guessing or retrying blindly. Control actions: \`start\`, \`restart\`, \`stop\` (answers first, exits after; writes a sentinel so the VS Code extension does not silently respawn it), \`tunnel_enable\`, \`tunnel_disable\`, \`token_rotate\`. Ask the user before \`stop\`/\`restart\` — you are turning off the server you are talking through. |
+
+---
+
+### Category 17: Local File Write (2 tools)
+
+Reads formula definitions from Airtable but writes to caller-chosen local paths. Included in
+\`safe-write\` and \`full\`, not \`read-only\`.
+
+| Tool | When to Use |
+|------|-------------|
+| \`download_formula_field\` | Download one formula field to a local \`.formula\` file with an \`AT:\` header. Pass \`outputPath\` to save, or omit it to return the formula inline. |
+| \`download_base_formulas\` | Download every formula field in a base to \`.formula\` files organised into per-table subfolders. |
 
 ---
 

@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { pruneSchema } from '../../src/sync/prune-schema.js';
-import { pruneRecords, buildUpdateCells } from '../../src/sync/records.js';
+import { applyRecordsPass1, pruneRecords, buildUpdateCells } from '../../src/sync/records.js';
 
 const noopLimiter = { run: (fn) => fn() };
 
@@ -85,6 +85,57 @@ function recordsFixture() {
 }
 
 describe('pruneRecords — per-table write-failure gate', () => {
+  it('does NOT delete after all writes fail when source and destination table names differ', async () => {
+    const deleted = [];
+    const client = {
+      async createRecords(_baseId, _tableId, rows) {
+        return {
+          created: [],
+          failed: rows.map((row) => ({ sourceKey: row.sourceKey, error: 'FIELD_FORBIDDEN' })),
+        };
+      },
+      async deleteRecords(_baseId, _tableId, ids) { deleted.push(...ids); },
+    };
+    const srcSnapshot = {
+      baseId: 'appSource',
+      tables: [{
+        id: 'tblSource', name: 'Source Tasks',
+        fields: [{ id: 'fldSourceName', name: 'Name', type: 'text' }],
+        records: [{ id: 'recSourceNew', cellValuesByColumnId: { fldSourceName: 'new' } }],
+      }],
+    };
+    const destSnapshot = {
+      baseId: 'appDest',
+      tables: [{
+        id: 'tblDest', name: 'Renamed Tasks',
+        fields: [{ id: 'fldDestName', name: 'Name', type: 'text' }],
+        views: [{ id: 'viwDest', personalForUserId: null }],
+        snapshotRowCount: 1,
+        records: [{ id: 'recDestOrphan' }],
+      }],
+    };
+    const idmap = {
+      tables: { tblSource: 'tblDest' },
+      fields: { fldSourceName: { destFld: 'fldDestName' } },
+      records: {},
+    };
+    const result = { warnings: [], created: 0, updated: 0, skipped: 0, failed: 0 };
+
+    await applyRecordsPass1({
+      client, srcSnapshot, destSnapshot, idmap,
+      limiter: noopLimiter, journal: {}, persist: () => {}, result,
+      policy: 'mirror', policyOverrides: {},
+    });
+    await pruneRecords({
+      client, destSnapshot, idmap,
+      policy: 'mirror', policyOverrides: {}, confirmDeletions: true,
+      limiter: noopLimiter, result,
+    });
+
+    assert.deepEqual(deleted, [], 'a destination rename must not bypass the all-writes-failed guard');
+    assert.equal(result.warnings.filter((w) => w.code === 'RECORDS_FAILED_PRUNE_SKIPPED').length, 1);
+  });
+
   it('does NOT delete dest rows in a table whose every write failed', async () => {
     const { client, destSnapshot, deleted } = recordsFixture();
     const result = {
@@ -93,8 +144,8 @@ describe('pruneRecords — per-table write-failure gate', () => {
       // exactly the shape that disarmed the old run-wide gate.
       created: 0, updated: 0, skipped: 7, failed: 3,
       perTable: {
-        Tasks: { created: 0, updated: 0, skipped: 0, failed: 3 },
-        Other: { created: 0, updated: 0, skipped: 7, failed: 0 },
+        tblA: { created: 0, updated: 0, skipped: 0, failed: 3 },
+        tblOther: { created: 0, updated: 0, skipped: 7, failed: 0 },
       },
     };
 
@@ -115,7 +166,7 @@ describe('pruneRecords — per-table write-failure gate', () => {
     const result = {
       warnings: [],
       created: 1, updated: 0, skipped: 0, failed: 0,
-      perTable: { Tasks: { created: 1, updated: 0, skipped: 0, failed: 0 } },
+      perTable: { tblA: { created: 1, updated: 0, skipped: 0, failed: 0 } },
     };
 
     await pruneRecords({

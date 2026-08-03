@@ -192,6 +192,20 @@ const CATEGORY_TO_SETTINGS: Record<string, keyof ToolCategories> = Object.fromEn
   Object.entries(SETTINGS_TO_CATEGORY).map(([k, v]) => [v, k as keyof ToolCategories]),
 );
 
+// Keep this frozen to the categories that existed when customTools was introduced.
+// It mirrors the server's legacy-custom invariant: a category added later defaults
+// closed when an older custom profile has no explicit keys for its tools. Iterating
+// the complement makes future categories fail closed automatically.
+const LEGACY_CATEGORIES_DEFAULT_ON = new Set([
+  'read', 'record-read',
+  'table-write', 'table-destructive',
+  'field-write', 'field-destructive',
+  'view-write', 'view-destructive',
+  'view-section', 'view-section-destructive',
+  'form-write', 'extension',
+  'record-write',
+]);
+
 const CONFIG_DIR  = path.join(os.homedir(), '.airtable-user-mcp');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'tools-config.json');
 
@@ -202,6 +216,12 @@ interface OnDiskConfig {
 
 function defaultConfig(): OnDiskConfig {
   return { activeProfile: 'full', customTools: {} };
+}
+
+function isCustomToolEnabled(config: OnDiskConfig, tool: string): boolean {
+  const explicit = config.customTools[tool];
+  if (typeof explicit === 'boolean') return explicit;
+  return LEGACY_CATEGORIES_DEFAULT_ON.has(TOOL_CATEGORIES[tool]);
 }
 
 export class ToolProfileManager implements vscode.Disposable {
@@ -231,11 +251,18 @@ export class ToolProfileManager implements vscode.Disposable {
   async init(): Promise<void> {
     await fsp.mkdir(CONFIG_DIR, { recursive: true }).catch(() => { /* ignore */ });
 
+    let fileBefore: OnDiskConfig | undefined;
+    try { fileBefore = await this._readFile(); } catch { /* file missing is fine */ }
+
+    // VS Code returns package.json's default even when a setting did not exist in
+    // the user's older installation. Before settings overwrite the file, seed every
+    // post-legacy category from the old customTools map: explicit tool values survive,
+    // absent tools stay disabled, and an explicitly configured setting still wins.
+    await this._migrateLegacyCustomCategories(fileBefore);
+
     // Log what we're about to do so the extension host output channel shows
     // the resolved state — invaluable when debugging sync issues later.
     const beforeSnapshot = this.getSnapshot();
-    let fileBefore: OnDiskConfig | undefined;
-    try { fileBefore = await this._readFile(); } catch { /* file missing is fine */ }
     console.log(
       `[tool-profile] init — settings: ${beforeSnapshot.profile} (${beforeSnapshot.enabledCount}/${beforeSnapshot.totalCount}); ` +
       `file: ${fileBefore ? fileBefore.activeProfile : '<none>'}`
@@ -292,11 +319,12 @@ export class ToolProfileManager implements vscode.Disposable {
       daemon:                 cfg.get('mcp.categories.daemon',                 false),
       localWrite:             cfg.get('mcp.categories.localWrite',             true),
     };
+    const overrides = cfg.get<Record<string, boolean>>('mcp.tools', {});
     return {
       profile,
       categories,
       totalCount:   Object.keys(TOOL_CATEGORIES).length,
-      enabledCount: this._countEnabled(profile, categories),
+      enabledCount: this._countEnabled(profile, categories, overrides),
     };
   }
 
@@ -309,16 +337,37 @@ export class ToolProfileManager implements vscode.Disposable {
   /** Toggle a single category. Auto-switches profile to 'custom' if not already there. */
   async toggleCategory(category: keyof ToolCategories, enabled: boolean): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('airtableFormula');
-    const currentProfile = cfg.get<string>('mcp.toolProfile', 'full');
-    if (currentProfile !== 'custom') {
-      this._suppressSettingsSync = true;
-      try {
+    const wasSuppressed = this._suppressSettingsSync;
+    this._suppressSettingsSync = true;
+    try {
+      const currentProfile = cfg.get<string>('mcp.toolProfile', 'full');
+      if (currentProfile !== 'custom') {
         await cfg.update('mcp.toolProfile', 'custom', vscode.ConfigurationTarget.Global);
-      } finally {
-        setTimeout(() => { this._suppressSettingsSync = false; }, 200);
       }
+
+      // A category action is an explicit choice for every tool in that category.
+      // Drop older per-tool overrides first; otherwise values imported during a
+      // legacy migration remain the final authority and make the toggle a no-op.
+      const overrides = { ...cfg.get<Record<string, boolean>>('mcp.tools', {}) };
+      const fileCategory = SETTINGS_TO_CATEGORY[category];
+      let overridesChanged = false;
+      for (const [tool, candidateCategory] of Object.entries(TOOL_CATEGORIES)) {
+        if (candidateCategory !== fileCategory || !(tool in overrides)) continue;
+        delete overrides[tool];
+        overridesChanged = true;
+      }
+      if (overridesChanged) {
+        await cfg.update('mcp.tools', overrides, vscode.ConfigurationTarget.Global);
+      }
+      await cfg.update(`mcp.categories.${category}`, enabled, vscode.ConfigurationTarget.Global);
+    } finally {
+      this._suppressSettingsSync = wasSuppressed;
     }
-    await cfg.update(`mcp.categories.${category}`, enabled, vscode.ConfigurationTarget.Global);
+
+    // Configuration-change events are intentionally suppressed while the
+    // profile, overrides, and category move as one unit. Persist the final state
+    // once rather than exposing transient combinations to the MCP server.
+    if (!wasSuppressed) await this.syncSettingsToFile();
   }
 
   async openConfigFile(): Promise<void> {
@@ -331,7 +380,9 @@ export class ToolProfileManager implements vscode.Disposable {
   /** Return Markdown describing the current profile + enabled tools (for the status command). */
   renderStatusReport(): string {
     const snapshot = this.getSnapshot();
-    const enabled = this._computeEnabledSet(snapshot.profile, snapshot.categories);
+    const overrides = vscode.workspace.getConfiguration('airtableFormula')
+      .get<Record<string, boolean>>('mcp.tools', {});
+    const enabled = this._computeEnabledSet(snapshot.profile, snapshot.categories, overrides);
     const lines: string[] = [
       `**Profile:** ${snapshot.profile}  |  **Tools:** ${snapshot.enabledCount}/${snapshot.totalCount}`,
       '',
@@ -405,19 +456,28 @@ export class ToolProfileManager implements vscode.Disposable {
       }
 
       if (config.activeProfile === 'custom') {
+        // Materialize the server's legacy-custom semantics before importing the
+        // file. Older categories default on when absent; categories introduced
+        // later default off. Keeping an exact per-tool map also preserves mixed
+        // categories regardless of a stale/default category switch in VS Code.
+        const effectiveCustomTools = { ...config.customTools };
+        for (const tool of Object.keys(TOOL_CATEGORIES)) {
+          effectiveCustomTools[tool] = isCustomToolEnabled(config, tool);
+        }
+
         // Derive category booleans from customTools (all-enabled vs all-disabled per category)
         for (const [settingsKey, fileCat] of Object.entries(SETTINGS_TO_CATEGORY) as [keyof ToolCategories, string][]) {
           const toolsInCat = Object.entries(TOOL_CATEGORIES).filter(([, c]) => c === fileCat);
           if (toolsInCat.length === 0) continue;
-          const allEnabled  = toolsInCat.every(([t]) => config.customTools[t] !== false);
-          const allDisabled = toolsInCat.every(([t]) => config.customTools[t] === false);
+          const allEnabled  = toolsInCat.every(([t]) => effectiveCustomTools[t]);
+          const allDisabled = toolsInCat.every(([t]) => !effectiveCustomTools[t]);
           if (allDisabled) {
             await cfg.update(`mcp.categories.${settingsKey}`, false, vscode.ConfigurationTarget.Global);
           } else if (allEnabled) {
             await cfg.update(`mcp.categories.${settingsKey}`, true, vscode.ConfigurationTarget.Global);
           }
         }
-        await cfg.update('mcp.tools', config.customTools, vscode.ConfigurationTarget.Global);
+        await cfg.update('mcp.tools', effectiveCustomTools, vscode.ConfigurationTarget.Global);
       } else {
         // Built-in profile — reset category toggles to match
         const def = BUILTIN_PROFILES[config.activeProfile as keyof typeof BUILTIN_PROFILES] ?? BUILTIN_PROFILES.full;
@@ -434,16 +494,31 @@ export class ToolProfileManager implements vscode.Disposable {
 
   // ─── Private ────────────────────────────────────────────────
 
-  private _countEnabled(profile: ToolProfileName, categories: ToolCategories): number {
-    return this._computeEnabledSet(profile, categories).size;
+  private _countEnabled(
+    profile: ToolProfileName,
+    categories: ToolCategories,
+    overrides: Record<string, boolean> = {},
+  ): number {
+    return this._computeEnabledSet(profile, categories, overrides).size;
   }
 
-  private _computeEnabledSet(profile: ToolProfileName, categories: ToolCategories): Set<string> {
+  private _computeEnabledSet(
+    profile: ToolProfileName,
+    categories: ToolCategories,
+    overrides: Record<string, boolean> = {},
+  ): Set<string> {
     const enabled = new Set<string>();
     if (profile === 'custom') {
       for (const [tool, fileCat] of Object.entries(TOOL_CATEGORIES)) {
         const settingsKey = CATEGORY_TO_SETTINGS[fileCat];
         if (settingsKey && categories[settingsKey]) enabled.add(tool);
+      }
+      // Match syncSettingsToFile(): per-tool values are the final authority for a
+      // custom profile, including the mixed-category state imported during upgrade.
+      for (const [tool, isEnabled] of Object.entries(overrides)) {
+        if (!(tool in TOOL_CATEGORIES)) continue;
+        if (isEnabled) enabled.add(tool);
+        else enabled.delete(tool);
       }
     } else {
       const def = BUILTIN_PROFILES[profile as keyof typeof BUILTIN_PROFILES] ?? BUILTIN_PROFILES.full;
@@ -453,6 +528,61 @@ export class ToolProfileManager implements vscode.Disposable {
       }
     }
     return enabled;
+  }
+
+  private _hasExplicitSetting(cfg: vscode.WorkspaceConfiguration, key: string): boolean {
+    const inspected = cfg.inspect<unknown>(key);
+    if (!inspected) return false;
+    return [
+      inspected.globalValue,
+      inspected.workspaceValue,
+      inspected.workspaceFolderValue,
+      inspected.globalLanguageValue,
+      inspected.workspaceLanguageValue,
+      inspected.workspaceFolderLanguageValue,
+    ].some((value) => value !== undefined);
+  }
+
+  /** Preserve the effective state of categories unknown to an older custom profile. */
+  private async _migrateLegacyCustomCategories(fileBefore: OnDiskConfig | undefined): Promise<void> {
+    if (fileBefore?.activeProfile !== 'custom') return;
+
+    const cfg = vscode.workspace.getConfiguration('airtableFormula');
+    if (cfg.get<string>('mcp.toolProfile', 'full') !== 'custom') return;
+
+    const oldTools = fileBefore.customTools ?? {};
+    const overrides = { ...cfg.get<Record<string, boolean>>('mcp.tools', {}) };
+    let overridesChanged = false;
+
+    for (const [settingsKey, fileCat] of Object.entries(SETTINGS_TO_CATEGORY) as [keyof ToolCategories, string][]) {
+      if (LEGACY_CATEGORIES_DEFAULT_ON.has(fileCat)) continue;
+      const settingPath = `mcp.categories.${settingsKey}`;
+      if (this._hasExplicitSetting(cfg, settingPath)) continue;
+
+      const tools = Object.entries(TOOL_CATEGORIES)
+        .filter(([, category]) => category === fileCat)
+        .map(([tool]) => tool);
+      if (tools.length === 0) continue;
+
+      const effective = tools.map((tool) => {
+        const fromSettings = overrides[tool];
+        if (typeof fromSettings === 'boolean') return fromSettings;
+        const fromFile = oldTools[tool];
+        return typeof fromFile === 'boolean' ? fromFile : false;
+      });
+
+      // The category switch represents the common state; explicit per-tool values
+      // retain an exact mixed state on top of it.
+      await cfg.update(settingPath, effective.every(Boolean), vscode.ConfigurationTarget.Global);
+      for (let i = 0; i < tools.length; i++) {
+        overrides[tools[i]] = effective[i];
+        overridesChanged = true;
+      }
+    }
+
+    if (overridesChanged) {
+      await cfg.update('mcp.tools', overrides, vscode.ConfigurationTarget.Global);
+    }
   }
 
   private async _readFile(): Promise<OnDiskConfig> {

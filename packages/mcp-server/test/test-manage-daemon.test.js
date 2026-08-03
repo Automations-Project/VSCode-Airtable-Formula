@@ -88,9 +88,10 @@ async function waitFor(predicate, timeoutMs = 5_000) {
   throw new Error('waitFor timed out');
 }
 
-function callTool(port, bearer, name, args = {}, headers = {}) {
+function callTool(port, bearer, name, args = {}, headers = {}, signal) {
   return fetch(`http://127.0.0.1:${port}/mcp`, {
     method: 'POST',
+    signal,
     headers: {
       Authorization: `Bearer ${bearer}`,
       'Content-Type': 'application/json',
@@ -589,6 +590,76 @@ describe('post-response exit hook', () => {
       assert.deepEqual(events, ['handler', 'shutdown'], 'the exit must run after the handler, not during it');
       assert.equal(takeDaemonExit(), null, 'the hook consumes the intent exactly once');
     } finally {
+      await server.stop().catch(() => {});
+    }
+  });
+
+  it('only the response that staged an exit intent may consume it', async () => {
+    const events = [];
+    let releaseOrdinary;
+    let releaseStop;
+    let ordinaryStartedResolve;
+    let stopStagedResolve;
+    const ordinaryGate = new Promise((resolve) => { releaseOrdinary = resolve; });
+    const stopGate = new Promise((resolve) => { releaseStop = resolve; });
+    const ordinaryStarted = new Promise((resolve) => { ordinaryStartedResolve = resolve; });
+    const stopStaged = new Promise((resolve) => { stopStagedResolve = resolve; });
+    const stopAbort = new AbortController();
+    const server = await startDaemonServer({
+      port: 0,
+      configDir: dir,
+      uuid: 'owned-hook-uuid',
+      getTools: async () => [],
+      callTool: async (request) => {
+        if (request.params.name === 'slow_read') {
+          ordinaryStartedResolve();
+          await ordinaryGate;
+          return { content: [{ type: 'text', text: 'ordinary complete' }] };
+        }
+        requestDaemonExit({ action: 'stop', by: 'manage_daemon', reason: null });
+        stopStagedResolve();
+        await stopGate;
+        return { content: [{ type: 'text', text: '{"stopping":true}' }] };
+      },
+      onShutdown: async () => { events.push('shutdown'); },
+    });
+
+    let ordinaryCall;
+    let stopCall;
+    try {
+      // Start an ordinary request first, then hold the stop request after it has
+      // staged the process-wide intent but before it can flush its own answer.
+      ordinaryCall = callTool(server.port, server.bearerToken, 'slow_read');
+      await ordinaryStarted;
+      stopCall = callTool(
+        server.port,
+        server.bearerToken,
+        'manage_daemon',
+        { action: 'stop' },
+        {},
+        stopAbort.signal,
+      );
+      await stopStaged;
+
+      // Finishing the older request must not steal the newer request's intent.
+      releaseOrdinary();
+      const ordinaryResponse = await ordinaryCall;
+      assert.equal(ordinaryResponse.status, 200);
+      await ordinaryResponse.json();
+      assert.equal(peekDaemonExit()?.action, 'stop', 'the unrelated response consumed the stop intent');
+      assert.deepEqual(events, [], 'shutdown began before the stop response could finish');
+
+      releaseStop();
+      const stopResponse = await stopCall;
+      assert.equal(stopResponse.status, 200);
+      const body = await stopResponse.json();
+      assert.match(body.result.content[0].text, /"stopping":true/);
+      await waitFor(() => events.includes('shutdown'));
+    } finally {
+      releaseOrdinary();
+      releaseStop();
+      stopAbort.abort();
+      await Promise.allSettled([ordinaryCall, stopCall].filter(Boolean));
       await server.stop().catch(() => {});
     }
   });

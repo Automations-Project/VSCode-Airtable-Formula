@@ -6,6 +6,33 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed — PR #22 acceptance audit follow-ups (2026-08-01)
+
+- **Existing custom profiles stay closed when a category is added.** The MCP server already
+  treated absent tools in post-legacy categories as disabled, but extension startup rewrote the
+  same file from VS Code's package defaults first — silently enabling `local-write`. Startup and
+  file-to-settings sync now preserve the server's fail-closed semantics, including mixed per-tool
+  states, and a later category toggle clears those imported overrides before applying the user's
+  explicit choice.
+- **Record-prune failure accounting now follows destination table IDs.** Per-table write results
+  were stored under the source table name but read back under the destination table name, so a
+  renamed matched table could lose the all-writes-failed no-prune guard. A regression test runs the
+  write and prune phases together with differing names.
+- **Daemon exit intents have request ownership.** An older concurrent `/mcp` response could finish
+  after `manage_daemon stop` staged its process-wide intent, steal it, and begin shutdown before the
+  stop confirmation flushed. `AsyncLocalStorage` now binds the intent to the response that staged
+  it, with a deterministic two-request regression test.
+- **Session restore no longer bundles vulnerable `adm-zip` 0.5.x.** A tiny crafted archive could
+  declare a multi-gigabyte uncompressed entry and crash the extension host before CRC validation.
+  The bundled parser is now 0.6.0, the restore picker size-checks before reading only the encryption
+  header, and declared uncompressed totals are rejected before entry allocation.
+- **The shipped Ajv URI parser is patched without widening the dependency refresh.** The lockfile
+  moves `fast-uri` 3.1.0 → 3.1.5 through the existing MCP SDK dependency, clearing its four
+  production audit findings while leaving the SDK and browser-auth stack pinned.
+- Corrected the live tool references to list 9 read tools and 2 local-file-write tools, completed
+  the dashboard's early-activation category fallback, and removed stale secret-bearing login CLI
+  examples and an inapplicable `login.json` hint.
+
 ### Fixed — formula diagnostics were quadratic, blocking the editor on every keystroke (2026-07-31)
 
 - **`isInsideExclusionRange` was a linear scan run once per character.** `ranges.some(...)` is

@@ -7,8 +7,7 @@
  * Usage:
  *   npm run login                                  (uses env vars)
  *   node src/login.js                              (uses env vars)
- *   node src/login.js --email X --password Y       (explicit)
- *   node src/login.js --email X --password Y --otp-secret Z
+ *   node src/login.js --email X                     (email only; secrets use env vars)
  *   node src/login.js --profile .chrome-profile-prod  (custom profile dir)
  *
  * Environment variables:
@@ -57,14 +56,15 @@ function parseArgs() {
   // this deliberately: login-runner.js invented an IPC protocol so credentials
   // "never enter this process's environment".
   //
-  // Supply them via AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET, or
-  // via login.json as direct-login.js reads it. Email is not a secret and stays.
+  // Supply them via AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET. `login.json` is a
+  // direct-login.js input, not an input to this browser-login command. Email is
+  // not a secret and remains accepted here.
   const REJECTED = new Set(['--password', '--otp-secret']);
   for (let i = 0; i < args.length; i++) {
     if (REJECTED.has(args[i])) {
       process.stderr.write(
         `${args[i]} is not supported: command-line arguments are world-readable via the process list.\n` +
-        'Set AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET in the environment, or use ~/.airtable-user-mcp/login.json.\n',
+        'Set AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET in the environment. For login.json, use AIRTABLE_AUTH_MODE=direct-login.\n',
       );
       process.exit(2);
     }

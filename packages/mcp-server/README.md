@@ -429,7 +429,7 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 72 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 73 tools total under the default `full` profile.
 
-### Schema Read (11)
+### Schema Read (9)
 
 | Tool | Description |
 |:-----|:------------|
@@ -442,6 +442,14 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `validate_formula` | Validate a formula expression before applying |
 | `list_view_sections` | List sidebar sections for a table with their view membership |
 | `list_record_templates` | List record templates (saved row scaffolds) for a table |
+
+### Local File Write (2)
+
+These tools read from Airtable but write to caller-chosen paths, so they are included in
+`safe-write` and `full`, not `read-only`.
+
+| Tool | Description |
+|:-----|:------------|
 | `download_formula_field` | Download a formula field to a local `.formula` file with an `AT:` metadata header — field refs resolved to real `{Field Name}` syntax. Pass `outputPath` to save; omit to read inline. |
 | `download_base_formulas` | Download **all** formula fields in a base to `.formula` files, organised into per-table subfolders — field refs resolved to real `{Field Name}` syntax. Each file includes the `AT:` header for one-click upload. |
 
