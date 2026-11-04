@@ -748,23 +748,23 @@
     "test:e2e": "node ./dist/test/runTest.js"
   },
   "dependencies": {
-    "@airtable-formula/shared": "workspace:*",
-    "@airtable-formula/language-services": "workspace:*"
+    "@airtable-formula/language-services": "workspace:*",
+    "@airtable-formula/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
-    "prettier": "3.8.3",
-    "terser": "^5.0.0",
     "@types/archiver": "^7.0.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/vscode": "^1.100.0",
-    "@vscode/test-electron": "^2.4.0",
-    "@vscode/vsce": "^3.0.0",
-    "adm-zip": "^0.6.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.2",
+    "adm-zip": "^0.6.1",
     "airtable-user-mcp": "workspace:*",
     "archiver": "^7.0.1",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "prettier": "3.8.3",
+    "terser": "^5.51.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.6"
   }
 }

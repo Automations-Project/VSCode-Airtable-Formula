@@ -118,6 +118,7 @@ describe('HttpTransport — real proxy round-trip', () => {
   let target, proxy, targetPort, proxyPort;
   const connects = [];
   const savedEnv = {};
+  const tunnelSockets = new Set();
 
   before(async () => {
     target = http.createServer((req, res) => { res.writeHead(200); res.end('origin:' + req.url); });
@@ -127,10 +128,15 @@ describe('HttpTransport — real proxy round-trip', () => {
     proxy = http.createServer((_req, res) => { res.writeHead(400); res.end(); });
     proxy.on('connect', (req, clientSocket, head) => {
       connects.push(req.url);
+      tunnelSockets.add(clientSocket);
+      // An unhandled socket error (ECONNRESET on teardown) would surface as an
+      // uncaughtException after the test ended and fail the whole file.
+      clientSocket.on('error', () => {});
       const [host, port] = req.url.split(':');
       const upstream = net.connect(Number(port), host, () => {
         clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
         if (head?.length) upstream.write(head);
+        tunnelSockets.add(upstream);
         upstream.pipe(clientSocket);
         clientSocket.pipe(upstream);
       });
@@ -150,6 +156,9 @@ describe('HttpTransport — real proxy round-trip', () => {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
     resetProxyDispatcher();
+    for (const sock of tunnelSockets) sock.destroy();
+    proxy.closeAllConnections?.();
+    target.closeAllConnections?.();
     await new Promise(r => proxy.close(r));
     await new Promise(r => target.close(r));
   });
