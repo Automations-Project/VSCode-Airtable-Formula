@@ -17,7 +17,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 // Mock vscode before importing modules that depend on it
 vi.mock('vscode', () => ({
-  EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),
+  EventEmitter: vi.fn(function () { return { event: vi.fn(), fire: vi.fn(), dispose: vi.fn() }; }),
   Disposable: vi.fn(),
   McpHttpServerDefinition: undefined,
   // buildDaemonEnv reads mcp.authMode / mcp.httpClient off the workspace config;
@@ -1600,7 +1600,7 @@ describe('createHttpDefinition', () => {
 
   it('calls constructor with url and headers object when McpHttpServerDefinition present', async () => {
     // Temporarily add McpHttpServerDefinition to the vscode mock
-    const mockCtor = vi.fn(() => ({}));
+    const mockCtor = vi.fn(function () { return {}; });
     const vscodeModule = await import('vscode');
     (vscodeModule as unknown as Record<string, unknown>).McpHttpServerDefinition = mockCtor;
 
@@ -1621,7 +1621,7 @@ describe('createHttpDefinition', () => {
   });
 
   it('allows overriding client id', async () => {
-    const mockCtor = vi.fn(() => ({}));
+    const mockCtor = vi.fn(function () { return {}; });
     const vscodeModule = await import('vscode');
     (vscodeModule as unknown as Record<string, unknown>).McpHttpServerDefinition = mockCtor;
 

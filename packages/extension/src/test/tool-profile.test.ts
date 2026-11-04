@@ -19,7 +19,7 @@ vi.mock('node:os', () => ({
 }));
 
 vi.mock('vscode', () => ({
-  EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),
+  EventEmitter: vi.fn(function () { return { event: vi.fn(), fire: vi.fn(), dispose: vi.fn() }; }),
   ConfigurationTarget: { Global: 1 },
   workspace: {
     getConfiguration: vi.fn(() => ({
