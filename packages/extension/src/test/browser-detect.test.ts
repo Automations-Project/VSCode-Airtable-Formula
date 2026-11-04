@@ -10,11 +10,11 @@ const selectedChoice = vi.hoisted(() => ({
 
 vi.mock('fs', () => fsMock);
 vi.mock('vscode', () => ({
-  EventEmitter: vi.fn(() => ({
+  EventEmitter: vi.fn(function () { return {
     event: vi.fn(),
     fire: vi.fn(),
     dispose: vi.fn(),
-  })),
+  }; }),
   workspace: {
     getConfiguration: vi.fn(() => ({
       get: (_key: string, fallback: unknown) => fallback,
