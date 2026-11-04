@@ -30,6 +30,43 @@ if (cliArgs.length === 0 && !process.env.AIRTABLE_NO_DAEMON) {
     try {
       const daemon = await ensureDaemon({ configDir, startTimeoutMs: 15_000 });
 
+      // Say ONCE, out loud, when this client's own configuration is not the one
+      // that will actually be used. Attaching means our whole process is a pipe:
+      // every tool call runs inside the daemon, under the daemon's env. Only
+      // AIRTABLE_NO_DAEMON and AIRTABLE_USER_MCP_HOME are read on this side (above);
+      // AIRTABLE_AUTH_MODE, AIRTABLE_HTTP_CLIENT and everything else this client was
+      // configured with are silently void. Since a daemon exists on essentially
+      // every VS Code session, a standalone client (Claude Desktop / Cursor / Cline
+      // / Amp) normally lands here and inherits VS Code's settings without a word.
+      //
+      // We attach anyway, deliberately: refusing would send this process down the
+      // in-process path and put a SECOND Chromium on the shared persistent profile,
+      // which is the Chrome-exit-21 failure this codebase has historically
+      // mis-reported as "session dead". A silent config override is a much smaller
+      // problem than a crash loop — but silent is the part worth fixing, so make it
+      // visible. `manage_daemon action="status"` and /daemon/health report the same
+      // three fields for anyone who reads this later.
+      const mine = {
+        authMode: (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase(),
+        httpClient: process.env.AIRTABLE_HTTP_CLIENT || 'fetch',
+      };
+      const theirs = daemon.health ?? {};
+      const differing = Object.keys(mine).filter(
+        // Only report what the daemon actually told us. An older daemon predating
+        // these health fields returns undefined — unknown is not a mismatch.
+        (k) => theirs[k] !== undefined && theirs[k] !== mine[k],
+      );
+      if (differing.length) {
+        process.stderr.write(
+          `[airtable-mcp] attached to the daemon already running at pid ${daemon.pid} (port ${daemon.port}); ` +
+          `it was started with a different configuration, and ITS settings apply, not this client's: ` +
+          differing.map((k) => `${k}=${theirs[k]} (you configured ${mine[k]})`).join(', ') +
+          `. Daemon configDir=${theirs.configDir ?? 'unknown'}. ` +
+          `To run under your own settings instead, set AIRTABLE_NO_DAEMON=1 for this client, ` +
+          `or stop the daemon (\`npx airtable-user-mcp daemon stop\`) and let it restart from your env.\n`
+        );
+      }
+
       const stdioTransport = new StdioServerTransport(process.stdin, process.stdout);
       const httpTransport = new StreamableHTTPClientTransport(
         new URL(daemon.url + '/mcp'),
@@ -90,12 +127,46 @@ import { AirtableClient } from './client.js';
 import { ICON_DATA_URI } from './icon.js';
 import { trace, traceToolHandler } from './debug-tracer.js';
 import { getPrompts, renderPrompt } from './prompts.js';
+// withToolDispatchContext was used below WITHOUT being imported, so every
+// tools/call on the in-process stdio path (AIRTABLE_NO_DAEMON=1 — the VS Code
+// stdio fallback) died with a ReferenceError before reaching its handler. The
+// daemon path imports it in daemon/server.js and was unaffected, which is why
+// this stayed hidden. currentToolContext is what manage_daemon reads the
+// caller's origin from.
+import { withToolDispatchContext, currentToolContext } from './page-scheduler.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve as resolvePath, sep as pathSep } from 'node:path';
 import path from 'path';
+
+/**
+ * Join Airtable-supplied name segments under `baseDir` and prove the result did
+ * not escape it.
+ *
+ * Table and field names come from the BASE, not from us, so they are attacker
+ * influenced by anyone who can edit a base the user can read. The old sanitiser
+ * stripped separators (`/\:*?"<>|`) but not `.`, so a table literally named `..`
+ * produced `<outputDir>/..` and wrote every formula file one directory ABOVE the
+ * directory the user chose.
+ */
+function confineToDir(baseDir, ...segments) {
+  const root = resolvePath(baseDir);
+  const safe = segments.map((s) => {
+    const cleaned = String(s).replace(/[/\\:*?"<>|]/g, '_');
+    // A segment of only dots is traversal, not a name.
+    return /^\.+$/.test(cleaned) ? '_' : cleaned;
+  });
+  const full = resolvePath(root, ...safe);
+  if (full !== root && !full.startsWith(root + pathSep)) {
+    throw new Error(`refusing to write outside ${root} (resolved to ${full})`);
+  }
+  return full;
+}
+
+/** Airtable-supplied text going into a `# AT:` header line — must stay one line. */
+const headerSafe = (s) => String(s).replace(/[\r\n]+/g, ' ').replace(/"/g, "'");
 import { stripHeader } from './formula-header.js';
 import { formulaRefsToNames, buildFieldNameMap } from './formula-refs.js';
 import { uploadAttachmentsByUrl } from './attachments.js';
@@ -127,6 +198,31 @@ function resolveServerVersion() {
 }
 const PKG_VERSION = resolveServerVersion();
 
+// Build provenance for `manage_daemon status`. The bundler writes version.json
+// next to the bundle; a source/npx run has no such file and reports null rather
+// than guessing. Answers "which build am I actually talking to", which the model
+// otherwise cannot see at all.
+function resolveProvenance() {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(__dirname, 'version.json'), 'utf8'));
+    return {
+      package: parsed.package ?? null,
+      mcpServer: parsed.mcpServer ?? null,
+      builtAt: parsed.builtAt ?? null,
+      gitSha: parsed.gitSha ?? null,
+      bundled: true,
+    };
+  } catch {
+    return { package: 'airtable-user-mcp', mcpServer: PKG_VERSION, builtAt: null, gitSha: null, bundled: false };
+  }
+}
+const PKG_PROVENANCE = resolveProvenance();
+
+// Set once this process actually becomes the daemon (startDaemon resolves with
+// the uuid it wrote into the lockfile). Stays null in stdio mode, which is
+// exactly what makes the am-I-the-holder check false by construction there.
+let _daemonRuntime = null;
+
 const auth = new AirtableAuth();
 const client = new AirtableClient(auth);
 const toolConfig = new ToolConfigManager();
@@ -137,11 +233,11 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable bases with 71 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
+      'Manage Airtable bases with 72 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
       'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
       'select field choices with color support, formula validation and file-based bulk editing, ' +
       'record create/update/duplicate/delete plus URL-based attachment uploads, base-to-base schema and record sync, ' +
-      'extension management, and granular tool profile control (read-only / safe-write / full / custom).',
+      'extension management, daemon inspection and control, and granular tool profile control (read-only / safe-write / full / custom).',
     websiteUrl: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/tree/main/packages/mcp-server',
     icons: [{ src: ICON_DATA_URI, mimeType: 'image/png', sizes: ['128x109'] }],
   },
@@ -591,7 +687,11 @@ SELECT CHOICES:
   {
     name: 'download_formula_field',
     description: 'Download the formula text of a formula field to a local file. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so the file is readable and can be uploaded back unchanged. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // NOT readOnlyHint: this tool WRITES a file to a caller-supplied path.
+    // readOnlyHint is the signal MCP clients use to auto-approve without
+    // prompting, so claiming it here removed the user's consent step from a
+    // filesystem write. It overwrites whatever is at that path, hence destructive.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
@@ -606,7 +706,11 @@ SELECT CHOICES:
   {
     name: 'download_base_formulas',
     description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so files are readable and upload back unchanged. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // NOT readOnlyHint: this tool WRITES a file to a caller-supplied path.
+    // readOnlyHint is the signal MCP clients use to auto-approve without
+    // prompting, so claiming it here removed the user's consent step from a
+    // filesystem write. It overwrites whatever is at that path, hence destructive.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
@@ -1640,16 +1744,55 @@ Note: "form title" is the view name itself — use rename_view to change it. "Fi
         limit: { type: 'number', description: 'Used by mode="diff" with detail: maximum number of entries to return.' },
         direction: { type: 'string', enum: ['to-dest', 'to-source'], description: 'Used only by mode="plan": direction of the changeset. "to-dest" (default) brings the destination base up to date with the source. "to-source" swaps the roles so the changeset targets the source base (makes the source match the destination).' },
         skip: { type: 'array', items: { type: 'string' }, description: 'Used only by mode="apply": list of changeIds to skip (actions with a matching changeId are counted as skipped but not applied). Use changeIds from the plan output.' },
-        policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = make dest identical to source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode.' },
+        policy: { type: 'string', enum: ['mirror', 'overlay', 'preserve'], description: 'Used by mode="apply" for the record reconciliation preset. "mirror" = converge dest toward source (delete dest-only records, overwrite dest edits); "overlay" = keep dest-only records, source updates win on conflicts (default); "preserve" = keep dest-only records and never overwrite dest edits. Requires confirmDeletions=true to actually delete in mirror mode. NOTE: "mirror" does NOT make the destination byte-identical — two removals are deferred and are reported, not performed: dest-extra LINKED-RECORD entries are never unlinked (Pass 2 only adds), and a source row that CLEARED its attachments leaves the dest attachment cell untouched. Watch for RECORD_LINK_EXTRA / attachment warnings in the result.' },
         policyOverrides: { type: 'object', description: 'Used by mode="apply": per-table reconciliation preset overrides. Maps table name → preset (e.g. { "Games": "preserve" }). Overrides the global policy for the named tables.', additionalProperties: { type: 'string', enum: ['mirror', 'overlay', 'preserve'] } },
         confirmDeletions: { type: 'boolean', description: 'Used by mode="apply" with policy="mirror": must be set to true to actually delete dest-only RECORDS and dest-only FIELDS/VIEWS. Without it, mirror mode reports a DELETION_GATED count and deletes nothing for records; orphan fields/views are reported and kept.' },
         confirmTableDeletions: { type: 'boolean', description: 'Used by mode=apply with policy=mirror: required to delete whole dest-only TABLES. confirmDeletions alone never drops a table; without confirmTableDeletions, orphan tables report TABLE_DELETION_GATED and are kept.' },
         confirmRetypes: { type: 'boolean', description: 'Used by mode=apply: required to apply a matched field\'s SCALAR type change to the destination (source-wins). Without it, a diverging scalar type reports RETYPE_GATED and the field is kept. Non-scalar retypes (to/from formula/rollup/lookup/count/autoNumber/link/attachment) stay RETYPE_DEFERRED.' },
+        strictDrift: { type: 'boolean', description: 'Used by mode=plan: also hash live VIEW CONFIG (filters/sorts/groups/colors/column order) into the plan\'s drift fingerprint, so a collaborator editing a view between plan and apply is detected. Costs one extra ~1s read PER VIEW on every apply of this plan (minutes on a view-heavy base) — which is why it is off by default. Field types, options, choices, formulas and descriptions are ALWAYS covered regardless of this flag. Recorded on the plan; apply reuses the plan\'s setting.' },
+        resumeAfterDrift: { type: 'boolean', description: 'Used by mode=apply: continue a partially-applied plan even though the destination no longer matches the plan\'s fingerprint. A plan with prior progress has already mutated the destination itself, so some divergence is expected — but a collaborator\'s edit is indistinguishable from here, and the remaining actions (including deletions) would overwrite it. Prefer re-running mode=plan. Without this flag such an apply aborts with RESUME_DRIFT instead of silently overwriting.' },
         fieldMappings: { type: 'object', description: 'Field mapping overrides: maps table name → { sourceField: destField } to inject a source field\'s value into a different (writable scalar) dest field during record sync. Example: { "Games": { "Title": "Name" } }. In mode="plan" and mode="diff", fieldMappings are validated against the two schemas (dry-run, no mutation) and errors are returned in fieldMappingErrors.', additionalProperties: { type: 'object', additionalProperties: { type: 'string' } } },
         verbose: { type: 'boolean', description: 'Used only by mode="status": by default planDigest is projected to { human, machineOmitted: true } (the full machine payload can be tens of thousands of lines on a view-heavy base and pushes the useful result fields out of the response — it always stays on disk). Set verbose:true to get the full planDigest.machine back in the response.' },
         debug: debugProp,
       },
       required: ['mode', 'sourceAppId', 'destAppId'],
+    },
+  },
+
+  // ── Daemon ──
+  {
+    name: 'manage_daemon',
+    description:
+      'Inspect and control the MCP daemon this server runs in. action="status" is the diagnostic to reach for FIRST when tools start failing: it reports whether a daemon is running and whether YOU are it, the transport, uptime, version/provenance, the tunnel URL, and — the part nothing else exposes — the live session state (sessionDead, the last circuit-breaker trip INCLUDING Airtable\'s own response body, and the browser/auth busy queue). That is how you tell "daemon gone" from "session dead" from "browser busy" instead of guessing. ' +
+      'Control actions: start (idempotent; attaches to a healthy daemon rather than starting a second one), restart, stop (writes a sentinel so the VS Code extension does not silently respawn it), tunnel_enable, tunnel_disable, token_rotate. ' +
+      'stop/restart answer first and exit afterwards, so this call returns normally and the daemon goes away a moment later. token_rotate and tunnel_* are loopback-only and are refused for callers arriving through the tunnel; status is returned to them with host-identifying fields blanked. The bearer token is never returned to anyone. ' +
+      'Interactive tunnel setup (cloudflared login, creating a named tunnel) is deliberately NOT here — use the CLI or the VS Code dashboard.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['status', 'start', 'restart', 'stop', 'tunnel_enable', 'tunnel_disable', 'token_rotate'],
+          description: 'What to do. Start with "status" — it is read-only and never launches a browser or touches the lockfile.',
+        },
+        provider: {
+          type: 'string',
+          enum: ['cf-quick', 'cf-named'],
+          description: 'Used only by action="tunnel_enable": which tunnel provider to start. Defaults to the persisted preference (usually "cf-quick"). "ngrok" is not available here — its authtoken lives in VS Code SecretStorage and never reaches the daemon.',
+        },
+        domain: {
+          type: 'string',
+          description: 'Used only by action="tunnel_enable": optional custom hostname for providers that support one.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Used only by action="stop": a short note recorded in the stop sentinel, so a human reading ~/.airtable-user-mcp/daemon.stopped later knows why the daemon is down.',
+        },
+        // No `debug` here: there is no raw Airtable response to dump — the whole
+        // result already IS the diagnostic payload.
+      },
+      required: ['action'],
     },
   },
 ];
@@ -1681,7 +1824,11 @@ const MANAGE_TOOLS_DEF = {
       },
       category: {
         type: 'string',
-        description: 'Category name for toggle_category action (read, table-write, table-destructive, field-write, field-destructive, view-write, view-destructive, extension)',
+        // Derived from CATEGORY_LABELS, not hand-listed: the hand-written list this
+        // replaces named 8 of the then-15 categories and had no way to notice when a
+        // new one shipped, so the model could not discover `sync` or `daemon` existed.
+        enum: Object.keys(CATEGORY_LABELS),
+        description: `Category name for toggle_category action (${Object.keys(CATEGORY_LABELS).join(', ')})`,
       },
       enabled: {
         type: 'boolean',
@@ -1942,7 +2089,7 @@ const handlers = {
       return ok({ written: false, formulaText, fieldName, tableId: foundTableId, description, resultType }, raw, debug);
     }
     const headerLines = [
-      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName.replace(/"/g, "'")}"`,
+      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${headerSafe(fieldName)}"`,
       description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
       resultType ? `# AT: resultType=${resultType}` : null,
     ].filter(Boolean).join('\n');
@@ -1964,8 +2111,10 @@ const handlers = {
       const formulaFields = fields.filter(f => f.type === 'formula');
       if (formulaFields.length === 0) continue;
 
-      const safeTableName = (table.name ?? table.id).replace(/[/\\:*?"<>|]/g, '_');
-      const tableDir = `${baseDir}/${safeTableName}`;
+      // Table names come from the base, not from us. confineToDir also rejects a
+      // dot-only name: the old sanitiser stripped separators but not `.`, so a
+      // table named `..` wrote every file one directory above the chosen one.
+      const tableDir = confineToDir(baseDir, table.name ?? table.id);
       await mkdir(tableDir, { recursive: true });
 
       for (const field of formulaFields) {
@@ -1982,13 +2131,12 @@ const handlers = {
         const resultType = field.typeOptions?.resultType ?? '';
 
         const headerLines = [
-          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${fieldName.replace(/"/g, "'")}"`,
+          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${headerSafe(fieldName)}"`,
           description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
           resultType ? `# AT: resultType=${resultType}` : null,
         ].filter(Boolean).join('\n');
 
-        const safeFieldName = fieldName.replace(/[/\\:*?"<>|]/g, '_');
-        const filePath = `${tableDir}/${safeFieldName}.formula`;
+        const filePath = confineToDir(tableDir, `${fieldName}.formula`);
         const content = headerLines + '\n' + formulaText;
         await writeFile(filePath, content, 'utf8');
         written.push({ path: filePath, tableName: table.name, tableId: table.id, fieldName, fieldId: field.id });
@@ -2463,15 +2611,27 @@ const handlers = {
 
   // ── Sync ──
 
-  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, verbose, debug }) {
+  async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, strictDrift, resumeAfterDrift, verbose, debug }) {
     const sync = await import('./sync/index.js');
+    // planId/diffId are interpolated into on-disk filenames (`plan-<id>.json`,
+    // `diff-<id>.json`, `sync-job-<id>.json`) and join() normalises `..`, so an id
+    // like "x/../../tools-config" wrote a sync blob over
+    // ~/.airtable-user-mcp/tools-config.json — which ToolConfigManager.load() then
+    // merges over defaultConfig(), whose activeProfile is 'full'. That is a gap in
+    // this project's own anti-traversal control (AIRTABLE_ID_RE, "Prevents path
+    // traversal"), so close it the same way.
+    for (const [label, value] of [['planId', planId], ['diffId', diffId]]) {
+      if (value != null && !/^[A-Za-z0-9_-]+$/.test(String(value))) {
+        return err(`${label} must contain only letters, digits, "-" and "_" (got ${JSON.stringify(String(value))})`);
+      }
+    }
     if (mode === 'plan') {
       // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
       // which blows past the MCP response window (Connection closed) even though the plan is
       // computed + persisted. Run it as a BACKGROUND job and return the jobId immediately; poll
       // mode=status with this planId to get the plan digest when it lands.
       const id = 'pln' + client._genRandomId();
-      const { jobId, status } = sync.planJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings });
+      const { jobId, status } = sync.planJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId: id, direction, fieldMappings, strictDrift });
       return ok({ jobId, planId: jobId, status, message: 'Plan is computing in the background — poll mode=status with this planId (jobId).' }, { jobId, status }, debug);
     }
     if (mode === 'apply') {
@@ -2481,7 +2641,7 @@ const handlers = {
       // backgrounds records — long enough on a real base to trip the MCP response window. Run the
       // WHOLE apply (schema then records) as a background job and return immediately. Field-mapping
       // validation, DRIFT abort, and APPLY_LOCKED now surface via mode=status (phase='failed'/'done').
-      const { jobId, status } = sync.applyJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys });
+      const { jobId, status } = sync.applyJob({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, planId, runStartedAt, skip: skip || [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, resumeAfterDrift });
       // Forward-looking note: DELETION_GATED warnings are only emitted by the background records
       // job, so they can't appear synchronously. Emit a synchronous advisory when the effective
       // policy would delete dest-only records but confirmDeletions was not set.
@@ -2557,13 +2717,39 @@ const handlers = {
     if (mode === 'diff') {
       if (detail) {
         const out = sync.diffDetail({ sourceBaseId: sourceAppId, destBaseId: destAppId, diffId, detail, offset, limit });
-        return ok({ diffId: diffId ?? null, summary: out.human }, out.machine, debug);
+        // out.diffId is the RESOLVED id (diffDetail falls back to the latest diff when the
+        // param is omitted) — echoing the raw param here returned diffId:null on success.
+        return ok({ diffId: out.diffId ?? diffId ?? null, summary: out.human }, out.machine, debug);
       }
       const id = diffId || ('dif' + client._genRandomId());
       const out = await sync.diff({ client, sourceBaseId: sourceAppId, destBaseId: destAppId, diffId: id, fieldMappings });
       return ok({ diffId: id, summary: out.human }, out.machine, debug);
     }
     return err(`Unsupported mode "${mode}". Use "plan", "apply", "reconcile", "status", or "diff".`);
+  },
+
+  // ── Meta: Daemon Control ──
+
+  async manage_daemon({ action, provider, domain, reason }) {
+    // Dynamic import so the stdio path never pulls express + the daemon stack
+    // into startup just to have this handler defined.
+    const { manageDaemon } = await import('./daemon/manage.js');
+    const result = await manageDaemon(
+      { action, provider, domain, reason },
+      {
+        auth,
+        runtime: _daemonRuntime,
+        // Set by the daemon's /mcp route; absent on stdio, where the call never
+        // crossed HTTP and is local by construction.
+        origin: currentToolContext()?.origin ?? 'local',
+        version: PKG_VERSION,
+        provenance: PKG_PROVENANCE,
+      },
+    );
+    // A refusal is an honest answer, not a failure — same shape as the rest of
+    // this file's ok() results so the model reads `refused` and `runInstead`
+    // instead of retrying a call that can never work.
+    return ok(result);
   },
 
   // ── Meta: Tool Management ──
@@ -2808,7 +2994,12 @@ async function main() {
         }
       },
     });
-    if (!result.attached) await result.closed;
+    // Only a process that actually acquired the lock is the holder; an attach
+    // means some OTHER process owns the daemon, so leave _daemonRuntime null.
+    if (!result.attached) {
+      _daemonRuntime = { uuid: result.uuid, port: result.port, startedAt: result.startedAt };
+      await result.closed;
+    }
     return;
   }
 

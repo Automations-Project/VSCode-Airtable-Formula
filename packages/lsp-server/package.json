@@ -1,6 +1,6 @@
 {
   "name": "airtable-user-lsp",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "Airtable language server for formula, script, and automation files. Works with any LSP-capable editor.",
   "type": "module",
   "main": "dist/index.mjs",
@@ -32,16 +32,17 @@
   "license": "MIT",
   "scripts": {
     "build": "tsup",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12"
+    "vscode-languageserver-textdocument": "^1.0.16"
   },
   "devDependencies": {
     "@airtable-formula/language-services": "workspace:*",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.6"
   }
 }

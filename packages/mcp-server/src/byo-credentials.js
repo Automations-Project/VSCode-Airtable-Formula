@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getHomeDir } from './paths.js';
 import { getInjectedCredentials } from './daemon/cred-store.js';
+import { scrapeSessionUserId } from './session-user.js';
 
 /** Path to the BYO credentials file. */
 export function getCredentialsPath() {
@@ -46,17 +47,36 @@ export function scrapeCsrf(html) {
   return null;
 }
 
+/** Headers for fetching Airtable HTML pages (login page, authed homepage) from Node.
+ *  Airtable's bot protection (PerimeterX) answers Node fetch's default User-Agent with a
+ *  403 "Verify it’s you" challenge page instead of the page — JSON API routes are not gated. */
+export const PAGE_HEADERS = Object.freeze({
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+});
+
+/** True when `html` is PerimeterX's challenge page rather than an Airtable page. */
+export function isBotChallenge(html) {
+  return typeof html === 'string' && /_pxAppId|px-captcha|Verify it.s you/i.test(html);
+}
+
 /**
  * Resolve a BYO cookie header + csrf token.
  *
  * @param {object}   [opts]
  * @param {Function} [opts.fetchImpl] test seam — overrides global fetch for the
  *                                    csrf-scrape GET.
- * @returns {Promise<{cookieHeader: string, csrfToken: string|null}>}
+ * @returns {Promise<{cookieHeader: string, csrfToken: string|null, userId: string|null}>}
  */
 export async function loadByoCredentials({ fetchImpl } = {}) {
   let cookieHeader = null;
   let csrfToken = null;
+  // Advisory only, and only when the csrf scrape below actually fetches HTML —
+  // that page is the sole place a signed-in user id appears (getUserProperties
+  // returns 8 feature-flag booleans and no identity: live probes, 2026-07). Null
+  // is normal here (a supplied csrf means no fetch happens) and must never gate.
+  let userId = null;
 
   // 0. Injected in-memory store — the daemon's runtime credential channel
   //    (POST /daemon/auth-credentials; never env/disk). Highest priority so a
@@ -108,9 +128,16 @@ export async function loadByoCredentials({ fetchImpl } = {}) {
   if (!csrfToken) {
     const fetchFn = fetchImpl || globalThis.fetch;
     try {
-      const res = await fetchFn('https://airtable.com/', { headers: { Cookie: cookieHeader } });
+      const res = await fetchFn('https://airtable.com/', { headers: { ...PAGE_HEADERS, Cookie: cookieHeader } });
       const html = await res.text();
+      if (isBotChallenge(html)) {
+        console.error(
+          '[byo] airtable.com answered the csrf scrape with a bot challenge (PerimeterX) instead of a page — ' +
+          'set AIRTABLE_HTTP_CLIENT=impit (Chrome TLS impersonation) or supply "csrf" explicitly.'
+        );
+      }
       csrfToken = scrapeCsrf(html);
+      userId = scrapeSessionUserId(html);
     } catch (err) {
       console.error(`[byo] Failed to fetch airtable.com for csrf scrape: ${err.message}`);
     }
@@ -122,5 +149,5 @@ export async function loadByoCredentials({ fetchImpl } = {}) {
     }
   }
 
-  return { cookieHeader, csrfToken: csrfToken ?? null };
+  return { cookieHeader, csrfToken: csrfToken ?? null, userId };
 }

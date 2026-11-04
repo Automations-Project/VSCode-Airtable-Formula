@@ -62,10 +62,20 @@ export function acquireApplyLock(sourceBaseId, destBaseId, planId) {
     // is already caught by heldLockPaths above, so reaching here with our pid means an external holder.
     let held = null;
     try { held = JSON.parse(readFileSync(lockPath, 'utf8')); } catch { /* corrupt → stale */ }
-    if (held && pidAlive(held.pid)) {
+    // pidAlive is the only holder test and nothing ever expires this file, so a
+    // crash-while-held (the expected failure mode — the lock spans the whole
+    // background records job) followed by the OS reassigning that pid wedges every
+    // future apply for this base pair. Treat a lock older than any plausible run as
+    // stale, and always name the path: the error used to report planId/pid/startedAt
+    // but not WHERE the file is, and no user-facing doc mentions it.
+    const heldAgeMs = held?.startedAt ? Date.now() - Date.parse(held.startedAt) : NaN;
+    const MAX_RUN_MS = 24 * 60 * 60 * 1000;
+    const expired = Number.isFinite(heldAgeMs) && heldAgeMs > MAX_RUN_MS;
+    if (held && pidAlive(held.pid) && !expired) {
       throw lockedError(
         `Another apply is already running for this base pair (planId "${held.planId}", pid ${held.pid}, started ${held.startedAt}). ` +
-        'Wait for it to finish (poll sync_base mode=status) before re-applying.',
+        'Wait for it to finish (poll sync_base mode=status) before re-applying. ' +
+        `If that pid is not an airtable-user-mcp apply, delete the lock: ${lockPath}`,
       );
     }
     try { unlinkSync(lockPath); } catch { /* raced away */ }

@@ -47,8 +47,24 @@ export function ensureToken(options = {}) {
   return record;
 }
 
+// A running daemon server holds the bearer in a closure variable (server.js
+// `currentToken`) and compares every request against it. Rewriting daemon.token
+// alone leaves that variable pre-rotation forever, and nothing recovers: the
+// rotator now presents a bearer the server rejects, while getDaemonStatus's heal
+// path only ever retries with the on-disk token — which already matches the
+// lockfile — so the daemon reports {running:true, healthy:false} until it exits.
+// Servers subscribe here so the module function and POST /daemon/rotate-token
+// are the same rotation, not two of them.
+const rotationListeners = new Set();
+
+export function onTokenRotate(listener) {
+  rotationListeners.add(listener);
+  return () => { rotationListeners.delete(listener); };
+}
+
 export function rotateToken(options = {}) {
-  const previous = readToken(options);
+  const tokenPath = options.tokenPath ?? getTokenPath();
+  const previous = readToken({ ...options, tokenPath });
   const now = (options.now ?? defaultNow)();
   const record = {
     bearerToken: generateBearerToken(),
@@ -56,14 +72,22 @@ export function rotateToken(options = {}) {
     createdAt: previous?.createdAt ?? now,
     rotatedAt: now,
   };
-  writeToken(record, options);
+  writeToken(record, { ...options, tokenPath });
+  for (const listener of rotationListeners) {
+    // A subscriber that throws must not turn a completed rotation into a failed
+    // one — the new token is already on disk by this point.
+    try { listener(record, tokenPath); } catch { /* best-effort */ }
+  }
   return record;
 }
 
 function writeToken(record, options = {}) {
   const tokenPath = options.tokenPath ?? getTokenPath();
   const normalized = normalizeRecord(record);
-  mkdirSync(dirname(tokenPath), { recursive: true });
+  // 0700: this directory holds the daemon token AND the hand-authored
+  // credentials.json / login.json. The files are chmod 0600 individually, but the
+  // containing directory was created traversable. No-op on Windows.
+  mkdirSync(dirname(tokenPath), { recursive: true, mode: 0o700 });
   const tmp = tokenPath + '.tmp';
   writeFileSync(tmp, JSON.stringify(normalized, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   renameSync(tmp, tokenPath);

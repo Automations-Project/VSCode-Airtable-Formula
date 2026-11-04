@@ -1490,6 +1490,40 @@ describe('DaemonManager user-stopped latch', () => {
     expect((dm as any)._spawnDetached).not.toHaveBeenCalled();
   });
 
+  it('implicit ensureDaemon honours a daemon.stopped sentinel written by another process', async () => {
+    // The manage_daemon tool's stop runs INSIDE the daemon, so it cannot reach
+    // _userStopped in this extension host. Without reading the sentinel the next
+    // implicit ensureDaemon respawns the daemon and the tool's stop was a lie —
+    // which is what four shipped surfaces promised it would not be.
+    (dm as any)._spawnDetached = vi.fn();
+    fs.writeFileSync(
+      path.join(tmpDir, 'daemon.stopped'),
+      JSON.stringify({ stoppedAt: new Date().toISOString(), by: 'manage_daemon' }),
+    );
+
+    await expect(dm.ensureDaemon({ implicit: true, timeoutMs: 500 })).rejects.toThrow(/stopped/i);
+    expect((dm as any)._spawnDetached).not.toHaveBeenCalled();
+  });
+
+  it('a corrupt sentinel still suppresses an implicit respawn (presence is the signal)', async () => {
+    (dm as any)._spawnDetached = vi.fn();
+    fs.writeFileSync(path.join(tmpDir, 'daemon.stopped'), 'not json {{{');
+
+    await expect(dm.ensureDaemon({ implicit: true, timeoutMs: 500 })).rejects.toThrow(/stopped/i);
+    expect((dm as any)._spawnDetached).not.toHaveBeenCalled();
+  });
+
+  it('an EXPLICIT ensureDaemon ignores the sentinel and spawns', async () => {
+    // Same bypass the _userStopped latch already gets: a deliberate Start must
+    // never be blocked by a record of a past stop. startDaemon() then clears the
+    // file as it takes the lock.
+    (dm as any)._spawnDetached = vi.fn().mockResolvedValue(undefined);
+    fs.writeFileSync(path.join(tmpDir, 'daemon.stopped'), JSON.stringify({ by: 'manage_daemon' }));
+
+    await expect(dm.ensureDaemon({ timeoutMs: 400 })).rejects.toThrow(/Timed out/);
+    expect((dm as any)._spawnDetached).toHaveBeenCalled();
+  });
+
   it('explicit ensureDaemon clears the latch and attempts a spawn', async () => {
     // _spawnDetached returns Promise<void>; ensureDaemon's single-flight guard calls .finally() on it.
     (dm as any)._spawnDetached = vi.fn().mockResolvedValue(undefined);

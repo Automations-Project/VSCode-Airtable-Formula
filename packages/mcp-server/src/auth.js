@@ -9,12 +9,24 @@ import { directLogin } from './direct-login.js';
 import { isProfileLockError, killProfileHolders } from './profile-lock.js';
 import { PageScheduler } from './page-scheduler.js';
 import { killProfileBrowserTree } from './process-tree.js';
+import { SESSION_USER_ID_IN_HTML, probeFailureReason } from './session-user.js';
 
 /** Generate a page-load-id (pgl + 13 base36 chars) using crypto, not Math.random. */
 function genPageLoadId() {
   // 10 bytes → ~13 base36 chars when converted as BigInt
   const hex = randomBytes(10).toString('hex');
   return 'pgl' + BigInt('0x' + hex).toString(36).slice(0, 13).padStart(13, '0');
+}
+
+/**
+ * The diagnostic to show for a rejected session probe. A status-0 transport
+ * failure carries NO body — its `error` (describeFetchError's CA-cert / proxy
+ * advice) is then the only clue there is, and dropping it printed a bare
+ * "Session invalid (0): …\nResponse: " for exactly the failures that most
+ * needed explaining.
+ */
+function sessionErrorDetail(result) {
+  return String(result?.body || result?.error || '(no response body)').substring(0, 200);
 }
 
 /**
@@ -65,7 +77,13 @@ function resolveIdleParkMs() {
   const trimmed = String(raw).trim();
   if (trimmed === '') return 30 * 60_000;
   const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed <= 0) return 0;
+  // Only an explicit, well-formed 0 (or negative) disables parking. Garbage used to
+  // land here too, so a typo — "30m", "1_800_000", a stray quote — silently pinned a
+  // ~300-600MB Chromium tree resident forever, and the env var that was meant to tune
+  // parking switched it off instead. Unparseable now means "I didn't understand you,
+  // keep the default", which is the safe direction to fail.
+  if (!Number.isInteger(parsed)) return 30 * 60_000;
+  if (parsed <= 0) return 0;
   return parsed;
 }
 
@@ -209,7 +227,12 @@ export class AirtableAuth {
    *  error bodies are small JSON with the real reason; we keep ~300 chars and never log cookies. */
   _captureTripBody(result) {
     try {
-      const raw = typeof result?.body === 'string' ? result.body : '';
+      // Fall back to `error`: a status-0 transport failure has NO body, and those
+      // (CA-cert / proxy / DNS) are exactly the failures this field exists to
+      // explain — a records-job abort reason embeds it, and it was arriving empty.
+      const raw = (typeof result?.body === 'string' && result.body)
+        ? result.body
+        : (result?.error ? String(result.error) : '');
       this._lastTripBody = raw ? raw.replace(/\s+/g, ' ').slice(0, 300) : null;
     } catch { this._lastTripBody = null; }
   }
@@ -421,31 +444,32 @@ export class AirtableAuth {
     if (!(result.status >= 200 && result.status < 300)) {
       this.isLoggedIn = false;
       throw new Error(
-        `BYO_CREDENTIALS_INVALID: the provided AIRTABLE_COOKIE/credentials.json cookie was rejected (status ${result.status}) — refresh it from a logged-in browser`
+        `BYO_CREDENTIALS_INVALID: the provided AIRTABLE_COOKIE/credentials.json cookie was rejected (status ${result.status}) — refresh it from a logged-in browser.\nResponse: ${sessionErrorDetail(result)}`
       );
     }
-    try {
-      const data = JSON.parse(result.body);
-      this.userId = data?.data?.userId || null;
-    } catch {
-      this.userId = null;
-    }
-    console.error('[auth] BYO session verified!', this.userId ? `User: ${this.userId}` : '(userId not in payload)');
+    // Identity is only ever a by-product here: byo has no page, and the id exists
+    // nowhere in an API response (getUserProperties' authenticated 200 body is 8
+    // feature-flag booleans — live probes, 2026-07). loadByoCredentials knows it
+    // only when it happened to fetch a page for the csrf scrape, i.e. when no csrf
+    // was supplied. Null otherwise, never invented, and never a gate.
+    this.userId = this._credentials.userId ?? null;
+    console.error('[auth] BYO session verified!', this.userId ? `User: ${this.userId}` : '(user id unavailable — byo has no page to read it from)');
   }
 
   /**
    * Direct-login init: no browser. Replicate the HAR login flow over HTTP
    * (impit + TOTP) to mint fresh session cookies + csrf, then drive all API
    * calls through the direct-HTTP transport with them. directLogin() itself
-   * validates the session (checks the session cookie is present and re-scrapes
-   * an authed page), so no separate browser verify is needed.
+   * validates the session — it requires a signed-in user id in the authed page it
+   * fetches, not merely a session cookie in the jar — so no separate verify here.
    */
   async _doInitDirectLogin() {
     console.error('[auth] AIRTABLE_AUTH_MODE=direct-login — browser-free login via impit + TOTP (no browser).');
     this._credentials = await this._directLogin();
     this.csrfToken = this._credentials?.csrfToken ?? null;
+    this.userId = this._credentials?.userId ?? null;
     this.isLoggedIn = true;
-    console.error('[auth] direct-login complete.');
+    console.error('[auth] direct-login complete.', this.userId ? `User: ${this.userId}` : '');
   }
 
   /**
@@ -556,36 +580,62 @@ export class AirtableAuth {
     this._credentials = { cookieHeader, csrfToken: this.csrfToken };
   }
 
-  // ─── CSRF Extraction ─────────────────────────────────────────
+  // ─── CSRF + session-user Extraction ──────────────────────────
 
+  /**
+   * Read BOTH page-only credentials in ONE page.evaluate: the csrf token and the
+   * signed-in user id.
+   *
+   * The user id is read here, and not from page.content(), for two reasons.
+   * content() serializes the whole multi-MB DOM and ships it over CDP to Node
+   * just so we can regex 17 characters out of it — and it THROWS mid-navigation
+   * ("Unable to retrieve content because the page is navigating and changing the
+   * content"), which is indistinguishable from "nobody is signed in". Inside this
+   * evaluate the id is a by-product of a call we already make.
+   *
+   * No API response can supply it: getUserProperties' AUTHENTICATED 200 body is
+   * eight feature-flag booleans with no identity in it at all (live probes against
+   * airtable.com, 2026-07) — which is why a failed login used to print
+   * "Login verified! User: undefined" (issue #21). The SPA reads it from the page
+   * bootstrap and builds its own /v0.3/user/<usr…>/… URLs from it.
+   *
+   * Both reads are NON-FATAL when they come up empty: warn and carry on.
+   */
   async _extractCsrf() {
-    this.csrfToken = await this.page.evaluate(() => {
-      // 1. Script tags containing csrfToken in JSON
-      for (const s of document.querySelectorAll('script')) {
-        const text = s.textContent || '';
-        const m = text.match(/"csrfToken"\s*:\s*"([^"]+)"/);
-        if (m) return m[1];
-      }
-      // 2. __NEXT_DATA__
-      const nextEl = document.getElementById('__NEXT_DATA__');
-      if (nextEl) {
-        try {
-          const d = JSON.parse(nextEl.textContent);
-          if (d?.props?.pageProps?.csrfToken) return d.props.pageProps.csrfToken;
-        } catch {}
-      }
-      // 3. Meta tag
-      const meta = document.querySelector('meta[name="csrf-token"]');
-      if (meta) return meta.content;
-      // 4. Window variables
-      for (const key of Object.keys(window)) {
-        try {
-          const obj = window[key];
-          if (obj && typeof obj === 'object' && obj.csrfToken) return obj.csrfToken;
-        } catch {}
-      }
-      return null;
-    });
+    const read = await this.page.evaluate((userIdPattern) => {
+      const findCsrf = () => {
+        // 1. Script tags containing csrfToken in JSON
+        for (const s of document.querySelectorAll('script')) {
+          const text = s.textContent || '';
+          const m = text.match(/"csrfToken"\s*:\s*"([^"]+)"/);
+          if (m) return m[1];
+        }
+        // 2. __NEXT_DATA__
+        const nextEl = document.getElementById('__NEXT_DATA__');
+        if (nextEl) {
+          try {
+            const d = JSON.parse(nextEl.textContent);
+            if (d?.props?.pageProps?.csrfToken) return d.props.pageProps.csrfToken;
+          } catch {}
+        }
+        // 3. Meta tag
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        if (meta) return meta.content;
+        // 4. Window variables
+        for (const key of Object.keys(window)) {
+          try {
+            const obj = window[key];
+            if (obj && typeof obj === 'object' && obj.csrfToken) return obj.csrfToken;
+          } catch {}
+        }
+        return null;
+      };
+      const m = document.documentElement.innerHTML.match(new RegExp(userIdPattern));
+      return { csrfToken: findCsrf(), sessionUserId: m ? m[1] : null };
+    }, SESSION_USER_ID_IN_HTML.source);
+
+    this.csrfToken = read?.csrfToken ?? null;
+    this.userId = read?.sessionUserId ?? null;
 
     if (this.csrfToken) {
       // Never log any portion of the CSRF token — even a prefix is a secret leak to stderr/logs.
@@ -601,23 +651,44 @@ export class AirtableAuth {
     const result = await this._rawApiCall('GET', '/v0.3/getUserProperties');
 
     if (result.status === 200) {
-      try {
-        const data = JSON.parse(result.body);
-        this.userId = data?.data?.userId || null;
-      } catch {
-        this.userId = null;
-      }
       this.isLoggedIn = true;
       trace('auth', 'auth:session_check', { success: true, user_id: this.userId });
-      console.error('[auth] Session verified!', this.userId ? `User: ${this.userId}` : '(userId not in payload)');
+      if (this.page && !this.userId) {
+        // ADVISORY, never a gate. Airtable ACCEPTED this cookie over direct HTTP,
+        // and a cookieless caller gets 401 from this endpoint (live probes,
+        // 2026-07) — so the status carries real signal, while a missing
+        // "sessionUserId" in the page does not: it reads the same whether the
+        // profile is signed out, the wrong page loaded, the render was incomplete,
+        // or Airtable renamed the key. Failing here would propagate through
+        // _doInit's catch (context closed, page nulled) and _recoverSession's
+        // dead-session breaker, so one scrape drift would take down every tool
+        // and turn a records job into a per-row Chromium relaunch march. Let real
+        // API calls fail with real errors instead. Strictness belongs where a
+        // human is waiting and a false green IS the bug: the login polls and the
+        // spawned health-check.
+        console.error(
+          '[auth] WARNING: no "sessionUserId" in the loaded page — the session cookie was accepted, ' +
+          'so continuing without an identity. If tool calls now fail with auth errors, the profile is ' +
+          'signed out: run "npx airtable-user-mcp login", or log in from the extension dashboard.'
+        );
+      }
+      console.error('[auth] Session verified!', this.userId ? `User: ${this.userId}` : '(user id unavailable)');
     } else {
       this.isLoggedIn = false;
-      const hint = this._authMode === 'byo'
-        ? 'the provided cookie was rejected — save a fresh Airtable session cookie (byo recovers only from a re-pasted cookie)'
-        : this._authMode === 'direct-login'
-          ? 'direct-login credentials were rejected — check AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_TOTP_SECRET (direct-login re-authenticates itself on the next call)'
-          : 'the Airtable login has expired — re-authenticate (open the extension dashboard and log in), or use AIRTABLE_AUTH_MODE=direct-login so long unattended jobs re-authenticate themselves';
-      const sessionError = `Session invalid (${result.status}): ${hint}.\nResponse: ${result.body?.substring(0, 200)}`;
+      // status 0 FIRST: it means the transport never got an HTTP response at all.
+      // "Session invalid (0)" wearing the expired-login hint is the exact string
+      // that sent issue #21's reporter after the wrong problem. A cookieless
+      // caller gets a real 401 from this endpoint (live probes, 2026-07), so
+      // no-response is never an auth verdict.
+      const hint = result.status === 0
+        ? 'airtable.com could not be reached — this is a NETWORK/TLS/proxy failure, NOT an expired login. '
+          + 'Behind a TLS-inspecting proxy set NODE_EXTRA_CA_CERTS (Node ignores the OS trust store); otherwise check HTTPS_PROXY/NO_PROXY and connectivity'
+        : this._authMode === 'byo'
+          ? 'the provided cookie was rejected — save a fresh Airtable session cookie (byo recovers only from a re-pasted cookie)'
+          : this._authMode === 'direct-login'
+            ? 'direct-login credentials were rejected — check AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_TOTP_SECRET (direct-login re-authenticates itself on the next call)'
+            : 'the Airtable login has expired — re-authenticate (open the extension dashboard and log in), or use AIRTABLE_AUTH_MODE=direct-login so long unattended jobs re-authenticate themselves';
+      const sessionError = `Session invalid (${result.status}): ${hint}.\nResponse: ${sessionErrorDetail(result)}`;
       trace('auth', 'auth:session_check', { success: false }, sessionError);
       throw new Error(sessionError);
     }
@@ -644,8 +715,11 @@ export class AirtableAuth {
         this.csrfToken = this._credentials.csrfToken ?? null;
         const result = await this._rawApiCall('GET', '/v0.3/getUserProperties');
         if (!(result.status >= 200 && result.status < 300)) {
+          // The detail matters as much here as at init (_doInitByo has it): a
+          // status-0 TLS/proxy failure otherwise tells a byo user to re-paste a
+          // cookie that was never the problem.
           throw new Error(
-            'BYO_CREDENTIALS_EXPIRED: cookie no longer valid — paste a fresh cookie into ~/.airtable-user-mcp/credentials.json or AIRTABLE_COOKIE'
+            `BYO_CREDENTIALS_EXPIRED: cookie no longer valid — paste a fresh cookie into ~/.airtable-user-mcp/credentials.json or AIRTABLE_COOKIE.\nResponse: ${sessionErrorDetail(result)}`
           );
         }
         this.isLoggedIn = true;
@@ -768,7 +842,15 @@ export class AirtableAuth {
       // Without a cookie header, cookie-only park would leave isLoggedIn true
       // with no HTTP path and force a full Chromium relaunch next call.
       if (!this._credentials?.cookieHeader) {
-        console.error('[auth] idle park aborted — no cookie snapshot available; keeping browser up.');
+        // Bailing here does NOT strand the browser, though it reads like it does:
+        // scheduleIdlePark() nulled _parkTimer before calling us, so nothing is armed
+        // at this instant. The re-arm comes from _subscribeBusy — we are inside
+        // runBarrier, so the scheduler is busy now and fires a busy→idle edge the
+        // moment this returns, which calls scheduleIdlePark() again. Retry is
+        // automatic; an explicit re-arm here is redundant, not defensive.
+        // Pinned by "a cookie-less park RE-ARMS the timer" in test-auth-idle-park —
+        // that test fails only if BOTH paths are gone, which is the real invariant.
+        console.error('[auth] idle park deferred — no cookie snapshot available; will retry when idle again.');
         return;
       }
 
@@ -948,7 +1030,8 @@ export class AirtableAuth {
           // dead-session breaker wrongly aborts the WHOLE records job (the 5-session "403 during
           // record sync" saga). Surface it as a distinct per-request error so the CALLER fails just
           // that row/cell and continues; do NOT touch _recoveryStreak or latch _sessionDead.
-          if (result.status === 403 && /INVALID_PERMISSIONS|cannot be (updated|created)/i.test(result.body || '')) {
+          // ponytail: region-restriction wording (AI fields on region-gated models pre-check the caller's region on every write) is unverified against a live body — widen when a capture lands.
+          if (result.status === 403 && /INVALID_PERMISSIONS|cannot be (updated|created)|not (available|supported|permitted) in your (region|country)|regional/i.test(result.body || '')) {
             const e = new Error(`FIELD_FORBIDDEN (403): ${String(result.body || '').replace(/\s+/g, ' ').slice(0, 300)}`);
             e.code = 'FIELD_FORBIDDEN';
             throw e;
@@ -967,7 +1050,7 @@ export class AirtableAuth {
               this._lastTripStatus = result.status;
               this._lastTripReason = 'auth-403-persist';
               this._captureTripBody(result);
-              throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive 403s that did not clear after re-authentication — the login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
+              throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive 403s that did not clear after re-authentication — the login has expired or been blocked. Re-authenticate (run \`login\`) and retry.${this._lastTripBody ? `\nAirtable's last response body: ${this._lastTripBody}` : ''}`);
             }
             console.error(`[auth] 403 persisted after backoff (${this._authMode}) — re-authenticating on the same session (streak ${this._recoveryStreak})...`);
             await this._recoverSession();
@@ -980,7 +1063,7 @@ export class AirtableAuth {
             this._lastTripStatus = result.status;
             this._lastTripReason = 'throttle';
             this._captureTripBody(result);
-            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.`);
+            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.${this._lastTripBody ? `\nAirtable's last response body: ${this._lastTripBody}` : ''}`);
           }
           const delay = Math.min(30_000, 1000 * (2 ** rlAttempt)) + Math.floor(Math.random() * 500);
           console.error(`[auth] ${result.status} (rate-limit/throttle) — backing off ${delay}ms on the same session, no relaunch (streak ${this._recoveryStreak})...`);
@@ -999,7 +1082,10 @@ export class AirtableAuth {
             this._lastTripStatus = result.status;
             this._lastTripReason = result.error ? 'network' : 'auth-401';
             this._captureTripBody(result);
-            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive auth failures (status=${result.status}) across recoveries — the Airtable login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
+            // Append the transport detail: this branch also latches on `result.error`
+            // (status 0, no HTTP response), where "the login has expired" is simply
+            // wrong and the CA-cert/proxy advice in `error` is the only real clue.
+            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive auth failures (status=${result.status}) across recoveries — the Airtable login has expired or been blocked. Re-authenticate (run \`login\`) and retry.${result.error ? `\nTransport error (status=0 means no HTTP response — network/TLS/proxy, not an expired login): ${result.error}` : ''}`);
           }
           console.error(`[auth] API call failed (status=${result.status}, error=${result.error || 'none'}). Recovering... (streak ${this._recoveryStreak})`);
           await this._recoverSession();
@@ -1073,15 +1159,15 @@ export class AirtableAuth {
     try {
       await this.ensureLoggedIn();
       const res = await this.get('/v0.3/getUserProperties');
-      if (res.ok) {
-        let userId = this.userId;
-        try {
-          const data = await res.json();
-          userId = data?.data?.userId ?? userId;
-        } catch { /* keep cached userId */ }
-        return { valid: true, userId: userId ?? null };
-      }
-      return { valid: false, status: res.status };
+      // A 2xx IS the verdict here, and that is honest: Airtable accepted the
+      // cookie, and a cookieless caller gets 401 from this endpoint (live probes,
+      // 2026-07). The user id is REPORTED when known and is never a gate — it comes
+      // from page/login HTML, which byo (no csrf scrape) and a parked browser
+      // simply may not have, so requiring it would report a working session as
+      // signed out. `userId` is whatever init/login actually learned, never a
+      // guess: close() clears it so a stale id cannot stand in as proof.
+      if (res.ok) return { valid: true, userId: this.userId ?? null };
+      return { valid: false, status: res.status, error: probeFailureReason({ status: res.status }) };
     } catch (err) {
       return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -1180,6 +1266,10 @@ export class AirtableAuth {
       this._networkHandler = null;
       this.isLoggedIn = false;
       this._credentials = null;
+      // Drop the identity with the session that produced it. checkSessionHealth
+      // reports this field, so a leftover id from a previous login would be served
+      // as evidence about a session it knows nothing about.
+      this.userId = null;
       // A full teardown ENDS the recovery loop the breaker exists to bound, so a
       // latched breaker must not survive it. close() is the daemon's
       // /daemon/release-browser path (run right before an interactive re-login) —

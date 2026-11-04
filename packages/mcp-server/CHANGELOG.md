@@ -2,6 +2,530 @@
 
 ## [Unreleased]
 
+### Fixed (2026-11-04 — Airtable bot protection on the login page)
+
+- **Direct-login / BYO page fetches.** Airtable now fronts its HTML routes (`GET /login`, the authed
+  `GET /`) with PerimeterX, which answers Node `fetch`'s default User-Agent with a 403 "Verify it's
+  you" challenge page instead of the sign-in page — so `scrapeCsrf()` found no token and
+  `AIRTABLE_AUTH_MODE=direct-login` failed with `DIRECT_LOGIN_NO_CSRF` (BYO's csrf scrape silently
+  got no token). Page fetches now send Chrome-like `User-Agent`/`Accept`/`Accept-Language` headers
+  (`PAGE_HEADERS`); the JSON API routes are not gated and are unchanged. When a challenge page is
+  still served, `DIRECT_LOGIN_NO_CSRF` now names the bot protection and the remedies
+  (`AIRTABLE_HTTP_CLIENT=impit`, or `AIRTABLE_AUTH_MODE=browser`) instead of blaming a changed page.
+- **Dead-session breaker diagnostics.** A 403 that trips the breaker (`SESSION_INVALID`) now carries
+  Airtable's captured response body in the error message, so the real reason is visible rather than
+  a bare status. Region-restriction wording (`not available in your region`, `regional`) on a 403 is
+  now classed as a per-request `FIELD_FORBIDDEN` — it fails just that row/cell — instead of being
+  retried as throttle and escalating to session death.
+
+### Security / dependencies (2026-11-04)
+
+- **`pnpm audit --prod` is clean (was 1 critical + 19 high).** `@modelcontextprotocol/sdk` 1.x -> **1.32.2** and `undici` -> **7.30.1** (still 7.x). Clears: critical `proxy-addr` IP spoofing (via express); high MCP SDK request-body size-limit, OAuth and session advisories (bodies are now read with a 4 MiB cap and JSON-RPC batches are capped at 100 when the transport reads the body itself; the daemon passes its own pre-parsed 1 MB body, so it is unaffected), undici TLS-validation bypass + DoS, and the transitive `zod`, `body-parser`, `hono`, `fast-uri` and `ip-address` advisories. `zod` is a peer dependency of the SDK that the lockfile had frozen at 4.3.6, so it is now declared explicitly (`^4.6.6`) to pull the patched release.
+- **`patchright` 1.58 -> 1.64.3, `otpauth` 9.5 -> 9.6** (in-range). `impit` and `@ngrok/ngrok` are intentionally not bumped (their native-binary digest pins are unchanged). Dev tooling: vitest 1.6 -> 3.2, esbuild 0.27 -> 0.28, vite 6.4.5.
+- **`cheerio`, `fetch-cookie`, `node-fetch` and `tough-cookie` moved to `devDependencies`.** Nothing in `src/`, `test/`, `bin/` or the bundle imports them — only the local (gitignored) `dev-tools/` capture scripts do — so npm consumers no longer install them or their audit surface.
+- Test hygiene: `test-http-proxy.test.js` no longer leaks the CONNECT-tunnel sockets (an `ECONNRESET` after the test ended marked the file failed although all 16 subtests passed).
+
+### Fixed (2026-08-01 — audit low-severity sweep)
+
+- **Credentials.** `logout` wiped the browser profile, printed "Browser session cleared." and exited
+  0 while `credentials.json` / `login.json` still held a live session — the next server start read
+  them and was logged straight back in. It now reports those files and exits non-zero rather than
+  claiming a cleared session (they are user-authored, so it does not delete them). `login` no longer
+  accepts `--password` / `--otp-secret`: argv lands in world-readable `/proc/<pid>/cmdline` and shell
+  history for the ~5-minute login poll, and a captured base32 TOTP seed is a permanent 2FA bypass —
+  use environment variables (the separate `direct-login` mode reads `login.json`). The config directory is created 0700 (it holds those files), and
+  the session-backup archive 0600 (it contains the cookie jar, `daemon.token` and `daemon.lock`).
+  IDE config writes that carry an Airtable PAT are 0600 — the atomic rename replaces the destination
+  inode, so without a mode any restrictive permissions the user had set were reset. All no-ops on Windows.
+- **`sync_base` ids are validated.** `planId`/`diffId` are interpolated into on-disk filenames and
+  `join()` normalises `..`, so `diffId: "x/../../tools-config"` overwrote
+  `~/.airtable-user-mcp/tools-config.json` — which `ToolConfigManager.load()` then merges over a
+  `defaultConfig()` whose `activeProfile` is `full`.
+- **An unverifiable view no longer reads as "clean".** `snapshotViewFiltered` is the only signal that
+  suppresses `pruneRecords`, and it was set only when every candidate view's filter state was KNOWN —
+  a `getView` that threw left the view `unknown` and the row set was treated as complete, so mirror
+  could delete real records as false orphans. Unverified picks are now flagged (`unverified: true`).
+- **Attachment fetch checks `r.ok`.** A 403/404 body was uploaded to the destination cell as the file,
+  counted as success, and written into the persisted dedupe map — so a re-run SKIPPED the corrupted
+  cell instead of repairing it. Source signed URLs expire mid-job, which is exactly when this happened.
+- **An unreadable `daemon.lock` is no longer deleted.** `acquire()` publishes the file with
+  `openSync(...,'wx')` and fills it a moment later, so it legitimately exists with zero bytes in
+  between — and the parse-failure branch removed it with no liveness check, letting a racing acquirer
+  evict a lock a live daemon was mid-write. It now fails the attempt and lets the retry loop re-probe.
+- **`apply.lock` no longer wedges forever on a recycled pid**, and the `APPLY_LOCKED` error finally
+  names the lock file's path.
+- **The daemon exit-intent slot** is now tied to its originating request with
+  `AsyncLocalStorage`, so an older concurrent `/mcp` response cannot consume it and truncate the
+  stop/restart caller's confirmation. Staging refuses to overwrite a still-pending intent (the
+  second `manage_daemon stop`/`restart` gets a refusal naming the staged action), and an intent
+  whose staging response closed without flushing is discarded — a confirmed stop can neither be
+  stolen nor orphaned.
+- **`offsetToPosition` no longer rescans from offset 0 for every diagnostic.** `makeRange` calls it
+  twice per diagnostic, so N diagnostics cost O(N x document). Line starts are memoised per document
+  and binary-searched: `')'.repeat(20000)` **~1000 ms → 28 ms**, `'IF('.repeat(10000)` **~3500 ms → 484 ms**.
+- **`showToolStatus` reuses one OutputChannel** instead of minting a new identically-named one per
+  invocation and never disposing it.
+- **The transitive Ajv URI parser is patched in place.** `fast-uri` 3.1.0 → 3.1.5 clears four
+  production audit findings without pulling an MCP SDK or browser-auth upgrade. No repository path
+  accepts caller-supplied schemas or `$id` values, but the bundled parser no longer carries the
+  advisory regardless.
+
+### Changed (2026-08-01 — new `local-write` category; read-only is 12 → 10 tools)
+
+- **`download_formula_field` and `download_base_formulas` moved out of `read` into a new
+  `local-write` category.** They READ from Airtable but WRITE .formula files to a path the caller
+  chooses, so a profile advertised as "Schema inspection, formula validation, and record reading
+  only" had no business containing them — the annotation fix in the previous entry restored the
+  client's consent prompt, but the profile itself was still mislabelled. `local-write` is included
+  in **safe-write** and **full**, so those tool sets are UNCHANGED (54 / 72); only **read-only**
+  changes, 12 → 10. Deliberately NOT added to `LEGACY_CATEGORIES_DEFAULT_ON`, so a pre-existing
+  `custom` profile does not silently widen to include it, including when the VS Code extension
+  imports or rewrites an older profile file. New setting:
+  `airtableFormula.mcp.categories.localWrite` (default true).
+
+### Fixed (2026-07-31 — sync prune could delete data it had not replaced)
+
+- **`pruneRecords` had only a RUN-wide failure gate.** The "don't prune after a failed run" check
+  was `failed > 0 && created === 0 && updated === 0 && skipped === 0` against global accumulators,
+  so a single converged row in *any other table* (counted as `skipped`) disarmed it. A
+  `FIELD_FORBIDDEN` 403 is a per-field permission property that fails every row of exactly one
+  table by design, so "one table wholly failed, the rest fine" is routine — and under
+  `mirror` + `confirmDeletions` that table's pre-existing dest rows were deleted while their
+  replacement data was never written, with the job reporting `phase='done'`. Pass 1 now records
+  per-table outcomes (`result.perTable`) and `pruneRecords` skips any table with
+  `failed > 0 && created + updated + skipped === 0`, emitting `RECORDS_FAILED_PRUNE_SKIPPED` —
+  the same shape as the existing truncation guard. The accounting is keyed by matched destination
+  table ID; using source/destination names made the guard disappear when a matched table had been
+  renamed between bases.
+- **`pruneSchema` deleted the `fieldMappings` targets `apply()` had just validated.** A mapping
+  target must exist on the dest and be writable but is *not* required to exist on the source — the
+  documented injection pattern (source autoNumber `Code` → dest text field `InjectID`) is dest-only
+  by construction and therefore always classified an orphan. `apply()` validated the mappings, then
+  called `pruneSchema` without them and deleted the target; the background records job then
+  re-validated, threw `FIELD_MAP_INVALID` and synced zero records. Net effect: a destination column
+  destroyed and no data written. `fieldMappings` is now threaded through and targets are kept with
+  `FIELD_MAP_TARGET_PROTECTED`.
+- **The drift guard fingerprints only the DESTINATION, but `plan.orphans` is a statement about the
+  SOURCE.** A source-side *addition* between plan and apply was invisible: the dest was untouched so
+  the fingerprint matched, no `DRIFT`/`RESUME_DRIFT` fired, `applyPlan` had no create action for the
+  new field (the plan predates it) — and `pruneSchema` then deleted the dest field that now
+  legitimately matched, taking its data with it. `deleteField`'s `expectedName` guard cannot help,
+  because the dest field kept its name. `apply()` now re-reads the source before any schema deletion
+  and drops orphans that have regained a counterpart (`ORPHAN_STALE_SKIPPED`); if that read fails it
+  skips all schema deletion for the run rather than trusting a stale list (`ORPHAN_RECHECK_FAILED`).
+  The extra read is only paid when deletions are actually confirmed.
+
+### Fixed (2026-07-31 — force-stop could kill an unrelated process; converged re-syncs re-posted every cell)
+
+- **`stopDaemon --force` SIGKILLed a pid read from the lockfile with no identity check.** The only
+  thing establishing that the pid was the daemon was `isStale()`'s bare `process.kill(pid, 0)`
+  liveness probe, which cannot distinguish our daemon from a process that recycled the pid after an
+  unclean death. In that state the lock persists with a live-but-foreign pid, the 10s wait never
+  clears, and the force branch signalled a stranger — on Windows `SIGTERM` maps to
+  `TerminateProcess`, so even the "graceful" first step is an unsavable hard kill. Now mirrors the
+  extension's `_verifyDaemonIdentity`: probe `/daemon/health` and require the uuid to echo the
+  lockfile's. Unproven ⇒ release the stale lock, leave the process alone, and say so.
+- **`buildUpdateCells` performed no comparison against the destination.** `updateRecords` issues one
+  serialized HTTP POST *per cell*, and every mapped writable scalar was re-posted on every re-sync
+  even when nothing had changed — 1000 rows × 20 fields = 20,000 sequential requests for a run that
+  changes nothing. Converged cells are now skipped, which collapses most rows to zero cells and lets
+  the existing empty-row skip drop them entirely. Cleared-cell propagation is unaffected.
+
+### Fixed (2026-07-31 — tunnel revocation reached only half the cases)
+
+- **The daemon held TWO independent `activeTunnel` handles**, one in `daemon/server.js` (filled by
+  `POST /daemon/enable-tunnel`) and one in `daemon/launcher.js` (filled by the boot auto-start).
+  Neither closure could see the other, so every path that stops a tunnel reached only half the
+  cases: `POST /daemon/disable-tunnel` was a **silent no-op on a boot-started tunnel** — it
+  skipped `stop()`, nulled the lockfile `tunnelUrl`, published `daemon:tunnel-stopped` and
+  returned `{ok:true}` while cloudflared kept serving the public hostname; the **401-burst
+  tripwire** delegated to the launcher's callback and so could never stop a dashboard-enabled
+  tunnel (it latched `tunnelAutoDisabled`, the UI showed "Auto-disabled", the URL stayed live);
+  and `enable-tunnel`'s stop-the-existing guard was equally blind, leaving **two cloudflared
+  children and two public URLs**. `getHealth()` reads the server closure, so `/daemon/health` and
+  `manage_daemon action=status` corroborated the false state. `/mcp` still required the 256-bit
+  timing-safe bearer throughout, so this was a **failed revocation control**, not open access —
+  but with `/mcp?token=` secret URLs the URL *is* the shared credential. `startDaemonServer()` now
+  exposes `adoptTunnel()`/`getActiveTunnel()`, the launcher hands its boot-started handle over,
+  and the tripwire stops that single handle directly. Pinned by `test/test-tunnel-ownership.test.js`.
+- **A boot-auto-started tunnel could kill the daemon by unhandled rejection.** `waitUntilReady` is
+  created eagerly in `tunnel.js` and rejected when cloudflared exits before publishing a URL
+  (offline boot, blocked egress, a trycloudflare 429). Nothing consumed it and the repo installs
+  no `process.on('unhandledRejection')`, so Node's default throw took the daemon down ~1s after it
+  began serving, killing in-flight MCP requests and orphaning the non-detached LSP child. Now
+  consumed and logged.
+
+### Security (2026-07-31 — `download_*` tools declared read-only while writing files)
+
+- **`download_formula_field` and `download_base_formulas` were annotated `readOnlyHint: true`,
+  `destructiveHint: false`** while writing (and overwriting) files at a caller-supplied path.
+  `readOnlyHint` is exactly the signal MCP clients use to **auto-approve a call without
+  prompting**, so the annotation removed the user's consent step from a filesystem write. Both are
+  now `readOnlyHint: false, destructiveHint: true`. *(Their `read` category is unchanged and
+  remains a judgement call — see the note below.)*
+- **A table named `..` escaped the chosen output directory.** The filename sanitiser stripped
+  separators (`/\:*?"<>|`) but not `.`, so `download_base_formulas` wrote every formula file one
+  directory *above* `outputDir`. Table and field names come from the base, so they are attacker
+  influenced by anyone who can edit a base the user can read. Both segments now go through
+  `confineToDir()`, which rejects dot-only segments and asserts the resolved path stays under the
+  chosen directory.
+- **`fieldName` was interpolated into the `# AT:` header with only quotes escaped**, so a newline
+  in a field name injected arbitrary header lines (`description` was already stripped). Both sites
+  now use `headerSafe()`.
+- Not changed: `outputPath`/`outputDir` themselves are still honoured as given. They are the
+  user's explicit choice, and confining them to `cwd` would break legitimate "save to my Desktop"
+  use; the consent step is restored by the annotation fix instead.
+
+### Security (2026-07-31 — row-template IDs were missing the path-traversal guard)
+
+- **All seven row-template client methods interpolated a caller-supplied `templateId` into the
+  API URL path with no `assertAirtableId`.** `client.js` defines `AIRTABLE_ID_RE` with the
+  comment "Prevents path traversal" and applies it at 128 call sites — but
+  `renameRowTemplate`, `updateRowTemplateDescription`, `setRowTemplateCell`,
+  `setRowTemplateVisibleColumns`, `duplicateRowTemplate`, `applyRowTemplate` and
+  `deleteRowTemplate` validated only `appId`. Since the value reaches the client straight from
+  tool arguments and `auth._rawApiCall` passes an absolute URL through unchanged (WHATWG parsing
+  collapses `..` before the request), a crafted id reached arbitrary internal endpoints under
+  the live session cookie — same-origin authorization bypass, not exfiltration, since the host
+  is a literal. Notably `applyRowTemplate`'s request body is byte-identical to what
+  `deleteTable` posts to `table/{id}/destroy`, so a `table-write`-only caller could destroy a
+  table while skipping `deleteTable`'s `expectedName` confirmation. `createRowTemplate` was
+  never affected — it generates its own id.
+
+### Security (2026-07-31 — undici bumped past the TLS certificate-validation bypass)
+
+- **`undici` floor raised `^7.0.0` → `^7.28.0`** (resolves 7.29.0). 7.24.5 was in range for
+  GHSA-level advisories including a **TLS certificate validation bypass via dropped
+  `requestTls`** — and that is not a theoretical transitive: `src/proxy.js` builds undici's
+  `EnvHttpProxyAgent` for every proxied environment, which is the exact affected path. A
+  corporate-proxy user could have had certificate validation silently skipped.
+- **This shipped inside the extension, not just to npm users.** `undici` is not in the esbuild
+  `external` list (`scripts/bundle-mcp.mjs`), so the vulnerable copy was compiled into
+  `dist/mcp/index.mjs` and frozen into all 8 platform VSIXes — extension users could not have
+  fixed it by updating a dependency. Reaching them requires a rebuild + republish.
+- Deliberately **not** bumped: the `hono` / `@hono/node-server` advisories carried by
+  `@modelcontextprotocol/sdk`. Their vulnerable code is `serve-static`, the CORS middleware and
+  JSX; the SDK only uses `@hono/node-server`'s request/response conversion
+  (`server/streamableHttp.js`), so none are reachable. Bumping them in-range pulled 24 unrelated
+  upgrades (including `patchright` 1.59.4 → 1.61.1, the Chromium driver behind the default auth
+  path) for zero security gain, so the change was reverted to an undici-only diff.
+
+### Added (2026-07-31 daemon — secret-URL token for claude.ai custom connectors)
+
+- **Daemon accepts the bearer token as `?token=` in the URL.** claude.ai custom connectors
+  support only OAuth or no-auth — there is no header field, so a bearer-only server made
+  Claude attempt OAuth discovery/registration against endpoints that don't exist
+  ("Couldn't register with …'s sign-in service"). `requireBearer` now also checks
+  `req.query.token` (same secret, same timing-safe compare, 401-burst tripwire unchanged),
+  so a tunnel URL like `https://<host>/mcp?token=<bearer>` connects as a no-auth connector —
+  the Zapier/n8n secret-URL pattern. Requests that present a query token get
+  `Referrer-Policy: no-referrer` + `Cache-Control: no-store` so the URL never leaks via
+  referrer or cache. The token rides the URL, so treat the URL as the secret (edge/proxy
+  access logs will see it); `manage_daemon action=token_rotate` invalidates it.
+
+### Fixed (2026-07-30 review finish — diff detail id, autoNumber update path, test isolation)
+
+- **`sync_base mode=diff` with `detail` but no `diffId` returned `diffId:null` on success.**
+  `diffDetail()` resolves the latest saved diff when the param is omitted, but the tool echoed
+  the caller's absent param — and the detail branch's machine payload carried no id at all.
+  `diffDetail()` now returns the resolved id (top-level and in `machine`) and the tool reports
+  it, so a caller can pin follow-up `detail`/`offset` pages to the exact diff it was served.
+- **A semantic `typeOptions` update on an existing autoNumber field shipped `maxUsedAutoNumber`.**
+  The createField and reconcilePrimary paths already stripped the read-only runtime counter,
+  but the generic updateField options path sent the raw remapped options — counter included —
+  which the API 422s. The strip is now single-sourced (`stripAutoNumberCounter()`, apply.js)
+  and applied at all three send sites.
+- **`test-tool-config.test.js` wrote the LIVE `~/.airtable-user-mcp/tools-config.json`.**
+  `switchProfile()`/`toggleTool()` persist on every call; the suite ran unsandboxed, so tests
+  raced the real daemon for the file (Windows EPERM rename flake) and could flip the user's
+  real active profile. The whole file now runs under an `AIRTABLE_USER_MCP_HOME` temp dir.
+
+### Fixed (2026-07-30 sync drift detection — two ways a collaborator's edit got overwritten)
+
+External review (PR #19) found both, with a reproduction. Sync's drift guard is what stops
+`mode=apply` writing over changes made to the destination between `plan` and `apply`, and it had
+two holes that compounded: the fingerprint usually could not see the change, and once a run was
+resuming it stopped looking.
+
+- **Third review round (same day): `2d` hashed autoNumber's runtime counter — fixed as engine `2e`.**
+  `typeOptions.maxUsedAutoNumber` is a read-only counter the server advances whenever a row is
+  created — including by this sync's OWN records phase — so hashing it raw made an unchanged
+  schema abort with a phantom `DRIFT` (review repro: counter 7 → 8, apply aborted), and a
+  re-apply after any records run could trip its own guard. The fingerprint now strips it via
+  `fingerprintTypeOptions()`, the same strip `apply.js` already performs before every write;
+  semantic `typeOptions` changes on the same field still drift. Regressions cover the synthetic
+  shape, the `normalizeSchema` parity path, and a full plan→apply run with only the counter
+  advanced. Plans saved by `2d` abort `PLAN_STALE` with a re-plan instruction. Fails safe
+  either way — the bug refused legitimate applies; it never overwrote anything.
+- **Second review round (same day): the widening itself had three defects, all fixed as engine `2d`.**
+  (1) The fingerprint hashed `f.options` — a key NO normalized snapshot carries; the real key is
+  `typeOptions` (`normalizeSchema`), so the widening was inert in production while its tests
+  passed on synthetic shapes using the same wrong key. Fixed, and a normalizeSchema-parity test
+  now fingerprints a snapshot produced by the real normalizer so the two can never drift apart
+  again. (2) `applyJob()` accepted `resumeAfterDrift` but never forwarded it to `apply()` —
+  the flag was unusable through `sync_base`, which only calls the background path (failed
+  closed: it refused resumes rather than overwriting). Fixed + a background-path regression
+  test. (3) Table **sections** were in neither fingerprint mode, while mirror prune deletes
+  dest-only sections by id — a section renamed between plan and apply was deleted under its old
+  identity. Sections are now in the DEFAULT fingerprint (they ride on the schema-only snapshot;
+  free). Plans saved by `2c` abort with `PLAN_STALE` and a re-plan instruction.
+- **The drift fingerprint now covers field `typeOptions` and `description`.** `fingerprintSchema()`
+  hashed `id=name=type` only. A collaborator could rewrite a formula, retarget a link, add a
+  select choice or edit a description and produce a **byte-identical** fingerprint — the guard
+  passed and apply overwrote them. Both facets already ride on the schema-only snapshot, so this
+  costs no extra API calls. Options are hashed with a key-order-stable serializer, so a
+  re-serialization difference is not mistaken for a schema change.
+- **Live view config is opt-in, via `strictDrift:true` on `mode=plan`.** Filters/sorts/groups/
+  colors/column order are *not* in the default fingerprint: `apply` deliberately uses
+  `snapshotSchemaOnly` to skip one ~1s `getView` per view, and folding config in unconditionally
+  would reintroduce that storm on every apply. The plan records which basis built it and `apply`
+  reuses that setting — it cannot infer it, because `plan` snapshots *with* view config and
+  `apply` *without*, so an inferred flag would mismatch every time and abort every apply with a
+  phantom `DRIFT`.
+- **Resuming past drift is now gated by `resumeAfterDrift:true`.** One `done` journal action used
+  to switch the drift guard off for the whole remaining run, silently. Prior progress proves *this
+  plan* mutated the destination; it does not prove a collaborator did not also, and the remaining
+  actions — deletions included — would overwrite them. `apply` now aborts with `RESUME_DRIFT` and
+  says what to do (re-run `mode=plan`, preferred; or pass the flag to overwrite). This matches how
+  every other destructive path here is gated (`confirmDeletions` / `confirmTableDeletions` /
+  `confirmRetypes`). Known limit: still a whole-run decision — per-action preconditions are the
+  tracked follow-up.
+- **A plan from an older engine aborts with `PLAN_STALE`, not `DRIFT`.** An older plan hashed
+  fewer facets, so its digest can never match a current one. Reporting that as `DRIFT` blamed a
+  collaborator; mid-resume it invited the user to wave an overwrite through to fix what was really
+  a version mismatch. `ENGINE_VERSION` is exported (now `2e` — see the rounds above), so test
+  fixtures track it instead of pinning a literal that goes stale on the next bump.
+
+### Changed (2026-07-30 — `mirror` no longer claims more than it does)
+
+- The `policy: "mirror"` description said "make dest identical to source". It does not, and the
+  code already knew: dest-extra **linked-record** entries are never unlinked (Pass 2 only adds),
+  and a source row that **cleared** its attachments leaves the dest attachment cell untouched.
+  Both are reported rather than performed. The preset is now described as "converge dest toward
+  source" with those two exclusions stated inline. Implementing them remains a deferred follow-up;
+  the contract no longer overstates it in the meantime.
+
+### Added (2026-07-30 `manage_daemon` — model-facing daemon control)
+
+- **New tool `manage_daemon`, in a new `daemon` category, `full` profile only.**
+  Tool counts move **71 → 72** (`read-only` stays 12, `safe-write` stays 54);
+  categories move 15 → 16. Actions: `status`, `start`, `restart`, `stop`,
+  `tunnel_enable`, `tunnel_disable`, `token_rotate`.
+  - `action="status"` is the read-only diagnostic and the reason the tool exists:
+    it reports daemon liveness, **whether this process is the daemon**, transport,
+    uptime, version/provenance and tunnel URL, plus the live session state
+    (`sessionDead`, the last circuit-breaker trip *including Airtable's captured
+    4xx response body*, and the browser/auth busy queue). Those three were
+    previously reachable only by the VS Code extension over HTTP, so a model
+    watching a sync job die could not tell *daemon gone* from *session dead* from
+    *browser busy*. It never launches a browser and never mutates the lockfile.
+  - `stop`/`restart` answer **first** and exit afterwards, from a `res.on('finish')`
+    hook in `daemon/server.js`. Exiting from inside the handler deadlocks: closing
+    the transport clears the request map without resolving the SDK's
+    `enableJsonResponse` promise, so the response never flushes and the socket
+    never closes. `stop` also writes a `daemon.stopped` sentinel, so the VS Code
+    extension does not silently respawn the daemon the model just stopped.
+  - `token_rotate` and `tunnel_*` are **loopback-only** and are refused for callers
+    arriving through the tunnel; `status` is returned to them with host-identifying
+    fields blanked. `/mcp` is the one route a tunnel caller can reach — every other
+    `/daemon/*` route 404s for them — so putting daemon administration on the `/mcp`
+    plane without this guard would have handed back exactly what that allowlist
+    takes away. The bearer token is never returned to any caller, in any mode.
+  - Interactive tunnel setup (`cloudflared login`, creating a named tunnel) is
+    deliberately **not** exposed: readline prompts, an up-to-10-minute block, and a
+    new Cloudflare tunnel per call. Use the CLI or the VS Code dashboard.
+- **Standalone `airtable-user-mcp` npm/CLI users on the `custom` profile will not
+  get `manage_daemon` automatically** — and that is intended. `daemon` is a new
+  category, so it is correctly excluded from the frozen
+  `LEGACY_CATEGORIES_DEFAULT_ON` allowlist and an absent `customTools` key resolves
+  to **disabled**, exactly as `sync` and `record-destructive` did when they shipped.
+  A tool that can stop or restart the server the caller is talking through must
+  never arrive by upgrade alone. **To enable it:** run
+  `manage_tools toggle_category daemon true`, or add an explicit
+  `"manage_daemon": true` to `~/.airtable-user-mcp/tools-config.json`. VS Code
+  extension users are unaffected: `syncSettingsToFile()` always writes an explicit
+  key for every tool, and the new `airtableFormula.mcp.categories.daemon` setting
+  ships **off** by default.
+
+### Fixed (2026-07-30 stale category/tool enumerations)
+
+- **`manage_tools`' own `category` parameter listed 8 of the 15 categories.** It was
+  a hand-written string that nobody updated when a category shipped, so a model had
+  no way to discover that `record-write`, `view-section`, `sync` or `daemon` were
+  toggleable at all. It is now derived from `CATEGORY_LABELS` — both the prose and a
+  real JSON-Schema `enum`, so the list cannot go stale again and clients can
+  validate the argument.
+- **The published MCP Registry manifest (`server.json`) advertised 32 of 72 tools at
+  version 2.1.1 while the package was at 2.4.15.** `mcp-publisher publish` reads this
+  file, so that was the tool list shown on registry.modelcontextprotocol.io. The
+  `tools` array is regenerated (all 72 + `manage_tools`) and both version fields now
+  track `package.json`. `check:tool-sync` guards the tool-name set and the versions
+  from now on; the blurbs stay free prose, so ordinary copy edits do not fail the
+  build.
+
+### Fixed (2026-07-30 cross-client config override is no longer silent)
+
+- **A standalone client that attach-proxies into someone else's daemon now says so,
+  once, on stderr.** Since the daemon is now started on MCP request, a
+  `daemon.lock` exists on essentially every VS Code session — so a standalone client
+  (Claude Desktop, Cursor, Cline, Amp) that finds one attaches to **VS Code's**
+  daemon and every tool call runs under **that** process's environment. The attach
+  path reads only `AIRTABLE_NO_DAEMON` and `AIRTABLE_USER_MCP_HOME` from the
+  client's own env; its configured `AIRTABLE_AUTH_MODE`, `AIRTABLE_HTTP_CLIENT`,
+  browser channel and idle-park tuning were silently void. The attach still
+  happens — refusing it would send the process down the in-process path and put a
+  **second** Chromium on the shared persistent profile, which is the Chrome-exit-21
+  failure this codebase has historically mis-reported as "session dead" — but the
+  mismatch is now named explicitly, with the two ways to opt out
+  (`AIRTABLE_NO_DAEMON=1`, or stop the daemon and let it restart from your env).
+- **`/daemon/health` now reports the daemon's effective `authMode`, `httpClient` and
+  `configDir`**, so a caller can ask "whose settings am I actually running under?"
+  after the fact. `manage_daemon action="status"` reports the same three.
+- **This is deliberate, not a bug to be fixed later.** A standalone client that
+  attaches inherits **that daemon's** auth mode and HTTP client, and its own
+  `AIRTABLE_AUTH_MODE` / `AIRTABLE_HTTP_CLIENT` are not applied — because the whole
+  point of the shared daemon is that exactly **one** browser owns the persistent
+  Chrome profile. Two processes on that profile is the crash class, so the shared
+  configuration wins by design. The stderr line is the discovery mechanism: it is
+  the only place that mismatch is ever announced.
+
+### Changed (2026-07-30 the daemon now starts on an MCP request)
+
+- **An MCP tool call can now bring the daemon up; previously only the VS Code
+  dashboard or a formula command could.** `registration.ts` called a passive
+  `getDaemonStatus()`, so unless the user had already opened the dashboard, *every*
+  session fell through to the stdio branch — and that branch spawns an in-process
+  server **per VS Code window**, each with its own Chromium on the single-owner
+  `.chrome-profile`. That is the Chrome exit-21 collision this project has
+  repeatedly mis-reported as "session dead". Starting the daemon here makes profile
+  collisions **less** likely, not more: one shared daemon replaces N stdio servers.
+  - **What changes for users:** a `daemon.lock` now exists on essentially every VS
+    Code session, browser logins are shared instead of duplicated, and standalone
+    clients on the same machine attach to it (see the cross-client note above).
+  - The start is **implicit**: it preserves the `_userStopped` latch, so a daemon
+    you deliberately stopped is *not* resurrected by the next tool call, and it
+    keeps the spawn-suppression window that closed the runaway-spawn OOM.
+  - **If the daemon cannot start, MCP still works** — the provider falls through to
+    stdio rather than returning no server at all.
+- **`byo` / `direct-login` users no longer get a credential-less stdio server when
+  the daemon is unavailable.** The credential-injection branch used to test the
+  `useDaemon` *setting*; it now tests whether a daemon is *actually serving this
+  registration*. Those were the same thing until the daemon could fail to start.
+  With the old test, a `byo`/`direct-login` user whose daemon failed to start (or
+  who had pressed Stop) got a stdio server with no credentials and no browser to
+  fall back on — `*_CREDENTIALS_MISSING` on every single tool call. When the daemon
+  *is* serving, `/daemon/auth-credentials` remains the single credential channel and
+  secrets are still never duplicated into the child environment.
+
+### Fixed (2026-07-30 daemon lifecycle hardening)
+
+- **A malformed `AIRTABLE_IDLE_PARK_MS` disabled idle parking instead of being
+  ignored.** Anything unparseable — `"30m"`, `"1_800_000"`, a stray quote — fell
+  through to `0`, and `0` means *never park*. So the env var meant to **tune**
+  parking silently **switched it off**, pinning a ~300–600 MB Chromium tree
+  resident forever. Unparseable input now returns the 30-minute default; only an
+  explicit, well-formed `0` (or negative) disables parking.
+- **A cookie-less idle park no longer reads as a stranded browser.** The abort path
+  logs "deferred … will retry when idle again" and is genuinely re-armed by the
+  busy→idle edge, rather than claiming it is "keeping browser up" forever.
+- **The tool-config watcher is awaited at daemon startup.** `startWatching()` only
+  assigns its watcher after an internal `await mkdir`, so the un-awaited call let
+  `stop()` run `stopWatching()` while the handle was still null. The watcher was
+  then created with nobody left to close it, the fs handle kept the process alive
+  past shutdown, and `stopDaemon()` waited out its timeout and escalated to
+  SIGKILL.
+
+### Fixed (2026-07-30 issue #21 — login reported success without checking who was signed in)
+
+- **`login` declared success on the first 2xx and printed `User: undefined` even
+  when it worked** ([#21]). The root cause is counter-intuitive, so state it
+  plainly: **`/v0.3/getUserProperties` carries no identity at all.** Its
+  *authenticated* 200 body is eight feature-flag booleans
+  (`{"gemini":false,"libra":false,…}`) — there is no `userId` in it, anywhere. The
+  `data.data.userId` that every probe read was a **phantom field that never
+  existed**, which is why the success line printed `undefined` on *successful*
+  logins too. The checkmark had never been reporting identity; it was reporting an
+  HTTP status and labelling it a user.
+  - **Consequence for the reporter:** because any 2xx counted, `login` closed the
+    browser roughly 2 s after opening it — before an SSO round trip or a
+    hand-typed 2FA code could possibly finish — and then reported success.
+  - **The fix:** identity now comes from the page bootstrap, where it actually
+    lives (`"sessionUserId":"usr…"` in the served HTML — the SPA reads it there
+    and builds its own `/v0.3/user/<usr…>/…` URLs from it). New module
+    `src/session-user.js` holds the scrape, the predicate, and the single poll
+    loop that `login.js` (×2), `login-runner.js` and `manual-login-runner.js` each
+    used to keep a private copy of. Those copies had already drifted — one polled
+    60 s while the other three polled 300 s — and that divergence is how #21
+    survived this long. All four now poll for the same 5 minutes, which is what
+    SSO plus a typed 2FA code actually needs.
+- **The identity check is STRICT at the login and health probes, ADVISORY at
+  session verify — and that asymmetry is the design, not an inconsistency.**
+  - **STRICT** (`login`, the spawned `health-check`): a real `usr…` id is
+    *required*. A human is waiting on a green light here, and a false green **is**
+    the bug being fixed. A cookieless caller gets `401` from `getUserProperties`,
+    so an accepted call carries real signal — but not conclusive signal: the
+    reporter demonstrably reached a state where a stale/partial profile cookie was
+    still accepted while the session was not usable.
+  - **ADVISORY** (`auth._verifySession` at server init): a missing id is logged and
+    ignored. The cookie has *already* been accepted over direct HTTP by that point,
+    and a missing marker is equally what you see when the wrong page loaded, the
+    render had not finished, or Airtable renamed the key. Gating there would turn
+    one scrape drift into a total outage of all 72 tools.
+  - The same reasoning is why the VS Code extension takes the daemon's verdict as
+    given and does **not** add its own "no userId ⇒ signed out" gate: `byo` and a
+    parked browser may never have had a page to read an id from.
+- **`userId` is never invented and never inherited.** It is dropped on `close()`,
+  so a leftover id from a previous login cannot stand in as proof about a session
+  it knows nothing about; `byo` reports `(user id unavailable — byo has no page to
+  read it from)` instead of a fabricated one. It is read in the same
+  `page.evaluate()` that already scrapes the CSRF token rather than via
+  `page.content()`, which serializes the entire multi-MB DOM over CDP and throws
+  mid-navigation.
+- **`direct-login` can now fail with `DIRECT_LOGIN_UNVERIFIED`.** It fires when the
+  HTTP login flow completes and a `__Host-airtable-session` cookie **is** present,
+  but the page airtable.com then serves carries **no** signed-in user — i.e. a
+  session cookie exists while the sign-in never actually completed (an incomplete
+  SSO or 2FA step). A cookie alone was previously treated as a completed login;
+  that is the same false-green as #21, on the browser-free path. **Remedy:** check
+  `AIRTABLE_EMAIL` / `AIRTABLE_PASSWORD` / `AIRTABLE_TOTP_SECRET`, or switch to
+  `AIRTABLE_AUTH_MODE=browser`.
+  - Deliberately **tri-state**, because getting this wrong breaks working logins:
+    `usr…` = signed in, `null` = the page says nobody is, `undefined` = never read.
+    **Only the middle case raises the error.** This client does not follow
+    redirects, so a perfectly good login whose `GET /` answers `302` hands back an
+    empty body; treating that as "signed out" failed successful logins and, through
+    `_recoverSession`, fed the dead-session breaker that aborts exactly the long
+    unattended jobs this mode exists to serve.
+- **`health-check` probes up to three times instead of once.** The marker arrives
+  with the page bootstrap, so a single shot reports a healthy session as signed out
+  on a slow render — and the extension answers an `expired` verdict by relaunching
+  Chrome, so a false red costs a full launch against the single-owner profile.
+- **`login-runner` is given 330 s by the extension, matching the runner's own
+  5-minute poll.** The previous 120 s default sent it `SIGTERM` mid-poll and threw
+  away the diagnostic it was about to print.
+
+### Changed (2026-07-30 `status` and `doctor` now tell you different, true things)
+
+- **`doctor` actually probes the session.** It previously reported all-green for
+  precisely the broken profile in #21, because it never checked the session at all.
+  It now prints one of `Session: signed in as usr…`, `Session: signed in, user id
+  unavailable in this auth mode`, or `Session: NOT signed in — <reason>`, and says
+  which route it used (`via the running daemon` / `checked directly`).
+  - It **prefers the running daemon** over opening its own browser. The persistent
+    profile is single-owner: launching a second Chromium against it collides
+    (Chrome exit 21), and auth's lock recovery would then kill the live daemon's
+    browser as a "stale holder". Only with no healthy daemon does `doctor` open its
+    own.
+- **`status` stopped lying in the other direction.** It reported
+  `Session: found`/`not found` from the existence of `session.json` — a file
+  nothing has written for several versions, so healthy installs read `not found`.
+  It now reports what the login flow actually produces (`Browser profile: …`,
+  `Daemon: …`) and explicitly claims **nothing** about whether you are signed in:
+  those files exist whether or not the login completed. `doctor` is the command
+  that can answer that, and `status` now says so.
+
+[#21]: https://github.com/Automations-Project/VSCode-Airtable-Formula/issues/21
+
 ### Known limitations (2026-07-25 tool profile safety — standalone CLI users)
 
 - **`LEGACY_CATEGORIES_DEFAULT_ON` is category-granular, not tool-name-granular —

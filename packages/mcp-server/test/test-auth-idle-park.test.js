@@ -106,6 +106,33 @@ describe("AirtableAuth idle park", () => {
     assert.equal(killed, 0);
   });
 
+  it("a cookie-less park RE-ARMS the timer instead of stranding Chromium", async () => {
+    // scheduleIdlePark() nulls _parkTimer before invoking parkBrowser, and the only
+    // other re-arm is a scheduler busy->idle edge — which on a genuinely idle daemon
+    // never comes again. Without the re-arm this branch kept the whole browser tree
+    // alive for the life of the process: the single path where "idle costs nothing"
+    // was false. Now that the daemon auto-starts, that leak would have all day to run.
+    const auth = new AirtableAuth({
+      profileDir: "/fake/profile",
+      idleParkMs: 60_000,
+      killBrowserTree: async () => ({ killed: true, pids: [] }),
+    });
+    auth.context = { close: async () => {} };
+    auth.page = { removeListener() {} };
+    auth.isLoggedIn = true;
+    auth._credentials = null;
+    auth._snapshotCredentials = async () => { /* never produces a cookie */ };
+
+    // Simulate the real entry point: the timer fired and cleared itself.
+    auth._parkTimer = null;
+
+    await auth.parkBrowser();
+
+    assert.ok(auth.context, "browser is deliberately kept up without a cookie snapshot");
+    assert.ok(auth._parkTimer, "a retry must be armed, or the browser is stranded forever");
+    auth.cancelIdlePark();
+  });
+
   it("ensureLoggedIn is a no-op when parked with valid credentials", async () => {
     let initCalled = 0;
     const auth = new AirtableAuth({
@@ -269,19 +296,32 @@ describe("resolveIdleParkMs", () => {
     }
   });
 
-  it("disables on 0 / negative / malformed", () => {
+  it("disables only on an explicit 0 or negative", () => {
     const prev = process.env.AIRTABLE_BROWSER_IDLE_PARK_MS;
     try {
       process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = "0";
       assert.equal(resolveIdleParkMs(), 0);
       process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = "-1";
       assert.equal(resolveIdleParkMs(), 0);
-      process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = "30abc";
-      assert.equal(resolveIdleParkMs(), 0);
-      process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = "1.5";
-      assert.equal(resolveIdleParkMs(), 0);
       process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = "45000";
       assert.equal(resolveIdleParkMs(), 45000);
+    } finally {
+      if (prev === undefined) delete process.env.AIRTABLE_BROWSER_IDLE_PARK_MS;
+      else process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = prev;
+    }
+  });
+
+  it("falls back to the default on malformed input instead of disabling parking", () => {
+    // A typo in the tuning knob used to SWITCH PARKING OFF, pinning a ~300-600MB
+    // Chromium tree resident for the life of the process. Failing to the default is
+    // the safe direction: the worst case is that the user's intended interval is
+    // ignored, not that the browser never parks again.
+    const prev = process.env.AIRTABLE_BROWSER_IDLE_PARK_MS;
+    try {
+      for (const junk of ["30abc", "1.5", "30m", "1_800_000", '"600000"', "NaN", "  "]) {
+        process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = junk;
+        assert.equal(resolveIdleParkMs(), 30 * 60_000, `expected default for ${JSON.stringify(junk)}`);
+      }
     } finally {
       if (prev === undefined) delete process.env.AIRTABLE_BROWSER_IDLE_PARK_MS;
       else process.env.AIRTABLE_BROWSER_IDLE_PARK_MS = prev;

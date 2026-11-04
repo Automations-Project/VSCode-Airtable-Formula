@@ -18,7 +18,9 @@ import { AirtableAuth } from '../auth.js';
 import { AirtableClient } from '../client.js';
 import { ToolConfigManager } from '../tool-config.js';
 import { withToolDispatchContext } from '../page-scheduler.js';
-import { ensureToken, rotateToken, getTokenPath } from './token.js';
+import { ensureToken, rotateToken, getTokenPath, onTokenRotate } from './token.js';
+import { discardDaemonExit, takeDaemonExit, withDaemonExitOwner } from './exit-intent.js';
+import { clearStopSentinel, writeStopSentinel } from './stop-sentinel.js';
 import { setInjectedCredentials } from './cred-store.js';
 import { getTunnelProvider, writeTunnelSettings } from './tunnel-providers/index.js';
 import {
@@ -132,7 +134,7 @@ function getBoundPort(server) {
  * @param {import('express').Request} req
  * @returns {boolean}
  */
-function isTunnelRequest(req) {
+export function isTunnelRequest(req) {
   if (req.headers?.['x-forwarded-for']) return true;
   if (req.headers?.['cf-connecting-ip']) return true;
   const ip = req.socket?.remoteAddress ?? '';
@@ -236,6 +238,14 @@ export async function startDaemonServer(options = {}) {
     : ensureToken({ tokenPath });
 
   let currentToken = initialToken;
+  // A rotation driven through the module-level rotateToken() — CLI, a tool
+  // handler, anything that is not POST /daemon/rotate-token — cannot reach this
+  // closure on its own. Subscribing makes adoption unconditional, so no rotation
+  // can strand this process on a bearer nobody will present again.
+  const unsubscribeTokenRotate = onTokenRotate((record, rotatedPath) => {
+    if (rotatedPath !== tokenPath) return; // another configDir's daemon, not ours
+    currentToken = record;
+  });
   let closed = false;
   let activeTunnel = null;
 
@@ -274,7 +284,12 @@ export async function startDaemonServer(options = {}) {
 
   const toolConfig = new ToolConfigManager();
   await toolConfig.load();
-  toolConfig.startWatching();
+  // Awaited, not fire-and-forget: startWatching() only assigns `_watcher` after an
+  // internal `await mkdir`, so an un-awaited call lets stop() run stopWatching()
+  // while `_watcher` is still null. The watcher is then created with nobody left to
+  // close it, and the fs handle keeps the process alive after the daemon has shut
+  // down — stopDaemon() waits out its timeout and escalates to SIGKILL.
+  await toolConfig.startWatching();
   const startedAt = Date.now();
   const sseClients = new Set();
   const activeMcpClosers = new Set();
@@ -324,6 +339,18 @@ export async function startDaemonServer(options = {}) {
       const ip = req.headers?.['cf-connecting-ip']
         ?? req.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
         ?? null;
+      // Stop the tunnel HERE, on the one handle this module owns. The launcher's
+      // onTunnelAutoDisable callback used to be the only thing that stopped it,
+      // and it could only see a tunnel the LAUNCHER had started at boot — so a
+      // tunnel enabled from the dashboard (which fills this closure instead)
+      // survived the tripwire entirely: `tunnelAutoDisabled` latched, the UI said
+      // "Auto-disabled", and cloudflared kept serving the public hostname.
+      // The callback is now bookkeeping only (settings + lockfile).
+      if (activeTunnel) {
+        const stopping = activeTunnel;
+        activeTunnel = null;
+        void stopping.stop().catch(() => undefined);
+      }
       publishEvent('daemon:tunnel-auto-disabled', { failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
       options.onTunnelAutoDisable?.({ failures: authFailureCount, windowMs: BURST_WINDOW_MS, ip });
     }
@@ -343,7 +370,17 @@ export async function startDaemonServer(options = {}) {
     const header = req.headers?.authorization ?? '';
     const match = header.match(/^Bearer\s+(.+)$/i);
     const provided = match ? match[1] : null;
-    if (!tokensMatch(provided, currentToken.bearerToken)) {
+    // Claude.ai custom connectors can't send an Authorization header (OAuth or
+    // no-auth only), so the token may ride the URL instead: /mcp?token=<bearer>.
+    // Same secret, same timing-safe compare — the Zapier/n8n secret-URL pattern.
+    const queryToken = typeof req.query?.token === 'string' ? req.query.token : null;
+    if (queryToken !== null) {
+      // The URL carries the secret on this path — keep it out of referrers and caches.
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Cache-Control', 'no-store');
+    }
+    if (!tokensMatch(provided, currentToken.bearerToken)
+      && !tokensMatch(queryToken, currentToken.bearerToken)) {
       track401Burst(req);  // 401-burst tripwire (D-06)
       const wantHtml = (req.headers?.accept ?? '').includes('text/html');
       if (wantHtml) {
@@ -365,6 +402,23 @@ export async function startDaemonServer(options = {}) {
     uptimeMs: Date.now() - startedAt,
     startedAt: new Date(startedAt).toISOString(),
     tunnelUrl: activeTunnel?.getState?.()?.url ?? null,
+    // The daemon's EFFECTIVE runtime config, reported because it is not
+    // necessarily the caller's. A standalone client (Claude Desktop, Cursor,
+    // Cline, Amp) that finds a lockfile attach-proxies into whichever daemon is
+    // already running — typically VS Code's — and the attach path reads only
+    // AIRTABLE_NO_DAEMON and AIRTABLE_USER_MCP_HOME from the client's own env
+    // (see the attach-proxy prologue in src/index.js). Every other variable that
+    // client was configured with — AIRTABLE_AUTH_MODE, AIRTABLE_HTTP_CLIENT, the
+    // browser channel, idle-park tuning — belongs to the daemon's process, not
+    // theirs, and is silently void. Attaching anyway is deliberate: refusing
+    // would put a second Chromium on the shared persistent profile, which is the
+    // Chrome-exit-21 "session dead" crash class. So the mismatch is made
+    // *visible* instead — one stderr line at attach time, and these fields, which
+    // are the only way a caller can ask "whose settings am I actually running
+    // under?" after the fact.
+    authMode: (process.env.AIRTABLE_AUTH_MODE || 'browser').toLowerCase(),
+    httpClient: process.env.AIRTABLE_HTTP_CLIENT || 'fetch',
+    configDir: options.configDir ?? null,
     // Shared page/auth pipeline busy snapshot (tool name when runInToolContext is set).
     pageBusy: auth?.getBusyState?.() ?? {
       busy: false,
@@ -651,8 +705,65 @@ export async function startDaemonServer(options = {}) {
     } catch (err) { next(err); }
   });
 
+  // Carry out an exit intent staged by a tool handler (manage_daemon stop/restart).
+  // Called only from the response's 'finish' event — see the /mcp route below and
+  // exit-intent.js for the SDK deadlock that makes anything earlier unsafe.
+  const runExitIntent = async (intent) => {
+    try {
+      if (intent.action === 'stop') {
+        // Written HERE, not in the handler: only a stop that actually reached
+        // the exit is a stop, and the extension's implicit ensureDaemon() reads
+        // this file to know it must not respawn.
+        writeStopSentinel({
+          configDir: options.configDir,
+          pid: process.pid,
+          uuid: options.uuid ?? null,
+          by: intent.by ?? 'manage_daemon',
+          reason: intent.reason ?? null,
+        });
+      } else {
+        clearStopSentinel({ configDir: options.configDir });
+      }
+      await stop();
+      if (intent.action === 'restart') {
+        // After stop(): onShutdown → finalize() has released the lockfile and
+        // closeIdleConnections has freed the port, so the replacement can take
+        // both. Dynamic import breaks the launcher↔server module cycle;
+        // options.spawnDaemon is the test seam (a real detached child would
+        // outlive the test run).
+        const spawnDaemon = options.spawnDaemon ?? (await import('./launcher.js')).spawnDetachedDaemon;
+        await spawnDaemon({ configDir: options.configDir, host, port: requestedPort });
+      }
+    } catch (error) {
+      console.error(`[airtable-mcp] daemon ${intent.action} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   app.all('/mcp', requireBearer, async (req, res, next) => {
     try {
+      // 'finish' fires after the response body has been handed to the OS — the
+      // only point at which shutting the process down cannot truncate the answer
+      // the model is waiting for. Registered BEFORE handleRequest so it is armed
+      // no matter how fast the handler completes; a no-op when nothing staged.
+      // AsyncLocalStorage associates stageExit() with this request. A concurrent
+      // response cannot consume an intent it did not stage, even if it began
+      // earlier and finishes in the stage-to-flush window.
+      const exitOwner = Symbol('mcp-request');
+      res.on('finish', () => {
+        const intent = takeDaemonExit(exitOwner);
+        if (intent) void runExitIntent(intent);
+      });
+      // Owner-death scavenging: 'close' without 'finish' means this response
+      // aborted before its body flushed. Discard — never execute — any intent
+      // THIS response staged: its caller never received the confirmation, and
+      // since requestDaemonExit refuses overwrites, a slot left owned by a
+      // response that can no longer finish would otherwise be wedged forever.
+      // Node also fires 'close' after 'finish' on normal completion, hence the
+      // writableFinished guard.
+      res.on('close', () => {
+        if (!res.writableFinished) discardDaemonExit(exitOwner);
+      });
+
       const mcpServer = new Server(
         { name: 'airtable-user-mcp', version },
         { capabilities: { tools: { listChanged: true }, prompts: {} } },
@@ -665,9 +776,14 @@ export async function startDaemonServer(options = {}) {
         if (!options.callTool) {
           return { content: [{ type: 'text', text: 'Daemon not fully initialized' }], isError: true };
         }
-        // Ambient tool label for PageScheduler busy-state (real MCP tool name).
+        // Ambient tool label for PageScheduler busy-state (real MCP tool name),
+        // plus the caller's origin. /mcp is the ONE route a tunnel caller can
+        // reach (the allowlist 404s the rest), so a tool that administers the
+        // daemon needs to know which side of that line it is answering — reusing
+        // isTunnelRequest rather than inventing a second notion of "remote".
         return withToolDispatchContext(request, extra, () =>
           options.callTool(request, getClient, toolConfig),
+          { origin: isTunnelRequest(req) ? 'tunnel' : 'local' },
         );
       });
       mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: getPrompts() }));
@@ -707,7 +823,7 @@ export async function startDaemonServer(options = {}) {
       res.on('close', () => { void cleanup(); });
 
       await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      await withDaemonExitOwner(exitOwner, () => transport.handleRequest(req, res, req.body));
     } catch (error) {
       next(error);
     }
@@ -738,6 +854,7 @@ export async function startDaemonServer(options = {}) {
     if (closed) return;
     closed = true;
 
+    unsubscribeTokenRotate();
     try { toolConfig.stopWatching(); } catch { /* best-effort */ }
 
     // Close shared browser + tree-kill orphan Chromium before lock release.
@@ -767,6 +884,12 @@ export async function startDaemonServer(options = {}) {
     await runShutdownStep('on-shutdown', () => options.onShutdown?.() ?? undefined);
 
     if (httpServer) {
+      // httpServer.close() only stops NEW connections; an idle keep-alive socket
+      // (every client that just got a response) holds it open until
+      // keepAliveTimeout — 5s of the daemon still owning port 8723, which is long
+      // enough for a restart's replacement to lose the fixed port and silently
+      // fall back to an ephemeral one.
+      httpServer.closeIdleConnections?.();
       await runShutdownStep('http-close', () =>
         new Promise((resolve, reject) => {
           httpServer.close((error) => {
@@ -789,5 +912,24 @@ export async function startDaemonServer(options = {}) {
     stop,
     publishEvent,
     getHealth,
+    /**
+     * Hand a tunnel started elsewhere (the launcher's boot auto-start) to this
+     * module, so there is exactly ONE owner of the running tunnel.
+     *
+     * Without this the launcher kept its own `activeTunnel` that this closure
+     * could not see, and the three paths that stop a tunnel each reached only
+     * half the cases: `/daemon/disable-tunnel` was a silent no-op on a
+     * boot-started tunnel (it reported ok and nulled the lockfile while
+     * cloudflared kept serving), `/daemon/enable-tunnel`'s stop-the-existing
+     * guard missed it and orphaned a second cloudflared, and the 401-burst
+     * tripwire could only stop boot-started ones.
+     */
+    adoptTunnel(handle) {
+      activeTunnel = handle;
+    },
+    /** The tunnel handle this module currently owns (read-only; null when none). */
+    getActiveTunnel() {
+      return activeTunnel;
+    },
   };
 }

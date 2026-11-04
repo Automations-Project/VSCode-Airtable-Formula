@@ -7,8 +7,7 @@
  * Usage:
  *   npm run login                                  (uses env vars)
  *   node src/login.js                              (uses env vars)
- *   node src/login.js --email X --password Y       (explicit)
- *   node src/login.js --email X --password Y --otp-secret Z
+ *   node src/login.js --email X                     (email only; secrets use env vars)
  *   node src/login.js --profile .chrome-profile-prod  (custom profile dir)
  *
  * Environment variables:
@@ -18,6 +17,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getProfileDir } from './paths.js';
+import { POLL_BUDGET_LABEL, pollForSessionUser } from './session-user.js';
 
 dotenv.config();
 
@@ -49,14 +49,28 @@ async function getOtpauth() {
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
+  // Secrets are NOT accepted on the command line. Anything in argv lands in
+  // /proc/<pid>/cmdline — which is world-readable, unlike /proc/<pid>/environ —
+  // and in shell history, for the whole ~5 minute login poll. A captured base32
+  // TOTP seed is a permanent 2FA bypass. The rest of the codebase already avoids
+  // this deliberately: login-runner.js invented an IPC protocol so credentials
+  // "never enter this process's environment".
+  //
+  // Supply them via AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET. `login.json` is a
+  // direct-login.js input, not an input to this browser-login command. Email is
+  // not a secret and remains accepted here.
+  const REJECTED = new Set(['--password', '--otp-secret']);
   for (let i = 0; i < args.length; i++) {
+    if (REJECTED.has(args[i])) {
+      process.stderr.write(
+        `${args[i]} is not supported: command-line arguments are world-readable via the process list.\n` +
+        'Set AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET in the environment. For login.json, use AIRTABLE_AUTH_MODE=direct-login.\n',
+      );
+      process.exit(2);
+    }
     if (args[i] === '--email' && args[i + 1]) opts.email = args[++i];
-    else if (args[i] === '--password' && args[i + 1]) opts.password = args[++i];
-    else if (args[i] === '--otp-secret' && args[i + 1]) opts.otpSecret = args[++i];
     else if (args[i] === '--profile' && args[i + 1]) opts.profile = args[++i];
-    // Legacy positional args support
     else if (!opts.email) opts.email = args[i];
-    else if (!opts.password) opts.password = args[i];
   }
   return {
     email: opts.email || process.env.AIRTABLE_EMAIL,
@@ -94,40 +108,22 @@ async function mainManual(profileDir) {
     const page = context.pages()[0] || await context.newPage();
     await page.goto('https://airtable.com/login', { waitUntil: 'domcontentloaded' });
 
-    let loggedIn = false;
-    let attempts = 0;
-    while (!loggedIn && attempts < 150) {
-      attempts++;
-      await page.waitForTimeout(2000);
-      try {
-        const result = await page.evaluate(async () => {
-          try {
-            const res = await fetch('/v0.3/getUserProperties', {
-              headers: {
-                'x-airtable-inter-service-client': 'webClient',
-                'x-requested-with': 'XMLHttpRequest',
-              },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              return { ok: true, userId: data?.data?.userId };
-            }
-            return { ok: false, status: res.status };
-          } catch (e) {
-            return { ok: false, error: e.message };
-          }
-        });
-        if (result.ok) {
-          loggedIn = true;
-          console.log('✅ Login verified! User:', result.userId);
-        }
-      } catch {
-        // Page navigating, keep waiting
-      }
+    // A 2xx from the probe is NOT proof of login — only a real user id is (see
+    // session-user.js / issue #21), so an anonymous answer keeps polling.
+    const { userId, closed, reason } = await pollForSessionUser(page);
+
+    if (closed) {
+      // Closing the window is how a user abandons a login — a normal exit, not
+      // an unhandled waitForTimeout rejection. Still a FAILURE: exiting 0 here
+      // reintroduced issue #21 through the exit code, so `login && daemon start`
+      // would march on as though somebody had signed in.
+      console.log('\nBrowser closed before sign-in completed. Run login again to finish signing in.');
+      process.exitCode = 1;
+      return;
     }
+    if (!userId) throw new Error(`Login not detected after ${POLL_BUDGET_LABEL} — ${reason}`);
 
-    if (!loggedIn) throw new Error('Login not detected after 5 minutes');
-
+    console.log('✅ Login verified! User:', userId);
     console.log('\nSession stored in Chrome profile.');
     console.log('MCP server will use this session headlessly.');
     console.log('\nClosing browser...');
@@ -229,47 +225,27 @@ async function main() {
   }
 
   // ─── Poll for authentication ──────────────────────────────────
-  let loggedIn = false;
-  let attempts = 0;
+  // A 2xx from the probe is NOT proof of login — only a real user id is (see
+  // session-user.js / issue #21), so an anonymous answer keeps polling.
+  const { userId, closed, reason } = await pollForSessionUser(page);
 
-  while (!loggedIn && attempts < 150) {
-    attempts++;
-    await page.waitForTimeout(2000);
-
-    try {
-      const result = await page.evaluate(async () => {
-        try {
-          const res = await fetch('/v0.3/getUserProperties', {
-            headers: {
-              'x-airtable-inter-service-client': 'webClient',
-              'x-requested-with': 'XMLHttpRequest',
-            },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            return { ok: true, userId: data?.data?.userId };
-          }
-          return { ok: false, status: res.status };
-        } catch (e) {
-          return { ok: false, error: e.message };
-        }
-      });
-
-      if (result.ok) {
-        loggedIn = true;
-        console.log('✅ Login verified! User:', result.userId);
-      }
-    } catch {
-      // Page navigating, keep waiting
-    }
+  if (closed) {
+    // Closing the window is how a user abandons a login — a normal exit, not an
+    // unhandled waitForTimeout rejection. Still a FAILURE: exiting 0 here
+    // reintroduced issue #21 through the exit code, so `login && daemon start`
+    // would march on as though somebody had signed in.
+    console.log('\nBrowser closed before sign-in completed. Run login again to finish signing in.');
+    process.exitCode = 1;
+    return;
   }
 
-  if (!loggedIn) {
+  if (!userId) {
     // Throw so the outer finally closes the browser, then the top-level
     // main().catch sets exit code 1.
-    throw new Error('Login not detected after 5 minutes');
+    throw new Error(`Login not detected after ${POLL_BUDGET_LABEL} — ${reason}`);
   }
 
+  console.log('✅ Login verified! User:', userId);
   console.log('\nSession stored in Chrome profile.');
   console.log('MCP server will use this session headlessly.');
   console.log('\nClosing browser...');

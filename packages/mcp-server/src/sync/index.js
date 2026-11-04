@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { snapshotBase, snapshotSchemaOnly } from './snapshot.js';
+import { snapshotBase, snapshotSchemaOnly, snapshotViews } from './snapshot.js';
 import { matchByName, saveIdmap, savePlan, saveState, loadPlan, loadIdmap, saveDiff, loadDiff, latestDiffId } from './idmap.js';
 import { computePlan } from './diff.js';
 import { compare } from './compare.js';
@@ -12,7 +12,48 @@ import { pruneSchema } from './prune-schema.js';
 import { acquireApplyLock } from './apply-lock.js';
 import { writeSyncJobStatus, readSyncJobStatus } from './job-status.js';
 
-const ENGINE_VERSION = '2b';
+// '2c' widened the drift fingerprint (field options/description, optional view config). '2d'
+// exists because 2c hashed a field that does not exist: normalized snapshots expose
+// `typeOptions`, not `options`, so 2c's widening was inert in production while its tests
+// passed on synthetic shapes — external review caught it with a live reproduction. 2d hashes
+// `typeOptions` and also folds in table SECTIONS (mirror prune deletes dest-only sections by
+// id, so a renamed section must read as drift, not get deleted under its old identity).
+// '2e' exists because 2d hashed typeOptions RAW, including autoNumber's maxUsedAutoNumber —
+// a read-only runtime counter Airtable advances whenever a row is created, including by this
+// sync's OWN records phase. Any row landing between plan and apply (or a re-apply after a
+// records run) produced a phantom DRIFT abort on an unchanged schema. 2e strips it, exactly
+// as apply.js already strips it before every write.
+// A plan saved by an older engine hashed a DIFFERENT basis, so its fingerprint can never match
+// a current one — apply detects that by version and says "re-plan", instead of blaming a
+// collaborator.
+export const ENGINE_VERSION = '2e';
+
+/**
+ * typeOptions as hashed by the drift fingerprint: schema SEMANTICS only, runtime state out.
+ *
+ * `maxUsedAutoNumber` is the one known runtime key — a counter the server advances on row
+ * creation, not something a collaborator edits. apply.js strips it at both of its write
+ * sites for the same reason (the API rejects it); if another runtime key ever surfaces,
+ * add it HERE and THERE together, and bump ENGINE_VERSION.
+ */
+function fingerprintTypeOptions(typeOptions) {
+  if (!typeOptions || typeof typeOptions !== 'object') return typeOptions ?? null;
+  const { maxUsedAutoNumber, ...semantic } = typeOptions;
+  return semantic;
+}
+
+/**
+ * Stable JSON — object keys sorted at every depth.
+ *
+ * Field `options` is a nested bag whose key order comes from Airtable's JSON, and a plain
+ * JSON.stringify would make a re-serialization difference look like a schema change. Drift
+ * detection that cries wolf gets switched off, so order-independence is load-bearing here.
+ */
+function stableJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  return '{' + Object.keys(value).sort().map((k) => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}';
+}
 
 /**
  * Produce a deterministic SHA-256 fingerprint of a schema snapshot.
@@ -24,13 +65,45 @@ const ENGINE_VERSION = '2b';
  * first in the string, before any content that legitimately changes the fingerprint like a
  * rename or retype) while keeping the same shape as the views line below.
  *
- * @param {{ tables: Array<{id:string, name:string, fields:Array<{id:string,name:string,type:string}>}> }} snap
+ * WHAT IT COVERS, and why that changed. It used to hash `id=name=type` only, which left the
+ * guard blind to most of what the synchronizer itself writes: a collaborator could retarget a
+ * link, rewrite a formula, add a select choice or edit a description between plan and apply and
+ * produce a BYTE-IDENTICAL fingerprint — so the guard passed and apply overwrote them. Field
+ * `options` and `description` are now hashed too; both already ride on the schema-only snapshot,
+ * so this costs no extra API calls.
+ *
+ * View CONFIG (filters/sorts/groups/colors/column order) is opt-in via `includeViewConfig`,
+ * NOT free: apply() deliberately uses snapshotSchemaOnly to skip one ~1s getView per view, and
+ * folding config in unconditionally would reintroduce that storm on every apply. It must be
+ * passed EXPLICITLY rather than inferred from "does this snapshot happen to carry config",
+ * because plan() snapshots with snapshotBase (config present) while apply() uses
+ * snapshotSchemaOnly (config absent) — an inferred flag would mismatch every single time and
+ * abort every apply with a phantom DRIFT. The plan records which mode built it; apply reads it
+ * back rather than deciding for itself.
+ *
+ * @param {{ tables: Array<{id:string, name:string, fields:Array<object>}> }} snap
+ * @param {{ includeViewConfig?: boolean }} [opts]
  * @returns {string}  hex digest
  */
-export function fingerprintSchema(snap) {
+export function fingerprintSchema(snap, { includeViewConfig = false } = {}) {
   const basis = snap.tables
-    .map((t) => `${t.id}:${t.name}:` + t.fields.map((f) => `${f.id}=${f.name}=${f.type}`).sort().join(',')
-      + ';V:' + (t.views || []).map((v) => `${v.id}=${v.name}=${v.type}`).sort().join(','))
+    // `typeOptions`, NOT `options`: that is the name normalizeSchema() actually emits
+    // (snapshot.js). The first cut of this widening hashed `f.options`, which no snapshot
+    // carries — so it hashed `null` for every field and the guard stayed blind, while the
+    // tests passed on hand-built snapshots using the wrong key. Tests for this function
+    // must construct fields the way normalizeSchema does.
+    .map((t) => `${t.id}:${t.name}:`
+      + t.fields.map((f) =>
+        `${f.id}=${f.name}=${f.type}=${stableJson(fingerprintTypeOptions(f.typeOptions))}=${f.description ?? ''}`
+      ).sort().join(',')
+      + ';V:' + (t.views || []).map((v) =>
+        `${v.id}=${v.name}=${v.type}` + (includeViewConfig ? `=${stableJson(v.config ?? null)}` : '')
+      ).sort().join(',')
+      // Sections ride on the schema-only snapshot (getApplicationData → viewSectionsById),
+      // so hashing them is free — and it is load-bearing: mirror prune deletes dest-only
+      // sections BY ID, so a section renamed between plan and apply must surface as drift
+      // rather than be deleted under its old name.
+      + ';S:' + (t.sections || []).map((s) => stableJson(s)).sort().join(','))
     .sort()
     .join('|');
   return createHash('sha256').update(basis).digest('hex');
@@ -49,7 +122,7 @@ export function fingerprintSchema(snap) {
  * @param {{ client: object, sourceBaseId: string, destBaseId: string, planId: string, direction?: 'to-dest'|'to-source', fieldMappings?: object }} opts
  * @returns {Promise<{ human: string, machine: object }>}
  */
-export async function plan({ client, sourceBaseId, destBaseId, planId, direction = 'to-dest', fieldMappings }) {
+export async function plan({ client, sourceBaseId, destBaseId, planId, direction = 'to-dest', fieldMappings, strictDrift = false }) {
   // When direction='to-source', swap so the changeset targets the original SOURCE base.
   const effectiveSrcId = direction === 'to-source' ? destBaseId : sourceBaseId;
   const effectiveDestId = direction === 'to-source' ? sourceBaseId : destBaseId;
@@ -70,7 +143,11 @@ export async function plan({ client, sourceBaseId, destBaseId, planId, direction
   const fullPlan = {
     planId,
     engineVersion: ENGINE_VERSION,
-    destFingerprint: fingerprintSchema(dest),
+    // Persist HOW the dest was fingerprinted, not just the digest. apply() snapshots the dest
+    // itself and must hash the same facets or every comparison is meaningless — and it cannot
+    // infer the mode, because its cheap snapshot legitimately lacks the view config this one has.
+    strictDrift: !!strictDrift,
+    destFingerprint: fingerprintSchema(dest, { includeViewConfig: !!strictDrift }),
     ...base,
   };
   saveIdmap(effectiveSrcId, effectiveDestId, idmap);
@@ -134,7 +211,11 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
   if (!savedDiff) {
     return { human: 'no diff found', machine: { error: 'no diff found — run mode=diff first' } };
   }
-  return renderDiff(savedDiff, { detail, offset, limit });
+  const out = renderDiff(savedDiff, { detail, offset, limit });
+  // Surface which diff answered: when the caller omitted diffId this resolved to the LATEST
+  // file, and renderDiff's detail branch doesn't carry an id — echoing the caller's (absent)
+  // param returned diffId:null on a successful detail read.
+  return { ...out, diffId: resolvedDiffId, machine: { diffId: resolvedDiffId, ...out.machine } };
 }
 
 /**
@@ -156,7 +237,7 @@ export function diffDetail({ sourceBaseId, destBaseId, diffId, detail, offset, l
  *   `records-failed` fire from the records job's own completion path (payload: `{ recordsResult }`
  *   / `{ error }`).
  */
-export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase }) {
+export async function apply({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase, resumeAfterDrift = false }) {
   const fullPlan = loadPlan(sourceBaseId, destBaseId, planId);
   if (!fullPlan) throw new Error(`No saved plan "${planId}" for ${sourceBaseId} -> ${destBaseId}. Run mode=plan first.`);
 
@@ -170,7 +251,25 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
   try {
     // Schema-only: fingerprintSchema + buildIndex use table/field/view METADATA only, not per-view
     // live config — so skip the getView/readData storm (one ~1s read per view) on the dest here.
+    // A plan from an older engine hashed FEWER facets, so its digest can never match one we
+    // compute now. Without this it surfaces as DRIFT ("someone changed the destination") or, mid
+    // resume, as RESUME_DRIFT — both of which point the user at the wrong problem, and the second
+    // invites them to wave through an overwrite to fix a version mismatch. Say what it is.
+    if (fullPlan.engineVersion !== ENGINE_VERSION) {
+      return renderApplyResult({
+        planId, aborted: true, reason: 'PLAN_STALE',
+        warnings: [{
+          code: 'PLAN_STALE',
+          message: `Plan ${planId} was built by sync engine "${fullPlan.engineVersion ?? 'unknown'}"; this is "${ENGINE_VERSION}", which checks more of the schema for drift. Re-run mode=plan — this is a version difference, not a change to your destination.`,
+        }],
+      });
+    }
+
+    const strictDrift = !!fullPlan.strictDrift;
+    // Match the plan's fingerprint basis. strictDrift pays snapshotViews' ~1s-per-view read storm
+    // — that cost is exactly why it is opt-in and recorded on the plan rather than defaulted on.
     const destSnapshot = await snapshotSchemaOnly(client, destBaseId);
+    if (strictDrift) await snapshotViews(client, destBaseId, destSnapshot);
     const journal = loadJournal(sourceBaseId, destBaseId, planId) ?? newJournal(planId, runStartedAt);
     // Resume path: a journal with done actions proves a prior partial run of THIS plan already
     // mutated the dest, so the fingerprint divergence is (at least partly) our own doing —
@@ -178,9 +277,27 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     // re-plan after every partial failure. Warn instead of aborting.
     const resuming = journal.actions.some((a) => a.status === 'done');
     let resumeDriftBypass = false;
-    if (fingerprintSchema(destSnapshot) !== fullPlan.destFingerprint) {
+    if (fingerprintSchema(destSnapshot, { includeViewConfig: strictDrift }) !== fullPlan.destFingerprint) {
       if (!resuming) {
         return renderApplyResult({ planId, aborted: true, reason: 'DRIFT', warnings: [{ code: 'DRIFT', message: `Destination changed since plan ${planId}. Re-run mode=plan.` }] });
+      }
+      // Resuming proves a prior partial run of THIS plan already mutated the dest, so SOME of the
+      // divergence is our own. It does not prove ALL of it is: a collaborator editing the dest
+      // between the two runs lands in the same state, and the remaining actions would overwrite
+      // them — deletions included. One `done` action used to switch the guard off for the whole
+      // run, silently. Now the ambiguity is the user's call to resolve, matching how every other
+      // destructive path here is gated (confirmDeletions / confirmTableDeletions / confirmRetypes).
+      // ponytail: still a whole-run decision. Per-action preconditions — re-check each target
+      // against what the plan assumed, skip the ones that moved — would remove the choice
+      // entirely; that is the tracked follow-up, not something to fake with a coarser flag.
+      if (!resumeAfterDrift) {
+        return renderApplyResult({
+          planId, aborted: true, reason: 'RESUME_DRIFT',
+          warnings: [{
+            code: 'RESUME_DRIFT',
+            message: `Plan ${planId} has partial progress AND the destination no longer matches the plan. Some of that is this plan's own earlier writes, but a collaborator's edit is indistinguishable from here. Re-run mode=plan to pick up the current state (preferred), or pass resumeAfterDrift:true to continue the saved plan and overwrite whatever diverged.`,
+          }],
+        });
       }
       resumeDriftBypass = true;
     }
@@ -218,7 +335,52 @@ export async function apply({ client, sourceBaseId, destBaseId, planId, runStart
     // applyPlan so matched fields/views exist (orphan deps safe) and BEFORE the records job so
     // the schema is clean before record sync begins. Mutates `result` in-place.
     if (!result.aborted) {
-      await pruneSchema({ client, destAppId: destBaseId, plan: fullPlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result });
+      // Re-validate the orphan list against the LIVE source before deleting anything.
+      //
+      // The drift guard above fingerprints only the DESTINATION, but `plan.orphans` is a
+      // statement about the SOURCE ("this dest object has no source counterpart"). A
+      // source-side ADDITION between plan and apply is therefore completely invisible:
+      // the dest is untouched so the fingerprint matches, no DRIFT fires, applyPlan has
+      // no create action for the new field (the plan predates it) — and pruneSchema then
+      // deletes the dest field that now legitimately matches, taking its data with it.
+      // deleteField's expectedName guard cannot help: the dest field kept its name.
+      //
+      // Only pay for the extra read when we are actually going to delete something.
+      let prunePlan = fullPlan;
+      const orphanList = fullPlan.orphans || [];
+      if (orphanList.length && (confirmDeletions || confirmTableDeletions)) {
+        try {
+          const srcNow = await snapshotSchemaOnly(client, sourceBaseId);
+          const srcTablesByName = new Map((srcNow.tables || []).map((t) => [t.name, t]));
+          const stillOrphaned = orphanList.filter((o) => {
+            if (o.kind === 'table') return !srcTablesByName.has(o.name);
+            const st = srcTablesByName.get(o.tableName);
+            if (!st) return true; // whole source table gone → its children are still orphans
+            const pool = o.kind === 'field' ? (st.fields || [])
+              : o.kind === 'view' ? (st.views || [])
+              : (st.sections || []);
+            return !pool.some((x) => x.name === o.name);
+          });
+          for (const o of orphanList.filter((o) => !stillOrphaned.includes(o))) {
+            result.warnings.push({
+              code: 'ORPHAN_STALE_SKIPPED',
+              message: `${o.kind} "${o.name}"${o.tableName ? ` in "${o.tableName}"` : ''} was planned for deletion but now has a source counterpart — the source changed after plan ${planId}. Kept. Re-run mode=plan to sync it.`,
+            });
+          }
+          if (stillOrphaned.length !== orphanList.length) prunePlan = { ...fullPlan, orphans: stillOrphaned };
+        } catch (e) {
+          // Cannot prove the orphan list is current → do not delete on a stale one.
+          prunePlan = { ...fullPlan, orphans: [] };
+          result.warnings.push({
+            code: 'ORPHAN_RECHECK_FAILED',
+            message: `Could not re-read the source to confirm ${orphanList.length} planned deletion(s) are still orphans (${e.message ?? e}); skipped all schema deletions this run.`,
+          });
+        }
+      }
+
+      // fieldMappings is threaded through so pruneSchema never deletes a mapping
+      // TARGET — those are dest-only by construction and therefore always orphans.
+      await pruneSchema({ client, destAppId: destBaseId, plan: prunePlan, policy, policyOverrides, confirmDeletions, confirmTableDeletions, result, fieldMappings });
 
       // Records phase: runs after schema apply, only if not aborted. It is minutes-long for large
       // bases, so we launch it in the BACKGROUND (fire-and-forget) and return immediately — a single
@@ -290,13 +452,13 @@ function compactPlanDigest(machine) {
   return idmap ? { ...rest, idmapOmitted: true } : rest;
 }
 
-export function planJob({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings }) {
+export function planJob({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings, strictDrift }) {
   const startedAt = new Date().toISOString();
   writeSyncJobStatus(sourceBaseId, destBaseId, planId, { phase: 'planning', startedAt });
   // Defer to a microtask so a synchronous throw inside plan() still becomes a phase='failed'
   // write rather than propagating out of planJob (which must return synchronously).
   Promise.resolve()
-    .then(() => plan({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings }))
+    .then(() => plan({ client, sourceBaseId, destBaseId, planId, direction, fieldMappings, strictDrift }))
     .then((rendered) => {
       writeSyncJobStatus(sourceBaseId, destBaseId, planId, {
         phase: 'done',
@@ -329,7 +491,7 @@ export function planJob({ client, sourceBaseId, destBaseId, planId, direction, f
  * @param {object} opts — every apply() param (client, sourceBaseId, destBaseId, planId, runStartedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys)
  * @returns {{ jobId: string, status: 'running' }}
  */
-export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys }) {
+export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedAt, skip = [], policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, resumeAfterDrift }) {
   const startedAt = runStartedAt || new Date().toISOString();
   // Don't clobber a job already running for this planId. readSyncJobStatus downgrades a
   // running-phase-with-dead-pid to 'failed', so a live 'planning'/'schema'/'records' phase here means a
@@ -359,7 +521,7 @@ export function applyJob({ client, sourceBaseId, destBaseId, planId, runStartedA
   };
 
   Promise.resolve()
-    .then(() => apply({ client, sourceBaseId, destBaseId, planId, runStartedAt: startedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase }))
+    .then(() => apply({ client, sourceBaseId, destBaseId, planId, runStartedAt: startedAt, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, naturalKeys, onPhase, resumeAfterDrift }))
     .then((rendered) => {
       const m = (rendered && rendered.machine) || {};
       // When the records phase launched, its own onPhase callbacks (records-done/records-failed)

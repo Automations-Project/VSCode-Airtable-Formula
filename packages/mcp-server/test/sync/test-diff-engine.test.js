@@ -109,6 +109,8 @@ describe('sync index.diff / diffDetail', () => {
     assert.ok(entry.scope, 'entry.scope should be present');
     assert.ok(entry.key, 'entry.key should be present');
     assert.ok(entry.class, 'entry.class should be present');
+    assert.equal(result.diffId, 'd1', 'diffDetail must echo the diffId it served');
+    assert.equal(result.machine.diffId, 'd1', 'machine payload must carry the served diffId');
   });
 
   it('diffDetail() with no diffId uses latestDiffId() to find the file', async () => {
@@ -118,6 +120,10 @@ describe('sync index.diff / diffDetail', () => {
     assert.ok(typeof result.human === 'string', 'human should be a string');
     assert.ok(Array.isArray(result.machine.entries), 'machine.entries should be an array');
     assert.ok(result.machine.entries.length >= 1, 'should resolve to the latest diff and return entries');
+    // Regression: the tool used to echo the caller's (absent) diffId param → diffId:null on a
+    // successful detail read. diffDetail must return the RESOLVED id so sync_base can report it.
+    assert.equal(result.diffId, 'd1', 'must surface the auto-resolved diffId, not null');
+    assert.equal(result.machine.diffId, 'd1', 'machine payload must carry the resolved diffId');
   });
 });
 

@@ -22,7 +22,8 @@
  * negative control fails if Airtable ever does start rotating.
  *
  * Transport DEFAULTS to Node's built-in `fetch` (no dependency), so direct-login works out of the
- * box. impit (Chrome TLS impersonation) is used ONLY when AIRTABLE_HTTP_CLIENT=impit — for the
+ * box; the fetch client sends Chrome-like page headers because PerimeterX gates the HTML routes on
+ * User-Agent (2026-11), and impit remains the escalation when the TLS fingerprint itself is challenged. impit (Chrome TLS impersonation) is used ONLY when AIRTABLE_HTTP_CLIENT=impit — for the
  * rare account whose login endpoints challenge a non-browser TLS fingerprint (PerimeterX). impit
  * and otpauth are OPTIONAL deps, lazy-loaded, and injectable (impitFactory / otpFactory) for tests
  * so NO live Airtable call or real crypto runs under `node --test`.
@@ -32,7 +33,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getHomeDir } from './paths.js';
-import { scrapeCsrf } from './byo-credentials.js';
+import { scrapeCsrf, PAGE_HEADERS, isBotChallenge } from './byo-credentials.js';
+import { scrapeSessionUserId } from './session-user.js';
 import { getInjectedCredentials } from './daemon/cred-store.js';
 import { getProxyDispatcher } from './proxy.js';
 
@@ -242,7 +244,7 @@ function getHeader(res, name) {
  */
 async function request(client, method, urlPath, { jar, form } = {}) {
   const url = urlPath.startsWith('http') ? urlPath : BASE + urlPath;
-  const headers = {};
+  const headers = { ...PAGE_HEADERS };
   const cookie = jarToCookieHeader(jar);
   if (cookie) headers['Cookie'] = cookie;
   const options = { method, headers };
@@ -319,7 +321,7 @@ function indicatesSso(body) {
  * @param {string}   [opts.totpSecret]   base32 TOTP secret (2FA accounts)
  * @param {Function} [opts.impitFactory] test seam — () => ({ fetch(url,opts) })
  * @param {Function} [opts.otpFactory]   test seam — (secret) => code
- * @returns {Promise<{ cookieHeader: string, csrfToken: string|null }>}
+ * @returns {Promise<{ cookieHeader: string, csrfToken: string|null, userId: string|null }>}
  */
 export async function directLogin({ email, password, totpSecret, impitFactory, otpFactory } = {}) {
   const creds = resolveCredentials({ email, password, totpSecret });
@@ -328,9 +330,12 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
 
   // 1. GET /login — scrape the csrfToken, collect the initial cookies (brw, …).
   const loginPage = await request(client, 'GET', '/login', { jar });
-  let csrf = scrapeCsrf(await loginPage.text());
+  const loginHtml = await loginPage.text();
+  let csrf = scrapeCsrf(loginHtml);
   if (!csrf) {
-    throw new Error('DIRECT_LOGIN_NO_CSRF: could not scrape a csrfToken from GET /login — Airtable may have changed the login page.');
+    throw new Error(isBotChallenge(loginHtml)
+      ? `DIRECT_LOGIN_NO_CSRF: Airtable's bot protection (PerimeterX) answered GET /login with a "Verify it’s you" challenge page (status ${loginPage.status}) instead of the sign-in page. Retry with AIRTABLE_HTTP_CLIENT=impit (Chrome TLS impersonation), or use AIRTABLE_AUTH_MODE=browser.`
+      : `DIRECT_LOGIN_NO_CSRF: could not scrape a csrfToken from GET /login (status ${loginPage.status}) — Airtable may have changed the login page.`);
   }
 
   // 2. getLoginTypeForEmail — bail early on SSO/enterprise accounts.
@@ -379,7 +384,10 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
     }
   }
 
-  // 5. Must have a real session cookie now.
+  // 5. Must have a real session cookie now. NECESSARY BUT NOT SUFFICIENT — see
+  //    the sessionUserId check below. A stale/partial profile cookie can still be
+  //    accepted by Airtable while the sign-in never completed (that is the state
+  //    issue #21's reporter hit), so cookie presence alone is not a verdict.
   if (!jar.has('__Host-airtable-session')) {
     throw new Error('DIRECT_LOGIN_NO_SESSION: login flow completed without a session cookie');
   }
@@ -388,11 +396,39 @@ export async function directLogin({ email, password, totpSecret, impitFactory, o
   // the page Airtable renders for this session. NOT a staleness fix: login preserves
   // the csrfSecret (see the CSRF note in the module header), so the login-flow token
   // is still valid — hence best-effort, keeping that token if the re-scrape fails.
+  //
+  // The SAME HTML is the only place a signed-in user id ever appears (the API's
+  // getUserProperties returns 8 feature-flag booleans and no identity at all —
+  // live probes against airtable.com, 2026-07), so read it here for free and use
+  // it as the real proof that this login completed. Tri-state on purpose:
+  //   usr… → signed in;  null → the page says nobody is;  undefined → never read.
+  // Only the middle case is a verdict. A transport blip must NOT be read as
+  // "signed out" — confusing those two is precisely the bug that gating on an
+  // unreadable page caused elsewhere.
+  //
+  // "Never read" therefore has to include every response we did not positively
+  // serve. This client does NOT follow redirects (followRedirects:false /
+  // redirect:'manual' above), so a perfectly good login whose GET / answers 302
+  // hands us an empty body — which scrapes to null, not undefined. Gating on that
+  // failed a SUCCESSFUL login and, via _recoverSession, fed the dead-session
+  // breaker that aborts the long unattended jobs this mode exists to serve. Only
+  // a 2xx page we actually read can say "nobody is signed in".
+  let userId;
   try {
-    const home = await request(client, 'GET', '/', { jar });
-    const fresh = scrapeCsrf(await home.text());
+    const res = await request(client, 'GET', '/', { jar });
+    const html = await res.text();
+    const fresh = scrapeCsrf(html);
     if (fresh) csrf = fresh;
-  } catch { /* keep the existing csrf */ }
+    if (res.status >= 200 && res.status < 300) userId = scrapeSessionUserId(html);
+  } catch { /* keep the existing csrf; a failed read is not a login verdict */ }
 
-  return { cookieHeader: jarToCookieHeader(jar), csrfToken: csrf };
+  if (userId === null) {
+    throw new Error(
+      'DIRECT_LOGIN_UNVERIFIED: the login flow finished but airtable.com served no signed-in user — '
+      + 'a session cookie alone does not prove a completed login (an SSO/2FA step may be incomplete). '
+      + 'Check AIRTABLE_EMAIL / AIRTABLE_PASSWORD / AIRTABLE_TOTP_SECRET, or use AIRTABLE_AUTH_MODE=browser.'
+    );
+  }
+
+  return { cookieHeader: jarToCookieHeader(jar), csrfToken: csrf, userId: userId ?? null };
 }

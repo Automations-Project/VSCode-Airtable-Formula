@@ -13,7 +13,7 @@ import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
 import { DaemonManager } from './mcp/daemon-manager.js';
 import { BrowserDownloadManager } from './mcp/browser-download.js';
-import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES } from './mcp/tool-profile.js';
+import { ToolProfileManager, BUILTIN_PROFILES, CATEGORY_LABELS, TOOL_CATEGORIES, SETTINGS_TO_CATEGORY } from './mcp/tool-profile.js';
 import { scriptBeautify, scriptMinify, scriptBeautifyFile, scriptMinifyFile, formatScriptDocument } from './commands/scriptFormatter.js';
 import { uploadFormulaFile, downloadFormulaField } from './commands/formulaFile.js';
 import { registerFileTemplates } from './commands/formulaFileTemplate.js';
@@ -22,7 +22,15 @@ import { registerFileTemplates } from './commands/formulaFileTemplate.js';
 // These must mirror the ToolProfileName / ToolCategories definitions in
 // packages/shared/src/types.ts.
 type LocalToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
-type LocalToolCategoryKey = 'read' | 'tableWrite' | 'tableDestructive' | 'fieldWrite' | 'fieldDestructive' | 'viewWrite' | 'viewDestructive' | 'extension';
+type LocalToolCategoryKey =
+    | 'read' | 'recordRead'
+    | 'tableWrite' | 'tableDestructive'
+    | 'fieldWrite' | 'fieldDestructive'
+    | 'viewWrite' | 'viewDestructive'
+    | 'viewSection' | 'viewSectionDestructive'
+    | 'formWrite' | 'extension'
+    | 'recordWrite' | 'recordDestructive'
+    | 'sync' | 'daemon';
 import { getSettings } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
@@ -153,6 +161,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Live-stream debug events to the VS Code Output panel
     const debugOutput = vscode.window.createOutputChannel('Airtable Formula: Debug Log');
     context.subscriptions.push(debugOutput);
+
+    // Created once here, not per invocation: VS Code mints a DISTINCT channel per
+    // createOutputChannel call, so creating it inside the showToolStatus handler
+    // left one identically-named entry in the Output dropdown per invocation and
+    // never disposed any of them.
+    const toolStatusChannel = vscode.window.createOutputChannel('Airtable Formula: MCP Tools', 'markdown');
+    context.subscriptions.push(toolStatusChannel);
     debugCollector.onEvent = (ev) => {
         const time = ev.ts.slice(11, 23); // HH:MM:SS.mmm
         const tag = `[${ev.source}] ${ev.event}`;
@@ -521,21 +536,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.toggleToolCategory', async () => {
-            const settingsCategoryKeys: LocalToolCategoryKey[] = [
-                'read', 'tableWrite', 'tableDestructive', 'fieldWrite', 'fieldDestructive', 'viewWrite', 'viewDestructive', 'extension'
-            ];
-            // Map settings-side key → on-disk (file-format) category key used by
-            // TOOL_CATEGORIES values and CATEGORY_LABELS keys.
-            const fileKeyBySettingsKey: Record<LocalToolCategoryKey, string> = {
-                read:             'read',
-                tableWrite:       'table-write',
-                tableDestructive: 'table-destructive',
-                fieldWrite:       'field-write',
-                fieldDestructive: 'field-destructive',
-                viewWrite:        'view-write',
-                viewDestructive:  'view-destructive',
-                extension:        'extension',
-            };
+            // Settings-side key → on-disk (file-format) category key used by
+            // TOOL_CATEGORIES values and CATEGORY_LABELS keys. Taken from the
+            // tool-profile mirror rather than re-listed here: the hand-written
+            // list this replaces named 8 of the then-15 categories, so the other
+            // half were unreachable from the command palette and a new category
+            // was invisible until someone noticed.
+            const fileKeyBySettingsKey = SETTINGS_TO_CATEGORY as Record<LocalToolCategoryKey, string>;
+            const settingsCategoryKeys = Object.keys(fileKeyBySettingsKey) as LocalToolCategoryKey[];
             const snapshot = toolProfileManager.getSnapshot();
             const items = settingsCategoryKeys.map(key => {
                 const fileKey = fileKeyBySettingsKey[key];
@@ -564,7 +572,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             dashboardProvider.refresh();
         }),
         vscode.commands.registerCommand('airtable-formula.showToolStatus', async () => {
-            const channel = vscode.window.createOutputChannel('Airtable Formula: MCP Tools', 'markdown');
+            // Created once and reused. VS Code mints a DISTINCT channel per
+            // createOutputChannel call, so doing this inside the handler left N
+            // identically-named entries in the Output dropdown with no way to tell
+            // which was current — the channel.clear() below shows reuse was intended.
+            const channel = toolStatusChannel;
             channel.clear();
             channel.appendLine(toolProfileManager.renderStatusReport());
             channel.show();

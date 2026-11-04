@@ -168,7 +168,14 @@ class AdvancedFormulaMinifier {
         name += formula[i];
         i++;
       }
-      
+
+      // Same non-advancing fallback as the v1 beautifier — see the comment
+      // there. Throwing engages minify()'s existing simpleMinify() fallback
+      // instead of hanging the process.
+      if (name === '') {
+        throw new Error(`Unexpected character ${JSON.stringify(formula[i])} at position ${i}`);
+      }
+
       let j = i;
       while (j < formula.length && WHITESPACE_RE.test(formula[j])) j++;
       

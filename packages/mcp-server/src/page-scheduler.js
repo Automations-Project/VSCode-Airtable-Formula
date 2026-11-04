@@ -67,14 +67,20 @@ export function resolveToolClientId(extra) {
 /**
  * Outermost MCP tools/call wrap: names the async chain for PageScheduler labels.
  * Prefer this once at the request handler — do not scatter per-tool.
+ *
+ * `context` merges extra per-request facts into the ambient store. The daemon
+ * passes `{ origin: 'local'|'tunnel' }` there so `manage_daemon` can tell a
+ * loopback caller from a tunnel one without re-deriving it from headers — the
+ * transport knows (it has the socket), the handler does not. Absent means the
+ * call never crossed HTTP at all (in-process stdio), i.e. local.
  */
-export function withToolDispatchContext(request, extra, fn) {
+export function withToolDispatchContext(request, extra, fn, context) {
   const tool =
     typeof request?.params?.name === 'string' && request.params.name
       ? request.params.name
       : 'unknown';
   const clientId = resolveToolClientId(extra);
-  return runInToolContext({ tool, clientId }, fn);
+  return runInToolContext({ tool, clientId, ...context }, fn);
 }
 
 /** Thrown when the queue is at capacity. */

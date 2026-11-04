@@ -10,6 +10,7 @@ import { startDaemonServer } from './server.js';
 import { acquire, getLockfilePath, isStale, read, release, replace } from './lockfile.js';
 import { ensureToken, getTokenPath, readToken } from './token.js';
 import { readTunnelSettings, writeTunnelSettings, getTunnelProvider } from './tunnel-providers/index.js';
+import { clearStopSentinel } from './stop-sentinel.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -60,7 +61,15 @@ async function probeHealth(record, options = {}) {
   }
 }
 
-async function adminRequest(record, path, options) {
+/**
+ * Authenticated loopback call to a daemon's own /daemon/* route, using the
+ * bearer from its lockfile. Exported so `manage_daemon` can drive tunnel and
+ * token administration through the SERVER's routes instead of reimplementing
+ * them — `activeTunnel` and `currentToken` are closure state inside
+ * startDaemonServer, and anything that mutates them from outside leaves the
+ * running server holding a stale handle.
+ */
+export async function adminRequest(record, path, options) {
   const response = await fetch(`http://127.0.0.1:${record.port}${path}`, {
     method: options.method,
     headers: {
@@ -91,6 +100,12 @@ function toConnectionInfo(record, health) {
     version: record.version,
     startedAt: record.startedAt,
     tunnelUrl: record.tunnelUrl ?? null,
+    // The /daemon/health payload we already fetched to decide "healthy". Passed
+    // through rather than dropped so callers can read the daemon's EFFECTIVE
+    // runtime config (authMode / httpClient / configDir) without a second
+    // round-trip — the attach-proxy in index.js uses it to warn when the daemon
+    // it is joining was configured differently than this client was.
+    health: health ?? null,
   };
 }
 
@@ -268,6 +283,12 @@ export async function startDaemon(options = {}) {
       continue;
     }
 
+    // A daemon is starting on purpose, so any "the user stopped this deliberately"
+    // marker is now spent. Clearing it HERE — on the one path every intentional
+    // start goes through — is what stops a stale sentinel from wedging startup
+    // forever; see stop-sentinel.js.
+    clearStopSentinel({ configDir });
+
     let server;
     let lspChild = null;
     let activeTunnel = null;
@@ -343,7 +364,12 @@ export async function startDaemon(options = {}) {
           syncLockfile(nextToken.bearerToken);
         },
         onTunnelAutoDisable: async ({ failures, windowMs, ip }) => {
-          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl
+          // 401-burst auto-disable callback (D-06): update settings + clear lockfile tunnelUrl.
+          // The SERVER now stops the tunnel before invoking this — it owns the
+          // single handle, so it reaches dashboard-enabled tunnels too, which
+          // this callback never could. The stop below is a defensive no-op
+          // (tunnel.js stop() returns early once `stopping` is set); it stays so
+          // the mirror is cleared and an un-adopted handle is still torn down.
           if (activeTunnel) {
             await activeTunnel.stop().catch(() => undefined);
             activeTunnel = null;
@@ -432,6 +458,23 @@ export async function startDaemon(options = {}) {
               }
             },
           });
+
+          // Hand ownership to the server. Until this existed, a boot-started
+          // tunnel lived ONLY in this closure, so /daemon/disable-tunnel saw
+          // null, skipped stop(), and still returned ok + nulled the lockfile —
+          // the public URL kept serving while every UI surface said "off".
+          server.adoptTunnel?.(activeTunnel);
+
+          // waitUntilReady is created eagerly in tunnel.js and rejected when
+          // cloudflared exits before publishing a URL (offline boot, blocked
+          // egress, trycloudflare 429). Nothing consumed it, and there is no
+          // process-level unhandledRejection handler, so Node's default throw
+          // killed the daemon ~1s after it began serving.
+          activeTunnel?.waitUntilReady?.catch?.((err) => {
+            console.error(
+              `[airtable-mcp] tunnel never became ready: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
         } catch (err) {
           // Non-fatal: daemon continues without tunnel (D-04: no auto-restart)
           console.error(`[airtable-mcp] Tunnel auto-start failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -518,6 +561,36 @@ export async function stopDaemon(options = {}) {
   }
 
   const pid = recordForShutdown.pid;
+
+  // NEVER signal a pid we have not PROVEN is our daemon.
+  //
+  // isStale()'s liveness probe is a bare `process.kill(pid, 0)` — it cannot tell our
+  // daemon from an unrelated process that recycled the pid after an unclean death.
+  // In that state the lock persists with a live-but-foreign pid, so status is
+  // running/unhealthy, the 10s wait never clears, and this branch used to SIGTERM
+  // then SIGKILL a stranger's process. On Windows `process.kill(pid,'SIGTERM')` maps
+  // to TerminateProcess, so even the "graceful" step is an unsavable hard kill.
+  // The extension already gates its equivalent on _verifyDaemonIdentity; this
+  // mirrors it — probe /daemon/health and require the uuid to echo the lockfile's.
+  let provenOurDaemon = false;
+  try {
+    const health = await adminRequest(recordForShutdown, '/daemon/health', { method: 'GET' });
+    provenOurDaemon = !!recordForShutdown.uuid && health?.uuid === recordForShutdown.uuid;
+  } catch { /* unreachable → unproven, fall through */ }
+
+  if (!provenOurDaemon) {
+    // Release the lock so a fresh daemon can start, but leave the process alone.
+    try {
+      release({ lockPath: getLockfilePath(configDir), expectedUuid: recordForShutdown.uuid });
+    } catch { /* best-effort */ }
+    return {
+      stopped: false,
+      forced: false,
+      pid,
+      reason: `Refusing to force-kill pid ${pid}: it did not answer /daemon/health with this lockfile's uuid, so it cannot be shown to be our daemon — the pid may have been recycled by an unrelated process. The stale lock was released, so a new daemon can start normally. If you are certain pid ${pid} is a hung airtable-user-mcp daemon, end it yourself.`,
+    };
+  }
+
   let signalled = false;
   try {
     process.kill(pid, 'SIGTERM');
@@ -563,6 +636,27 @@ export async function restartDaemon(options = {}) {
   return { stopped, reSpawned: true, connection };
 }
 
+/**
+ * Environment for the detached `daemon start` child.
+ *
+ * Only AIRTABLE_NO_DAEMON is stripped, and only because it is addressed to the
+ * PARENT: it means "don't delegate to a daemon, serve stdio yourself". Inherited
+ * by the child it is self-contradictory — index.js would skip the attach/serve
+ * path in the very process whose job is to BE the daemon.
+ *
+ * AIRTABLE_HEADLESS_ONLY is not an instruction to the parent, it is the host's
+ * display policy: the extension sets it to '1' on every daemon it owns
+ * (registration.ts, daemon-manager.ts, auto-config/index.ts) precisely so no
+ * browser window is ever put on the user's screen. Dropping it made a respawn
+ * quietly louder than the daemon it replaced. It is inherited.
+ */
+export function buildDetachedDaemonEnv(configDir, baseEnv = process.env) {
+  const env = { ...baseEnv };
+  delete env.AIRTABLE_NO_DAEMON;
+  env.AIRTABLE_USER_MCP_HOME = configDir;
+  return env;
+}
+
 export async function spawnDetachedDaemon(options) {
   const configDir = options.configDir ?? getHomeDir();
   const cliEntry = resolveCliEntry();
@@ -571,17 +665,10 @@ export async function spawnDetachedDaemon(options) {
     args.push('--port', String(options.port));
   }
 
-  const env = { ...process.env };
-  delete env.AIRTABLE_NO_DAEMON;
-  delete env.AIRTABLE_HEADLESS_ONLY;
-
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: 'ignore',
-    env: {
-      ...env,
-      AIRTABLE_USER_MCP_HOME: configDir,
-    },
+    env: buildDetachedDaemonEnv(configDir),
   });
   child.unref();
 }

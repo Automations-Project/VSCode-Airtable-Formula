@@ -6,6 +6,189 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed — PR #22 acceptance audit follow-ups (2026-08-01)
+
+- **Existing custom profiles stay closed when a category is added.** The MCP server already
+  treated absent tools in post-legacy categories as disabled, but extension startup rewrote the
+  same file from VS Code's package defaults first — silently enabling `local-write`. Startup and
+  file-to-settings sync now preserve the server's fail-closed semantics, including mixed per-tool
+  states, and a later category change clears those imported overrides before applying the user's
+  explicit choice — from the dashboard toggle or a native settings.json / Settings UI edit alike
+  (the imported overrides previously won over a native edit silently, in both the written file and
+  the effective tool set). The dashboard toggle also always persists its result and can no longer
+  latch settings→file sync off for the session when it races the file watcher's suppression window.
+- **Record-prune failure accounting now follows destination table IDs.** Per-table write results
+  were stored under the source table name but read back under the destination table name, so a
+  renamed matched table could lose the all-writes-failed no-prune guard. A regression test runs the
+  write and prune phases together with differing names.
+- **Daemon exit intents have request ownership.** An older concurrent `/mcp` response could finish
+  after `manage_daemon stop` staged its process-wide intent, steal it, and begin shutdown before the
+  stop confirmation flushed. `AsyncLocalStorage` now binds the intent to the response that staged
+  it, with a deterministic two-request regression test. A second stop/restart arriving while one is
+  already staged is refused (naming the staged action) instead of silently overwriting it, and an
+  intent whose staging response died before flushing is discarded — so a flushed "stopping"
+  confirmation is always followed by the exit and the single slot can never be orphaned.
+- **Session restore no longer bundles vulnerable `adm-zip` 0.5.x.** A tiny crafted archive could
+  declare a multi-gigabyte uncompressed entry and crash the extension host before CRC validation.
+  The bundled parser is now 0.6.0, the restore picker size-checks before reading only the encryption
+  header, and declared uncompressed totals are rejected before entry allocation.
+- **The shipped Ajv URI parser is patched without widening the dependency refresh.** The lockfile
+  moves `fast-uri` 3.1.0 → 3.1.5 through the existing MCP SDK dependency, clearing its four
+  production audit findings while leaving the SDK and browser-auth stack pinned.
+- Corrected the live tool references to list 9 read tools and 2 local-file-write tools, completed
+  the dashboard's early-activation category fallback, and removed stale secret-bearing login CLI
+  examples and an inapplicable `login.json` hint.
+
+### Fixed — formula diagnostics were quadratic, blocking the editor on every keystroke (2026-07-31)
+
+- **`isInsideExclusionRange` was a linear scan run once per character.** `ranges.some(...)` is
+  O(field refs) and is called per character by `checkParentheses`, `checkQuotes` and
+  `checkBrackets`, plus once per match by five more checkers — so cost was chars × refs, with no
+  debounce and no size cap on either entry point (`registration.ts`'s `onDidChangeTextDocument`
+  and the LSP's `onDidChangeContent`, which in `--tcp` daemon mode is shared by every attached
+  editor). `getFieldRefRanges` emits ascending, non-overlapping spans, so this is now a binary
+  search. Measured on this repo's own largest shipped example
+  (`examples/[IGD-JSON]~[Payload]~[Formula].formula`, 38,830 chars / 741 refs):
+  **83.3 ms → 9.6 ms** per run. On an 87 KB / 4,000-ref synthetic: **592 ms → 10 ms**. Diagnostic
+  output is byte-identical before and after.
+
+### Fixed — Unconfigure destroyed unrelated config in Codex / Helix files (2026-07-31)
+
+- **`unconfigureMcpToml` and `unconfigureHelix` truncated the user's config file from our marker
+  to EOF.** Both did `existing.slice(0, indexOf(MARKER))`, discarding everything below our block
+  rather than removing only our block. Since `configureMcpToml` appends at EOF and `codex mcp add`
+  does too, any second MCP server or `[model_providers.*]` section the user added after running
+  Setup sat below ours — and clicking **Unconfigure** in the dashboard (no confirmation prompt)
+  destroyed it silently, with no backup and no error. Measured against the old code, a
+  `config.toml` holding one extra MCP server was reduced to a **single newline**.
+  Both now remove only the sections we own, preserving everything else verbatim.
+  Note `HELIX_BLOCK` is *four* top-level tables, not one, so a naive "delete to the next `[`
+  header" would have orphaned three `[[language]]` blocks; the header matcher is also strict
+  enough not to mistake a continuation line of a multi-line array (`matrix = [\n[1,2],\n]`) for a
+  table header. Pinned by `src/test/lsp-config-toml.test.ts`.
+
+### Fixed — formatter tokenizers silently corrupted formulas / hung the extension host (2026-07-31)
+
+Found by audit, both reproduced before fixing.
+
+- **The default (v2) beautifier and minifier deleted lowercase function names and wrote the
+  result to disk.** Airtable function names are case-insensitive, but both v2 tokenizers matched
+  `/[A-Z_]/` with **no `/i` flag**, so every `a`–`z` character fell through to the operator
+  chain's `else { i++ }` catch-all and vanished from the token stream. Measured before the fix:
+  `lower({Email})` → `({Email})`, `IF({A}, lower({B}), 0)` → `IF({A}, ({B}), 0)`,
+  `if({A},1,0)` →(minify)→ `({A},1,0)`, `If({A},1,0)` →(minify)→ `I({A},1,0)`. Because the
+  mangled output still *parses*, `beautify()`'s try/catch never fired and no diagnostic was
+  raised — so Shift+Alt+F and `editor.formatOnSave` corrupted the buffer silently, and the bulk
+  `beautifyFilesWithStyle` path wrote unopened files directly with no undo stack. Both
+  tokenizers now match case-insensitively and canonicalise only for the `FUNCTIONS`/`CONSTANTS`
+  lookup, so **the casing you typed is preserved** in the output.
+- **The v1 beautifier and minifier hung the extension host on an unrecognized character.** The
+  identifier fallback was the only branch of the tokenizer loop with no unconditional advance:
+  a character matched by no branch (`;`, `%`, `[`, `}`, a smart quote pasted from a doc, any
+  non-ASCII letter) matched zero characters, left the cursor unmoved, and spun the loop
+  allocating until V8 aborted (`Ineffective mark-compacts`, ~2 s). Both now **throw** rather
+  than skip, which engages the callers' existing try/catch — an untokenizable formula is
+  returned unchanged instead of being emitted with characters deleted.
+- Pinned by `packages/extension/src/test/formatter-tokenizer.test.ts` (21 cases).
+
+### Added — `manage_daemon` tool and the `Daemon Control` category (2026-07-30)
+
+- **New MCP tool `manage_daemon` in a new `daemon` category.** Tool counts move
+  **71 → 72** (`read-only` 12 and `safe-write` 54 are unchanged; only `full`
+  grows), categories 15 → 16. `action="status"` is a read-only diagnostic that
+  reports daemon liveness/holder/transport/uptime/tunnel plus the live session
+  state — `sessionDead`, the last circuit-breaker trip including Airtable's own
+  captured response body, and the browser busy queue — which is what lets an AI
+  agent tell *daemon gone* from *session dead* from *browser busy*. The remaining
+  actions (`start`, `restart`, `stop`, `tunnel_enable`, `tunnel_disable`,
+  `token_rotate`) administer the daemon process itself.
+- **New setting `airtableFormula.mcp.categories.daemon`, defaulting to `false`.**
+  For a `custom`-profile user that one value is the whole decision, and this tool
+  can stop or restart the very server the agent is talking through — so it is off
+  until explicitly enabled. It is included in the `full` profile only.
+
+### Fixed — "Toggle MCP Tool Categories" showed 8 of 16 categories (2026-07-30)
+
+- **The command-palette category picker had its own hand-written list of 8
+  categories**, so Record Read/Write/Destructive, View Sections (both), Form
+  Metadata, Sync and Daemon Control were simply unreachable from it — and a newly
+  shipped category was invisible until someone noticed. It now enumerates
+  `SETTINGS_TO_CATEGORY` from `tool-profile.ts` (the table `check:tool-sync`
+  already guards) instead of a second copy, so the picker cannot fall behind the
+  category list again.
+
+### Fixed — `check:tool-sync` can no longer pass while a tool is uncallable (2026-07-30)
+
+- **The tool-sync guard now cross-checks `mcp-server/src/index.js` against
+  `tool-config.js` in both directions.** `manage_daemon` shipped with a definition
+  and a handler in `index.js` but **no entry in `TOOL_CATEGORIES`** — and because
+  `enabledToolNames()` iterates that map, a tool absent from it is yielded by
+  nothing and `isToolEnabled()` returns `false` in *every* profile, `full`
+  included. It was registered and permanently uncallable. `check:tool-sync`
+  nevertheless printed green, because every check it performed walked
+  `tool-config.js` and its mirrors — comparing the map against copies of itself,
+  which cannot see a tool that belongs to no category. The guard now also asserts
+  that every tool defined or handled in `index.js` is categorized, and that every
+  categorized tool has both a definition and a handler. It fails loudly if either
+  extraction yields zero tools, so a reformat degrades to a failure rather than to
+  a silent pass.
+
+### Changed — the shared daemon now starts when an MCP tool call needs it (2026-07-30)
+
+- **You no longer have to open the dashboard for the daemon to start.** MCP tool
+  calls now start it themselves. Before this, the extension only *looked* for a
+  running daemon, so unless you had opened the Airtable dashboard (or run a formula
+  command) that session quietly fell back to a per-window server — and **each VS
+  Code window then drove its own Chromium against the same browser profile**. That
+  collision is the failure this extension has historically shown you as "session
+  dead". One shared daemon is the configuration that avoids it.
+- **What you will notice:** one Airtable browser session shared by every window
+  instead of one per window, fewer spurious "session dead" errors, and the daemon
+  appearing in the dashboard without you starting it.
+- **Stop still means stop.** A daemon you stop from the dashboard is not
+  resurrected by the next tool call.
+- **If the daemon cannot start, the extension falls back to the old per-window
+  server** rather than leaving you with no MCP tools.
+- **Fixed alongside it:** on `Bring your own cookie` / `Direct login`, a failed or
+  stopped daemon used to leave the fallback server with no credentials at all —
+  every tool call failed with a missing-credentials error. The fallback is now
+  given credentials exactly when it is the one actually serving you.
+
+### Fixed — login could report success when you were not signed in (issue #21) (2026-07-30)
+
+- **Login declared success as soon as Airtable answered, and showed
+  `User: undefined` even when it had worked.** The endpoint being polled
+  (`getUserProperties`) turns out to carry **no identity whatsoever** — its
+  signed-in response is a list of feature flags — so the user id being read had
+  never existed, and any successful HTTP response counted as "logged in". In
+  practice the login window could close about two seconds after opening, before an
+  SSO redirect or a typed 2FA code could finish, and still report success.
+- **Login now waits for Airtable to actually say who you are**, reading the signed-in
+  user from the page itself, and every login path (dashboard login, CLI login,
+  manual login) waits the same **5 minutes** — enough for SSO plus a hand-typed 2FA
+  code. Previously these paths disagreed, one waiting 1 minute and the others 5.
+- **The dashboard shows your user id only when it genuinely knows it**, and never
+  carries one over from a previous session. In `Bring your own cookie` mode, where
+  there is no page to read it from, it says so instead of showing a stale or made-up
+  id. A missing user id is no longer treated as "signed out" — it is not evidence of
+  anything, and treating it as such would have logged out working sessions.
+- **`Direct login` now fails loudly with `DIRECT_LOGIN_UNVERIFIED`** when the login
+  flow finishes and a session cookie exists but Airtable still serves no signed-in
+  user — the same false success as above, on the browser-free path. It usually means
+  an incomplete SSO or 2FA step: check your email/password/TOTP secret, or switch
+  Auth Mode back to `browser`.
+- **Session health checks retry before declaring a session expired.** The signed-in
+  marker arrives with the page, so a single slow render used to read as "signed out"
+  — and the extension answers that by relaunching the browser, so a false alarm cost
+  a full browser launch. Login is also no longer killed at 2 minutes while it is
+  still legitimately waiting for you to finish signing in.
+- **CLI `doctor` and `status` now tell you different, true things.** `doctor`
+  actually probes the session (`Session: signed in as usr…` / `NOT signed in —
+  <reason>`) and reuses the running daemon's browser rather than opening a second one
+  against the same profile. `status` reports only what is on disk and no longer
+  claims anything about your session — it used to print `Session: not found` on
+  perfectly healthy installs by looking for a file nothing writes any more.
+
 ### Pre-merge hardening pass — tool profiles, sync safety, packaging, transport, proxies, session recovery, logout (2026-07-25)
 
 Pre-merge hardening pass on `feat/base-to-base-sync` before merging base-to-base

@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MockClient } from './helpers/mock-client.js';
-import { apply, fingerprintSchema } from '../../src/sync/index.js';
+import { apply, fingerprintSchema, ENGINE_VERSION } from '../../src/sync/index.js';
 import { snapshotBase } from '../../src/sync/snapshot.js';
 import { savePlan, syncDir } from '../../src/sync/idmap.js';
 
@@ -18,7 +18,7 @@ const DEST = 'appDDDDDDDDDDDDDD';
 async function seedPlan(client, planId) {
   const dest = await snapshotBase(client, DEST);
   const plan = {
-    planId, engineVersion: '2b', destFingerprint: fingerprintSchema(dest),
+    planId, engineVersion: ENGINE_VERSION, destFingerprint: fingerprintSchema(dest),
     sourceBaseId: SRC, destBaseId: DEST,
     idmap: { tables: {}, fields: {}, views: {} },
     actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }],
@@ -87,7 +87,7 @@ describe('sync index.apply — per-pair apply lock', () => {
     process.env.AIRTABLE_USER_MCP_HOME = mkdtempSync(join(tmpdir(), 'apply-lock-drift-'));
     const client = new MockClient();
     const plan = {
-      planId: 'plnDR', engineVersion: '2b', destFingerprint: 'STALE',
+      planId: 'plnDR', engineVersion: ENGINE_VERSION, destFingerprint: 'STALE',
       sourceBaseId: SRC, destBaseId: DEST,
       idmap: { tables: {}, fields: {} },
       actions: [{ kind: 'createTable', sourceTableId: 'tS', name: 'T' }],

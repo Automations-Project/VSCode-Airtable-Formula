@@ -24,6 +24,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { unlink } from 'node:fs/promises';
 import { getProfileDir } from './paths.js';
+import { SESSION_PROBE_SOURCE, isAuthenticatedProbe, probeFailureReason, POLL_INTERVAL_MS } from './session-user.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const profileDir = getProfileDir();
@@ -47,6 +48,22 @@ async function getChromium() {
 
 function output(data) {
   process.stdout.write(JSON.stringify(data) + '\n');
+}
+
+/**
+ * The verdict, exported so it can be tested without launching Chrome.
+ *
+ * STRICT on purpose, unlike auth._verifySession: this runs where a human is
+ * waiting on a green/red light, and "a 2xx means signed in" is issue #21 itself
+ * — Airtable's authenticated getUserProperties body is eight feature-flag
+ * booleans with no identity in it at all (live probes, 2026-07), so a stale or
+ * partial profile cookie can be accepted here while the profile is not usably
+ * signed in. A real page-bootstrap user id is required.
+ */
+export function sessionVerdict(probe) {
+  return isAuthenticatedProbe(probe)
+    ? { valid: true, userId: probe.userId }
+    : { valid: false, status: probe?.status, error: probeFailureReason(probe) };
 }
 
 async function main() {
@@ -86,25 +103,19 @@ async function main() {
       await page.waitForTimeout(2000);
     }
 
-    const result = await page.evaluate(async () => {
-      try {
-        const res = await fetch('/v0.3/getUserProperties', {
-          headers: {
-            'x-airtable-inter-service-client': 'webClient',
-            'x-requested-with': 'XMLHttpRequest',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          return { valid: true, userId: data?.data?.userId || null };
-        }
-        return { valid: false, status: res.status };
-      } catch (e) {
-        return { valid: false, error: e.message };
-      }
-    });
-
-    output(result);
+    // A 2xx alone never proved the profile was signed in (issue #21) — the
+    // verdict needs a real user id from the page bootstrap too.
+    //
+    // Probe a few times, not once: the marker arrives with the bootstrap, and on a
+    // slow render a single shot reports a healthy session as signed out. The
+    // extension answers an `expired` verdict by relaunching Chrome to auto-login,
+    // so a false red costs a full launch against the single-owner profile.
+    let probe = await page.evaluate(SESSION_PROBE_SOURCE);
+    for (let i = 0; i < 2 && !isAuthenticatedProbe(probe); i++) {
+      await page.waitForTimeout(POLL_INTERVAL_MS);
+      probe = await page.evaluate(SESSION_PROBE_SOURCE);
+    }
+    output(sessionVerdict(probe));
   } catch (e) {
     output({ valid: false, error: e.message });
   } finally {
@@ -114,7 +125,14 @@ async function main() {
   }
 }
 
-main().catch(e => {
-  output({ valid: false, error: e.message });
-  process.exit(1);
-});
+// Run only when this file IS the process entry point — the extension forks it,
+// so argv[1] is this script. Same guard login.js uses, and it is what lets a test
+// import sessionVerdict() without launching a browser.
+const invokedDirectly =
+  process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (invokedDirectly) {
+  main().catch(e => {
+    output({ valid: false, error: e.message });
+    process.exit(1);
+  });
+}

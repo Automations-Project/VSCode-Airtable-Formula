@@ -5,6 +5,7 @@ import { mkdtempSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncDir } from '../../src/sync/idmap.js';
+import { normalizeSchema } from '../../src/sync/snapshot.js';
 
 describe('sync index.plan', () => {
   it('produces a plan summary and persists plan-<id>.json', async () => {
@@ -38,6 +39,129 @@ describe('sync index.plan', () => {
     assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'permutation 1 must match');
     assert.equal(fingerprintSchema(a), fingerprintSchema(c), 'permutation 2 must match');
   });
+  // The guard used to hash id=name=type ONLY, so everything below produced a BYTE-IDENTICAL
+  // fingerprint: a collaborator could rewrite a formula, retarget a link, add a select choice or
+  // edit a description between plan and apply, the drift check passed, and apply overwrote them.
+  //
+  // SHAPE MATTERS: these snapshots are built the way normalizeSchema() actually emits them —
+  // `typeOptions`, not `options`. The first cut of this suite invented an `options` key, the
+  // production code hashed the same invented key, and both agreed while the real snapshot field
+  // went unhashed: the tests were green and the guard was blind. If normalizeSchema renames the
+  // field again, the normalizeSchema-parity test below fails, not just these synthetic ones.
+  it('fingerprintSchema: a field typeOptions change is drift (formula text, choices, link target)', () => {
+    const mk = (typeOptions) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Calc', type: 'formula', typeOptions },
+    ] }] });
+
+    const fp = fingerprintSchema(mk({ formulaTextParsed: 'A + B' }));
+    assert.notEqual(fingerprintSchema(mk({ formulaTextParsed: 'A * B' })), fp, 'a rewritten formula must be drift');
+
+    const sel = (choices) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Status', type: 'select', typeOptions: { choices } },
+    ] }] });
+    assert.notEqual(
+      fingerprintSchema(sel({ c1: { name: 'A' }, c2: { name: 'B' } })),
+      fingerprintSchema(sel({ c1: { name: 'A' } })),
+      'an added select choice must be drift',
+    );
+
+    const link = (foreignTableId) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Rel', type: 'foreignKey', typeOptions: { foreignTableId } },
+    ] }] });
+    assert.notEqual(fingerprintSchema(link('tblA')), fingerprintSchema(link('tblB')), 'a retargeted link must be drift');
+  });
+
+  it('fingerprintSchema: sees drift through a REAL normalizeSchema snapshot, not just synthetic shapes', () => {
+    // End-to-end parity check: raw internal-API table schema → normalizeSchema → fingerprint.
+    // This is the test that would have caught the options/typeOptions mismatch — the synthetic
+    // tests above share whatever key the fingerprint reads, so only a snapshot produced by the
+    // real normalizer can prove the two agree.
+    const raw = (formulaText) => ({ data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'Calc', type: 'formula', typeOptions: { formulaTextParsed: formulaText } }],
+    }] } });
+    const a = normalizeSchema(raw('A + B'));
+    const b = normalizeSchema(raw('A * B'));
+    assert.notEqual(fingerprintSchema(a), fingerprintSchema(b),
+      'a formula rewrite must change the fingerprint of a REAL normalized snapshot');
+  });
+
+  it('fingerprintSchema: a description change is drift, and typeOptions key ORDER is not', () => {
+    const withDesc = (description) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'Name', type: 'text', description },
+    ] }] });
+    assert.notEqual(fingerprintSchema(withDesc('before')), fingerprintSchema(withDesc('after')));
+
+    // Same typeOptions, different key order — Airtable's JSON key order is not a schema change,
+    // and a guard that cried wolf on re-serialization would get switched off.
+    const a = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'N', type: 'number', typeOptions: { precision: 2, symbol: '$', nested: { x: 1, y: 2 } } },
+    ] }] };
+    const b = { tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'N', type: 'number', typeOptions: { symbol: '$', nested: { y: 2, x: 1 }, precision: 2 } },
+    ] }] };
+    assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'key order must not be drift');
+  });
+
+  it('fingerprintSchema: autoNumber maxUsedAutoNumber is runtime state, NOT drift', () => {
+    // The counter advances whenever a row is created — including by this sync's OWN records
+    // phase — so hashing it made an unchanged schema abort with a phantom DRIFT (review repro:
+    // counter 7 → 8, fingerprint changed, apply aborted). apply.js strips it before every
+    // write for the same reason; the fingerprint must share that knowledge.
+    const mk = (typeOptions) => ({ tables: [{ id: 't1', name: 'T', fields: [
+      { id: 'f1', name: 'ID', type: 'autoNumber', typeOptions },
+    ] }] });
+    assert.equal(
+      fingerprintSchema(mk({ maxUsedAutoNumber: 7 })),
+      fingerprintSchema(mk({ maxUsedAutoNumber: 8 })),
+      'a counter-only change must NOT be drift',
+    );
+    // …but a SEMANTIC typeOptions change on the same field still is.
+    assert.notEqual(
+      fingerprintSchema(mk({ maxUsedAutoNumber: 7, format: 'A' })),
+      fingerprintSchema(mk({ maxUsedAutoNumber: 8, format: 'B' })),
+      'a real typeOptions change must still be drift even with the counter moving',
+    );
+    // And through the REAL normalizer, same asymmetry.
+    const raw = (n, fmt) => ({ data: { tableSchemas: [{
+      id: 'tbl1', name: 'T', primaryColumnId: 'fld1',
+      columns: [{ id: 'fld1', name: 'ID', type: 'autoNumber', typeOptions: { maxUsedAutoNumber: n, ...(fmt ? { format: fmt } : {}) } }],
+    }] } });
+    assert.equal(fingerprintSchema(normalizeSchema(raw(7))), fingerprintSchema(normalizeSchema(raw(8))));
+    assert.notEqual(fingerprintSchema(normalizeSchema(raw(7, 'A'))), fingerprintSchema(normalizeSchema(raw(8, 'B'))));
+  });
+
+  it('fingerprintSchema: a section rename is drift in the DEFAULT mode (mirror prune deletes by id)', () => {
+    // pruneSchema deletes dest-only sections by ID. If a section renamed between plan and apply
+    // does not read as drift, apply deletes it under its old identity — reproduced by review:
+    // "Disposable" renamed to "Keep Me" was still pruned as sec1.
+    const mk = (name) => ({ tables: [{ id: 't1', name: 'T', fields: [], views: [],
+      sections: [{ id: 'sec1', name, viewNames: ['Grid'] }] }] });
+    assert.notEqual(fingerprintSchema(mk('Disposable')), fingerprintSchema(mk('Keep Me')),
+      'a renamed section must be drift — WITHOUT strictDrift');
+    // Section membership changes are drift too (they decide what auto-promotes on delete).
+    const mv = (viewNames) => ({ tables: [{ id: 't1', name: 'T', fields: [], views: [],
+      sections: [{ id: 'sec1', name: 'S', viewNames }] }] });
+    assert.notEqual(fingerprintSchema(mv(['Grid'])), fingerprintSchema(mv(['Grid', 'Board'])));
+  });
+
+  it('fingerprintSchema: view CONFIG counts only under includeViewConfig (the opt-in read-storm)', () => {
+    const mk = (filters) => ({ tables: [{ id: 't1', name: 'T', fields: [], views: [
+      { id: 'viw1', name: 'Grid', type: 'grid', config: { filters } },
+    ] }] });
+    const a = mk({ filterSet: [{ columnId: 'f1', value: 'x' }] });
+    const b = mk({ filterSet: [{ columnId: 'f1', value: 'y' }] });
+
+    // Default: view config is NOT hashed — apply() uses the cheap schema-only snapshot.
+    assert.equal(fingerprintSchema(a), fingerprintSchema(b), 'default must ignore view config');
+    // Opt-in: the same edit is now drift.
+    assert.notEqual(
+      fingerprintSchema(a, { includeViewConfig: true }),
+      fingerprintSchema(b, { includeViewConfig: true }),
+      'strictDrift must see a changed view filter',
+    );
+  });
+
   it('fingerprintSchema: a genuine field change (add/remove/rename/retype) still changes the fingerprint', () => {
     const base = { tables: [{ id: 't1', name: 'T', fields: [
       { id: 'f1', name: 'Name', type: 'text' },

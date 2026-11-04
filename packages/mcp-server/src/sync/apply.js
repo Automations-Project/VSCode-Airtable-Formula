@@ -17,6 +17,16 @@ const LINK_TYPES = new Set(['foreignKey', 'multipleRecordLinks']);
 const LINK_DEPENDENCY_ERROR = /requires a link field|link field was changed/i;
 const SCALAR_RETYPE_TYPES = new Set(['text', 'multilineText', 'richText', 'number', 'currency', 'percent', 'rating', 'duration', 'checkbox', 'date', 'dateTime', 'phone', 'email', 'url', 'select', 'singleSelect', 'multiSelect', 'multipleSelects']);
 
+// maxUsedAutoNumber is a read-only runtime counter the server advances on every row create —
+// any write payload carrying it 422s ("options not valid"). Single-sourced so every autoNumber
+// send site strips it (create, primary retype, AND options update); no-op for other types.
+// Same key fingerprintTypeOptions (sync/index.js) strips on the drift-guard side.
+function stripAutoNumberCounter(type, typeOptions) {
+  if (type !== 'autoNumber') return typeOptions;
+  const { maxUsedAutoNumber, ...rest } = typeOptions || {};
+  return rest;
+}
+
 // Types Airtable refuses as a primary field — keep a placeholder + warn instead of
 // retyping. The try/catch around the retype is the ultimate guard (set is an optimization).
 const ILLEGAL_PRIMARY_TYPES = new Set([
@@ -269,10 +279,8 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
             } else {
               toOpts = toWritableComputedOptions(a.toType, toOpts);
             }
-          } else if (a.toType === 'autoNumber') {
-            // maxUsedAutoNumber is a read-only runtime counter (same strip as createField).
-            const { maxUsedAutoNumber, ...rest } = toOpts || {};
-            toOpts = rest;
+          } else {
+            toOpts = stripAutoNumberCounter(a.toType, toOpts);
           }
           if (!disposition) {
             try { await client.updateFieldConfig(destAppId, primaryId, { type: a.toType, typeOptions: toOpts }); retyped = true; }
@@ -345,12 +353,8 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
           if (!v.valid) throw new Error(`formula invalid: ${v.message ?? v.error ?? 'rejected'}`);
         }
       }
-      if (a.type === 'autoNumber') {
-        // maxUsedAutoNumber is a read-only runtime counter — the internal API rejects it on create.
-        // The dest base starts its own auto-numbering; strip it so the field creates cleanly.
-        const { maxUsedAutoNumber, ...rest } = typeOptions || {};
-        typeOptions = rest;
-      }
+      // The dest base starts its own auto-numbering; strip the counter so the field creates cleanly.
+      typeOptions = stripAutoNumberCounter(a.type, typeOptions);
       const { columnId } = await client.createField(destAppId, destTableId, { name: a.name, type: a.type, typeOptions, description: a.description ?? undefined });
       let createdTypeOptions = typeOptions;
       let choices = {};
@@ -445,7 +449,7 @@ async function applyAction({ client, destAppId, a, idmap, index, state, result, 
           await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: writableLinkOptions(remapped) });
           mutated = true;
         } else {
-          await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: mergeChoices(findDestField(index, a.destFld), remapped) });
+          await client.updateFieldConfig(destAppId, a.destFld, { type: destType, typeOptions: stripAutoNumberCounter(destType, mergeChoices(findDestField(index, a.destFld), remapped)) });
           mutated = true;
         }
       }

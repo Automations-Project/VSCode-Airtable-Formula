@@ -1,10 +1,10 @@
 {
   "name": "airtable-formula",
   "private": true,
-  "version": "2.1.32",
+  "version": "2.2.1",
   "publisher": "Nskha",
   "displayName": "Airtable Formulas, Scripts, Automation, MCP & LSP",
-  "description": "Airtable formula, script & automation editor with MCP server (71 tools), language server, and AI skills for VS Code.",
+  "description": "Airtable formula, script & automation editor with MCP server (72 tools), language server, and AI skills for VS Code.",
   "icon": "images/icon.png",
   "license": "MIT",
   "author": {
@@ -407,7 +407,11 @@
         "airtableFormula.mcp.authMode": {
           "type": "string",
           "default": "browser",
-          "enum": ["browser", "byo", "direct-login"],
+          "enum": [
+            "browser",
+            "byo",
+            "direct-login"
+          ],
           "enumDescriptions": [
             "Log in through a bundled headless Chrome, then run all API calls over direct HTTP (default). The browser only mints/refreshes the session cookie.",
             "Bring your own cookie — no browser. Paste a session cookie into ~/.airtable-user-mcp/credentials.json (or set the AIRTABLE_COOKIE env var); the CSRF token is scraped automatically.",
@@ -418,7 +422,10 @@
         "airtableFormula.mcp.httpClient": {
           "type": "string",
           "default": "fetch",
-          "enum": ["fetch", "impit"],
+          "enum": [
+            "fetch",
+            "impit"
+          ],
           "enumDescriptions": [
             "Node's built-in fetch (default) — verified to work against Airtable's internal API with no TLS impersonation.",
             "impit with Chrome TLS impersonation — a fallback if Airtable ever fingerprints non-browser clients. Requires the optional 'impit' package to be available to the server."
@@ -431,7 +438,6 @@
           "minimum": 0,
           "description": "Minutes of idle time before the shared daemon parks (closes) its Chromium browser to free ~300–600 MB RSS. Cookie-based HTTP keeps working; the browser is only relaunched if session recovery needs it. Set 0 to disable. Takes effect on the next daemon/server restart."
         },
-
         "airtableFormula.mcp.serverSource": {
           "type": "string",
           "default": "bundled",
@@ -525,9 +531,9 @@
             "custom"
           ],
           "enumDescriptions": [
-            "Schema inspection, formula validation, and record reading only (12 tools)",
+            "Schema inspection, formula validation, and record reading only (10 tools)",
             "Read + record read/write + create/update tables, fields, views, sidebar sections, and record templates, no deletes, no form metadata (54 tools)",
-            "All tools enabled including destructive ops, form metadata, and extensions (71 tools)",
+            "All tools enabled including destructive ops, form metadata, extensions, and daemon control (72 tools)",
             "User-defined per-tool selection"
           ],
           "description": "Active MCP tool profile. Controls which tools are exposed to AI agents through the bundled Airtable MCP server."
@@ -535,7 +541,7 @@
         "airtableFormula.mcp.categories.read": {
           "type": "boolean",
           "default": true,
-          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections."
+          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections, list_record_templates."
         },
         "airtableFormula.mcp.categories.tableWrite": {
           "type": "boolean",
@@ -606,6 +612,16 @@
           "type": "boolean",
           "default": false,
           "description": "Sync tools: sync_base (base-to-base schema + record sync). mode=plan/diff/status are read-only; mode=apply mutates the destination and, with policy=mirror plus the confirmation flags, can delete tables, fields, views, sections and records; mode=reconcile updates local mapping state."
+        },
+        "airtableFormula.mcp.categories.daemon": {
+          "type": "boolean",
+          "default": false,
+          "description": "Daemon Control tool: manage_daemon (inspect and administer the MCP daemon itself — not Airtable). action=status is read-only and reports daemon liveness, transport, uptime, tunnel URL and the live session/browser state; start, restart, stop, tunnel_enable, tunnel_disable and token_rotate control the running process. Off by default: this lets an AI agent stop or restart the server it is talking through."
+        },
+        "airtableFormula.mcp.categories.localWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Local File Write tools: download_formula_field, download_base_formulas. These READ from Airtable but WRITE .formula files to a path the caller chooses, so they are not part of the read-only profile. Included in safe-write and full."
         },
         "airtableFormula.mcp.tools": {
           "type": "object",
@@ -714,7 +730,7 @@
       {
         "id": "AirtableFormula.server",
         "label": "Airtable User MCP",
-        "description": "Manage Airtable bases via 71 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate / upload_attachment), and extension management. Operates over stdio using JSON-RPC 2.0."
+        "description": "Manage Airtable bases via 72 MCP tools: schema read, table CRUD, field CRUD (including formula/rollup/lookup/download), view configuration (filters / sorts / groups / visibility / column ordering / freezing — with merge-safe append mode), sidebar section grouping, view-type metadata (Kanban/Gallery/Calendar covers, colors, calendar date ranges), legacy-form metadata, formula validation, formula download, bulk base formula download, record template management (create / rename / pre-fill cells / duplicate / apply / delete), record CRUD (create / update / delete / duplicate / upload_attachment), extension management, base-to-base sync, and daemon control. Operates over stdio using JSON-RPC 2.0."
       }
     ]
   },
@@ -732,23 +748,23 @@
     "test:e2e": "node ./dist/test/runTest.js"
   },
   "dependencies": {
-    "@airtable-formula/shared": "workspace:*",
-    "@airtable-formula/language-services": "workspace:*"
+    "@airtable-formula/language-services": "workspace:*",
+    "@airtable-formula/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
-    "prettier": "3.8.3",
-    "terser": "^5.0.0",
     "@types/archiver": "^7.0.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/vscode": "^1.100.0",
-    "@vscode/test-electron": "^2.4.0",
-    "@vscode/vsce": "^3.0.0",
-    "adm-zip": "^0.5.17",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.2",
+    "adm-zip": "^0.6.1",
     "airtable-user-mcp": "workspace:*",
     "archiver": "^7.0.1",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "prettier": "3.8.3",
+    "terser": "^5.51.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.6"
   }
 }

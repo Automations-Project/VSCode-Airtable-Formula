@@ -21,6 +21,7 @@ vi.mock('os', async (orig) => {
 let backupSession: typeof import('../mcp/session-backup.js').backupSession;
 let restoreSession: typeof import('../mcp/session-backup.js').restoreSession;
 let isEncryptedFile: typeof import('../mcp/session-backup.js').isEncryptedFile;
+let isEncryptedBackupFile: typeof import('../mcp/session-backup.js').isEncryptedBackupFile;
 
 beforeEach(async () => {
   fsSync.mkdirSync(configDir, { recursive: true });
@@ -29,6 +30,7 @@ beforeEach(async () => {
   backupSession = mod.backupSession;
   restoreSession = mod.restoreSession;
   isEncryptedFile = mod.isEncryptedFile;
+  isEncryptedBackupFile = mod.isEncryptedBackupFile;
 });
 
 afterEach(() => {
@@ -41,6 +43,7 @@ describe('backup/restore roundtrip (unencrypted)', () => {
     const dest = path.join(sandboxParent, 'backup.zip');
     await backupSession(dest);
     expect(fsSync.existsSync(dest)).toBe(true);
+    expect(await isEncryptedBackupFile(dest)).toBe(false);
 
     // Wipe config and restore.
     fsSync.rmSync(configDir, { recursive: true, force: true });
@@ -59,6 +62,7 @@ describe('backup/restore roundtrip (encrypted v2)', () => {
 
     const raw = await fs.readFile(dest);
     expect(isEncryptedFile(raw)).toBe(true);
+    expect(await isEncryptedBackupFile(dest)).toBe(true);
     // v2 format has the version byte at offset 4.
     expect(raw[0]).toBe(0x41); // 'A'
     expect(raw[4]).toBe(0x02); // FORMAT_V2
@@ -123,7 +127,7 @@ describe('legacy v1 format read (C3 backwards-compat)', () => {
  * whose entry name is exactly what the caller specified — no normalisation.
  * This is the zip equivalent of a hand-crafted attack file.
  */
-function buildMaliciousZip(entryName: string, data: Buffer): Buffer {
+function buildMaliciousZip(entryName: string, data: Buffer, declaredSize = data.length): Buffer {
   const nameBuf = Buffer.from(entryName, 'utf8');
   // Proper CRC-32 (adm-zip validates it on getData()).
   const crc32 = Buffer.alloc(4);
@@ -144,7 +148,7 @@ function buildMaliciousZip(entryName: string, data: Buffer): Buffer {
   lfh.writeUInt16LE(0, 12);      // mod date
   crc32.copy(lfh, 14);           // crc32
   lfh.writeUInt32LE(data.length, 18); // comp size
-  lfh.writeUInt32LE(data.length, 22); // uncomp size
+  lfh.writeUInt32LE(declaredSize, 22); // declared uncomp size
   lfh.writeUInt16LE(nameBuf.length, 26);
   lfh.writeUInt16LE(0, 28);      // extra len
 
@@ -161,7 +165,7 @@ function buildMaliciousZip(entryName: string, data: Buffer): Buffer {
   cd.writeUInt16LE(0, 14);       // mod date
   crc32.copy(cd, 16);
   cd.writeUInt32LE(data.length, 20); // comp size
-  cd.writeUInt32LE(data.length, 24); // uncomp size
+  cd.writeUInt32LE(declaredSize, 24); // declared uncomp size
   cd.writeUInt16LE(nameBuf.length, 28);
   cd.writeUInt16LE(0, 30);       // extra len
   cd.writeUInt16LE(0, 32);       // comment len
@@ -223,6 +227,30 @@ describe('file-size cap (H1)', () => {
       await fd.close();
     }
     await expect(restoreSession(dest)).rejects.toThrow(/too large/);
+  });
+
+  it('checks a selected backup before probing its encryption header', async () => {
+    const dest = path.join(sandboxParent, 'huge-selected.zip');
+    const fd = await fs.open(dest, 'w');
+    try {
+      await fd.truncate(201 * 1024 * 1024);
+    } finally {
+      await fd.close();
+    }
+
+    await expect(isEncryptedBackupFile(dest)).rejects.toThrow(/too large/);
+  });
+});
+
+describe('uncompressed-size cap (H1)', () => {
+  it('rejects an oversized declared entry before decompressing it', async () => {
+    const declaredSize = 501 * 1024 * 1024;
+    const maliciousZip = buildMaliciousZip('oversized.txt', Buffer.from('x'), declaredSize);
+    const dest = path.join(sandboxParent, 'oversized-entry.zip');
+    await fs.writeFile(dest, maliciousZip);
+
+    await expect(restoreSession(dest)).rejects.toThrow(/uncompressed size exceeds/);
+    expect(fsSync.readFileSync(path.join(configDir, 'seed.txt'), 'utf8')).toBe('seed data');
   });
 });
 
