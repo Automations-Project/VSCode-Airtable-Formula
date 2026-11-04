@@ -24,6 +24,7 @@
 - **`patchright` 1.58 -> 1.64.3, `otpauth` 9.5 -> 9.6** (in-range). `impit` and `@ngrok/ngrok` are intentionally not bumped (their native-binary digest pins are unchanged). Dev tooling: vitest 1.6 -> 3.2, esbuild 0.27 -> 0.28, vite 6.4.5.
 - **`cheerio`, `fetch-cookie`, `node-fetch` and `tough-cookie` moved to `devDependencies`.** Nothing in `src/`, `test/`, `bin/` or the bundle imports them — only the local (gitignored) `dev-tools/` capture scripts do — so npm consumers no longer install them or their audit surface.
 - Test hygiene: `test-http-proxy.test.js` no longer leaks the CONNECT-tunnel sockets (an `ECONNRESET` after the test ended marked the file failed although all 16 subtests passed).
+- **Dev-tooling Dependabot alerts cleared (full `pnpm audit` is clean).** `vitest` 3.2 -> **4.1.12** in every package that declares it (drops the vulnerable `tinypool` and `@vitest/mocker`; the only test changes are `vi.fn(() => ...)` constructor mocks rewritten as `vi.fn(function () { ... })`, which vitest 4 requires for `new`). Scoped root `pnpm.overrides` carry the rest along the exact paths that held the old copies, so no global major bump: `@vscode/vsce>glob`/`archiver-utils>glob` -> 14.0.2+ (AbortSignal bypass), `@vscode/vsce>minimatch`/`readdir-glob>minimatch` -> 11.0.1+ (globparts DoS), `tsup>esbuild` -> 0.28.1+ (dev-server file read). None of this ships in the npm package. CI actions moved off Node 20: `actions/checkout` v7, `actions/setup-node` v7, `pnpm/action-setup` v6.
 
 ### Fixed (2026-08-01 — audit low-severity sweep)
 

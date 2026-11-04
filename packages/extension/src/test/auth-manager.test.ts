@@ -3,7 +3,7 @@ import * as http from 'http';
 
 // Mock vscode before importing the module under test.
 vi.mock('vscode', () => ({
-  EventEmitter: vi.fn(() => ({ event: vi.fn(), fire: vi.fn(), dispose: vi.fn() })),
+  EventEmitter: vi.fn(function () { return { event: vi.fn(), fire: vi.fn(), dispose: vi.fn() }; }),
   Disposable: vi.fn(),
   workspace: { getConfiguration: vi.fn(() => ({ get: (_k: string, d: unknown) => d, inspect: () => undefined })) },
   ConfigurationTarget: { Global: 1 },
