@@ -1,11 +1,17 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App.js';
+import { ActionButton } from '../components/ActionButton.js';
 import { requestHostConfirmation } from '../lib/confirmation.js';
 import { useStore } from '../store.js';
 import { makeDashboardState } from './dashboard-state.fixture.js';
 import { resetWebviewStore, vscodeApiMock } from './test-setup.js';
+// jsdom does not apply CSS imported through @layer. Import the same shipped
+// owner files directly so this remains a real computed-style contract.
+import '../styles/sections.css';
+import '../styles/accessibility.css';
 
 describe('App rendered shell', () => {
   beforeEach(() => {
@@ -15,7 +21,47 @@ describe('App rendered shell', () => {
   it('renders the real loading state in a DOM', () => {
     render(<App />);
 
-    expect(screen.getByText('Loading dashboard…')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading Airtable Control…');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('renders a labelled tablist and linked active panel without a persistent footer', () => {
+    useStore.setState({ loading: false, activeTab: 'overview' });
+
+    render(<App />);
+
+    expect(screen.getByRole('tablist', { name: 'Dashboard sections' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Overview' }))
+      .toHaveAttribute('aria-controls', 'dashboard-panel-overview');
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByRole('tabpanel'))
+      .toHaveAttribute('aria-labelledby', 'dashboard-tab-overview');
+    expect(screen.queryByRole('button', { name: 'Open GitHub (external link)' }))
+      .not.toBeInTheDocument();
+  });
+
+  it('keeps focus on a selected top-level tab instead of moving it into the panel', async () => {
+    const user = userEvent.setup();
+    useStore.setState({ loading: false, activeTab: 'overview' });
+    render(<App />);
+
+    const settingsTab = screen.getByRole('tab', { name: 'Settings' });
+    await user.click(settingsTab);
+
+    await waitFor(() => expect(settingsTab).toHaveFocus());
+    expect(settingsTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByRole('tabpanel'))
+      .toHaveAttribute('aria-labelledby', 'dashboard-tab-settings');
+    expect(screen.getByRole('tabpanel')).not.toHaveFocus();
+  });
+
+  it('computes the reduced-motion transition contract for actions', () => {
+    document.body.classList.add('vscode-reduce-motion');
+
+    render(<ActionButton>Refresh status</ActionButton>);
+
+    expect(getComputedStyle(screen.getByRole('button')).transitionDuration).toBe('0.01ms');
   });
 
   it('can mutate the singleton store during a rendered test', () => {
@@ -131,11 +177,11 @@ describe('App rendered shell', () => {
     await expect(confirmation).resolves.toBe(true);
   });
 
-  it('opens footer links by opaque id with a pending action lifecycle', () => {
-    useStore.setState({ loading: false });
+  it('opens Settings support links by opaque id with a pending action lifecycle', () => {
+    useStore.setState({ activeTab: 'settings', loading: false });
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open GitHub (external link)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open GitHub repository' }));
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({

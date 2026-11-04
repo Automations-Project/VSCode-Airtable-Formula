@@ -4,6 +4,7 @@ import type { WebviewSettingChange } from '@shared/messages.js';
 import type { ToolCategories } from '@shared/types.js';
 import { friendlyError } from '../lib/friendlyError.js';
 import { StatusDot } from '../components/StatusDot.js';
+import { SupportAboutSection } from './settings/SupportAboutSection.js';
 import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson, FolderOpen, ChevronDown, ChevronRight, Archive, Upload } from 'lucide-react';
 
 type BooleanSettingKey =
@@ -994,6 +995,7 @@ export function Settings() {
         </div>
       </div>
 
+      <SupportAboutSection />
     </div>
   );
 }
