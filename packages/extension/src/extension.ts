@@ -702,36 +702,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         traceConfigChanges(debugCollector),
         vscode.workspace.onDidChangeConfiguration(async (e) => {
-            if (e.affectsConfiguration('airtableFormula.debug.enabled')) {
-                debugCollector.enabled = getSettings().debug.enabled;
-            }
-            if (e.affectsConfiguration('airtableFormula.debug.bufferSize')) {
-                debugCollector.resize(getSettings().debug.bufferSize);
-            }
-
-            // Auto-propagate serverSource changes to all configured IDEs
-            if (e.affectsConfiguration('airtableFormula.mcp.serverSource')) {
-                const statuses = await getAllIdeStatuses();
-                const configured = statuses.filter(s => s.detected && s.mcpConfigured);
-                if (configured.length > 0) {
-                    const entry = getServerEntry(context);
-                    const serverPath = getBundledServerPath(context);
-                    await Promise.all(configured.map(s => configureMcpForIde(s.ideId, serverPath, entry)));
-                    vscode.window.showInformationMessage(
-                        `Airtable Formula: MCP server source updated to "${getSettings().mcp.serverSource}" for ${configured.map(s => s.label).join(', ')}.`
-                    );
-                    dashboardProvider.refresh();
+            const effectKeys: import('./webview/DashboardProvider.js').ConfigurationSideEffectKey[] = [
+                'auth.autoRefresh',
+                'auth.refreshIntervalHours',
+                'mcp.serverSource',
+                'mcp.authMode',
+                'mcp.httpClient',
+                'mcp.browserIdleParkMinutes',
+                'debug.enabled',
+                'debug.bufferSize',
+            ];
+            let changed = false;
+            for (const key of effectKeys) {
+                if (e.affectsConfiguration(`airtableFormula.${key}`)) {
+                    changed = true;
+                    await dashboardProvider.applyConfigurationSideEffect(key);
                 }
             }
-
-            // Transport settings (authMode / httpClient / browserIdleParkMinutes) are injected
-            // into the daemon/stdio env at spawn time, so a settings.json or Settings-UI edit
-            // needs the same restart + re-provision the dashboard performs on its own edits.
-            // Route through the shared DashboardProvider method so both paths behave identically.
-            if (e.affectsConfiguration('airtableFormula.mcp.authMode') ||
-                e.affectsConfiguration('airtableFormula.mcp.httpClient') ||
-                e.affectsConfiguration('airtableFormula.mcp.browserIdleParkMinutes')) {
-                await dashboardProvider.applyTransportSettingChange();
+            if (changed) {
+                await dashboardProvider.refresh();
             }
         }),
     );

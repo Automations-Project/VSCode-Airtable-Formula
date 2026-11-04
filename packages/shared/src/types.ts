@@ -23,21 +23,33 @@ export type AuthStatus =
   | 'logging-in'
   | 'chrome-missing';
 
-export interface BrowserInfo {
-  found:          boolean;
-  channel?:       'chrome' | 'msedge' | 'chromium';
-  label?:         string;
-  /** True when the active browser is a bundled Chromium we downloaded. */
-  downloaded?:    boolean;
-  executablePath?: string;
-}
+export type BrowserChannel = 'chrome' | 'msedge' | 'chromium';
+export type BrowserId =
+  | 'chrome'
+  | 'edge'
+  | 'chromium'
+  | 'brave'
+  | 'bundled-chromium'
+  | 'custom-browser';
+export type DetectedBrowserId = Exclude<BrowserId, 'custom-browser'>;
+export type StorageEntryId = 'browser-profile' | 'tool-config' | 'bundled-chromium';
+export type WebviewLinkId = 'docs' | 'changelog' | 'github' | 'chrome';
+export type DashboardTabId = 'overview' | 'setup' | 'prompts' | 'settings';
 
-export interface BrowserChoice {
-  mode:            'auto' | 'custom';
-  channel?:        string;
-  executablePath?: string;
-  label?:          string;
-}
+export type BrowserInfo =
+  | { found: false }
+  | {
+      found: true;
+      id: DetectedBrowserId;
+      channel: BrowserChannel;
+      label: string;
+      downloaded?: boolean;
+    };
+
+export type BrowserChoiceSummary =
+  | { mode: 'auto' }
+  | { mode: 'detected'; browserId: DetectedBrowserId; label: string }
+  | { mode: 'custom'; label: string };
 
 export type BrowserDownloadStatus = 'idle' | 'downloading' | 'done' | 'error';
 
@@ -48,8 +60,8 @@ export interface BrowserDownloadState {
 }
 
 export interface StorageEntry {
+  id:         StorageEntryId;
   label:      string;
-  path:       string;
   sizeBytes?: number;
   exists:     boolean;
 }
@@ -70,7 +82,7 @@ export interface AuthState {
   browser?:           BrowserInfo;
   browserDownload?:   BrowserDownloadState;
   availableBrowsers?: BrowserInfo[];
-  browserChoice?:     BrowserChoice;
+  browserChoice?:     BrowserChoiceSummary;
 }
 
 export interface AiFiles {
@@ -134,15 +146,20 @@ export interface SettingsSnapshot {
     daemonPort:             number;
     authMode:               'browser' | 'byo' | 'direct-login';
     httpClient:             'fetch' | 'impit';
+    useDaemon:              boolean;
+    browserIdleParkMinutes: number;
   };
   ai:      { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2' };
-  script:  { beautifyStyle: string; minifyLevel: string };
+  script:  {
+    beautifyStyle: 'default' | 'compact' | 'singleQuote' | 'tabIndent' | 'semicolonFree';
+    minifyLevel: 'safe' | 'standard' | 'aggressive' | 'extreme';
+  };
   auth:    {
     autoRefresh: boolean;
     refreshIntervalHours: number;
     loginMode: 'manual' | 'auto';
-    browserChoice?: BrowserChoice;
+    browserChoice?: BrowserChoiceSummary;
   };
   debug:   { enabled: boolean; verboseHttp: boolean; bufferSize: number };
 }

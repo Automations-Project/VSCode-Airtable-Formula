@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test": "vitest run"
+    "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@airtable-formula/shared": "workspace:*",
@@ -18,9 +18,14 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.4",
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "axe-core": "4.12.1",
+    "jsdom": "29.1.1",
     "tailwindcss": "^4.3.4",
     "typescript": "^5.9.3",
     "vite": "^6.4.5",

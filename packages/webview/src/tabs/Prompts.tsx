@@ -3,6 +3,10 @@ import { useStore } from '../store.js';
 import type { PromptDef, PromptArg } from '@shared/types.js';
 import { Plus, ArrowLeft, Trash2, RotateCcw, Save, X, Info } from 'lucide-react';
 
+const MAX_ACTION_ERROR_LENGTH = 300;
+const DEFAULT_ACTION_ERROR =
+  'The change did not apply — check the VS Code notifications for details, then try again.';
+
 // ─── Reconnect notice ─────────────────────────────────────────────────────────
 
 function ReconnectNotice() {
@@ -102,13 +106,18 @@ function PromptEditor({
 
   useEffect(() => {
     if (!inFlightId || pendingActions.has(inFlightId)) return;
-    const ok = consumeActionResult(inFlightId);
+    const outcome = consumeActionResult(inFlightId);
     setInFlightId(null);
-    if (ok === false) {
-      setActionError('The change did not apply — check the VS Code notifications for details, then try again.');
-    } else {
+    if (outcome?.ok) {
       onBack();
+      return;
     }
+
+    const hostError = outcome?.error?.trim().slice(0, MAX_ACTION_ERROR_LENGTH);
+    setActionError(
+      hostError
+      || (outcome?.cancelled ? 'The action was cancelled.' : DEFAULT_ACTION_ERROR),
+    );
   }, [pendingActions, inFlightId, consumeActionResult, onBack]);
 
   function markDirty() { setDirty(true); }

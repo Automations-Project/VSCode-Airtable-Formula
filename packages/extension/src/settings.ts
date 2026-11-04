@@ -2,12 +2,22 @@ import * as vscode from 'vscode';
 
 const NS = 'airtableFormula';
 
+export type HostBrowserChoice =
+  | { mode: 'auto' }
+  | {
+      mode: 'custom';
+      channel: 'chrome' | 'msedge' | 'chromium';
+      executablePath: string;
+      label: string;
+      detectedId?: import('@airtable-formula/shared').BrowserId;
+    };
+
 export interface Settings {
   mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx'; useDaemon: boolean; daemonPort: number; authMode: 'browser' | 'byo' | 'direct-login'; httpClient: 'fetch' | 'impit'; browserIdleParkMinutes: number };
   ai:  { autoInstallFiles: boolean; includeAgents: boolean };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
   script: { beautifyStyle: string; minifyLevel: string };
-  auth: { autoRefresh: boolean; refreshIntervalHours: number; loginMode: 'manual' | 'auto'; browserChoice?: { mode: 'auto' | 'custom'; channel?: string; executablePath?: string; label?: string } };
+  auth: { autoRefresh: boolean; refreshIntervalHours: number; loginMode: 'manual' | 'auto'; browserChoice?: HostBrowserChoice };
   debug: { enabled: boolean; bufferSize: number; verboseHttp: boolean };
 }
 
@@ -41,7 +51,7 @@ export function getSettings(): Settings {
       autoRefresh:           cfg.get('auth.autoRefresh', true),
       refreshIntervalHours:  cfg.get('auth.refreshIntervalHours', 12),
       loginMode:             cfg.get('auth.loginMode', 'manual') as 'manual' | 'auto',
-      browserChoice:         cfg.get('auth.browserChoice', undefined),
+      browserChoice:         cfg.get<HostBrowserChoice | undefined>('auth.browserChoice', undefined),
     },
     debug: {
       enabled:     cfg.get('debug.enabled', true),
@@ -54,6 +64,16 @@ export function getSettings(): Settings {
 export async function updateSetting(key: string, value: unknown): Promise<void> {
   const cfg = vscode.workspace.getConfiguration(NS);
   await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+}
+
+export async function updateWebviewSetting(
+  change: import('@airtable-formula/shared').WebviewSettingChange,
+): Promise<void> {
+  if (change.key === 'mcp.category') {
+    throw new Error('Tool categories must be updated through ToolProfileManager');
+  }
+
+  await updateSetting(change.key, change.value);
 }
 
 /** Convert dashboard minutes setting → AIRTABLE_BROWSER_IDLE_PARK_MS. 0 disables. */

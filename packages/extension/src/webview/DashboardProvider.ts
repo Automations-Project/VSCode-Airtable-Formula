@@ -1,21 +1,188 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
-import type { DashboardState, IdeStatus, AuthState, ToolProfileSnapshot, DaemonStatusInfo } from '@airtable-formula/shared';
-import type { WebviewMessage } from '@airtable-formula/shared';
+import {
+  parseWebviewMessage,
+  type AuthState,
+  type ConfirmationKind,
+  type DaemonStatusInfo,
+  type DashboardState,
+  type IdeId,
+  type IdeStatus,
+  type StorageEntry,
+  type StorageEntryId,
+  type ToolProfileSnapshot,
+  type WebviewLinkId,
+  type WebviewMessage,
+} from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
 import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
-import type { IdeId } from '@airtable-formula/shared';
 import { installAiFiles, checkAiFiles } from '../skills/installer.js';
-import { getSettings, updateSetting } from '../settings.js';
+import { getSettings, updateWebviewSetting, type HostBrowserChoice } from '../settings.js';
 import { getBundledServerPath, getServerEntry } from '../mcp/server-path.js';
+import { detectAllBrowsers } from '../mcp/browser-detect.js';
 import { exportDebugLog } from '../debug/exporter.js';
 import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
 import type { DaemonManager } from '../mcp/daemon-manager.js';
 import { BUILTIN_PROMPT_DEFS, BUILTIN_NAMES } from '../mcp/prompt-defs.js';
+
+const WEBVIEW_LINKS: Record<WebviewLinkId, string> = {
+  docs: 'https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula',
+  changelog: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/CHANGELOG.md',
+  github: 'https://github.com/Automations-Project/VSCode-Airtable-Formula',
+  chrome: 'https://www.google.com/chrome/',
+};
+
+const IDE_DOCS_LINKS: Record<IdeId, string> = {
+  cursor: 'https://cursor.com/download',
+  windsurf: 'https://windsurf.com/download',
+  'windsurf-next': 'https://windsurf.com/download',
+  'claude-code': 'https://docs.claude.com/en/docs/claude-code/quickstart',
+  'claude-desktop': 'https://claude.ai/download',
+  cline: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
+  amp: 'https://ampcode.com/',
+  opencode: 'https://opencode.ai',
+  'codex-cli': 'https://github.com/openai/codex',
+  zed: 'https://zed.dev/download',
+  helix: 'https://helix-editor.com',
+  neovim: 'https://neovim.io',
+};
+
+const CONFIRMATION_COPY: Record<ConfirmationKind, string> = {
+  'discard-prompt-edits': 'Discard unsaved prompt changes?',
+};
+
+const AUTH_UNAVAILABLE_ERROR = 'Airtable authentication is unavailable';
+const SAVE_COOKIE_ERROR = 'Failed to save the Airtable session cookie';
+const CLEAR_COOKIE_ERROR = 'Failed to clear the saved Airtable session cookie';
+
+type CustomBrowserChannel = 'chrome' | 'msedge' | 'chromium';
+
+interface ResolvedCustomBrowserExecutable {
+  channel: CustomBrowserChannel;
+  executablePath: string;
+  label: string;
+}
+
+const WINDOWS_CUSTOM_BROWSER_EXECUTABLES: ReadonlyMap<
+  string,
+  CustomBrowserChannel
+> = new Map([
+  ['chrome.exe', 'chrome'],
+  ['msedge.exe', 'msedge'],
+  ['chromium.exe', 'chromium'],
+  ['brave.exe', 'chromium'],
+]);
+
+const LINUX_CUSTOM_BROWSER_EXECUTABLES: ReadonlyMap<
+  string,
+  CustomBrowserChannel
+> = new Map([
+  ['google-chrome', 'chrome'],
+  ['google-chrome-stable', 'chrome'],
+  ['chrome', 'chrome'],
+  ['microsoft-edge', 'msedge'],
+  ['microsoft-edge-stable', 'msedge'],
+  ['msedge', 'msedge'],
+  ['chromium', 'chromium'],
+  ['chromium-browser', 'chromium'],
+  ['brave', 'chromium'],
+  ['brave-browser', 'chromium'],
+]);
+
+const MACOS_CUSTOM_BROWSER_BUNDLES: ReadonlyArray<{
+  bundle: string;
+  executable: string;
+  channel: CustomBrowserChannel;
+}> = [
+  {
+    bundle: 'Google Chrome.app',
+    executable: 'Google Chrome',
+    channel: 'chrome',
+  },
+  {
+    bundle: 'Microsoft Edge.app',
+    executable: 'Microsoft Edge',
+    channel: 'msedge',
+  },
+  {
+    bundle: 'Chromium.app',
+    executable: 'Chromium',
+    channel: 'chromium',
+  },
+  {
+    bundle: 'Brave Browser.app',
+    executable: 'Brave Browser',
+    channel: 'chromium',
+  },
+];
+
+function resolveCustomBrowserExecutable(
+  selectedPath: string,
+): ResolvedCustomBrowserExecutable | undefined {
+  if (process.platform === 'win32') {
+    const label = path.win32.basename(selectedPath);
+    const channel = WINDOWS_CUSTOM_BROWSER_EXECUTABLES.get(label.toLowerCase());
+    return channel ? { channel, executablePath: selectedPath, label } : undefined;
+  }
+
+  if (process.platform === 'darwin') {
+    const normalizedPath = selectedPath.replaceAll('\\', '/');
+
+    for (const browser of MACOS_CUSTOM_BROWSER_BUNDLES) {
+      const bundleSuffix = `/${browser.bundle}`;
+      const executableSuffix = `${bundleSuffix}/Contents/MacOS/${browser.executable}`;
+
+      if (normalizedPath.endsWith(executableSuffix)) {
+        return {
+          channel: browser.channel,
+          executablePath: selectedPath,
+          label: browser.executable,
+        };
+      }
+
+      if (normalizedPath.endsWith(bundleSuffix)) {
+        return {
+          channel: browser.channel,
+          executablePath: path.join(
+            selectedPath,
+            'Contents',
+            'MacOS',
+            browser.executable,
+          ),
+          label: browser.executable,
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  const label = path.posix.basename(selectedPath);
+  const channel = LINUX_CUSTOM_BROWSER_EXECUTABLES.get(label);
+  return channel ? { channel, executablePath: selectedPath, label } : undefined;
+}
+
+function withoutUndefined<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+interface HostStorageEntry extends StorageEntry {
+  path: string;
+}
+
+export type ConfigurationSideEffectKey =
+  | 'auth.autoRefresh'
+  | 'auth.refreshIntervalHours'
+  | 'mcp.serverSource'
+  | 'mcp.authMode'
+  | 'mcp.httpClient'
+  | 'mcp.browserIdleParkMinutes'
+  | 'debug.enabled'
+  | 'debug.bufferSize';
 
 export class DashboardProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'airtable-formula.dashboard';
@@ -24,6 +191,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private toolProfileManager?: ToolProfileManager;
   private _debugCollector?: DebugCollector;
   private _storageCache?: { info: import('@airtable-formula/shared').StorageInfo; ts: number };
+  private readonly settingEffects =
+    new Map<ConfigurationSideEffectKey, Promise<void>>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -34,7 +203,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   setAuthManager(authManager: AuthManager): void {
     this.authManager = authManager;
     authManager.onDidChange(state => {
-      this.view?.webview.postMessage({ type: 'auth:state', payload: state });
+      this.view?.webview.postMessage({
+        type: 'auth:state',
+        payload: withoutUndefined(state),
+      });
     });
   }
 
@@ -137,7 +309,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const dm = this._daemonManager;
     if (!dm) {
       // No daemon manager wired → still re-provision for a stdio server.
-      void this._fireMcpChanged();
+      await this._fireMcpChanged();
       return;
     }
     const status = await dm.getDaemonStatus();
@@ -147,6 +319,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       // (cleared in finally); _fireMcpChanged records the port so the watcher's detect
       // path also finds no change.
       this._daemonStarting = true;
+      let credentialDeliveryFailed = false;
       try {
         await dm.restartDaemon();
         // Fresh daemon is creds-free in env by design — deliver byo/direct-login
@@ -154,22 +327,69 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const pushed = await this._pushDaemonCredsIfNeeded();
         if (!pushed) {
           void vscode.window.showWarningMessage('Transport settings changed and the daemon restarted, but its credentials could not be updated — restart the daemon to apply them.');
+          credentialDeliveryFailed = true;
         }
         // The restart may have changed the port — re-query the definition provider
         // so VS Code rebuilds the HTTP URI from the current daemon.lock.
         await this._fireMcpChanged();
-        await this.pushState();
       } catch (err) {
-        vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
+        void vscode.window.showErrorMessage(`Daemon restart failed: ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
       } finally {
         this._daemonStarting = false;
+      }
+      if (credentialDeliveryFailed) {
+        throw new Error('Transport settings changed, but restarted-daemon credentials could not be updated');
       }
       return;
     }
     // No-daemon (stdio) mode: no daemon to restart — re-provision the MCP servers so VS Code
     // respawns the stdio server with the fresh env.
     await this._fireMcpChanged();
-    await this.pushState();
+  }
+
+  async applyConfigurationSideEffect(
+    key: ConfigurationSideEffectKey,
+  ): Promise<void> {
+    const current = this.settingEffects.get(key);
+    if (current) return current;
+
+    const running = this.performConfigurationSideEffect(key).finally(() => {
+      setTimeout(() => {
+        if (this.settingEffects.get(key) === running) {
+          this.settingEffects.delete(key);
+        }
+      }, 0);
+    });
+    this.settingEffects.set(key, running);
+    return running;
+  }
+
+  private async performConfigurationSideEffect(
+    key: ConfigurationSideEffectKey,
+  ): Promise<void> {
+    switch (key) {
+      case 'auth.autoRefresh':
+      case 'auth.refreshIntervalHours':
+        await this.authManager?.restartAutoRefresh();
+        return;
+      case 'mcp.serverSource':
+        await this.rewriteConfiguredIdeMcpEntries();
+        return;
+      case 'mcp.authMode':
+      case 'mcp.httpClient':
+      case 'mcp.browserIdleParkMinutes':
+        await this.applyTransportSettingChange();
+        return;
+      case 'debug.enabled':
+        if (this._debugCollector) {
+          this._debugCollector.enabled = getSettings().debug.enabled;
+        }
+        return;
+      case 'debug.bufferSize':
+        this._debugCollector?.resize(getSettings().debug.bufferSize);
+        return;
+    }
   }
 
   /**
@@ -248,7 +468,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview')],
     };
     webviewView.webview.html = getWebviewHtml(webviewView.webview, this.context);
-    webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg as WebviewMessage));
+    webviewView.webview.onDidReceiveMessage(input => {
+      void this.handleIncomingMessage(input);
+    });
     // Re-sync when the sidebar is re-opened — daemon/tunnel/auth state may
     // have changed while the view was hidden and no watcher fired since.
     webviewView.onDidChangeVisibility(() => {
@@ -260,6 +482,19 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         void (async () => { await this._pushDaemonCredsIfNeeded(); await this._syncMcpDefinition(); })();
       }
     });
+  }
+
+  private async handleIncomingMessage(input: unknown): Promise<void> {
+    const parsed = parseWebviewMessage(input);
+    if (!parsed.ok) {
+      this._debugCollector?.trace('ext', 'webview', 'webview:message_rejected', {
+        type: parsed.type ?? 'unknown',
+        reason: parsed.reason,
+      });
+      return;
+    }
+
+    await this.handleMessage(parsed.value);
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
@@ -350,9 +585,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
 
     if (msg.type === 'auth:saveCookie') {
+      if (!this.authManager) {
+        this.postResult(msg.id, false, AUTH_UNAVAILABLE_ERROR);
+        return;
+      }
       try {
-        // No auth manager wired → nowhere to store the cookie; skip the success message.
-        if (!this.authManager) return;
         // CSRF is auto-scraped server-side from the cookie's authed session, so it's not collected here.
         await this.authManager.saveCookie(msg.cookie);
         const pushed = await this._pushDaemonCredsIfNeeded();
@@ -364,30 +601,39 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           // Confirm the save — never echo the cookie value.
           vscode.window.showInformationMessage('Airtable session cookie saved to the keychain.');
         }
-      } catch (err) {
-        // Never surface the cookie — log only a concise, secret-free message + a user-facing error
-        // (a silent failure would leave the "Not set" chip with no explanation).
-        const m = err instanceof Error ? err.message : 'unknown error';
-        console.warn('[DashboardProvider] saveCookie failed:', m);
-        vscode.window.showErrorMessage(`Failed to save the Airtable cookie to the keychain: ${m}`);
+        this.postResult(msg.id, true);
+      } catch {
+        console.warn('[DashboardProvider] saveCookie failed');
+        vscode.window.showErrorMessage(SAVE_COOKIE_ERROR);
+        this.postResult(msg.id, false, SAVE_COOKIE_ERROR);
       }
       return;
     }
     if (msg.type === 'auth:clearCookie') {
-      if (!this.authManager) return;
+      if (!this.authManager) {
+        this.postResult(msg.id, false, AUTH_UNAVAILABLE_ERROR);
+        return;
+      }
+      let failed = false;
       try {
         await this.authManager.clearCookie();
         // Drop the daemon's in-memory copy of the (now-cleared) cookie.
         await this._restartDaemonAfterCredClear();
-      } catch (err) {
-        // Never echo the cookie value — surface a concise, secret-free error.
-        const m = err instanceof Error ? err.message : 'unknown error';
-        console.warn('[DashboardProvider] clearCookie failed:', m);
-        vscode.window.showErrorMessage(`Failed to clear the saved cookie: ${m}`);
-      } finally {
-        // Always refresh the UI so the chip reflects the real keychain state.
-        await this.pushState();
+      } catch {
+        failed = true;
+        console.warn('[DashboardProvider] clearCookie failed');
+        vscode.window.showErrorMessage(CLEAR_COOKIE_ERROR);
       }
+      try {
+        await this.pushState();
+      } catch {
+        if (!failed) {
+          console.warn('[DashboardProvider] clearCookie state refresh failed');
+          vscode.window.showErrorMessage(CLEAR_COOKIE_ERROR);
+        }
+        failed = true;
+      }
+      this.postResult(msg.id, !failed, failed ? CLEAR_COOKIE_ERROR : undefined);
       return;
     }
     if (msg.type === 'action:login') {
@@ -468,9 +714,33 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
+    if (msg.type === 'action:openLink') {
+      try {
+        await vscode.env.openExternal(vscode.Uri.parse(WEBVIEW_LINKS[msg.link]));
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:openIdeDocs') {
+      try {
+        await vscode.env.openExternal(vscode.Uri.parse(IDE_DOCS_LINKS[msg.ideId]));
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
     if (msg.type === 'action:openStoragePath') {
       try {
-        await vscode.env.openExternal(vscode.Uri.file(msg.path));
+        const inventory = await this._computeStorageInventory();
+        const entry = inventory.find(candidate => candidate.id === msg.entryId);
+        if (!entry?.exists) {
+          this.postResult(msg.id, false, 'Storage entry is unavailable');
+          return;
+        }
+        await vscode.env.openExternal(vscode.Uri.file(entry.path));
         this.postResult(msg.id, true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
@@ -536,26 +806,26 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         });
 
         if (result?.[0]) {
-          let execPath = result[0].fsPath;
-          if (process.platform === 'darwin' && execPath.endsWith('.app')) {
-            const appName = path.basename(execPath, '.app');
-            execPath = path.join(execPath, 'Contents', 'MacOS', appName);
+          const browser = resolveCustomBrowserExecutable(result[0].fsPath);
+          if (!browser) {
+            void vscode.window.showWarningMessage('Only Chromium-based browsers are supported (Chrome, Edge, Chromium, Brave).');
+            this.postResult(msg.id, false, 'Unsupported browser executable');
+            return;
           }
 
-          const base = path.basename(execPath).toLowerCase();
-          const isChromium = ['chrome', 'chromium', 'edge', 'msedge', 'brave'].some(n => base.includes(n));
-          if (!isChromium) {
-            vscode.window.showWarningMessage('Only Chromium-based browsers are supported (Chrome, Edge, Chromium, Brave).');
-          }
-
-          const choice = { mode: 'custom' as const, executablePath: execPath, label: path.basename(execPath) };
+          const choice: HostBrowserChoice = {
+            mode: 'custom',
+            channel: browser.channel,
+            executablePath: browser.executablePath,
+            label: browser.label,
+          };
           const cfg = vscode.workspace.getConfiguration('airtableFormula');
           await cfg.update('auth.browserChoice', choice, vscode.ConfigurationTarget.Global);
           this.authManager?.refreshBrowserDetection();
           await this.rewriteConfiguredIdeMcpEntries();
           await this.pushState();
         }
-        this.postResult(msg.id, true);
+        this.postResult(msg.id, result?.[0] !== undefined, result?.[0] ? undefined : 'Cancelled', result?.[0] ? undefined : true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
       }
@@ -563,8 +833,29 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'action:setBrowserChoice') {
       try {
+        let choice: HostBrowserChoice;
+        if (msg.choice.mode === 'auto') {
+          choice = { mode: 'auto' };
+        } else {
+          const downloadedPath = this.authManager?.getDownloadedBrowserExecutablePath();
+          const browsers = detectAllBrowsers(downloadedPath);
+          const selected = browsers.find(
+            browser => browser.found && browser.id === msg.choice.browserId,
+          );
+          if (!selected?.found) {
+            this.postResult(msg.id, false, 'Selected browser is no longer available');
+            return;
+          }
+          choice = {
+            mode: 'custom',
+            channel: selected.channel,
+            executablePath: selected.executablePath,
+            label: selected.label,
+            detectedId: selected.id,
+          };
+        }
         const cfg = vscode.workspace.getConfiguration('airtableFormula');
-        await cfg.update('auth.browserChoice', msg.choice, vscode.ConfigurationTarget.Global);
+        await cfg.update('auth.browserChoice', choice, vscode.ConfigurationTarget.Global);
         this.authManager?.refreshBrowserDetection();
         await this.rewriteConfiguredIdeMcpEntries();
         await this.pushState();
@@ -645,36 +936,31 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
 
     if (msg.type === 'setting:change') {
-      // Open external URL (used by footer links)
-      if (msg.key === '_openUrl' && typeof msg.value === 'string') {
-        vscode.env.openExternal(vscode.Uri.parse(msg.value));
-        return;
+      try {
+        const { change } = msg;
+        if (change.key === 'mcp.toolProfile') {
+          if (!this.toolProfileManager) {
+            throw new Error('Tool profile manager is unavailable');
+          }
+          await this.toolProfileManager.setProfile(change.value);
+        } else if (change.key === 'mcp.category') {
+          if (!this.toolProfileManager) {
+            throw new Error('Tool profile manager is unavailable');
+          }
+          await this.toolProfileManager.toggleCategory(change.category, change.value);
+        } else {
+          await updateWebviewSetting(change);
+        }
+
+        const sideEffectKey = this.configurationSideEffectKey(change.key);
+        if (sideEffectKey) {
+          await this.applyConfigurationSideEffect(sideEffectKey);
+        }
+        await this.pushState();
+        this.postResult(msg.id, true);
+      } catch (err) {
+        this.postResult(msg.id, false, err instanceof Error ? err.message : String(err));
       }
-      // Route tool profile changes through the manager so it updates both
-      // VS Code settings and the on-disk config atomically.
-      if (msg.key === 'mcp.toolProfile' && this.toolProfileManager) {
-        await this.toolProfileManager.setProfile(msg.value as any);
-      } else if (msg.key.startsWith('mcp.categories.') && this.toolProfileManager) {
-        const cat = msg.key.replace('mcp.categories.', '') as any;
-        await this.toolProfileManager.toggleCategory(cat, msg.value as boolean);
-      } else {
-        await updateSetting(msg.key, msg.value);
-      }
-      // Restart auto-refresh if auth settings changed
-      if (msg.key.startsWith('auth.')) {
-        this.authManager?.restartAutoRefresh();
-      }
-      // Transport settings (authMode / httpClient / browserIdleParkMinutes) are injected
-      // into the daemon env at spawn time, so a running daemon must be restarted for the
-      // change to take effect. Same flow serves settings.json / Settings-UI edits via
-      // extension.ts's onDidChangeConfiguration → applyTransportSettingChange().
-      if (msg.key === 'mcp.authMode' || msg.key === 'mcp.httpClient' || msg.key === 'mcp.browserIdleParkMinutes') {
-        void this.applyTransportSettingChange();
-      }
-      await this.pushState();
-      // No postResult here — setting:change has no id field and the webview
-      // does not register a pending action for it; posting action:result with
-      // id:'' would break acknowledgement routing.
       return;
     }
 
@@ -1003,6 +1289,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
     if (msg.type === 'action:delete-prompt') {
       try {
+        const choice = await vscode.window.showWarningMessage(
+          `Delete prompt "${msg.name}"?`,
+          { modal: true },
+          'Delete',
+        );
+        if (choice !== 'Delete') {
+          this.postResult(msg.id, false, 'Cancelled', true);
+          return;
+        }
         await this._writePromptConfig(cfg => {
           cfg.custom = ((cfg.custom ?? []) as { name: string }[]).filter(p => p.name !== msg.name);
         });
@@ -1014,6 +1309,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
     if (msg.type === 'action:reset-prompt') {
       try {
+        const choice = await vscode.window.showWarningMessage(
+          `Reset prompt "${msg.name}" to its built-in definition?`,
+          { modal: true },
+          'Reset',
+        );
+        if (choice !== 'Reset') {
+          this.postResult(msg.id, false, 'Cancelled', true);
+          return;
+        }
         await this._writePromptConfig(cfg => {
           if (cfg.overrides) delete cfg.overrides[msg.name];
         });
@@ -1021,6 +1325,37 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
       return;
+    }
+    if (msg.type === 'confirmation:request') {
+      const choice = await vscode.window.showWarningMessage(
+        CONFIRMATION_COPY[msg.kind],
+        { modal: true },
+        'Discard',
+      );
+      this.view?.webview.postMessage({
+        type: 'confirmation:result',
+        id: msg.id,
+        confirmed: choice === 'Discard',
+      });
+      return;
+    }
+  }
+
+  private configurationSideEffectKey(
+    key: import('@airtable-formula/shared').WebviewSettingChange['key'],
+  ): ConfigurationSideEffectKey | undefined {
+    switch (key) {
+      case 'auth.autoRefresh':
+      case 'auth.refreshIntervalHours':
+      case 'mcp.serverSource':
+      case 'mcp.authMode':
+      case 'mcp.httpClient':
+      case 'mcp.browserIdleParkMinutes':
+      case 'debug.enabled':
+      case 'debug.bufferSize':
+        return key;
+      default:
+        return undefined;
     }
   }
 
@@ -1129,6 +1464,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           daemonPort:             settings.mcp.daemonPort,
           authMode:               settings.mcp.authMode,
           httpClient:             settings.mcp.httpClient,
+          useDaemon:              settings.mcp.useDaemon,
+          browserIdleParkMinutes: settings.mcp.browserIdleParkMinutes,
         },
         ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
         formula: { formatterVersion: settings.formula.formatterVersion },
@@ -1137,7 +1474,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           autoRefresh: settings.auth.autoRefresh,
           refreshIntervalHours: settings.auth.refreshIntervalHours,
           loginMode: settings.auth.loginMode,
-          browserChoice: settings.auth.browserChoice,
+          browserChoice: authState.browserChoice,
         },
         debug:   { enabled: settings.debug.enabled, verboseHttp: settings.debug.verboseHttp, bufferSize: settings.debug.bufferSize },
       },
@@ -1150,7 +1487,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       prompts:          await this._computePromptsState(),
     };
 
-    this.view.webview.postMessage({ type: 'state:update', payload: state });
+    this.view.webview.postMessage({
+      type: 'state:update',
+      payload: withoutUndefined(state),
+    });
   }
 
   private async _computeStorageInfo(): Promise<import('@airtable-formula/shared').StorageInfo> {
@@ -1159,34 +1499,35 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       return this._storageCache.info;
     }
 
-    const fsP = await import('fs/promises');
-    const pathMod = await import('path');
-    const osMod = await import('os');
-
-    const configDir = pathMod.join(osMod.homedir(), '.airtable-user-mcp');
-    const profileDir = pathMod.join(configDir, '.chrome-profile');
-    const toolConfig = pathMod.join(configDir, 'tools-config.json');
-
-    const entries: import('@airtable-formula/shared').StorageEntry[] = [];
-
-    entries.push(await this._storageEntry('Browser Profile', profileDir, fsP));
-    entries.push(await this._storageEntry('Tool Config', toolConfig, fsP));
-
-    // Bundled Chromium (if applicable)
-    if (this.authManager) {
-      const dlMgr = (this.authManager as any)._downloadManager;
-      if (dlMgr) {
-        const storageDir: string = dlMgr.getStorageDir();
-        entries.push(await this._storageEntry('Bundled Chromium', storageDir, fsP));
-      }
-    }
-
-    const info = { entries };
+    const inventory = await this._computeStorageInventory();
+    const info = {
+      entries: inventory.map(({ path: _path, ...entry }) => entry),
+    };
     this._storageCache = { info, ts: now };
     return info;
   }
 
-  private async _storageEntry(label: string, itemPath: string, fsP: typeof import('fs/promises')): Promise<import('@airtable-formula/shared').StorageEntry> {
+  private async _computeStorageInventory(): Promise<HostStorageEntry[]> {
+    const fsP = await import('fs/promises');
+    const configDir = path.join(os.homedir(), '.airtable-user-mcp');
+    const profileDir = path.join(configDir, '.chrome-profile');
+    const toolConfig = path.join(configDir, 'tools-config.json');
+    const storageDir = this.authManager?.getBrowserStorageDir()
+      ?? path.join(this.context.globalStorageUri.fsPath, 'browsers');
+
+    return Promise.all([
+      this._storageEntry('browser-profile', 'Browser Profile', profileDir, fsP),
+      this._storageEntry('tool-config', 'Tool Config', toolConfig, fsP),
+      this._storageEntry('bundled-chromium', 'Bundled Chromium', storageDir, fsP),
+    ]);
+  }
+
+  private async _storageEntry(
+    id: StorageEntryId,
+    label: string,
+    itemPath: string,
+    fsP: typeof import('fs/promises'),
+  ): Promise<HostStorageEntry> {
     try {
       const stat = await fsP.stat(itemPath);
       let sizeBytes: number;
@@ -1195,9 +1536,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       } else {
         sizeBytes = stat.size;
       }
-      return { label, path: itemPath, sizeBytes, exists: true };
+      return { id, label, path: itemPath, sizeBytes, exists: true };
     } catch {
-      return { label, path: itemPath, exists: false };
+      return { id, label, path: itemPath, exists: false };
     }
   }
 
@@ -1542,13 +1883,25 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           } catch (err) {
             this._debugCollector?.trace('ext', 'error', 'mcp_config:rewrite_failed', { ideId: s.ideId }, String(err));
             console.error(`[airtable-formula] Failed to re-apply MCP config for ${s.ideId}:`, err);
+            throw err;
           }
         }),
     );
   }
 
-  private postResult(id: string, ok: boolean, error?: string): void {
-    this.view?.webview.postMessage({ type: 'action:result', id, ok, error });
+  private postResult(
+    id: string,
+    ok: boolean,
+    error?: string,
+    cancelled?: boolean,
+  ): void {
+    this.view?.webview.postMessage({
+      type: 'action:result',
+      id,
+      ok,
+      ...(error === undefined ? {} : { error }),
+      ...(cancelled === undefined ? {} : { cancelled }),
+    });
   }
 
   private async readBundledMcpVersion(): Promise<string> {

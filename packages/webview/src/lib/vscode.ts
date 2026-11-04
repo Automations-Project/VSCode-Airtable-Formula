@@ -1,4 +1,4 @@
-import type { WebviewMessage, ExtensionMessage } from '@shared/messages.js';
+import type { WebviewMessage } from '@shared/messages.js';
 
 declare function acquireVsCodeApi(): {
   postMessage(msg: unknown): void;
@@ -23,8 +23,30 @@ export function sendToExtension(msg: WebviewMessage): void {
   vscodeApi.postMessage(msg);
 }
 
-export function onExtensionMessage(handler: (msg: ExtensionMessage) => void): () => void {
-  const listener = (event: MessageEvent) => handler(event.data as ExtensionMessage);
+export interface PersistedWebviewState {
+  activeTab?: import('@shared/types.js').DashboardTabId;
+}
+
+export function getPersistedState(): PersistedWebviewState | undefined {
+  if (!vscodeApi) return undefined;
+  const value = vscodeApi.getState();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const activeTab = (value as { activeTab?: unknown }).activeTab;
+  if (
+    typeof activeTab !== 'string'
+    || !['overview', 'setup', 'prompts', 'settings'].includes(activeTab)
+  ) {
+    return undefined;
+  }
+  return { activeTab: activeTab as PersistedWebviewState['activeTab'] };
+}
+
+export function setPersistedState(state: PersistedWebviewState): void {
+  vscodeApi?.setState({ activeTab: state.activeTab });
+}
+
+export function onExtensionMessage(handler: (input: unknown) => void): () => void {
+  const listener = (event: MessageEvent<unknown>) => handler(event.data);
   window.addEventListener('message', listener);
   return () => window.removeEventListener('message', listener);
 }
