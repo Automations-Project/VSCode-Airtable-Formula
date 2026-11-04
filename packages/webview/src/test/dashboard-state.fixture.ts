@@ -29,13 +29,13 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
     mcp: {
       autoConfigureOnInstall: true, notifyOnUpdates: true,
       toolProfile: {
-        profile: 'safe-write', enabledCount: 54, totalCount: 71,
+        profile: 'safe-write', enabledCount: 54, totalCount: 72,
         categories: {
           read: true, recordRead: true, tableWrite: true, tableDestructive: true,
           fieldWrite: true, fieldDestructive: true, recordDestructive: false,
           viewWrite: true, viewDestructive: true, viewSection: true,
           viewSectionDestructive: true, formWrite: true, extension: true,
-          recordWrite: true, sync: false,
+          recordWrite: true, sync: false, daemon: false, localWrite: true,
         },
       },
       serverSource: 'bundled', daemonPort: 8723, authMode: 'browser', httpClient: 'fetch',

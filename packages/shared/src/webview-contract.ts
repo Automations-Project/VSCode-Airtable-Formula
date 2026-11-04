@@ -96,7 +96,16 @@ const TOOL_CATEGORY_KEYS = [
   'extension',
   'recordWrite',
   'sync',
+  'daemon',
+  'localWrite',
 ] as const;
+// Compile-time guard: the key list must match ToolCategories exactly, so a
+// category added to the shared type cannot silently make every state:update
+// fail the exact-keys check at runtime.
+const _toolCategoryKeysMatchType: [keyof ToolCategories] extends [(typeof TOOL_CATEGORY_KEYS)[number]]
+  ? [(typeof TOOL_CATEGORY_KEYS)[number]] extends [keyof ToolCategories] ? true : never
+  : never = true;
+void _toolCategoryKeysMatchType;
 const TUNNEL_PROVIDER_IDS = ['cf-quick', 'ngrok', 'cf-named'] as const;
 const TUNNEL_STATUSES = [
   'disabled',

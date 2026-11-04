@@ -55,6 +55,8 @@ const completeDashboardState = {
           extension: false,
           recordWrite: true,
           sync: false,
+          daemon: false,
+          localWrite: true,
         },
       },
       serverSource: 'bundled',
@@ -399,6 +401,8 @@ describe('parseWebviewMessage', () => {
       { key: 'mcp.browserIdleParkMinutes', value: 525600 },
       { key: 'mcp.toolProfile', value: 'safe-write' },
       { key: 'mcp.category', category: 'viewSection', value: true },
+      { key: 'mcp.category', category: 'daemon', value: false },
+      { key: 'mcp.category', category: 'localWrite', value: true },
       { key: 'formula.formatterVersion', value: 'v1' },
       { key: 'script.beautifyStyle', value: 'semicolonFree' },
       { key: 'script.minifyLevel', value: 'extreme' },
@@ -712,6 +716,29 @@ describe('parseExtensionMessage', () => {
         },
       },
     }).ok).toBe(false);
+  });
+
+  it('requires every ToolCategories key, including daemon and localWrite', () => {
+    for (const missing of ['daemon', 'localWrite'] as const) {
+      const { [missing]: _omitted, ...categories } =
+        completeDashboardState.settings.mcp.toolProfile.categories;
+      expect(parseExtensionMessage({
+        type: 'state:update',
+        payload: {
+          ...completeDashboardState,
+          settings: {
+            ...completeDashboardState.settings,
+            mcp: {
+              ...completeDashboardState.settings.mcp,
+              toolProfile: {
+                ...completeDashboardState.settings.mcp.toolProfile,
+                categories,
+              },
+            },
+          },
+        },
+      }).ok).toBe(false);
+    }
   });
 
   it('rejects inherited nested state fields', () => {

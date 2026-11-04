@@ -27,7 +27,7 @@ async function trackActionResults(): Promise<void> {
 
 export const vscodeApiMock = {
   postMessage: vi.fn(),
-  getState: vi.fn<[], unknown>().mockReturnValue(undefined),
+  getState: vi.fn<() => unknown>().mockReturnValue(undefined),
   setState: vi.fn(),
 };
 
