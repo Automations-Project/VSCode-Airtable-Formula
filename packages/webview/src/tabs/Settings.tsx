@@ -736,7 +736,7 @@ export function Settings() {
 
           {settings.mcp.toolProfile.profile === 'custom' && (
             <div className="stack stack-sm" style={{ paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (11 tools)" value={settings.mcp.toolProfile.categories.read}                   settingKey="mcp.categories.read" />
+              <SettingToggle label="Read / Inspect"       desc="Schema, fields, views, formula validation, sidebar sections, record templates (9 tools)" value={settings.mcp.toolProfile.categories.read}                    settingKey="mcp.categories.read" />
               <SettingToggle label="Record Read"          desc="query_records — snapshot read of up to 1000 rows per call (1 tool)"                            value={settings.mcp.toolProfile.categories.recordRead}             settingKey="mcp.categories.recordRead" />
               <SettingToggle label="Table Write"          desc="Tables + record templates: create / rename / update / set cells / duplicate / apply (9 tools)" value={settings.mcp.toolProfile.categories.tableWrite}             settingKey="mcp.categories.tableWrite" />
               <SettingToggle label="Table Destructive"    desc="delete_table, delete_record_template (2 tools)"                              value={settings.mcp.toolProfile.categories.tableDestructive}       settingKey="mcp.categories.tableDestructive" />
@@ -751,6 +751,7 @@ export function Settings() {
               <SettingToggle label="Record Write"         desc="create_records, update_records, duplicate_records, upload_attachment — bulk record create / update / duplication / attachment upload (4 tools)" value={settings.mcp.toolProfile.categories.recordWrite}            settingKey="mcp.categories.recordWrite" />
               <SettingToggle label="Record Destructive"   desc="delete_records — batch record deletion (1 tool)"                              value={settings.mcp.toolProfile.categories.recordDestructive}      settingKey="mcp.categories.recordDestructive" />
               <SettingToggle label="Sync"                 desc="sync_base — plan/diff/status are read-only; apply mutates the destination and can delete under policy=mirror (1 tool)" value={settings.mcp.toolProfile.categories.sync}                   settingKey="mcp.categories.sync" />
+              <SettingToggle label="Local File Write"     desc="download_formula_field, download_base_formulas — read formulas from Airtable and WRITE .formula files to a path the caller chooses. Not part of read-only (2 tools)" value={settings.mcp.toolProfile.categories.localWrite}             settingKey="mcp.categories.localWrite" />
               <SettingToggle label="Daemon Control"       desc="manage_daemon — status is read-only diagnostics; start / restart / stop / tunnel / token_rotate control the MCP server process itself (1 tool)" value={settings.mcp.toolProfile.categories.daemon}                 settingKey="mcp.categories.daemon" />
             </div>
           )}

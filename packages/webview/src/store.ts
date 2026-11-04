@@ -72,7 +72,7 @@ const defaultSettings: SettingsSnapshot = {
         viewWrite: true, viewDestructive: true,
         viewSection: true, viewSectionDestructive: true,
         formWrite: true, extension: true, recordWrite: true,
-        sync: false, daemon: false,
+        sync: false, daemon: false, localWrite: true,
       },
     },
     serverSource: 'bundled' as const,

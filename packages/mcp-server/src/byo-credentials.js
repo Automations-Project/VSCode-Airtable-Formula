@@ -47,6 +47,20 @@ export function scrapeCsrf(html) {
   return null;
 }
 
+/** Headers for fetching Airtable HTML pages (login page, authed homepage) from Node.
+ *  Airtable's bot protection (PerimeterX) answers Node fetch's default User-Agent with a
+ *  403 "Verify it’s you" challenge page instead of the page — JSON API routes are not gated. */
+export const PAGE_HEADERS = Object.freeze({
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+});
+
+/** True when `html` is PerimeterX's challenge page rather than an Airtable page. */
+export function isBotChallenge(html) {
+  return typeof html === 'string' && /_pxAppId|px-captcha|Verify it.s you/i.test(html);
+}
+
 /**
  * Resolve a BYO cookie header + csrf token.
  *
@@ -114,8 +128,14 @@ export async function loadByoCredentials({ fetchImpl } = {}) {
   if (!csrfToken) {
     const fetchFn = fetchImpl || globalThis.fetch;
     try {
-      const res = await fetchFn('https://airtable.com/', { headers: { Cookie: cookieHeader } });
+      const res = await fetchFn('https://airtable.com/', { headers: { ...PAGE_HEADERS, Cookie: cookieHeader } });
       const html = await res.text();
+      if (isBotChallenge(html)) {
+        console.error(
+          '[byo] airtable.com answered the csrf scrape with a bot challenge (PerimeterX) instead of a page — ' +
+          'set AIRTABLE_HTTP_CLIENT=impit (Chrome TLS impersonation) or supply "csrf" explicitly.'
+        );
+      }
       csrfToken = scrapeCsrf(html);
       userId = scrapeSessionUserId(html);
     } catch (err) {

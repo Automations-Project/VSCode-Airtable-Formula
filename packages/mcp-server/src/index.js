@@ -138,8 +138,35 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve as resolvePath, sep as pathSep } from 'node:path';
 import path from 'path';
+
+/**
+ * Join Airtable-supplied name segments under `baseDir` and prove the result did
+ * not escape it.
+ *
+ * Table and field names come from the BASE, not from us, so they are attacker
+ * influenced by anyone who can edit a base the user can read. The old sanitiser
+ * stripped separators (`/\:*?"<>|`) but not `.`, so a table literally named `..`
+ * produced `<outputDir>/..` and wrote every formula file one directory ABOVE the
+ * directory the user chose.
+ */
+function confineToDir(baseDir, ...segments) {
+  const root = resolvePath(baseDir);
+  const safe = segments.map((s) => {
+    const cleaned = String(s).replace(/[/\\:*?"<>|]/g, '_');
+    // A segment of only dots is traversal, not a name.
+    return /^\.+$/.test(cleaned) ? '_' : cleaned;
+  });
+  const full = resolvePath(root, ...safe);
+  if (full !== root && !full.startsWith(root + pathSep)) {
+    throw new Error(`refusing to write outside ${root} (resolved to ${full})`);
+  }
+  return full;
+}
+
+/** Airtable-supplied text going into a `# AT:` header line — must stay one line. */
+const headerSafe = (s) => String(s).replace(/[\r\n]+/g, ' ').replace(/"/g, "'");
 import { stripHeader } from './formula-header.js';
 import { formulaRefsToNames, buildFieldNameMap } from './formula-refs.js';
 import { uploadAttachmentsByUrl } from './attachments.js';
@@ -660,7 +687,11 @@ SELECT CHOICES:
   {
     name: 'download_formula_field',
     description: 'Download the formula text of a formula field to a local file. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so the file is readable and can be uploaded back unchanged. Writes a .formula file with a # AT: metadata header (appId, tableId, fieldId, fieldName) so the file can later be uploaded back with update_formula_field or the VS Code right-click command. When outputPath is omitted, returns the formula text without writing a file.',
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // NOT readOnlyHint: this tool WRITES a file to a caller-supplied path.
+    // readOnlyHint is the signal MCP clients use to auto-approve without
+    // prompting, so claiming it here removed the user's consent step from a
+    // filesystem write. It overwrites whatever is at that path, hence destructive.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
@@ -675,7 +706,11 @@ SELECT CHOICES:
   {
     name: 'download_base_formulas',
     description: 'Download ALL formula fields from a base to local .formula files, organized into per-table subfolders. Field refs are resolved to real field names ({Field Name}, Airtable\'s native syntax) so files are readable and upload back unchanged. Each file includes a # AT: header with appId, tableId, fieldId, fieldName, description, and resultType. Tables with no formula fields are silently skipped. outputDir defaults to the current working directory when omitted.',
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    // NOT readOnlyHint: this tool WRITES a file to a caller-supplied path.
+    // readOnlyHint is the signal MCP clients use to auto-approve without
+    // prompting, so claiming it here removed the user's consent step from a
+    // filesystem write. It overwrites whatever is at that path, hence destructive.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     inputSchema: {
       type: 'object',
       properties: {
@@ -2054,7 +2089,7 @@ const handlers = {
       return ok({ written: false, formulaText, fieldName, tableId: foundTableId, description, resultType }, raw, debug);
     }
     const headerLines = [
-      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${fieldName.replace(/"/g, "'")}"`,
+      `# AT: appId=${appId} tableId=${foundTableId} fieldId=${fieldId} fieldName="${headerSafe(fieldName)}"`,
       description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
       resultType ? `# AT: resultType=${resultType}` : null,
     ].filter(Boolean).join('\n');
@@ -2076,8 +2111,10 @@ const handlers = {
       const formulaFields = fields.filter(f => f.type === 'formula');
       if (formulaFields.length === 0) continue;
 
-      const safeTableName = (table.name ?? table.id).replace(/[/\\:*?"<>|]/g, '_');
-      const tableDir = `${baseDir}/${safeTableName}`;
+      // Table names come from the base, not from us. confineToDir also rejects a
+      // dot-only name: the old sanitiser stripped separators but not `.`, so a
+      // table named `..` wrote every file one directory above the chosen one.
+      const tableDir = confineToDir(baseDir, table.name ?? table.id);
       await mkdir(tableDir, { recursive: true });
 
       for (const field of formulaFields) {
@@ -2094,13 +2131,12 @@ const handlers = {
         const resultType = field.typeOptions?.resultType ?? '';
 
         const headerLines = [
-          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${fieldName.replace(/"/g, "'")}"`,
+          `# AT: appId=${appId} tableId=${table.id} fieldId=${field.id} fieldName="${headerSafe(fieldName)}"`,
           description ? `# AT: description="${description.replace(/\n/g, ' ').replace(/"/g, "'")}"` : null,
           resultType ? `# AT: resultType=${resultType}` : null,
         ].filter(Boolean).join('\n');
 
-        const safeFieldName = fieldName.replace(/[/\\:*?"<>|]/g, '_');
-        const filePath = `${tableDir}/${safeFieldName}.formula`;
+        const filePath = confineToDir(tableDir, `${fieldName}.formula`);
         const content = headerLines + '\n' + formulaText;
         await writeFile(filePath, content, 'utf8');
         written.push({ path: filePath, tableName: table.name, tableId: table.id, fieldName, fieldId: field.id });
@@ -2577,6 +2613,18 @@ const handlers = {
 
   async sync_base({ mode, sourceAppId, destAppId, planId, naturalKeys, detail, diffId, offset, limit, direction, skip, policy, policyOverrides, confirmDeletions, confirmTableDeletions, confirmRetypes, fieldMappings, strictDrift, resumeAfterDrift, verbose, debug }) {
     const sync = await import('./sync/index.js');
+    // planId/diffId are interpolated into on-disk filenames (`plan-<id>.json`,
+    // `diff-<id>.json`, `sync-job-<id>.json`) and join() normalises `..`, so an id
+    // like "x/../../tools-config" wrote a sync blob over
+    // ~/.airtable-user-mcp/tools-config.json — which ToolConfigManager.load() then
+    // merges over defaultConfig(), whose activeProfile is 'full'. That is a gap in
+    // this project's own anti-traversal control (AIRTABLE_ID_RE, "Prevents path
+    // traversal"), so close it the same way.
+    for (const [label, value] of [['planId', planId], ['diffId', diffId]]) {
+      if (value != null && !/^[A-Za-z0-9_-]+$/.test(String(value))) {
+        return err(`${label} must contain only letters, digits, "-" and "_" (got ${JSON.stringify(String(value))})`);
+      }
+    }
     if (mode === 'plan') {
       // Plan snapshots BOTH bases (a getView/readData per view — minutes on a view-heavy base),
       // which blows past the MCP response window (Connection closed) even though the plan is

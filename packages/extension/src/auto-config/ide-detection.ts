@@ -82,7 +82,10 @@ export async function writeConfigAtomic(filePath: string, config: Record<string,
   const tmp = `${filePath}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   try {
-    await fs.promises.writeFile(tmp, JSON.stringify(config, null, 2) + '\n', 'utf8');
+    // 0600 — this file carries the Airtable PAT (Authorization: Bearer pat…). The
+    // rename below replaces the destination inode, so without an explicit mode any
+    // restrictive permissions the user had set are reset to 0644. No-op on Windows.
+    await fs.promises.writeFile(tmp, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
     await fs.promises.rename(tmp, filePath);
   } catch (err) {
     await fs.promises.unlink(tmp).catch(() => {});

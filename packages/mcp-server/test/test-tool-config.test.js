@@ -44,7 +44,7 @@ describe('TOOL_CATEGORIES', () => {
       .filter(([, cat]) => cat === 'read')
       .map(([name]) => name);
     assert.deepEqual(readTools.sort(), [
-      'download_base_formulas', 'download_formula_field', 'get_base_schema', 'get_table_schema', 'get_view', 'list_fields', 'list_record_templates', 'list_tables', 'list_view_sections', 'list_views', 'validate_formula',
+      'get_base_schema', 'get_table_schema', 'get_view', 'list_fields', 'list_record_templates', 'list_tables', 'list_view_sections', 'list_views', 'validate_formula',
     ]);
   });
 
@@ -123,10 +123,14 @@ describe('ToolConfigManager', () => {
   });
 
   describe('enabledToolNames() for each profile', () => {
-    it('read-only enables only 12 read tools', async () => {
+    it('read-only enables only 10 read tools (no file-writing tools)', async () => {
       await mgr.switchProfile('read-only');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 12);
+      assert.equal(enabled.size, 10);
+      // The reason the count dropped: a profile advertised as "reading only" must not
+      // contain a tool that creates/overwrites files at a caller-supplied path.
+      assert.ok(!enabled.has('download_formula_field'), 'read-only must not write files');
+      assert.ok(!enabled.has('download_base_formulas'), 'read-only must not write files');
       assert.ok(enabled.has('get_base_schema'));
       assert.ok(enabled.has('get_view'));
       assert.ok(enabled.has('validate_formula'));
@@ -165,7 +169,7 @@ describe('ToolConfigManager', () => {
       // tampered tools-config.json by mutating loaded state directly.
       mgr._config.activeProfile = 'totally-bogus';
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 12, 'must match the read-only tool count');
+      assert.equal(enabled.size, 10, 'must match the read-only tool count');
       assert.ok(enabled.has('get_base_schema'));
       assert.ok(!enabled.has('delete_table'));
       assert.ok(!enabled.has('delete_field'));

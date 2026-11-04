@@ -190,6 +190,39 @@ describe('directLogin — a non-2xx final GET / is not a signed-out verdict', ()
   });
 });
 
+describe('directLogin — Airtable bot protection (PerimeterX) on the HTML routes', () => {
+  const CHALLENGE = "<html><head><script> window._pxAppId = 'PX0OZADU9K'; window._pxJsClientSrc = '/0OZADU9K/init.js';</script><title>Verify it’s you — Airtable</title>";
+
+  it('every login-flow request carries Chrome-like page headers (GET /login first)', async () => {
+    const impit = makeFakeImpit([{ status: 200, body: '<html>no token</html>' }]);
+    await assert.rejects(() => directLogin({ ...CREDS, impitFactory: () => impit }), /DIRECT_LOGIN_NO_CSRF/);
+    const { headers } = impit.calls[0].options;
+    assert.match(impit.calls[0].url, /\/login$/);
+    assert.match(headers['User-Agent'], /^Mozilla\//);
+    assert.match(headers['Accept'], /text\/html/);
+  });
+
+  it('a PerimeterX challenge page on GET /login → DIRECT_LOGIN_NO_CSRF naming the bot protection + impit remedy', async () => {
+    const impit = makeFakeImpit([{ status: 403, body: CHALLENGE }]);
+    await assert.rejects(() => directLogin({ ...CREDS, impitFactory: () => impit }), (err) => {
+      assert.match(err.message, /DIRECT_LOGIN_NO_CSRF/);
+      assert.match(err.message, /bot protection/);
+      assert.match(err.message, /AIRTABLE_HTTP_CLIENT=impit/);
+      return true;
+    });
+  });
+
+  it('a 200 page with no token keeps the plain "changed the login page" message (no bot-protection claim)', async () => {
+    const impit = makeFakeImpit([{ status: 200, body: '<html><body>hello</body></html>' }]);
+    await assert.rejects(() => directLogin({ ...CREDS, impitFactory: () => impit }), (err) => {
+      assert.match(err.message, /DIRECT_LOGIN_NO_CSRF/);
+      assert.match(err.message, /may have changed the login page/);
+      assert.doesNotMatch(err.message, /bot protection/);
+      return true;
+    });
+  });
+});
+
 describe('directLogin — failure branches', () => {
   it('SSO account → throws DIRECT_LOGIN_SSO_UNSUPPORTED before attempting a password login', async () => {
     const impit = makeFakeImpit([

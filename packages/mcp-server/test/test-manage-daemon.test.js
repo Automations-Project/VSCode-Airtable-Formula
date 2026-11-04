@@ -17,7 +17,10 @@ import { startDaemonServer } from '../src/daemon/server.js';
 import { getLockfilePath, replace as replaceLock } from '../src/daemon/lockfile.js';
 import { ensureToken, getTokenPath } from '../src/daemon/token.js';
 import { adminRequest } from '../src/daemon/launcher.js';
-import { requestDaemonExit, takeDaemonExit, peekDaemonExit, clearDaemonExit } from '../src/daemon/exit-intent.js';
+import {
+  requestDaemonExit, takeDaemonExit, peekDaemonExit, clearDaemonExit,
+  discardDaemonExit, withDaemonExitOwner,
+} from '../src/daemon/exit-intent.js';
 import {
   clearStopSentinel, getStopSentinelPath, readStopSentinel, writeStopSentinel,
 } from '../src/daemon/stop-sentinel.js';
@@ -88,9 +91,10 @@ async function waitFor(predicate, timeoutMs = 5_000) {
   throw new Error('waitFor timed out');
 }
 
-function callTool(port, bearer, name, args = {}, headers = {}) {
+function callTool(port, bearer, name, args = {}, headers = {}, signal) {
   return fetch(`http://127.0.0.1:${port}/mcp`, {
     method: 'POST',
+    signal,
     headers: {
       Authorization: `Bearer ${bearer}`,
       'Content-Type': 'application/json',
@@ -426,6 +430,68 @@ describe('manage_daemon idempotency', () => {
   });
 });
 
+// ─── stop/restart vs an exit already staged ───────────────────
+
+describe('manage_daemon when an exit is already staged', () => {
+  let dir;
+  beforeEach(() => { dir = tmp('staged'); clearDaemonExit(); });
+  afterEach(() => { clearDaemonExit(); rmSync(dir, { recursive: true, force: true }); });
+
+  it('stop as the holder stages the exit and reports stopping', async () => {
+    const { srv, uuid } = await startFixtureDaemon(dir);
+    try {
+      const out = await manageDaemon(
+        { action: 'stop', reason: 'because' },
+        { configDir: dir, runtime: { uuid }, auth: fakeAuth() },
+      );
+      assert.equal(out.ok, true);
+      assert.equal(out.stopping, true);
+      assert.equal(peekDaemonExit()?.action, 'stop');
+      assert.equal(peekDaemonExit()?.reason, 'because');
+    } finally {
+      clearDaemonExit();
+      await srv.stop().catch(() => {});
+    }
+  });
+
+  it('stop as the holder is refused when another in-flight request already staged an exit', async () => {
+    const { srv, uuid } = await startFixtureDaemon(dir);
+    try {
+      const out = await manageDaemon(
+        { action: 'stop' },
+        {
+          configDir: dir, runtime: { uuid }, auth: fakeAuth(),
+          stageExit: () => ({ staged: false, pending: { action: 'restart', by: 'manage_daemon' } }),
+        },
+      );
+      assert.equal(out.refused, true);
+      assert.equal(out.ok, false);
+      assert.match(out.reason, /already staged/i);
+      assert.match(out.reason, /restart/);
+      assert.match(out.runInstead, /status/);
+    } finally {
+      await srv.stop().catch(() => {});
+    }
+  });
+
+  it('restart as the holder is refused when another in-flight request already staged an exit', async () => {
+    const { srv, uuid } = await startFixtureDaemon(dir);
+    try {
+      const out = await manageDaemon(
+        { action: 'restart' },
+        {
+          configDir: dir, runtime: { uuid }, auth: fakeAuth(),
+          stageExit: () => ({ staged: false, pending: { action: 'stop', by: 'manage_daemon' } }),
+        },
+      );
+      assert.equal(out.refused, true);
+      assert.match(out.reason, /already staged/i);
+    } finally {
+      await srv.stop().catch(() => {});
+    }
+  });
+});
+
 // ─── through the daemon's own routes ──────────────────────────
 
 describe('manage_daemon drives the daemon through its own routes', () => {
@@ -542,6 +608,49 @@ describe('stop sentinel', () => {
   });
 });
 
+// ─── exit-intent slot: overwrite refusal + owner-death scavenging ──
+
+describe('exit intent slot', () => {
+  beforeEach(() => clearDaemonExit());
+  afterEach(() => clearDaemonExit());
+
+  it('refuses to overwrite a still-pending intent and keeps the first owner', () => {
+    const ownerA = Symbol('A');
+    const ownerB = Symbol('B');
+    const first = withDaemonExitOwner(ownerA, () => requestDaemonExit({ action: 'stop', by: 'A' }));
+    assert.equal(first.staged, true);
+
+    const second = withDaemonExitOwner(ownerB, () => requestDaemonExit({ action: 'restart', by: 'B' }));
+    assert.equal(second.staged, false, 'a second stage while one is pending must be refused');
+    assert.equal(second.pending.action, 'stop', 'the refusal must name what is already staged');
+
+    // Ownership is unchanged: B cannot take it, A still can.
+    assert.equal(peekDaemonExit()?.by, 'A', 'the second request overwrote the first intent');
+    assert.equal(takeDaemonExit(ownerB), null);
+    assert.equal(takeDaemonExit(ownerA)?.action, 'stop');
+  });
+
+  it('owner-death discard clears the slot so a retry can stage — without executing', () => {
+    const ownerA = Symbol('A');
+    withDaemonExitOwner(ownerA, () => requestDaemonExit({ action: 'stop', by: 'A' }));
+    assert.equal(discardDaemonExit(ownerA), true);
+    assert.equal(peekDaemonExit(), null);
+
+    const ownerB = Symbol('B');
+    const retry = withDaemonExitOwner(ownerB, () => requestDaemonExit({ action: 'stop', by: 'B' }));
+    assert.equal(retry.staged, true, 'a scavenged slot must accept the retried stop');
+    assert.equal(takeDaemonExit(ownerB)?.by, 'B');
+  });
+
+  it('a non-owner cannot discard someone else\'s pending intent', () => {
+    const ownerA = Symbol('A');
+    withDaemonExitOwner(ownerA, () => requestDaemonExit({ action: 'stop', by: 'A' }));
+    assert.equal(discardDaemonExit(Symbol('B')), false);
+    assert.equal(discardDaemonExit(undefined), false);
+    assert.equal(peekDaemonExit()?.by, 'A');
+  });
+});
+
 // ─── mechanism 1: the post-response exit hook ─────────────────
 
 describe('post-response exit hook', () => {
@@ -589,6 +698,200 @@ describe('post-response exit hook', () => {
       assert.deepEqual(events, ['handler', 'shutdown'], 'the exit must run after the handler, not during it');
       assert.equal(takeDaemonExit(), null, 'the hook consumes the intent exactly once');
     } finally {
+      await server.stop().catch(() => {});
+    }
+  });
+
+  it('only the response that staged an exit intent may consume it', async () => {
+    const events = [];
+    let releaseOrdinary;
+    let releaseStop;
+    let ordinaryStartedResolve;
+    let stopStagedResolve;
+    const ordinaryGate = new Promise((resolve) => { releaseOrdinary = resolve; });
+    const stopGate = new Promise((resolve) => { releaseStop = resolve; });
+    const ordinaryStarted = new Promise((resolve) => { ordinaryStartedResolve = resolve; });
+    const stopStaged = new Promise((resolve) => { stopStagedResolve = resolve; });
+    const stopAbort = new AbortController();
+    const server = await startDaemonServer({
+      port: 0,
+      configDir: dir,
+      uuid: 'owned-hook-uuid',
+      getTools: async () => [],
+      callTool: async (request) => {
+        if (request.params.name === 'slow_read') {
+          ordinaryStartedResolve();
+          await ordinaryGate;
+          return { content: [{ type: 'text', text: 'ordinary complete' }] };
+        }
+        requestDaemonExit({ action: 'stop', by: 'manage_daemon', reason: null });
+        stopStagedResolve();
+        await stopGate;
+        return { content: [{ type: 'text', text: '{"stopping":true}' }] };
+      },
+      onShutdown: async () => { events.push('shutdown'); },
+    });
+
+    let ordinaryCall;
+    let stopCall;
+    try {
+      // Start an ordinary request first, then hold the stop request after it has
+      // staged the process-wide intent but before it can flush its own answer.
+      ordinaryCall = callTool(server.port, server.bearerToken, 'slow_read');
+      await ordinaryStarted;
+      stopCall = callTool(
+        server.port,
+        server.bearerToken,
+        'manage_daemon',
+        { action: 'stop' },
+        {},
+        stopAbort.signal,
+      );
+      await stopStaged;
+
+      // Finishing the older request must not steal the newer request's intent.
+      releaseOrdinary();
+      const ordinaryResponse = await ordinaryCall;
+      assert.equal(ordinaryResponse.status, 200);
+      await ordinaryResponse.json();
+      assert.equal(peekDaemonExit()?.action, 'stop', 'the unrelated response consumed the stop intent');
+      assert.deepEqual(events, [], 'shutdown began before the stop response could finish');
+
+      releaseStop();
+      const stopResponse = await stopCall;
+      assert.equal(stopResponse.status, 200);
+      const body = await stopResponse.json();
+      assert.match(body.result.content[0].text, /"stopping":true/);
+      await waitFor(() => events.includes('shutdown'));
+    } finally {
+      releaseOrdinary();
+      releaseStop();
+      stopAbort.abort();
+      await Promise.allSettled([ordinaryCall, stopCall].filter(Boolean));
+      await server.stop().catch(() => {});
+    }
+  });
+
+  it('a staging request that aborts before flushing scavenges its intent — a retried stop still stops the daemon', async () => {
+    const events = [];
+    let calls = 0;
+    let releaseFirst;
+    let firstStagedResolve;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const firstStaged = new Promise((resolve) => { firstStagedResolve = resolve; });
+    const abort = new AbortController();
+    const server = await startDaemonServer({
+      port: 0,
+      configDir: dir,
+      uuid: 'scavenge-uuid',
+      getTools: async () => [],
+      callTool: async () => {
+        calls += 1;
+        const result = requestDaemonExit({ action: 'stop', by: `caller-${calls}`, reason: null });
+        if (calls === 1) {
+          firstStagedResolve();
+          await firstGate; // hold the response open so the abort lands pre-flush
+        }
+        return { content: [{ type: 'text', text: JSON.stringify({ stopping: true, staged: result?.staged !== false }) }] };
+      },
+      onShutdown: async () => { events.push('shutdown'); },
+    });
+
+    let firstCall;
+    try {
+      firstCall = callTool(server.port, server.bearerToken, 'manage_daemon', { action: 'stop' }, {}, abort.signal);
+      await firstStaged;
+      assert.equal(peekDaemonExit()?.by, 'caller-1');
+
+      // The client goes away before the response can flush: 'close' with no
+      // 'finish'. The wedge this pins: without scavenging, the slot stays owned
+      // by a response that can never finish, and no later stop can ever stage.
+      // The gate stays HELD until the server has observed the close (the
+      // scavenger runs on socket close even while the handler is pending) —
+      // releasing earlier would race the abort against a normal 'finish'.
+      abort.abort();
+      await Promise.allSettled([firstCall]);
+      await waitFor(() => peekDaemonExit() === null);
+      assert.deepEqual(events, [], 'an aborted stop must never execute — its caller got no confirmation');
+      releaseFirst(); // let the zombie handler unwind into its closed transport
+
+      const retry = await callTool(server.port, server.bearerToken, 'manage_daemon', { action: 'stop' });
+      assert.equal(retry.status, 200);
+      const body = await retry.json();
+      assert.match(body.result.content[0].text, /"staged":true/);
+      await waitFor(() => events.includes('shutdown'));
+    } finally {
+      releaseFirst();
+      abort.abort();
+      await Promise.allSettled([firstCall].filter(Boolean));
+      await server.stop().catch(() => {});
+    }
+  });
+
+  it('a second stop racing a pending one cannot steal or orphan the slot — the first flushed confirmation still exits', async () => {
+    const events = [];
+    const staged = [];
+    let calls = 0;
+    let releaseA;
+    let releaseB;
+    let aStagedResolve;
+    let bStagedResolve;
+    const gateA = new Promise((resolve) => { releaseA = resolve; });
+    const gateB = new Promise((resolve) => { releaseB = resolve; });
+    const aStaged = new Promise((resolve) => { aStagedResolve = resolve; });
+    const bStaged = new Promise((resolve) => { bStagedResolve = resolve; });
+    const abortB = new AbortController();
+    const server = await startDaemonServer({
+      port: 0,
+      configDir: dir,
+      uuid: 'race-uuid',
+      getTools: async () => [],
+      callTool: async () => {
+        calls += 1;
+        const who = calls === 1 ? 'A' : 'B';
+        staged.push({ who, result: requestDaemonExit({ action: 'stop', by: who, reason: null }) });
+        if (who === 'A') { aStagedResolve(); await gateA; }
+        else { bStagedResolve(); await gateB; }
+        return { content: [{ type: 'text', text: '{"stopping":true}' }] };
+      },
+      onShutdown: async () => { events.push('shutdown'); },
+    });
+
+    let callA;
+    let callB;
+    try {
+      callA = callTool(server.port, server.bearerToken, 'manage_daemon', { action: 'stop' });
+      await aStaged;
+      callB = callTool(server.port, server.bearerToken, 'manage_daemon', { action: 'stop' }, {}, abortB.signal);
+      await bStaged;
+
+      // B must be refused, not overwrite: A's ownership survives.
+      assert.equal(staged[0].result?.staged, true);
+      assert.equal(staged[1].result?.staged, false, 'the second stage while one is pending must be refused');
+      assert.equal(peekDaemonExit()?.by, 'A', 'the racing request stole the slot');
+
+      // B's client aborts before B's response can flush. Its close-scavenger
+      // must not touch A's intent — B owns nothing. B's gate stays held until
+      // the server-side 'close' has landed, so the scavenger runs for certain.
+      abortB.abort();
+      await Promise.allSettled([callB]);
+      await new Promise((r) => setTimeout(r, 50)); // let the server-side 'close' land
+      assert.equal(peekDaemonExit()?.by, 'A', 'B\'s abort discarded an intent it did not own');
+      releaseB();
+
+      // A's response flushes — and the exit it was promised actually runs.
+      releaseA();
+      const responseA = await callA;
+      assert.equal(responseA.status, 200);
+      const body = await responseA.json();
+      assert.match(body.result.content[0].text, /"stopping":true/);
+      await waitFor(() => events.includes('shutdown'));
+      assert.ok(existsSync(getStopSentinelPath(dir)), 'the flushed stop must write the sentinel on its way down');
+    } finally {
+      releaseA();
+      releaseB();
+      abortB.abort();
+      await Promise.allSettled([callA, callB].filter(Boolean));
       await server.stop().catch(() => {});
     }
   });

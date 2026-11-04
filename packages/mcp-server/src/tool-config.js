@@ -24,8 +24,13 @@ export const TOOL_CATEGORIES = {
   get_view:               'read',
   validate_formula:       'read',
   list_view_sections:     'read',
-  download_formula_field: 'read',
-  download_base_formulas:   'read',
+  // These READ from Airtable but WRITE to the local filesystem, so they are not
+  // `read`: the read-only profile is advertised as "reading only" and a tool that
+  // creates/overwrites files at a caller-supplied path does not belong in it.
+  // `local-write` is in safe-write and full, so the only profile whose tool set
+  // changes is read-only (12 -> 10).
+  download_formula_field: 'local-write',
+  download_base_formulas: 'local-write',
 
   // Table mutations (non-destructive)
   create_table:           'table-write',
@@ -140,6 +145,7 @@ export const CATEGORY_LABELS = {
   'record-destructive':       'Record Destructive',
   'sync':                     'Sync',
   'daemon':                   'Daemon Control',
+  'local-write':              'Local File Write',
 };
 
 /**
@@ -190,7 +196,7 @@ export const BUILTIN_PROFILES = {
   },
   'safe-write': {
     description: 'Read + record read/write + create/update tables, fields, views, and sidebar sections (no deletes, no form metadata)',
-    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section'],
+    categories: ['read', 'record-read', 'record-write', 'table-write', 'field-write', 'view-write', 'view-section', 'local-write'],
   },
   full: {
     description: 'All tools enabled including destructive ops, form metadata, extensions, and daemon control',
@@ -200,7 +206,7 @@ export const BUILTIN_PROFILES = {
       'field-write', 'field-destructive',
       'view-write', 'view-destructive',
       'view-section', 'view-section-destructive',
-      'form-write', 'extension', 'sync', 'daemon',
+      'form-write', 'extension', 'sync', 'daemon', 'local-write',
     ],
   },
 };

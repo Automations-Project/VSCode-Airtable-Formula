@@ -601,7 +601,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
     if (msg.type === 'action:restoreSession') {
       try {
-        const { restoreSession, isEncryptedFile } = await import('../mcp/session-backup.js');
+        const { restoreSession, isEncryptedBackupFile } = await import('../mcp/session-backup.js');
         const files = await vscode.window.showOpenDialog({
           canSelectFiles: true,
           canSelectFolders: false,
@@ -610,9 +610,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         });
         if (!files?.[0]) { this.postResult(msg.id, true); return; }
 
-        const fileData = await (await import('fs/promises')).readFile(files[0].fsPath);
         let password: string | undefined;
-        if (isEncryptedFile(fileData)) {
+        if (await isEncryptedBackupFile(files[0].fsPath)) {
           password = await vscode.window.showInputBox({
             prompt: 'Enter the backup password',
             password: true,
@@ -1096,6 +1095,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         viewSectionDestructive: true, formWrite: true,
         recordWrite: true,          extension: true,
         sync: true,                 daemon: true,
+        localWrite: true,
       },
     };
 

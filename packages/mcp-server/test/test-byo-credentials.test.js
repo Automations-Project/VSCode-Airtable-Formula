@@ -78,6 +78,8 @@ describe('loadByoCredentials', () => {
     assert.equal(creds.csrfToken, 'SCRAPED-CSRF-42');
     assert.equal(seenReq.url, 'https://airtable.com/');
     assert.equal(seenReq.opts.headers.Cookie, 'brw=9');
+    // PerimeterX 403s Node fetch's default User-Agent on HTML routes — browser headers are mandatory.
+    assert.match(seenReq.opts.headers['User-Agent'], /^Mozilla\//);
     // No sessionUserId in this fixture, so identity stays unknown — and that is
     // fine: in byo it is advisory (issue #21), never a gate on the credentials.
     assert.equal(creds.userId, null);

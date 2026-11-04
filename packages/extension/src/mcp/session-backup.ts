@@ -19,14 +19,25 @@ const CONFIG_DIR = path.join(os.homedir(), '.airtable-user-mcp');
 const MAX_BACKUP_FILE_BYTES = 200 * 1024 * 1024;    // 200 MB on-disk
 const MAX_UNZIPPED_BYTES    = 500 * 1024 * 1024;    // 500 MB post-extraction
 
+async function assertBackupFileSize(srcPath: string): Promise<void> {
+  const stat = await fs.stat(srcPath);
+  if (stat.size > MAX_BACKUP_FILE_BYTES) {
+    throw new Error(`Backup file is too large (${stat.size} bytes, max ${MAX_BACKUP_FILE_BYTES}).`);
+  }
+}
+
 export async function backupSession(destPath: string, password?: string): Promise<void> {
   const zipBuffer = await createZipBuffer(CONFIG_DIR);
 
+  // 0600: the archive contains the Chrome cookie jar, daemon.token and daemon.lock
+  // (both hold the plaintext bearer). Those files are hardened individually and
+  // secureDirectory() runs after RESTORE — but not after backup, so the archive was
+  // created 0666&~umask. No-op on Windows.
   if (password) {
     const encrypted = encrypt(zipBuffer, password);
-    await fs.writeFile(destPath, encrypted);
+    await fs.writeFile(destPath, encrypted, { mode: 0o600 });
   } else {
-    await fs.writeFile(destPath, zipBuffer);
+    await fs.writeFile(destPath, zipBuffer, { mode: 0o600 });
   }
 }
 
@@ -49,10 +60,7 @@ function parseEncryptedHeader(data: Buffer): BackupHeader {
 export async function restoreSession(srcPath: string, password?: string): Promise<void> {
   // H1 — size guard. stat before reading so a 4 GB attacker file doesn't OOM
   // the extension host.
-  const stat = await fs.stat(srcPath);
-  if (stat.size > MAX_BACKUP_FILE_BYTES) {
-    throw new Error(`Backup file is too large (${stat.size} bytes, max ${MAX_BACKUP_FILE_BYTES}).`);
-  }
+  await assertBackupFileSize(srcPath);
 
   const fileData = await fs.readFile(srcPath);
 
@@ -102,7 +110,14 @@ export async function restoreSession(srcPath: string, password?: string): Promis
         continue;
       }
 
-      // Track uncompressed size to guard against zip-bombs.
+      // Reject from the central-directory size before getData() allocates the
+      // decompressed buffer. adm-zip validates/caps the actual output; the
+      // post-read check below remains defense in depth for malformed metadata.
+      const declaredSize = entry.header.size;
+      if (!Number.isSafeInteger(declaredSize) || declaredSize < 0 || declaredSize > MAX_UNZIPPED_BYTES - totalSize) {
+        throw new Error(`Backup rejected: uncompressed size exceeds ${MAX_UNZIPPED_BYTES} bytes (possible zip-bomb).`);
+      }
+
       const data = entry.getData();
       totalSize += data.length;
       if (totalSize > MAX_UNZIPPED_BYTES) {
@@ -149,6 +164,20 @@ export async function restoreSession(srcPath: string, password?: string): Promis
 
 export function isEncryptedFile(data: Buffer): boolean {
   return isEncrypted(data);
+}
+
+/** Check a selected backup without reading the entire file into memory. */
+export async function isEncryptedBackupFile(srcPath: string): Promise<boolean> {
+  await assertBackupFileSize(srcPath);
+
+  const handle = await fs.open(srcPath, 'r');
+  try {
+    const header = Buffer.alloc(MAGIC.length);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    return isEncrypted(header.subarray(0, bytesRead));
+  } finally {
+    await handle.close();
+  }
 }
 
 function isEncrypted(data: Buffer): boolean {

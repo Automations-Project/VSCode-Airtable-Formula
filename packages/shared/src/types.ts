@@ -111,6 +111,7 @@ export interface ToolCategories {
   recordWrite:             boolean;
   sync:                    boolean;
   daemon:                  boolean;
+  localWrite:              boolean;
 }
 
 export interface ToolProfileSnapshot {

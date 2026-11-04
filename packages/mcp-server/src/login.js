@@ -7,8 +7,7 @@
  * Usage:
  *   npm run login                                  (uses env vars)
  *   node src/login.js                              (uses env vars)
- *   node src/login.js --email X --password Y       (explicit)
- *   node src/login.js --email X --password Y --otp-secret Z
+ *   node src/login.js --email X                     (email only; secrets use env vars)
  *   node src/login.js --profile .chrome-profile-prod  (custom profile dir)
  *
  * Environment variables:
@@ -50,14 +49,28 @@ async function getOtpauth() {
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = {};
+  // Secrets are NOT accepted on the command line. Anything in argv lands in
+  // /proc/<pid>/cmdline — which is world-readable, unlike /proc/<pid>/environ —
+  // and in shell history, for the whole ~5 minute login poll. A captured base32
+  // TOTP seed is a permanent 2FA bypass. The rest of the codebase already avoids
+  // this deliberately: login-runner.js invented an IPC protocol so credentials
+  // "never enter this process's environment".
+  //
+  // Supply them via AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET. `login.json` is a
+  // direct-login.js input, not an input to this browser-login command. Email is
+  // not a secret and remains accepted here.
+  const REJECTED = new Set(['--password', '--otp-secret']);
   for (let i = 0; i < args.length; i++) {
+    if (REJECTED.has(args[i])) {
+      process.stderr.write(
+        `${args[i]} is not supported: command-line arguments are world-readable via the process list.\n` +
+        'Set AIRTABLE_PASSWORD / AIRTABLE_OTP_SECRET in the environment. For login.json, use AIRTABLE_AUTH_MODE=direct-login.\n',
+      );
+      process.exit(2);
+    }
     if (args[i] === '--email' && args[i + 1]) opts.email = args[++i];
-    else if (args[i] === '--password' && args[i + 1]) opts.password = args[++i];
-    else if (args[i] === '--otp-secret' && args[i + 1]) opts.otpSecret = args[++i];
     else if (args[i] === '--profile' && args[i + 1]) opts.profile = args[++i];
-    // Legacy positional args support
     else if (!opts.email) opts.email = args[i];
-    else if (!opts.password) opts.password = args[i];
   }
   return {
     email: opts.email || process.env.AIRTABLE_EMAIL,

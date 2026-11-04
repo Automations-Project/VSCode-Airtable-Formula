@@ -54,7 +54,7 @@
     <text x="102" y="104" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5">
       <tspan font-weight="700" fill="#FCB400">72 tools</tspan>
       <tspan fill="#484f58">  ·  </tspan>
-      <tspan font-weight="600" fill="#18BFFF">16 categories</tspan>
+      <tspan font-weight="600" fill="#18BFFF">17 categories</tspan>
       <tspan fill="#484f58">  ·  </tspan>
       <tspan fill="#8b949e">multi-editor LSP</tspan>
     </text>

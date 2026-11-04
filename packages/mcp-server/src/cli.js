@@ -203,6 +203,30 @@ export async function runCli(args) {
     } catch {
       // ignore
     }
+
+    // The browser profile is only ONE of the credential sources. In byo /
+    // direct-login mode the session lives in credentials.json / login.json, which
+    // nothing here ever removed — so logout wiped a profile those modes never used,
+    // printed "Browser session cleared." and exited 0, and the next server start
+    // read the file and was logged straight back in. These are user-authored files,
+    // so deleting them silently would destroy input the user typed; report them
+    // instead, and do not claim the session is cleared while one still resolves.
+    const stillLive = [];
+    for (const name of ['credentials.json', 'login.json']) {
+      const p = path.join(getConfigDir(), name);
+      try {
+        await (await import('node:fs/promises')).access(p);
+        stillLive.push(p);
+      } catch { /* absent — nothing to report */ }
+    }
+    if (stillLive.length) {
+      process.stdout.write(
+        '\nThese files still hold live credentials and were NOT removed:\n' +
+        stillLive.map((p) => `  ${p}\n`).join('') +
+        'You are still logged in through them. Delete them to finish logging out.\n',
+      );
+      process.exitCode = 1;
+    }
     return true;
   }
 

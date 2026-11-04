@@ -111,7 +111,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
 | Daemon self-diagnosis (is the session dead, the browser busy, or the daemon gone?) | ❌ | ✅ `manage_daemon` `action=status` — plus start / restart / stop / tunnel / token rotation |
-| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (12 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` |
+| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (10 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
 
@@ -336,6 +336,7 @@ It will call `list_tables` and return the names and IDs.
 | `doctor` reports `Session: NOT signed in` | Re-run `npx -y airtable-user-mcp login` |
 | `Session invalid (0): airtable.com could not be reached` | Network/TLS/proxy, *not* an expired login — behind a TLS-inspecting proxy set `NODE_EXTRA_CA_CERTS`, else check `HTTPS_PROXY`/`NO_PROXY` |
 | `DIRECT_LOGIN_UNVERIFIED` (auth mode `direct-login`) | The login flow finished and a session cookie exists, but airtable.com then served no signed-in user — a cookie alone does not prove a completed login. Usually an incomplete SSO or 2FA step: check `AIRTABLE_EMAIL` / `AIRTABLE_PASSWORD` / `AIRTABLE_TOTP_SECRET`, or use `AIRTABLE_AUTH_MODE=browser` |
+| `DIRECT_LOGIN_NO_CSRF` (auth mode `direct-login`) | `GET /login` did not contain a `csrfToken`. Since 2026-11 Airtable fronts its HTML routes with PerimeterX bot protection; the message says whether the response was a "Verify it’s you" challenge page. The server now sends Chrome-like page headers, so this should be rare — if it persists, retry with `AIRTABLE_HTTP_CLIENT=impit` (Chrome TLS impersonation) or use `AIRTABLE_AUTH_MODE=browser` |
 | `[airtable-mcp] attached to the daemon already running at pid …` on stderr | Not an error — this client attached to a daemon started by another app (usually VS Code) and **that daemon's** auth mode / HTTP client apply, not this client's. See [Sharing one daemon across clients](#sharing-one-daemon-across-clients) |
 | Your configured `AIRTABLE_AUTH_MODE` / `AIRTABLE_HTTP_CLIENT` seems ignored | Same cause as above — you are attached to someone else's daemon. `AIRTABLE_NO_DAEMON=1` runs under your own settings; `manage_daemon action=status` or `/daemon/health` reports whose settings are actually in force |
 | Login window never loads | Check network / firewall, then `doctor` |
@@ -429,7 +430,7 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 72 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 73 tools total under the default `full` profile.
 
-### Schema Read (11)
+### Schema Read (9)
 
 | Tool | Description |
 |:-----|:------------|
@@ -442,6 +443,14 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `validate_formula` | Validate a formula expression before applying |
 | `list_view_sections` | List sidebar sections for a table with their view membership |
 | `list_record_templates` | List record templates (saved row scaffolds) for a table |
+
+### Local File Write (2)
+
+These tools read from Airtable but write to caller-chosen paths, so they are included in
+`safe-write` and `full`, not `read-only`.
+
+| Tool | Description |
+|:-----|:------------|
 | `download_formula_field` | Download a formula field to a local `.formula` file with an `AT:` metadata header — field refs resolved to real `{Field Name}` syntax. Pass `outputPath` to save; omit to read inline. |
 | `download_base_formulas` | Download **all** formula fields in a base to `.formula` files, organised into per-table subfolders — field refs resolved to real `{Field Name}` syntax. Each file includes the `AT:` header for one-click upload. |
 

@@ -2230,6 +2230,7 @@ export class AirtableClient {
 
   async renameRowTemplate(appId, templateId, name) {
     assertAirtableId(appId, 'appId');
+    assertAirtableId(templateId, 'templateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateName`;
     const res = await this.auth.postForm(url, this._mutationParams({ name }, appId), appId);
     if (!res.ok) {
@@ -2241,6 +2242,7 @@ export class AirtableClient {
 
   async updateRowTemplateDescription(appId, templateId, description) {
     assertAirtableId(appId, 'appId');
+    assertAirtableId(templateId, 'templateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateDescription`;
     const res = await this.auth.postForm(url, this._mutationParams({ description }, appId), appId);
     if (!res.ok) {
@@ -2253,6 +2255,7 @@ export class AirtableClient {
   async setRowTemplateCell(appId, templateId, columnId, cellObject) {
     assertAirtableId(appId, 'appId');
     assertAirtableId(columnId, 'columnId');
+    assertAirtableId(templateId, 'templateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateCell`;
     const res = await this.auth.postForm(url, this._mutationParams({ columnId, cellObject }, appId), appId);
     if (!res.ok) {
@@ -2264,6 +2267,7 @@ export class AirtableClient {
 
   async setRowTemplateVisibleColumns(appId, templateId, columnIds, isPartialSelection = true) {
     assertAirtableId(appId, 'appId');
+    assertAirtableId(templateId, 'templateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/updateVisibleColumns`;
     const res = await this.auth.postForm(
       url,
@@ -2281,6 +2285,7 @@ export class AirtableClient {
     assertAirtableId(appId, 'appId');
     assertAirtableId(tableId, 'tableId');
     const newTemplateId = 'rtp' + this._genRandomId();
+    assertAirtableId(sourceTemplateId, 'sourceTemplateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${sourceTemplateId}/duplicate`;
     const res = await this.auth.postForm(
       url,
@@ -2296,6 +2301,7 @@ export class AirtableClient {
 
   async applyRowTemplate(appId, templateId) {
     assertAirtableId(appId, 'appId');
+    assertAirtableId(templateId, 'templateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/instantiate`;
     const res = await this.auth.postForm(url, this._mutationParams({}, appId), appId);
     if (!res.ok) {
@@ -2307,6 +2313,7 @@ export class AirtableClient {
 
   async deleteRowTemplate(appId, templateId) {
     assertAirtableId(appId, 'appId');
+    assertAirtableId(templateId, 'templateId');
     const url = `https://airtable.com/v0.3/rowTemplate/${templateId}/destroy`;
     const res = await this.auth.postForm(url, this._mutationParams({ shouldDestroyRecursively: true }, appId), appId);
     if (!res.ok) {

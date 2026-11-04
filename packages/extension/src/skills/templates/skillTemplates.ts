@@ -304,7 +304,7 @@ When user wants to convert an Excel formula to Airtable.
 export const MCP_TOOLS_GUIDE = `# Airtable MCP — Tools Guide
 
 > **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
-> **Tools**: 72 tools across 16 categories + \`manage_tools\`
+> **Tools**: 72 tools across 17 categories + \`manage_tools\`
 
 ---
 
@@ -350,7 +350,7 @@ Most schema tools require \`appId\` (e.g. \`"appXXX"\`) as their first parameter
 
 ---
 
-### Category 1: Read / Inspect (11 tools)
+### Category 1: Read / Inspect (9 tools)
 
 Read-only. Safe to call at any time. Always call a read tool before mutating.
 
@@ -365,8 +365,6 @@ Read-only. Safe to call at any time. Always call a read tool before mutating.
 | \`validate_formula\` | **Always call before** \`create_formula_field\` or \`update_formula_field\`. Returns validity + result type. |
 | \`list_view_sections\` | List sidebar view sections (groups) in a table. |
 | \`list_record_templates\` | List record templates defined in a table. |
-| \`download_formula_field\` | Download a formula field to a local \`.formula\` file with \`AT:\` header. Pass \`outputPath\` to save, or omit to read inline. |
-| \`download_base_formulas\` | Download ALL formula fields in a base to \`.formula\` files, organised into per-table subfolders. |
 
 ---
 
@@ -663,6 +661,18 @@ Off unless the \`full\` profile is active.
 
 ---
 
+### Category 17: Local File Write (2 tools)
+
+Reads formula definitions from Airtable but writes to caller-chosen local paths. Included in
+\`safe-write\` and \`full\`, not \`read-only\`.
+
+| Tool | When to Use |
+|------|-------------|
+| \`download_formula_field\` | Download one formula field to a local \`.formula\` file with an \`AT:\` header. Pass \`outputPath\` to save, or omit it to return the formula inline. |
+| \`download_base_formulas\` | Download every formula field in a base to \`.formula\` files organised into per-table subfolders. |
+
+---
+
 ## REST API Limitations — and Our Fixes {#rest-api-limitations}
 
 The official Airtable REST API (\`mcp.airtable.com\`) has several well-known limitations.
@@ -771,7 +781,7 @@ and use airtable-user-mcp \`query_records\` to read/search data (especially when
 
 - **Name**: airtable-user-mcp  |  **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (JSON-RPC 2.0)
-- **Tools**: 72 tools across 16 categories + \`manage_tools\`
+- **Tools**: 72 tools across 17 categories + \`manage_tools\`
 - **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ## Mandatory Workflows
