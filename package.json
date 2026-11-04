@@ -27,5 +27,14 @@
     "airtable-user-mcp": "workspace:*",
     "esbuild": "^0.28.1",
     "rimraf": "^6.1.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "@vscode/vsce>glob": "^14.0.2",
+      "@vscode/vsce>minimatch": "^11.0.1",
+      "archiver-utils>glob": "^14.0.2",
+      "readdir-glob>minimatch": "^11.0.1",
+      "tsup>esbuild": "^0.28.1"
+    }
   }
 }
