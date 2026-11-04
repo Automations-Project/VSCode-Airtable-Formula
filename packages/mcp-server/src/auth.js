@@ -1030,7 +1030,8 @@ export class AirtableAuth {
           // dead-session breaker wrongly aborts the WHOLE records job (the 5-session "403 during
           // record sync" saga). Surface it as a distinct per-request error so the CALLER fails just
           // that row/cell and continues; do NOT touch _recoveryStreak or latch _sessionDead.
-          if (result.status === 403 && /INVALID_PERMISSIONS|cannot be (updated|created)/i.test(result.body || '')) {
+          // ponytail: region-restriction wording (AI fields on region-gated models pre-check the caller's region on every write) is unverified against a live body — widen when a capture lands.
+          if (result.status === 403 && /INVALID_PERMISSIONS|cannot be (updated|created)|not (available|supported|permitted) in your (region|country)|regional/i.test(result.body || '')) {
             const e = new Error(`FIELD_FORBIDDEN (403): ${String(result.body || '').replace(/\s+/g, ' ').slice(0, 300)}`);
             e.code = 'FIELD_FORBIDDEN';
             throw e;
@@ -1049,7 +1050,7 @@ export class AirtableAuth {
               this._lastTripStatus = result.status;
               this._lastTripReason = 'auth-403-persist';
               this._captureTripBody(result);
-              throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive 403s that did not clear after re-authentication — the login has expired or been blocked. Re-authenticate (run \`login\`) and retry.`);
+              throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive 403s that did not clear after re-authentication — the login has expired or been blocked. Re-authenticate (run \`login\`) and retry.${this._lastTripBody ? `\nAirtable's last response body: ${this._lastTripBody}` : ''}`);
             }
             console.error(`[auth] 403 persisted after backoff (${this._authMode}) — re-authenticating on the same session (streak ${this._recoveryStreak})...`);
             await this._recoverSession();
@@ -1062,7 +1063,7 @@ export class AirtableAuth {
             this._lastTripStatus = result.status;
             this._lastTripReason = 'throttle';
             this._captureTripBody(result);
-            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.`);
+            throw new Error(`SESSION_INVALID: ${this._recoveryStreak} consecutive rate-limit/throttle responses (status=${result.status}) that did not clear after backoff — the account is throttled or the login is blocked. Let the limit reset (wait), or re-authenticate (run \`login\`), then retry.${this._lastTripBody ? `\nAirtable's last response body: ${this._lastTripBody}` : ''}`);
           }
           const delay = Math.min(30_000, 1000 * (2 ** rlAttempt)) + Math.floor(Math.random() * 500);
           console.error(`[auth] ${result.status} (rate-limit/throttle) — backing off ${delay}ms on the same session, no relaunch (streak ${this._recoveryStreak})...`);

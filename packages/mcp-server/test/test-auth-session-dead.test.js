@@ -69,6 +69,23 @@ describe('AirtableAuth — throttle backoff vs. recovery', () => {
     });
     assert.match(a.getLastTrip().body, /unable to get local issuer certificate/);
   });
+
+  it("a tripped 403 carries Airtable's response body in the SESSION_INVALID message", async () => {
+    const a = fakeAuth();
+    a._rawApiCall = async () => ({ status: 403, body: '{"error":{"type":"FORBIDDEN","message":"Verify it is you"}}' });
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), (err) => {
+      assert.match(err.message, /SESSION_INVALID/);
+      assert.match(err.message, /Airtable's last response body: .*Verify it is you/);
+      return true;
+    });
+  });
+
+  it('region-restriction wording on a 403 is a per-request FIELD_FORBIDDEN, not session death', async () => {
+    const a = fakeAuth();
+    a._rawApiCall = async () => ({ status: 403, body: '{"message":"This model is not available in your region"}' });
+    await assert.rejects(() => a.get('/v0.3/x', 'app1'), (err) => err.code === 'FIELD_FORBIDDEN');
+    assert.equal(a._sessionDead, false);
+  });
 });
 
 // A latched breaker used to be unrecoverable in browser mode: _apiCall short-circuits on

@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed (2026-11-04 — Airtable bot protection on the login page)
+
+- **Direct-login / BYO page fetches.** Airtable now fronts its HTML routes (`GET /login`, the authed
+  `GET /`) with PerimeterX, which answers Node `fetch`'s default User-Agent with a 403 "Verify it's
+  you" challenge page instead of the sign-in page — so `scrapeCsrf()` found no token and
+  `AIRTABLE_AUTH_MODE=direct-login` failed with `DIRECT_LOGIN_NO_CSRF` (BYO's csrf scrape silently
+  got no token). Page fetches now send Chrome-like `User-Agent`/`Accept`/`Accept-Language` headers
+  (`PAGE_HEADERS`); the JSON API routes are not gated and are unchanged. When a challenge page is
+  still served, `DIRECT_LOGIN_NO_CSRF` now names the bot protection and the remedies
+  (`AIRTABLE_HTTP_CLIENT=impit`, or `AIRTABLE_AUTH_MODE=browser`) instead of blaming a changed page.
+- **Dead-session breaker diagnostics.** A 403 that trips the breaker (`SESSION_INVALID`) now carries
+  Airtable's captured response body in the error message, so the real reason is visible rather than
+  a bare status. Region-restriction wording (`not available in your region`, `regional`) on a 403 is
+  now classed as a per-request `FIELD_FORBIDDEN` — it fails just that row/cell — instead of being
+  retried as throttle and escalating to session death.
+
+### Security / dependencies (2026-11-04)
+
+- **`pnpm audit --prod` is clean (was 1 critical + 19 high).** `@modelcontextprotocol/sdk` 1.x -> **1.32.2** and `undici` -> **7.30.1** (still 7.x). Clears: critical `proxy-addr` IP spoofing (via express); high MCP SDK request-body size-limit, OAuth and session advisories (bodies are now read with a 4 MiB cap and JSON-RPC batches are capped at 100 when the transport reads the body itself; the daemon passes its own pre-parsed 1 MB body, so it is unaffected), undici TLS-validation bypass + DoS, and the transitive `zod`, `body-parser`, `hono`, `fast-uri` and `ip-address` advisories. `zod` is a peer dependency of the SDK that the lockfile had frozen at 4.3.6, so it is now declared explicitly (`^4.6.6`) to pull the patched release.
+- **`patchright` 1.58 -> 1.64.3, `otpauth` 9.5 -> 9.6** (in-range). `impit` and `@ngrok/ngrok` are intentionally not bumped (their native-binary digest pins are unchanged). Dev tooling: vitest 1.6 -> 3.2, esbuild 0.27 -> 0.28, vite 6.4.5.
+- **`cheerio`, `fetch-cookie`, `node-fetch` and `tough-cookie` moved to `devDependencies`.** Nothing in `src/`, `test/`, `bin/` or the bundle imports them — only the local (gitignored) `dev-tools/` capture scripts do — so npm consumers no longer install them or their audit surface.
+- Test hygiene: `test-http-proxy.test.js` no longer leaks the CONNECT-tunnel sockets (an `ECONNRESET` after the test ended marked the file failed although all 16 subtests passed).
+
 ### Fixed (2026-08-01 — audit low-severity sweep)
 
 - **Credentials.** `logout` wiped the browser profile, printed "Browser session cleared." and exited
