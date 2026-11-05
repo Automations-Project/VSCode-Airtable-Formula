@@ -40,14 +40,17 @@ export function AppShell({
         activeTab={activeTab}
         onRequestSelect={onRequestSelect}
       />
-      <main
-        id={`dashboard-panel-${activeTab}`}
-        role="tabpanel"
-        aria-labelledby={`dashboard-tab-${activeTab}`}
-        className="app-panel"
-        tabIndex={-1}
-      >
-        {children}
+      {/* role="tabpanel" on <main> itself would replace the main landmark, so the panel sits inside it. */}
+      <main className="app-panel-host">
+        <div
+          id={`dashboard-panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`dashboard-tab-${activeTab}`}
+          className="app-panel"
+          tabIndex={-1}
+        >
+          {children}
+        </div>
       </main>
     </div>
   );

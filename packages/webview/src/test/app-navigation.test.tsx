@@ -114,6 +114,18 @@ describe('App cross-tab navigation focus', () => {
 
     expect(screen.getByRole('tabpanel')).toHaveAttribute('tabindex', '-1');
   });
+
+  it('keeps one main landmark, with the tab panel inside it', () => {
+    seed();
+    render(<App />);
+
+    const main = screen.getByRole('main');
+    const panel = screen.getByRole('tabpanel');
+    expect(main).not.toBe(panel);
+    expect(main).toContainElement(panel);
+    expect(panel).toHaveAttribute('id', 'dashboard-panel-overview');
+    expect(panel).toHaveAttribute('aria-labelledby', 'dashboard-tab-overview');
+  });
 });
 
 describe('App navigate() and the Prompts discard guard', () => {

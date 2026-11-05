@@ -108,6 +108,16 @@
   content: '';
 }
 
+/* The main landmark around the tab panel. min-height: 0 keeps it from growing
+   to its content, so the panel below stays the scroll container. */
+.app-panel-host {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
 .app-panel {
   min-width: 0;
   flex: 1 1 auto;

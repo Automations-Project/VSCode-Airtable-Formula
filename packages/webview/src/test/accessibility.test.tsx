@@ -265,6 +265,16 @@ describe('focus, hit-area and layout contracts (CSSOM)', () => {
     expect(text).toMatch(/outline-offset\s*:\s*-/);
   });
 
+  it('keeps the tab panel the scroll container inside the main landmark', () => {
+    const [host] = rulesFor('.app-panel-host');
+
+    expect(host, '.app-panel-host').toBeDefined();
+    expect(host!.style.display).toBe('flex');
+    expect(host!.style.flexDirection).toBe('column');
+    // Without it the flex item grows to its content and the panel never scrolls.
+    expect(host!.style.minHeight).toMatch(/^0(px)?$/);
+  });
+
   it('never removes an outline except for a non-focus-visible state', () => {
     for (const rule of allStyleRules()) {
       if (/outline(-style)?\s*:\s*(none|0)\b/.test(rule.cssText)) {
