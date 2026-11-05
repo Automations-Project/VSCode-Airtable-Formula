@@ -30,10 +30,10 @@ importers:
       '@airtable-formula/language-services':
         specifier: workspace:*
         version: link:../language-services
+    devDependencies:
       '@airtable-formula/shared':
         specifier: workspace:*
         version: link:../shared
-    devDependencies:
       '@types/adm-zip':
         specifier: ^0.5.8
         version: 0.5.8

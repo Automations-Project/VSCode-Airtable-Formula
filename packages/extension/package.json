@@ -748,10 +748,10 @@
     "test:e2e": "node ./dist/test/runTest.js"
   },
   "dependencies": {
-    "@airtable-formula/language-services": "workspace:*",
-    "@airtable-formula/shared": "workspace:*"
+    "@airtable-formula/language-services": "workspace:*"
   },
   "devDependencies": {
+    "@airtable-formula/shared": "workspace:*",
     "@types/adm-zip": "^0.5.8",
     "@types/archiver": "^7.0.0",
     "@types/node": "^20.19.43",
