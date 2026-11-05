@@ -145,7 +145,10 @@ describe('Browser selection', () => {
     await user.click(screen.getByRole('button', { name: 'Download bundled Chromium' }));
     expect(lastPostedMessage()).toMatchObject({ type: 'action:install-browser' });
     expect(screen.getByRole('button', { name: 'Download bundled Chromium' })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByRole('button', { name: 'Download bundled Chromium' })).toBeDisabled();
+    // Pending keeps the clicked button focusable: aria-disabled, and a second click posts nothing.
+    expect(screen.getByRole('button', { name: 'Download bundled Chromium' })).toHaveAttribute('aria-disabled', 'true');
+    await user.click(screen.getByRole('button', { name: 'Download bundled Chromium' }));
+    expect(posted('action:install-browser')).toHaveLength(1);
 
     seed({
       auth: { browser: { found: false }, availableBrowsers: [], browserDownload: { status: 'downloading', progress: 42 } },
@@ -182,7 +185,7 @@ describe('Browser selection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Choose custom browser executable' }));
     const picker = screen.getByRole('button', { name: 'Choose custom browser executable' });
-    expect(picker).toBeDisabled();
+    expect(picker).toHaveAttribute('aria-disabled', 'true');
     expect(picker).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('combobox', { name: 'Browser selection' })).toBeDisabled();
     // Nothing else is locked out by the open file dialog.
@@ -194,7 +197,7 @@ describe('Browser selection', () => {
     const id = lastPostedMessage().id;
     first.unmount();
     render(<Settings navigate={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Choose custom browser executable' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Choose custom browser executable' })).toHaveAttribute('aria-disabled', 'true');
     await user.click(screen.getByRole('button', { name: 'Choose custom browser executable' }));
     expect(posted('action:selectCustomBrowser')).toHaveLength(1);
 
@@ -382,7 +385,7 @@ describe('Credentials and cookie', () => {
     });
     // Pending: nothing cleared yet, controls locked.
     expect(screen.getByLabelText('Airtable password')).toHaveValue('hunter2');
-    expect(screen.getByRole('button', { name: 'Save credentials to keychain' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save credentials to keychain' })).toHaveAttribute('aria-disabled', 'true');
 
     settle(lastPostedMessage().id, { ok: true });
 
@@ -577,16 +580,18 @@ describe('Storage and session backup', () => {
     const first = render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Open Tool Config' }));
-    expect(screen.getByRole('button', { name: 'Open Tool Config' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open Tool Config' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Open Tool Config' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('button', { name: 'Open Bundled Chromium' })).toBeEnabled();
     const id = lastPostedMessage().id;
     first.unmount();
 
     render(<Settings navigate={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Open Tool Config' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open Tool Config' })).toHaveAttribute('aria-disabled', 'true');
+    await user.click(screen.getByRole('button', { name: 'Open Tool Config' }));
+    expect(posted('action:openStoragePath')).toHaveLength(1);
     settle(id, { ok: false, error: 'Could not open the folder' });
-    expect(screen.getByRole('button', { name: 'Open Tool Config' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Open Tool Config' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('keeps backup and restore available and says restore replaces current session data', async () => {

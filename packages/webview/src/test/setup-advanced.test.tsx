@@ -359,13 +359,15 @@ describe('Remote access', () => {
     expect(posted('tunnel:disable')).toHaveLength(1);
   });
 
-  it('still disables Disable while its own pending action is in flight', async () => {
+  it('still holds Disable while its own pending action is in flight', async () => {
     seed({ tunnel: { status: 'active', url: null, provider: 'cf-quick' }, daemon: { running: false, healthy: false } });
     render(<Setup />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Disable remote access' }));
 
-    expect(screen.getByRole('button', { name: 'Disable remote access' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Disable remote access' })).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Disable remote access' }));
+    expect(posted('tunnel:disable')).toHaveLength(1);
   });
 
   it('keeps Enable disabled while the service is not ready', async () => {
@@ -406,14 +408,15 @@ describe('Remote access', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Enable remote access' }));
 
     expect(useStore.getState().pendingTunnelActions.size).toBe(1);
-    expect(screen.getByRole('button', { name: 'Enable remote access' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enable remote access' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Enable remote access' })).toHaveAttribute('aria-busy', 'true');
 
     // Tab switch: component-local state is lost, the store guard is not.
     first.unmount();
     render(<Setup />);
     await userEvent.click(toggle('Remote access'));
-    expect(screen.getByRole('button', { name: 'Enable remote access' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enable remote access' })).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Enable remote access' }));
     expect(posted('tunnel:enable')).toHaveLength(1);
   });
 
@@ -679,17 +682,19 @@ describe('Official Airtable MCP', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Configure Cursor' }));
     expect(useStore.getState().pendingOfficialActions.size).toBe(1);
-    expect(screen.getByRole('button', { name: 'Configure Cursor' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Configure Cursor' })).toHaveAttribute('aria-disabled', 'true');
 
     first.unmount();
     render(<Setup />);
-    expect(screen.getByRole('button', { name: 'Configure Cursor' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Configure Cursor' })).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Configure Cursor' }));
     expect(posted('action:configure-official-airtable')).toHaveLength(1);
 
     act(() => {
       for (const id of useStore.getState().pendingOfficialActions) useStore.getState().markActionDone(id, { ok: true });
     });
     expect(screen.getByRole('button', { name: 'Configure Cursor' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Configure Cursor' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('does not lock official controls on an unrelated pending action', async () => {

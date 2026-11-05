@@ -81,7 +81,7 @@
   transition-timing-function: var(--ease-std);
 }
 
-.action-button:hover:not(:disabled) {
+.action-button:hover:not(:disabled, [aria-disabled='true']) {
   border-color: var(--focus-ring);
   background: var(--surface-hover);
 }

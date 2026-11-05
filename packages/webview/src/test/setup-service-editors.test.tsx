@@ -118,8 +118,10 @@ describe('Local service transport', () => {
     expect(screen.queryByRole('button', { name: 'Start service' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Restart service' }));
     expect(posted('daemon:restart')).toHaveLength(1);
-    // The in-flight restart now locks the lifecycle controls.
-    expect(screen.getByRole('button', { name: 'Stop service' })).toBeDisabled();
+    // The in-flight restart now holds the lifecycle controls (focusable, inert).
+    expect(screen.getByRole('button', { name: 'Stop service' })).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Stop service' }));
+    expect(posted('daemon:stop')).toHaveLength(0);
   });
 
   it('posts daemon:stop from Stop service', async () => {
@@ -162,9 +164,10 @@ describe('Local service transport', () => {
 
     render(<Setup />);
 
-    expect(screen.getByRole('button', { name: 'Restart service' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Stop service' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Restart service' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Stop service' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Update Cursor' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Update Cursor' })).not.toHaveAttribute('aria-disabled');
     expect(service()).toHaveAttribute('aria-busy', 'true');
   });
 
@@ -255,7 +258,7 @@ describe('Editors section', () => {
 
     const button = screen.getByRole('button', { name: 'Setup all detected editors' });
     await userEvent.click(button);
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAttribute('aria-busy', 'true');
     await userEvent.click(button);
     expect(posted('action:setupAll')).toHaveLength(1);
@@ -263,7 +266,7 @@ describe('Editors section', () => {
     const { id } = posted('action:setupAll')[0] as { id: string };
     act(() => useStore.getState().markActionDone(id, { ok: true }));
 
-    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute('aria-disabled');
     expect(button).not.toHaveAttribute('aria-busy');
   });
 
@@ -281,14 +284,14 @@ describe('Editors section', () => {
     render(<Setup />);
 
     const button = screen.getByRole('button', { name: 'Setup all detected editors' });
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAttribute('aria-busy', 'true');
     await userEvent.click(button);
     expect(posted('action:setupAll')).toHaveLength(1);
 
     const { id } = posted('action:setupAll')[0] as { id: string };
     act(() => useStore.getState().markActionDone(id, { ok: true }));
-    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute('aria-disabled');
   });
 
   it('guards the Setup button when setup-all was started from the Overview next action', async () => {
@@ -301,19 +304,20 @@ describe('Editors section', () => {
 
     const overview = render(<Overview navigate={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: 'Set up all editors' }));
-    expect(screen.getByRole('button', { name: 'Set up all editors' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Set up all editors' })).toHaveAttribute('aria-disabled', 'true');
     overview.unmount();
 
     render(<Setup />);
-    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     expect(posted('action:setupAll')).toHaveLength(1);
 
     const { id } = posted('action:setupAll')[0] as { id: string };
     act(() => useStore.getState().markActionDone(id, { ok: true }));
-    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).not.toHaveAttribute('aria-disabled');
   });
 
-  it('keeps the Overview setup-all action blocked while a per-editor action is pending', () => {
+  it('keeps the Overview setup-all action blocked while a per-editor action is pending', async () => {
     const ideStatuses = [
       ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
       ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
@@ -329,7 +333,9 @@ describe('Editors section', () => {
     });
     render(<Overview navigate={vi.fn()} />);
 
-    expect(screen.getByRole('button', { name: 'Set up all editors' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Set up all editors' })).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Set up all editors' }));
+    expect(posted('action:setupAll')).toHaveLength(0);
   });
 
   it('does not lock Setup all on an unrelated pending action', () => {
@@ -477,8 +483,10 @@ describe('Editors section', () => {
 
     render(<Setup />);
 
-    expect(screen.getByRole('button', { name: 'Update Cursor' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Update Cursor' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Update Windsurf' })).not.toHaveAttribute('aria-disabled');
     expect(screen.getByRole('button', { name: 'Update Windsurf' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Restart service' })).not.toHaveAttribute('aria-disabled');
     expect(screen.getByRole('button', { name: 'Restart service' })).toBeEnabled();
   });
 

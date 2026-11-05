@@ -378,7 +378,7 @@ describe('Saving', () => {
     const status = screen.getByRole('status');
     expect(status).toHaveAttribute('aria-busy', 'true');
     expect(status).toHaveTextContent('Saving prompt…');
-    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute('aria-disabled', 'true');
     expect(save).toHaveAttribute('aria-busy', 'true');
     await user.click(save);
     expect(posted('action:save-prompt')).toHaveLength(1);

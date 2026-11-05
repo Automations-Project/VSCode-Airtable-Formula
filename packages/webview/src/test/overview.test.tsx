@@ -136,12 +136,15 @@ describe('Overview next action', () => {
     );
   });
 
-  it('disables the daemon action while a daemon action is in flight', async () => {
+  it('holds the daemon action while a daemon action is in flight', async () => {
     seed({ daemon: undefined });
     useStore.getState().startDaemon();
     render(<Overview navigate={vi.fn()} />);
+    const start = screen.getByRole('button', { name: 'Start service' });
 
-    expect(screen.getByRole('button', { name: 'Start service' })).toBeDisabled();
+    expect(start).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(start);
+    expect(postedTypes()).toEqual(['daemon:start']);
   });
 });
 

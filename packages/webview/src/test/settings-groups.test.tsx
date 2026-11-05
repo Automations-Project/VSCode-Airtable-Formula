@@ -327,17 +327,18 @@ describe('Diagnostics', () => {
 
     await user.click(screen.getByRole('button', { name: 'Export Full Log' }));
     expect(screen.getByRole('button', { name: 'Start Session' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Export Full Log' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Export Full Log' })).toHaveAttribute('aria-disabled', 'true');
     await user.click(screen.getByRole('button', { name: 'Export Full Log' }));
     expect(posted('action:debug.export')).toHaveLength(1);
 
     view.unmount();
     render(<Settings navigate={vi.fn()} />);
     await open('Diagnostics');
-    expect(screen.getByRole('button', { name: 'Export Full Log' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Export Full Log' })).toHaveAttribute('aria-disabled', 'true');
 
     settle(posted('action:debug.export')[0].id, { ok: false, error: 'Disk full' });
     expect(screen.getByRole('button', { name: 'Export Full Log' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Export Full Log' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('keeps focus on the toggle button when a disclosure opens and closes', async () => {
