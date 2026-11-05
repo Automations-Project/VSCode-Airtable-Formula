@@ -29,13 +29,16 @@ interface Store extends DashboardState {
    *  not on the global pendingActions, so an unrelated slow action (e.g. an
    *  open file dialog) can't lock the user out of stopping the daemon. */
   pendingDaemonActions: Set<string>;
+  /** Setup-all in flight, wherever it was started (Overview or Setup). Lives in
+   *  the store so the guard survives tab switches and spans both entry points. */
+  pendingSetupAll: Set<string>;
   setTab: (tab: Store['activeTab']) => void;
   hydratePersistedState: () => void;
   applyState: (state: DashboardState) => void;
   applyIdeStatus: (statuses: IdeStatus[]) => void;
   applyAuthState: (state: AuthState) => void;
   setupIde: (ideId: IdeId) => void;
-  setupAll: () => string;
+  setupAll: () => void;
   refresh: () => void;
   login: () => void;
   logout: () => void;
@@ -146,6 +149,12 @@ export const useStore = create<Store>((set, get) => {
     set(s => ({ pendingDaemonActions: new Set([...s.pendingDaemonActions, id]) }));
   };
 
+  /** beginAction + membership in the setup-all pending set. */
+  const beginSetupAllAction = (id: string) => {
+    beginAction(id);
+    set(s => ({ pendingSetupAll: new Set([...s.pendingSetupAll, id]) }));
+  };
+
   return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
@@ -158,6 +167,7 @@ export const useStore = create<Store>((set, get) => {
   pendingActions: new Set(),
   pendingIdeActions: new Map(),
   pendingDaemonActions: new Set(),
+  pendingSetupAll: new Set(),
 
   setTab: (tab) => {
     set({ activeTab: tab });
@@ -207,9 +217,8 @@ export const useStore = create<Store>((set, get) => {
 
   setupAll: () => {
     const id = randomId();
-    beginAction(id);
+    beginSetupAllAction(id);
     sendToExtension({ type: 'action:setupAll', id });
-    return id;
   },
 
   refresh: () => {
@@ -488,7 +497,14 @@ export const useStore = create<Store>((set, get) => {
       }
       const nextDaemon = new Set(s.pendingDaemonActions);
       nextDaemon.delete(id);
-      return { pendingActions: next, pendingIdeActions: nextIde, pendingDaemonActions: nextDaemon };
+      const nextSetupAll = new Set(s.pendingSetupAll);
+      nextSetupAll.delete(id);
+      return {
+        pendingActions: next,
+        pendingIdeActions: nextIde,
+        pendingDaemonActions: nextDaemon,
+        pendingSetupAll: nextSetupAll,
+      };
     });
   },
   });

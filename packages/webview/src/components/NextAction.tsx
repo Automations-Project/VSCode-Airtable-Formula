@@ -21,6 +21,7 @@ export function NextAction({ action, navigate }: NextActionProps) {
   const status = useStore(s => s.status);
   const daemonPending = useStore(s => s.pendingDaemonActions.size > 0);
   const idePending = useStore(s => (action?.ideId ? s.pendingIdeActions.has(action.ideId) : false));
+  const setupAllPending = useStore(s => s.pendingSetupAll.size > 0);
   const anyPending = useStore(s => s.pendingActions.size > 0);
 
   if (!action) return null;
@@ -46,7 +47,9 @@ export function NextAction({ action, navigate }: NextActionProps) {
     }
     pending = action.dispatchType === 'daemon:start'
       ? daemonPending
-      : action.dispatchType === 'action:setupIde' ? idePending : anyPending;
+      : action.dispatchType === 'action:setupIde'
+        ? idePending
+        : action.dispatchType === 'action:setupAll' ? setupAllPending : anyPending;
   }
 
   return (

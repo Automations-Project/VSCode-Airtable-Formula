@@ -9,16 +9,12 @@ import { useStore } from '../../store.js';
 export function EditorsSection() {
   const ideStatuses = useStore(s => s.ideStatuses);
   const pendingIdeActions = useStore(s => s.pendingIdeActions);
-  const pendingActions = useStore(s => s.pendingActions);
+  const setupAllPending = useStore(s => s.pendingSetupAll.size > 0);
   const includeAgents = useStore(s => s.settings.ai.includeAgents);
   const setupIde = useStore(s => s.setupIde);
   const setupAll = useStore(s => s.setupAll);
   const unconfigureIde = useStore(s => s.unconfigureIde);
   const openIdeDocs = useStore(s => s.openIdeDocs);
-
-  // Setup all tracks its own action id; unrelated pending work never locks it.
-  const [setupAllId, setSetupAllId] = React.useState<string | null>(null);
-  const setupAllPending = setupAllId !== null && pendingActions.has(setupAllId);
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
@@ -53,7 +49,7 @@ export function EditorsSection() {
         <ActionButton
           variant="primary"
           pending={setupAllPending || pendingIdeActions.size > 0}
-          onClick={() => setSetupAllId(setupAll())}
+          onClick={setupAll}
         >
           Setup all detected editors
         </ActionButton>

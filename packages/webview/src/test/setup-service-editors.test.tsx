@@ -2,8 +2,9 @@ import React from 'react';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IdeStatus } from '@shared/types.js';
+import { Overview } from '../tabs/Overview.js';
 import { Setup } from '../tabs/Setup.js';
 import { useStore } from '../store.js';
 import { makeDashboardState, type DashboardStateOverrides } from './dashboard-state.fixture.js';
@@ -264,6 +265,52 @@ describe('Editors section', () => {
 
     expect(button).toBeEnabled();
     expect(button).not.toHaveAttribute('aria-busy');
+  });
+
+  it('keeps Setup all guarded across an unmount and remount', async () => {
+    seed({
+      ideStatuses: [
+        ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
+        ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
+      ],
+    });
+
+    const first = render(<Setup />);
+    await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
+    first.unmount();
+    render(<Setup />);
+
+    const button = screen.getByRole('button', { name: 'Setup all detected editors' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    await userEvent.click(button);
+    expect(posted('action:setupAll')).toHaveLength(1);
+
+    const { id } = posted('action:setupAll')[0] as { id: string };
+    act(() => useStore.getState().markActionDone(id, { ok: true }));
+    expect(button).toBeEnabled();
+  });
+
+  it('guards the Setup button when setup-all was started from the Overview next action', async () => {
+    seed({
+      ideStatuses: [
+        ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
+        ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
+      ],
+    });
+
+    const overview = render(<Overview navigate={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Set up all editors' }));
+    expect(screen.getByRole('button', { name: 'Set up all editors' })).toBeDisabled();
+    overview.unmount();
+
+    render(<Setup />);
+    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeDisabled();
+    expect(posted('action:setupAll')).toHaveLength(1);
+
+    const { id } = posted('action:setupAll')[0] as { id: string };
+    act(() => useStore.getState().markActionDone(id, { ok: true }));
+    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeEnabled();
   });
 
   it('does not lock Setup all on an unrelated pending action', () => {
