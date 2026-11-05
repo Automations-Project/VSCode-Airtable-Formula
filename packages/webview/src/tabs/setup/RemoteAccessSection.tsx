@@ -65,6 +65,8 @@ export function RemoteAccessSection() {
       : provider === 'ngrok' ? ngrokDomain.trim() || undefined
       : undefined;
     enableTunnel(provider, authtoken, domain);
+    // The host owns the token from here; never keep the secret in component state.
+    if (authtoken) setNgrokToken('');
   };
 
   const saveToken = () => {
@@ -233,7 +235,7 @@ export function RemoteAccessSection() {
 
         <div className="form-actions">
           {live ? (
-            <ActionButton pending={pending} disabled={!serviceReady} onClick={disableTunnel}>
+            <ActionButton pending={pending} onClick={disableTunnel}>
               Disable remote access
             </ActionButton>
           ) : (

@@ -318,6 +318,62 @@ describe('Remote access', () => {
     expect(posted('tunnel:disable')).toHaveLength(1);
   });
 
+  it.each([
+    ['active', { running: false, healthy: false, port: null, port_lsp: null, uptime: null }],
+    ['active', { running: true, healthy: false }],
+    ['starting', { running: false, healthy: false, port: null, port_lsp: null, uptime: null }],
+  ] as const)('keeps Disable reachable when the tunnel is %s and the service is down', async (status, daemon) => {
+    seed({ tunnel: { status, url: null, provider: 'cf-quick' }, daemon });
+    render(<Setup />);
+
+    expect(screen.queryByRole('button', { name: 'Enable remote access' })).not.toBeInTheDocument();
+    const disable = screen.getByRole('button', { name: 'Disable remote access' });
+    expect(disable).toBeEnabled();
+    await userEvent.click(disable);
+
+    expect(posted('tunnel:disable')).toHaveLength(1);
+  });
+
+  it('still disables Disable while its own pending action is in flight', async () => {
+    seed({ tunnel: { status: 'active', url: null, provider: 'cf-quick' }, daemon: { running: false, healthy: false } });
+    render(<Setup />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Disable remote access' }));
+
+    expect(screen.getByRole('button', { name: 'Disable remote access' })).toBeDisabled();
+  });
+
+  it('keeps Enable disabled while the service is not ready', async () => {
+    seed({ tunnel: { status: 'disabled' }, daemon: { running: false, healthy: false, port: null, port_lsp: null, uptime: null } });
+    render(<Setup />);
+    await userEvent.click(toggle('Remote access'));
+
+    expect(screen.getByRole('button', { name: 'Enable remote access' })).toBeDisabled();
+  });
+
+  it('clears the typed ngrok token once Enable is dispatched, so Replace starts empty', async () => {
+    seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: false } });
+    render(<Setup />);
+    await userEvent.click(toggle('Remote access'));
+
+    const token = screen.getByLabelText('ngrok auth token');
+    await userEvent.type(token, 'tok_secret');
+    await userEvent.click(screen.getByRole('button', { name: 'Enable remote access' }));
+
+    expect(posted('tunnel:enable')).toEqual([expect.objectContaining({ authtoken: 'tok_secret' })]);
+    expect(screen.getByLabelText('ngrok auth token')).toHaveValue('');
+
+    // Host acknowledges, tunnel stops, and the token is now stored.
+    act(() => {
+      for (const id of useStore.getState().pendingTunnelActions) useStore.getState().markActionDone(id, { ok: true });
+      useStore.setState({ tunnel: { status: 'disabled', url: null, provider: 'ngrok', ngrokAuthtokenSet: true, autoDisabledReason: null } });
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Replace token' }));
+
+    expect(screen.getByLabelText('ngrok auth token')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save token' })).toBeDisabled();
+  });
+
   it('holds the pending guard in the store so it survives a remount and blocks duplicates', async () => {
     seed();
     const first = render(<Setup />);
