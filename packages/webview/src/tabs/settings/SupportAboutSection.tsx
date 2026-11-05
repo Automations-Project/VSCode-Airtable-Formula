@@ -29,6 +29,12 @@ export function SupportAboutSection() {
           <dt>Bundled MCP server</dt>
           <dd>{versions.mcpServerBundled}</dd>
         </div>
+        {versions.mcpServerPublished && versions.mcpServerPublished !== versions.mcpServerBundled && (
+          <div className="about-version">
+            <dt>MCP server update</dt>
+            <dd>Update available: {versions.mcpServerPublished}</dd>
+          </div>
+        )}
       </dl>
       <div className="support-actions">
         {SUPPORT_LINKS.map(link => (

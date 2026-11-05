@@ -48,8 +48,24 @@ export interface ReadinessIssue {
   focusTargetId?: string;
 }
 
+/** Why the model is in its state. Consumers key behavior on this, never on display text. */
+export type ReadinessReason =
+  | 'loading'
+  | 'browser-missing'
+  | 'session-checking'
+  | 'session-signing-in'
+  | 'session-unchecked'
+  | 'session-invalid'
+  | 'service-starting'
+  | 'service-stopped'
+  | 'service-unhealthy'
+  | 'no-clients'
+  | 'repair'
+  | 'ready';
+
 export interface ReadinessModel {
   state: ReadinessState;
+  reason: ReadinessReason;
   transportMode: 'daemon' | 'stdio';
   terms: {
     session: ReadinessTerm;
@@ -343,12 +359,14 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
 
   const result = (
     state: ReadinessState,
+    reason: ReadinessReason,
     resultLabel: string,
     headline: string,
     detail: string,
     nextAction: ReadinessAction | null,
   ): ReadinessModel => ({
     state,
+    reason,
     transportMode: useDaemon ? 'daemon' : 'stdio',
     terms,
     resultLabel,
@@ -360,14 +378,14 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
   });
 
   if (input.loading) {
-    return result('loading', 'CHECKING', 'Checking Airtable readiness',
+    return result('loading', 'loading', 'CHECKING', 'Checking Airtable readiness',
       'Waiting for the extension to report status.', null);
   }
 
   // 1. Browser.
   if (auth.status === 'chrome-missing') {
     const downloading = auth.browserDownload?.status === 'downloading';
-    return result('blocked', 'BROWSER', 'Install a browser to start a session',
+    return result('blocked', 'browser-missing', 'BROWSER', 'Install a browser to start a session',
       downloading
         ? `Downloading Chromium (${auth.browserDownload?.progress ?? 0}%).`
         : 'Airtable sign-in uses Chrome, Edge, or Chromium. Choose or download one in Settings.',
@@ -376,22 +394,22 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
 
   // 2. Session.
   if (auth.status === 'checking') {
-    return result('loading', 'CHECKING', 'Checking your Airtable session',
+    return result('loading', 'session-checking', 'CHECKING', 'Checking your Airtable session',
       'This usually takes a few seconds.', null);
   }
   if (auth.status === 'logging-in') {
-    return result('loading', 'SIGN IN', 'Signing in to Airtable',
+    return result('loading', 'session-signing-in', 'SIGN IN', 'Signing in to Airtable',
       'Finish signing in if a browser window opened.', null);
   }
   if (auth.status === 'unknown') {
-    return result('blocked', 'SIGN IN', 'Check your Airtable session',
+    return result('blocked', 'session-unchecked', 'SIGN IN', 'Check your Airtable session',
       'The session has not been verified yet.',
       { kind: 'dispatch', label: 'Check session', dispatchType: 'action:status' });
   }
   if (auth.status !== 'valid') {
     // Browser-mode and direct-login can re-run the login; byo needs a fresh cookie.
     const canLogin = input.settings.mcp.authMode !== 'byo' && auth.hasCredentials;
-    return result('blocked', 'SIGN IN', 'Sign in to Airtable',
+    return result('blocked', 'session-invalid', 'SIGN IN', 'Sign in to Airtable',
       auth.status === 'expired'
         ? 'Your Airtable session expired.'
         : 'Airtable could not confirm your session.',
@@ -403,16 +421,16 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
   // 3. Service (daemon mode only; stdio is a valid transport, not a stopped daemon).
   if (useDaemon) {
     if (daemon?.starting) {
-      return result('loading', 'SERVICE', 'Starting the local service',
+      return result('loading', 'service-starting', 'SERVICE', 'Starting the local service',
         'Editors can connect once it is healthy.', null);
     }
     if (!daemon?.running) {
-      return result('blocked', 'SERVICE', 'Start the local service',
+      return result('blocked', 'service-stopped', 'SERVICE', 'Start the local service',
         'Editors connect through the shared local service, which is not running.',
         { kind: 'dispatch', label: 'Start service', dispatchType: 'daemon:start' });
     }
     if (!daemon.healthy) {
-      return result('blocked', 'SERVICE', 'Repair the local service',
+      return result('blocked', 'service-unhealthy', 'SERVICE', 'Repair the local service',
         'The local service is running but is not answering health checks.',
         { kind: 'open-tab', label: 'Review local service', tab: 'setup', focusTargetId: FOCUS.service });
     }
@@ -422,7 +440,7 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
   if (usable === 0) {
     const action = clientRepairAction(repairs, true)
       ?? { kind: 'open-tab' as const, label: 'Review editors', tab: 'setup' as const, focusTargetId: FOCUS.editors };
-    return result('blocked', 'SET UP', 'Connect an editor',
+    return result('blocked', 'no-clients', 'SET UP', 'Connect an editor',
       summaries.length === 0
         ? 'No supported editor was detected on this machine.'
         : 'None of the detected editors can use Airtable yet.',
@@ -436,12 +454,12 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
       ?? (tunnelIssue
         ? { kind: 'open-tab' as const, label: 'Review remote access', tab: tunnelIssue.tab, focusTargetId: tunnelIssue.focusTargetId }
         : null);
-    return result('degraded', 'REPAIR', 'Airtable is ready, with repairs available',
+    return result('degraded', 'repair', 'REPAIR', 'Airtable is ready, with repairs available',
       `${issues.length} ${issues.length === 1 ? 'item needs' : 'items need'} attention. Working editors are unaffected.`,
       action);
   }
 
   // 6. Ready.
-  return result('ready', 'READY', 'Airtable is ready',
+  return result('ready', 'ready', 'READY', 'Airtable is ready',
     `${usable} ${usable === 1 ? 'editor is' : 'editors are'} ready to use Airtable.`, null);
 }

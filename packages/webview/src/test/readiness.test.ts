@@ -355,6 +355,25 @@ describe('selectReadiness priority and branches', () => {
   });
 });
 
+describe('selectReadiness reason', () => {
+  it.each([
+    ['loading', { loading: true }, 'loading'],
+    ['checking', { auth: { status: 'checking' } }, 'session-checking'],
+    ['logging-in', { auth: { status: 'logging-in' } }, 'session-signing-in'],
+    ['unchecked', { auth: { status: 'unknown' } }, 'session-unchecked'],
+    ['browser', { auth: { status: 'chrome-missing' } }, 'browser-missing'],
+    ['expired', { auth: { status: 'expired' } }, 'session-invalid'],
+    ['service stopped', { daemon: undefined }, 'service-stopped'],
+    ['service starting', { daemon: { running: false, healthy: false, starting: true } }, 'service-starting'],
+    ['service unhealthy', { daemon: { running: true, healthy: false } }, 'service-unhealthy'],
+    ['no clients', { ideStatuses: [] }, 'no-clients'],
+    ['tunnel error', { tunnel: { status: 'error' } }, 'repair'],
+    ['ready', {}, 'ready'],
+  ] as const)('exposes a typed reason for %s independent of display labels', (_name, overrides, reason) => {
+    expect(selectReadiness(makeDashboardState(overrides as never)).reason).toBe(reason);
+  });
+});
+
 describe('summarizeClients', () => {
   it('lists only detected editors with a ready, partial, or needs-setup state', () => {
     const summaries = summarizeClients([

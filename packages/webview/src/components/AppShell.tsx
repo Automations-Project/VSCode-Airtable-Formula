@@ -45,6 +45,7 @@ export function AppShell({
         role="tabpanel"
         aria-labelledby={`dashboard-tab-${activeTab}`}
         className="app-panel"
+        tabIndex={-1}
       >
         {children}
       </main>

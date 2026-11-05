@@ -5,7 +5,7 @@ import { AppShell } from './components/AppShell.js';
 import { Feedback } from './components/Feedback.js';
 import { resolveHostConfirmation } from './lib/confirmation.js';
 import { onExtensionMessage, sendToExtension } from './lib/vscode.js';
-import { selectReadiness, type ReadinessModel } from './selectors/readiness.js';
+import { selectReadiness, type ReadinessReason } from './selectors/readiness.js';
 import { useStore } from './store.js';
 import { Overview } from './tabs/Overview.js';
 import { Prompts } from './tabs/Prompts.js';
@@ -19,21 +19,22 @@ const TABS = [
   { id: 'settings' as const, label: 'Settings' },
 ];
 
-const BLOCKED_STATUS: Record<string, string> = {
-  BROWSER: 'Browser required',
-  'SIGN IN': 'Sign in required',
-  SERVICE: 'Service needs attention',
-  'SET UP': 'Client setup needed',
+// Header texts keyed on the typed reason, never on a display label. Pending
+// session/service states keep their long-standing texts (the header is a live region).
+const HEADER_STATUS: Record<ReadinessReason, string> = {
+  loading: 'Loading status',
+  'browser-missing': 'Browser required',
+  'session-checking': 'Sign in required',
+  'session-signing-in': 'Sign in required',
+  'session-unchecked': 'Sign in required',
+  'session-invalid': 'Sign in required',
+  'service-starting': 'Service needs attention',
+  'service-stopped': 'Service needs attention',
+  'service-unhealthy': 'Service needs attention',
+  'no-clients': 'Client setup needed',
+  repair: 'Needs repair',
+  ready: 'Ready',
 };
-
-function getAggregateStatus(readiness: ReadinessModel): string {
-  switch (readiness.state) {
-    case 'loading': return 'Loading status';
-    case 'ready': return 'Ready';
-    case 'degraded': return 'Needs repair';
-    default: return BLOCKED_STATUS[readiness.resultLabel] ?? 'Needs attention';
-  }
-}
 
 export function App() {
   const {
@@ -85,14 +86,14 @@ export function App() {
     return off;
   }, []);
 
-  const status = getAggregateStatus(selectReadiness({
+  const status = HEADER_STATUS[selectReadiness({
     loading,
     auth,
     settings,
     daemon,
     tunnel,
     ideStatuses,
-  }));
+  }).reason];
 
   function requestTab(tab: DashboardTabId): boolean {
     setTab(tab);
@@ -101,9 +102,13 @@ export function App() {
 
   function navigate(tab: DashboardTabId, focusTargetId?: string): void {
     setTab(tab);
-    if (!focusTargetId) return;
+    // Move focus to the requested heading, else the tab's own heading, else the
+    // panel, so it never falls back to <body> when the clicked control unmounts.
     requestAnimationFrame(() => {
-      document.getElementById(focusTargetId)?.focus();
+      const landing = (focusTargetId ? document.getElementById(focusTargetId) : null)
+        ?? document.getElementById(`${tab}-heading`)
+        ?? document.getElementById(`dashboard-panel-${tab}`);
+      landing?.focus();
     });
   }
 
