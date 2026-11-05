@@ -16,8 +16,7 @@
   50% { opacity: 0.55; }
 }
 
-.glass-panel,
-.metric-card {
+.glass-panel {
   padding: var(--space-4);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-2);
@@ -223,20 +222,6 @@
   padding-top: var(--space-3);
 }
 
-.metric-value {
-  font-size: 1.1em;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.metric-label {
-  margin-top: var(--space-1);
-  color: var(--text-secondary);
-  font-size: max(11px, 0.92em);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .btn {
   display: inline-flex;
   min-height: 28px;
@@ -275,12 +260,6 @@
 .btn-sm {
   padding: var(--space-1) var(--space-3);
   font-size: max(11px, 0.92em);
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
 }
 
 .stack {

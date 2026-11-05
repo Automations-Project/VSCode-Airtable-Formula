@@ -46,10 +46,6 @@
   .app-status {
     max-width: 44%;
   }
-
-  .metrics-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .vscode-high-contrast .section,

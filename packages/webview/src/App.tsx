@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell.js';
 import { Feedback } from './components/Feedback.js';
 import { resolveHostConfirmation } from './lib/confirmation.js';
 import { onExtensionMessage, sendToExtension } from './lib/vscode.js';
+import { selectReadiness, type ReadinessModel } from './selectors/readiness.js';
 import { useStore } from './store.js';
 import { Overview } from './tabs/Overview.js';
 import { Prompts } from './tabs/Prompts.js';
@@ -18,25 +19,20 @@ const TABS = [
   { id: 'settings' as const, label: 'Settings' },
 ];
 
-function getAggregateStatus({
-  loading,
-  authStatus,
-  useDaemon,
-  daemonHealthy,
-  hasConfiguredClient,
-}: {
-  loading: boolean;
-  authStatus: string;
-  useDaemon: boolean;
-  daemonHealthy: boolean;
-  hasConfiguredClient: boolean;
-}): string {
-  if (loading) return 'Loading status';
-  if (authStatus === 'chrome-missing') return 'Browser required';
-  if (authStatus !== 'valid') return 'Sign in required';
-  if (useDaemon && !daemonHealthy) return 'Service needs attention';
-  if (!hasConfiguredClient) return 'Client setup needed';
-  return 'Ready';
+const BLOCKED_STATUS: Record<string, string> = {
+  BROWSER: 'Browser required',
+  'SIGN IN': 'Sign in required',
+  SERVICE: 'Service needs attention',
+  'SET UP': 'Client setup needed',
+};
+
+function getAggregateStatus(readiness: ReadinessModel): string {
+  switch (readiness.state) {
+    case 'loading': return 'Loading status';
+    case 'ready': return 'Ready';
+    case 'degraded': return 'Needs repair';
+    default: return BLOCKED_STATUS[readiness.resultLabel] ?? 'Needs attention';
+  }
 }
 
 export function App() {
@@ -52,6 +48,7 @@ export function App() {
     auth,
     settings,
     daemon,
+    tunnel,
     ideStatuses,
   } = useStore();
 
@@ -88,19 +85,26 @@ export function App() {
     return off;
   }, []);
 
-  const status = getAggregateStatus({
+  const status = getAggregateStatus(selectReadiness({
     loading,
-    authStatus: auth.status,
-    useDaemon: settings.mcp.useDaemon,
-    daemonHealthy: daemon?.healthy === true,
-    hasConfiguredClient: ideStatuses.some(
-      client => client.mcpConfigured === true || client.lspConfigured === true,
-    ),
-  });
+    auth,
+    settings,
+    daemon,
+    tunnel,
+    ideStatuses,
+  }));
 
   function requestTab(tab: DashboardTabId): boolean {
     setTab(tab);
     return true;
+  }
+
+  function navigate(tab: DashboardTabId, focusTargetId?: string): void {
+    setTab(tab);
+    if (!focusTargetId) return;
+    requestAnimationFrame(() => {
+      document.getElementById(focusTargetId)?.focus();
+    });
   }
 
   return (
@@ -115,7 +119,7 @@ export function App() {
         <Feedback>Loading Airtable Control…</Feedback>
       ) : (
         <>
-          {activeTab === 'overview' && <Overview />}
+          {activeTab === 'overview' && <Overview navigate={navigate} />}
           {activeTab === 'setup' && <Setup />}
           {activeTab === 'prompts' && <Prompts />}
           {activeTab === 'settings' && <Settings />}
