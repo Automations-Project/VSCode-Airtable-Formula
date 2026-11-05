@@ -164,13 +164,11 @@ describe('Remote access', () => {
   it.each([
     ['active', 'Active'],
     ['starting', 'Starting'],
-    ['auto-disabled', 'Auto-disabled'],
   ] as const)('opens automatically when the tunnel is %s', (status, label) => {
     seed({
       tunnel: {
         status, url: status === 'active' ? 'https://x.trycloudflare.com' : null,
-        provider: 'cf-quick', ngrokAuthtokenSet: false,
-        autoDisabledReason: status === 'auto-disabled' ? { failures: 5, windowMs: 60_000, ip: '1.2.3.4' } : null,
+        provider: 'cf-quick', ngrokAuthtokenSet: false, autoDisabledReason: null,
       },
     });
     render(<Setup />);
@@ -179,16 +177,43 @@ describe('Remote access', () => {
     expect(within(remote()).getByRole('status')).toHaveTextContent(label);
   });
 
-  it('explains auto-disable with an alert', () => {
+  function seedAutoDisabled(windowMs: number): void {
     seed({
       tunnel: {
         status: 'auto-disabled', url: null, provider: 'cf-quick', ngrokAuthtokenSet: false,
-        autoDisabledReason: { failures: 5, windowMs: 60_000, ip: '1.2.3.4' },
+        autoDisabledReason: { failures: 5, windowMs, ip: '1.2.3.4' },
       },
     });
+  }
+
+  it('leaves an auto-disabled tunnel collapsed: it is a note, not a repair', () => {
+    seedAutoDisabled(60_000);
     render(<Setup />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('5 auth failures from 1.2.3.4 in 60s');
+    expect(toggle('Remote access')).toHaveAttribute('aria-expanded', 'false');
+    expect(within(remote()).getByText('Auto-disabled')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('explains auto-disable as status text, never an alert re-announced on every visit', async () => {
+    seedAutoDisabled(60_000);
+    render(<Setup />);
+    await userEvent.click(toggle('Remote access'));
+
+    const note = within(remote()).getByText(/Remote access was turned off after/);
+    expect(note).toHaveTextContent('5 auth failures from 1.2.3.4 in 60s');
+    expect(note.closest('[role="status"]')).not.toBeNull();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('omits the duration when the host reported no window', async () => {
+    seedAutoDisabled(0);
+    render(<Setup />);
+    await userEvent.click(toggle('Remote access'));
+
+    const note = within(remote()).getByText(/Remote access was turned off after/);
+    expect(note).toHaveTextContent('Remote access was turned off after 5 auth failures from 1.2.3.4.');
+    expect(note).not.toHaveTextContent(/ in \d+s/);
   });
 
   it('opens on demand and needs a healthy service before enabling controls', async () => {

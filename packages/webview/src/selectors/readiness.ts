@@ -236,6 +236,12 @@ function clientRepairAction(
   };
 }
 
+/**
+ * A note, not a repair: the 401-burst tripwire did its job and nothing local is
+ * broken, so it is listed but never makes the workbench "degraded" or offers an action.
+ */
+const TUNNEL_AUTO_DISABLED = 'tunnel-auto-disabled';
+
 function collectIssues(
   input: ReadinessInput,
   summaries: readonly ClientSummary[],
@@ -325,14 +331,21 @@ function collectIssues(
     });
   }
 
-  if (tunnel && (tunnel.status === 'error' || tunnel.status === 'auto-disabled')) {
+  if (tunnel?.status === 'error') {
     issues.push({
       id: 'tunnel-attention',
       severity: 'warning',
       title: 'Remote access needs attention',
-      detail: tunnel.status === 'error'
-        ? 'The remote tunnel failed. Local editors are not affected.'
-        : 'The remote tunnel was turned off after repeated failures. Local editors are not affected.',
+      detail: 'The remote tunnel failed. Local editors are not affected.',
+      tab: 'setup',
+      focusTargetId: FOCUS.remote,
+    });
+  } else if (tunnel?.status === 'auto-disabled') {
+    issues.push({
+      id: TUNNEL_AUTO_DISABLED,
+      severity: 'info',
+      title: 'Remote access was turned off',
+      detail: 'The remote tunnel was turned off after repeated failed sign-ins. Local editors are not affected.',
       tab: 'setup',
       focusTargetId: FOCUS.remote,
     });
@@ -450,15 +463,16 @@ export function selectReadiness(input: ReadinessInput): ReadinessModel {
       action);
   }
 
-  // 5. Degraded repair.
-  if (issues.length > 0) {
-    const tunnelIssue = issues.find(issue => issue.id === 'tunnel-attention');
+  // 5. Degraded repair. Notes (an auto-disabled tunnel) are listed, not repaired.
+  const repairIssues = issues.filter(issue => issue.id !== TUNNEL_AUTO_DISABLED);
+  if (repairIssues.length > 0) {
+    const tunnelIssue = repairIssues.find(issue => issue.id === 'tunnel-attention');
     const action = clientRepairAction(repairs, false)
       ?? (tunnelIssue
         ? { kind: 'open-tab' as const, label: 'Review remote access', tab: tunnelIssue.tab, focusTargetId: tunnelIssue.focusTargetId }
         : null);
     return result('degraded', 'repair', 'REPAIR', 'Airtable is ready, with repairs available',
-      `${issues.length} ${issues.length === 1 ? 'item needs' : 'items need'} attention. Working editors are unaffected.`,
+      `${repairIssues.length} ${repairIssues.length === 1 ? 'item needs' : 'items need'} attention. Working editors are unaffected.`,
       action);
   }
 

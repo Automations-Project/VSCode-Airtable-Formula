@@ -1,5 +1,5 @@
 import React from 'react';
-import type { TunnelProviderId, TunnelStatus } from '@shared/types.js';
+import type { TunnelAutoDisabledReason, TunnelProviderId, TunnelStatus } from '@shared/types.js';
 import { ActionButton } from '../../components/ActionButton.js';
 import { Disclosure } from '../../components/Disclosure.js';
 import { Feedback } from '../../components/Feedback.js';
@@ -22,6 +22,14 @@ const STATUS: Record<TunnelStatus, { text: string; dot: DotVariant }> = {
   'auto-disabled': { text: 'Auto-disabled', dot: 'warn' },
   error: { text: 'Error', dot: 'err' },
 };
+
+/** Why the tripwire fired. The host may not report a window; never print "in 0s". */
+function autoDisabledCause(reason: TunnelAutoDisabledReason | null | undefined): string {
+  if (!reason) return 'repeated auth failures';
+  const from = reason.ip ? ` from ${reason.ip}` : '';
+  const within = reason.windowMs > 0 ? ` in ${reason.windowMs / 1000}s` : '';
+  return `${reason.failures} auth failures${from}${within}`;
+}
 
 export function RemoteAccessSection() {
   const tunnel = useStore(s => s.tunnel);
@@ -51,9 +59,9 @@ export function RemoteAccessSection() {
   const live = status === 'active' || status === 'starting';
   const serviceReady = !!daemon?.running && !!daemon.healthy;
   const locked = live || pending || !serviceReady;
-  const needsAttention = live || status === 'auto-disabled' || status === 'error';
+  // Auto-disabled is a note, not a repair: it does not force the section open.
+  const needsAttention = live || status === 'error';
   const namedHost = tunnel?.namedTunnelHostname ?? null;
-  const reason = tunnel?.autoDisabledReason;
   const summary = STATUS[status];
 
   const enable = () => {
@@ -105,9 +113,10 @@ export function RemoteAccessSection() {
         </Feedback>
       )}
 
+      {/* Status, not alert: a standing condition must not be re-announced on every visit. */}
       {status === 'auto-disabled' && (
-        <Feedback variant="error">
-          Remote access was turned off after {reason ? `${reason.failures} auth failures${reason.ip ? ` from ${reason.ip}` : ''} in ${reason.windowMs / 1000}s` : 'repeated auth failures'}.
+        <Feedback variant="info">
+          Remote access was turned off after {autoDisabledCause(tunnel?.autoDisabledReason)}.
           Enable it again when you are ready.
         </Feedback>
       )}

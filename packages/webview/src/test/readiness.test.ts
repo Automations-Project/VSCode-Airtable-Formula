@@ -324,9 +324,9 @@ describe('selectReadiness priority and branches', () => {
     expect(model.nextAction).toMatchObject({ dispatchType: 'action:setupAll' });
   });
 
-  it.each(['error', 'auto-disabled'] as const)('degrades on a %s tunnel and links to remote access', status => {
+  it('degrades on a failed tunnel and links to remote access', () => {
     const model = selectReadiness(makeDashboardState({
-      tunnel: { status, url: null },
+      tunnel: { status: 'error', url: null },
     }));
 
     expect(model.state).toBe('degraded');
@@ -336,6 +336,38 @@ describe('selectReadiness priority and branches', () => {
       tab: 'setup',
       focusTargetId: 'remote-access-heading',
     });
+  });
+
+  it('keeps an auto-disabled tunnel informational: still ready, a note, no repair action', () => {
+    const model = selectReadiness(makeDashboardState({
+      tunnel: { status: 'auto-disabled', url: null },
+    }));
+
+    expect(model.state).toBe('ready');
+    expect(model.reason).toBe('ready');
+    expect(model.nextAction).toBeNull();
+    expect(model.issues).toEqual([
+      expect.objectContaining({
+        id: 'tunnel-auto-disabled',
+        severity: 'info',
+        tab: 'setup',
+        focusTargetId: 'remote-access-heading',
+      }),
+    ]);
+  });
+
+  it('still reports a real repair alongside an auto-disabled tunnel', () => {
+    const model = selectReadiness(makeDashboardState({
+      tunnel: { status: 'auto-disabled', url: null },
+      ideStatuses: [
+        cursor,
+        client({ ideId: 'cline', label: 'Cline', mcpConfigured: false }),
+      ],
+    }));
+
+    expect(model.state).toBe('degraded');
+    expect(model.detail).toBe('1 item needs attention. Working editors are unaffected.');
+    expect(model.nextAction).toMatchObject({ dispatchType: 'action:setupIde', ideId: 'cline' });
   });
 
   it('keeps a blocked state blocked when a tunnel also has an error', () => {
