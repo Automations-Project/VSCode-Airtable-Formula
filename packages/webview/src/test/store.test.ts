@@ -246,3 +246,55 @@ describe('action result confirmation (PromptEditor wait-for-result)', () => {
     expect(useStore.getState().consumeActionResult(ids[1]!)).toEqual({ ok: true });
   });
 });
+
+describe('tunnel and official pending guards', () => {
+  beforeEach(() => {
+    useStore.setState({ pendingTunnelActions: new Set(), pendingOfficialActions: new Set() });
+  });
+
+  const sent = (type: string) =>
+    vi.mocked(sendToExtension).mock.calls.filter(([message]) => (message as { type: string }).type === type);
+
+  it('tracks a tunnel action in its own set and drops a duplicate while it is in flight', () => {
+    useStore.getState().enableTunnel('cf-quick');
+    useStore.getState().enableTunnel('cf-quick');
+    useStore.getState().disableTunnel();
+    useStore.getState().setNgrokAuthtoken('tok');
+
+    const [id] = [...useStore.getState().pendingTunnelActions];
+    expect(useStore.getState().pendingTunnelActions.size).toBe(1);
+    expect(useStore.getState().pendingActions.has(id!)).toBe(true);
+    expect(sent('tunnel:enable')).toHaveLength(1);
+    expect(sent('tunnel:disable')).toHaveLength(0);
+    expect(sent('tunnel:set-ngrok-authtoken')).toHaveLength(0);
+
+    useStore.getState().markActionDone(id!, { ok: true });
+    expect(useStore.getState().pendingTunnelActions.size).toBe(0);
+    useStore.getState().disableTunnel();
+    expect(sent('tunnel:disable')).toHaveLength(1);
+  });
+
+  it('does not let an unrelated pending action block a tunnel action', () => {
+    useStore.getState().refresh();
+    useStore.getState().enableTunnel('ngrok', 'tok', 'me.ngrok-free.app');
+
+    expect(sent('tunnel:enable')).toHaveLength(1);
+  });
+
+  it('serialises official Airtable actions and releases them on completion', () => {
+    useStore.getState().saveAirtablePat('pat');
+    useStore.getState().configureOfficialAirtable('cursor');
+    useStore.getState().copyAirtablePat();
+
+    expect(useStore.getState().pendingOfficialActions.size).toBe(1);
+    expect(sent('action:save-airtable-pat')).toHaveLength(1);
+    expect(sent('action:configure-official-airtable')).toHaveLength(0);
+    expect(sent('action:copy-airtable-pat')).toHaveLength(0);
+
+    const [id] = [...useStore.getState().pendingOfficialActions];
+    useStore.getState().markActionDone(id!, { ok: false });
+    expect(useStore.getState().pendingOfficialActions.size).toBe(0);
+    useStore.getState().unconfigureOfficialAirtable('cursor');
+    expect(sent('action:unconfigure-official-airtable')).toHaveLength(1);
+  });
+});

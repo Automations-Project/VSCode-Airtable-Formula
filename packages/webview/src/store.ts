@@ -32,6 +32,11 @@ interface Store extends DashboardState {
   /** Setup-all in flight, wherever it was started (Overview or Setup). Lives in
    *  the store so the guard survives tab switches and spans both entry points. */
   pendingSetupAll: Set<string>;
+  /** Tunnel enable/disable/token-save in flight. Held here (not in component
+   *  state) so the duplicate-action guard survives a tab switch. */
+  pendingTunnelActions: Set<string>;
+  /** Official Airtable MCP work (PAT save/copy, per-editor configure/remove) in flight. */
+  pendingOfficialActions: Set<string>;
   setTab: (tab: Store['activeTab']) => void;
   hydratePersistedState: () => void;
   applyState: (state: DashboardState) => void;
@@ -155,6 +160,18 @@ export const useStore = create<Store>((set, get) => {
     set(s => ({ pendingSetupAll: new Set([...s.pendingSetupAll, id]) }));
   };
 
+  /** beginAction + membership in the tunnel pending set. */
+  const beginTunnelAction = (id: string) => {
+    beginAction(id);
+    set(s => ({ pendingTunnelActions: new Set([...s.pendingTunnelActions, id]) }));
+  };
+
+  /** beginAction + membership in the official-Airtable pending set. */
+  const beginOfficialAction = (id: string) => {
+    beginAction(id);
+    set(s => ({ pendingOfficialActions: new Set([...s.pendingOfficialActions, id]) }));
+  };
+
   return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
@@ -168,6 +185,8 @@ export const useStore = create<Store>((set, get) => {
   pendingIdeActions: new Map(),
   pendingDaemonActions: new Set(),
   pendingSetupAll: new Set(),
+  pendingTunnelActions: new Set(),
+  pendingOfficialActions: new Set(),
 
   setTab: (tab) => {
     set({ activeTab: tab });
@@ -377,21 +396,26 @@ export const useStore = create<Store>((set, get) => {
     return id;
   },
 
+  // Tunnel actions are mutually exclusive: a second one while one is in flight
+  // is dropped, so a double click can never start two tunnels.
   enableTunnel: (provider, authtoken, domain) => {
+    if (get().pendingTunnelActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginTunnelAction(id);
     sendToExtension({ type: 'tunnel:enable', id, provider, authtoken, domain });
   },
 
   disableTunnel: () => {
+    if (get().pendingTunnelActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginTunnelAction(id);
     sendToExtension({ type: 'tunnel:disable', id });
   },
 
   setNgrokAuthtoken: (authtoken) => {
+    if (get().pendingTunnelActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginTunnelAction(id);
     sendToExtension({ type: 'tunnel:set-ngrok-authtoken', id, authtoken });
   },
 
@@ -428,27 +452,33 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'daemon:rotate-token', id });
   },
 
+  // Official-Airtable actions share one in-flight slot: they all touch the same
+  // PAT / editor config files, so overlapping ones are dropped.
   saveAirtablePat: (pat) => {
+    if (get().pendingOfficialActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginOfficialAction(id);
     sendToExtension({ type: 'action:save-airtable-pat', id, pat });
   },
 
   copyAirtablePat: () => {
+    if (get().pendingOfficialActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginOfficialAction(id);
     sendToExtension({ type: 'action:copy-airtable-pat', id });
   },
 
   configureOfficialAirtable: (ideId) => {
+    if (get().pendingOfficialActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginOfficialAction(id);
     sendToExtension({ type: 'action:configure-official-airtable', id, ideId });
   },
 
   unconfigureOfficialAirtable: (ideId) => {
+    if (get().pendingOfficialActions.size > 0) return;
     const id = randomId();
-    beginAction(id);
+    beginOfficialAction(id);
     sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
   },
 
@@ -499,11 +529,17 @@ export const useStore = create<Store>((set, get) => {
       nextDaemon.delete(id);
       const nextSetupAll = new Set(s.pendingSetupAll);
       nextSetupAll.delete(id);
+      const nextTunnel = new Set(s.pendingTunnelActions);
+      nextTunnel.delete(id);
+      const nextOfficial = new Set(s.pendingOfficialActions);
+      nextOfficial.delete(id);
       return {
         pendingActions: next,
         pendingIdeActions: nextIde,
         pendingDaemonActions: nextDaemon,
         pendingSetupAll: nextSetupAll,
+        pendingTunnelActions: nextTunnel,
+        pendingOfficialActions: nextOfficial,
       };
     });
   },

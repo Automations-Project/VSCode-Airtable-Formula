@@ -3,20 +3,9 @@ import { ActionButton } from '../../components/ActionButton.js';
 import { Feedback } from '../../components/Feedback.js';
 import { Section } from '../../components/Section.js';
 import { StatusDot, type DotVariant } from '../../components/StatusDot.js';
+import { useFlash } from '../../lib/useFlash.js';
 import { useStore } from '../../store.js';
 import { formatUptime } from './snippets.js';
-
-/** A short-lived "just happened" flag for copy/rotate confirmations. */
-function useFlash(ms: number): [boolean, () => void] {
-  const [on, setOn] = React.useState(false);
-  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  React.useEffect(() => () => clearTimeout(timer.current), []);
-  return [on, () => {
-    setOn(true);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setOn(false), ms);
-  }];
-}
 
 interface ServiceStatus {
   text: string;

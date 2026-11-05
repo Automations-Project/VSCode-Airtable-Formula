@@ -1,10 +1,4 @@
 /* Temporary compatibility for surfaces migrated by later plan slices. */
-.uppercase-label {
-  font-size: max(11px, 0.92em);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .glass-panel {
   padding: var(--space-4);
   border: 1px solid var(--border-default);
@@ -28,13 +22,6 @@
   color: var(--text-primary);
   font-size: 1em;
   font-weight: 600;
-}
-
-.section-header .detail {
-  margin-top: var(--space-1);
-  color: var(--text-secondary);
-  font-size: max(11px, 0.92em);
-  line-height: 1.4;
 }
 
 .action-card {
@@ -99,7 +86,6 @@
 
 .chip-ok { border-color: var(--status-success); color: var(--status-success); }
 .chip-warn { border-color: var(--status-warning); color: var(--status-warning); }
-.chip-err { border-color: var(--status-error); color: var(--status-error); }
 .chip-info { border-color: var(--status-info); color: var(--status-info); }
 .chip-muted { color: var(--text-secondary); }
 
