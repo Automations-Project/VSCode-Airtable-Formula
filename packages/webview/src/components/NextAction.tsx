@@ -49,7 +49,7 @@ export function NextAction({ action, navigate }: NextActionProps) {
       ? daemonPending
       : action.dispatchType === 'action:setupIde'
         ? idePending
-        : action.dispatchType === 'action:setupAll' ? setupAllPending : anyPending;
+        : action.dispatchType === 'action:setupAll' ? setupAllPending || anyPending : anyPending;
   }
 
   return (

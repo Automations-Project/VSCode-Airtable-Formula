@@ -313,6 +313,25 @@ describe('Editors section', () => {
     expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeEnabled();
   });
 
+  it('keeps the Overview setup-all action blocked while a per-editor action is pending', () => {
+    const ideStatuses = [
+      ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
+      ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
+    ];
+    seed({ ideStatuses });
+    const view = render(<Overview navigate={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Set up all editors' })).toBeEnabled();
+    view.unmount();
+
+    useStore.setState({
+      pendingIdeActions: new Map([['cursor', 'abc123']]),
+      pendingActions: new Set(['abc123']),
+    });
+    render(<Overview navigate={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Set up all editors' })).toBeDisabled();
+  });
+
   it('does not lock Setup all on an unrelated pending action', () => {
     useStore.setState({
       ...makeDashboardState({
