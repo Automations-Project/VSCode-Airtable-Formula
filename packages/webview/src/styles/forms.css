@@ -186,6 +186,13 @@
   color: var(--text-secondary);
 }
 
+/* A row's own result wraps onto its own line under the row. */
+.official-editor > .outcome-status,
+.official-editor > .feedback {
+  min-width: 0;
+  flex: 1 0 100%;
+}
+
 /* Snippets scroll inside their own container, never the page. */
 .snippet-card {
   display: flex;

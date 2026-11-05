@@ -3,10 +3,11 @@ import type { IdeId } from '@shared/types.js';
 import { ActionButton } from '../../components/ActionButton.js';
 import { Disclosure } from '../../components/Disclosure.js';
 import { FormField } from '../../components/FormField.js';
+import { OutcomeFeedback } from '../../components/SettingRow.js';
 import { SnippetCard } from '../../components/SnippetCard.js';
 import { StatusDot } from '../../components/StatusDot.js';
 import { copyText } from '../../lib/clipboard.js';
-import { useFlash } from '../../lib/useFlash.js';
+import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useStore } from '../../store.js';
 import { getOfficialAirtableSnippet } from './snippets.js';
 
@@ -22,6 +23,19 @@ const OFFICIAL_CLIENTS: ReadonlyArray<{ id: IdeId; label: string }> = [
   { id: 'opencode', label: 'OpenCode' },
 ];
 
+type PatKind = 'save' | 'copy';
+
+const PAT_DONE: Record<PatKind, string> = {
+  save: 'Token saved.',
+  copy: 'Token copied to the clipboard.',
+};
+
+interface EditorAction {
+  id: string | null;
+  kind: 'configure' | 'remove';
+  ideId: IdeId | null;
+}
+
 export function OfficialAirtableSection() {
   const official = useStore(s => s.officialAirtable);
   const ideStatuses = useStore(s => s.ideStatuses);
@@ -33,7 +47,17 @@ export function OfficialAirtableSection() {
 
   const [pat, setPat] = React.useState('');
   const [snippetClient, setSnippetClient] = React.useState<IdeId>('claude-code');
-  const [copiedPat, flashCopiedPat] = useFlash(1500);
+  const [patAction, setPatAction] = React.useState<{ id: string | null; kind: PatKind }>({ id: null, kind: 'save' });
+  const [editorAction, setEditorAction] = React.useState<EditorAction>({ id: null, kind: 'configure', ideId: null });
+  const patOutcome = useActionOutcome(patAction.id);
+  const editorOutcome = useActionOutcome(editorAction.id);
+  const savingPat = patOutcome.pending && patAction.kind === 'save';
+
+  // The typed token leaves this component only once the host confirms it was
+  // stored; a failed save keeps it so it does not have to be pasted again.
+  React.useEffect(() => {
+    if (patOutcome.outcome?.ok && patAction.kind === 'save') setPat('');
+  }, [patOutcome.outcome, patAction.kind]);
 
   const patSet = !!official?.patSet;
   const detected = OFFICIAL_CLIENTS.filter(c => ideStatuses.some(s => s.ideId === c.id && s.detected));
@@ -44,10 +68,16 @@ export function OfficialAirtableSection() {
   // Never having opted in is not an issue, so that case stays collapsed.
   const needsAttention = (!patSet && configuredAnywhere) || (patSet && detected.length > 0 && !configuredHere);
 
-  const savePat = () => {
-    if (!pat) return;
-    saveAirtablePat(pat);
-    setPat('');
+  const runPat = (kind: PatKind, start: () => string | null) => {
+    patOutcome.clearOutcome();
+    editorOutcome.clearOutcome();
+    setPatAction({ id: start(), kind });
+  };
+
+  const runEditor = (kind: EditorAction['kind'], ideId: IdeId, start: () => string | null) => {
+    patOutcome.clearOutcome();
+    editorOutcome.clearOutcome();
+    setEditorAction({ id: start(), kind, ideId });
   };
 
   return (
@@ -81,28 +111,38 @@ export function OfficialAirtableSection() {
                 autoComplete="off"
                 placeholder="Paste a new token"
                 value={pat}
+                disabled={savingPat}
                 onChange={e => setPat(e.target.value)}
               />
-              <ActionButton variant="primary" pending={pending} disabled={!pat} onClick={savePat}>
+              <ActionButton
+                variant="primary"
+                pending={pending}
+                disabled={!pat}
+                onClick={() => { if (pat) runPat('save', () => saveAirtablePat(pat)); }}
+              >
                 {patSet ? 'Update token' : 'Save token'}
               </ActionButton>
               {patSet && (
-                <ActionButton
-                  pending={pending}
-                  onClick={() => { copyAirtablePat(); flashCopiedPat(); }}
-                >
+                <ActionButton pending={pending} onClick={() => runPat('copy', copyAirtablePat)}>
                   Copy saved token
                 </ActionButton>
               )}
             </div>
           )}
         </FormField>
-        {copiedPat && <span className="service-flash" role="status">Token copied</span>}
+        <OutcomeFeedback
+          outcome={patOutcome.outcome}
+          successMessage={PAT_DONE[patAction.kind]}
+          failureMessage={patAction.kind === 'save'
+            ? 'The token was not saved. It is still in the field.'
+            : 'The saved token could not be copied.'}
+        />
 
         {detected.length > 0 && (
           <ul className="official-editors" aria-label="Detected editors">
             {detected.map(client => {
               const configured = !!official?.ideConfigured[client.id];
+              const mine = editorAction.ideId === client.id;
               return (
                 <li key={client.id} className="official-editor">
                   <span className="official-editor__name">{client.label}</span>
@@ -115,7 +155,7 @@ export function OfficialAirtableSection() {
                       variant="danger"
                       aria-label={`Remove ${client.label}`}
                       pending={pending}
-                      onClick={() => unconfigureOfficialAirtable(client.id)}
+                      onClick={() => runEditor('remove', client.id, () => unconfigureOfficialAirtable(client.id))}
                     >
                       Remove
                     </ActionButton>
@@ -125,11 +165,19 @@ export function OfficialAirtableSection() {
                       aria-label={`Configure ${client.label}`}
                       pending={pending}
                       disabled={!patSet}
-                      onClick={() => configureOfficialAirtable(client.id)}
+                      onClick={() => runEditor('configure', client.id, () => configureOfficialAirtable(client.id))}
                     >
                       Configure
                     </ActionButton>
                   )}
+                  {/* One region per row, mounted before any result arrives. */}
+                  <OutcomeFeedback
+                    outcome={mine ? editorOutcome.outcome : null}
+                    successMessage={editorAction.kind === 'configure'
+                      ? `${client.label} configured.`
+                      : `Official Airtable MCP removed from ${client.label}.`}
+                    failureMessage={`The ${client.label} configuration did not change.`}
+                  />
                 </li>
               );
             })}

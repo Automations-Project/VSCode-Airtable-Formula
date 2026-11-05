@@ -2,7 +2,9 @@ import React from 'react';
 import { ActionButton } from '../../components/ActionButton.js';
 import { Feedback } from '../../components/Feedback.js';
 import { Section } from '../../components/Section.js';
+import { OutcomeFeedback } from '../../components/SettingRow.js';
 import { StatusDot, type DotVariant } from '../../components/StatusDot.js';
+import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useFlash } from '../../lib/useFlash.js';
 import { useStore } from '../../store.js';
 import { formatUptime } from './snippets.js';
@@ -11,6 +13,22 @@ interface ServiceStatus {
   text: string;
   dot: DotVariant;
 }
+
+type LifecycleKind = 'start' | 'restart' | 'stop';
+type TokenKind = 'copy' | 'rotate';
+
+// Start and restart are accepted by the host before the service is up; the
+// status line above reports when it actually is.
+const LIFECYCLE_DONE: Record<LifecycleKind, string> = {
+  start: 'Service start requested.',
+  restart: 'Service restart requested.',
+  stop: 'Service stopped.',
+};
+
+const TOKEN_DONE: Record<TokenKind, string> = {
+  copy: 'Token copied to the clipboard.',
+  rotate: 'Token rotated. Connected clients need the new token.',
+};
 
 export function LocalServiceSection() {
   const useDaemon = useStore(s => s.settings.mcp.useDaemon);
@@ -23,8 +41,19 @@ export function LocalServiceSection() {
   const rotateToken = useStore(s => s.rotateToken);
 
   const [copiedUrl, flashCopiedUrl] = useFlash(1500);
-  const [copiedToken, flashCopiedToken] = useFlash(1500);
-  const [rotatedToken, flashRotatedToken] = useFlash(2000);
+  const [lifecycle, setLifecycle] = React.useState<{ id: string | null; kind: LifecycleKind }>({ id: null, kind: 'start' });
+  const [tokenAction, setTokenAction] = React.useState<{ id: string | null; kind: TokenKind }>({ id: null, kind: 'copy' });
+  const lifecycleOutcome = useActionOutcome(lifecycle.id);
+  const tokenOutcome = useActionOutcome(tokenAction.id);
+
+  const runLifecycle = (kind: LifecycleKind, start: () => string | null) => {
+    lifecycleOutcome.clearOutcome();
+    setLifecycle({ id: start(), kind });
+  };
+  const runToken = (kind: TokenKind, start: () => string | null) => {
+    tokenOutcome.clearOutcome();
+    setTokenAction({ id: start(), kind });
+  };
 
   if (!useDaemon) {
     return (
@@ -67,17 +96,22 @@ export function LocalServiceSection() {
       busy={busy}
       actions={running ? (
         <>
-          <ActionButton pending={busy} onClick={restartDaemon}>Restart service</ActionButton>
-          <ActionButton variant="danger" pending={busy} onClick={stopDaemon}>Stop service</ActionButton>
+          <ActionButton pending={busy} onClick={() => runLifecycle('restart', restartDaemon)}>Restart service</ActionButton>
+          <ActionButton variant="danger" pending={busy} onClick={() => runLifecycle('stop', stopDaemon)}>Stop service</ActionButton>
         </>
       ) : (
-        <ActionButton variant="primary" pending={busy} onClick={startDaemon}>Start service</ActionButton>
+        <ActionButton variant="primary" pending={busy} onClick={() => runLifecycle('start', startDaemon)}>Start service</ActionButton>
       )}
     >
       <p className="service-status" role="status">
         <StatusDot variant={status.dot} />
         <span>{status.text}</span>
       </p>
+      <OutcomeFeedback
+        outcome={lifecycleOutcome.outcome}
+        successMessage={LIFECYCLE_DONE[lifecycle.kind]}
+        failureMessage="The service action did not complete."
+      />
 
       {unhealthy && (
         <Feedback variant="error">
@@ -137,19 +171,23 @@ export function LocalServiceSection() {
               <div className="service-token-actions">
                 <ActionButton
                   disabled={busy}
-                  onClick={() => { copyBearerToken(); flashCopiedToken(); }}
+                  onClick={() => runToken('copy', copyBearerToken)}
                 >
                   Copy token
                 </ActionButton>
                 <ActionButton
                   pending={busy}
-                  onClick={() => { rotateToken(); flashRotatedToken(); }}
+                  onClick={() => runToken('rotate', rotateToken)}
                 >
                   Rotate token
                 </ActionButton>
-                {copiedToken && <span className="service-flash" role="status">Token copied</span>}
-                {rotatedToken && <span className="service-flash" role="status">Token rotated</span>}
               </div>
+              {/* Said only once the host confirms: a failed rotation never reads as rotated. */}
+              <OutcomeFeedback
+                outcome={tokenOutcome.outcome}
+                successMessage={TOKEN_DONE[tokenAction.kind]}
+                failureMessage="The token action did not complete."
+              />
             </div>
           </details>
         </>

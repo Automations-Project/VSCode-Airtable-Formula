@@ -1,11 +1,23 @@
 import React from 'react';
 import type { DashboardTabId } from '@shared/types.js';
-import { useScopePending } from '../lib/useActionOutcome.js';
+import { useActionOutcome, useScopePending } from '../lib/useActionOutcome.js';
 import type { ReadinessAction } from '../selectors/readiness.js';
 import { useStore } from '../store.js';
 import { ActionButton } from './ActionButton.js';
+import { OutcomeFeedback } from './SettingRow.js';
 
 export type NavigateFn = (tab: DashboardTabId, focusTargetId?: string) => void;
+
+type DispatchType = NonNullable<ReadinessAction['dispatchType']>;
+
+const DONE: Record<DispatchType, string> = {
+  'action:login': 'Sign-in finished.',
+  'action:status': 'Session checked.',
+  'action:install-browser': 'Bundled Chromium installed.',
+  'daemon:start': 'Service start requested.',
+  'action:setupIde': 'Editor set up.',
+  'action:setupAll': 'Editors set up.',
+};
 
 interface NextActionProps {
   action: ReadinessAction | null;
@@ -13,9 +25,11 @@ interface NextActionProps {
 }
 
 /**
- * The single primary action of the page; renders nothing when none is useful.
+ * The single primary action of the page; no button when none is useful.
  * Each dispatch mirrors the surface that owns it: it is held only by work that
  * conflicts with it (the same guards the store applies), never by unrelated work.
+ * Its result region stays mounted: a successful action usually resolves the
+ * very state that offered it, so the button is gone when the result arrives.
  */
 export function NextAction({ action, navigate }: NextActionProps) {
   const login = useStore(s => s.login);
@@ -33,44 +47,49 @@ export function NextAction({ action, navigate }: NextActionProps) {
   const idePending = useStore(s => (action?.ideId ? s.pendingIdeActions.has(action.ideId) : false));
   const anyIdePending = useStore(s => s.pendingIdeActions.size > 0);
   const setupAllPending = useStore(s => s.pendingSetupAll.size > 0);
-
-  if (!action) return null;
+  const [started, setStarted] = React.useState<{ id: string | null; type: DispatchType }>({ id: null, type: 'action:status' });
+  const { outcome, clearOutcome } = useActionOutcome(started.id);
 
   let pending = false;
   let disabled = false;
   let run = (): void => undefined;
 
-  if (action.kind === 'open-tab' && action.tab) {
+  const dispatch = (type: DispatchType, start: () => string | null) => () => {
+    clearOutcome();
+    setStarted({ id: start(), type });
+  };
+
+  if (action?.kind === 'open-tab' && action.tab) {
     const { tab, focusTargetId } = action;
     run = () => navigate(tab, focusTargetId);
-  } else {
+  } else if (action) {
     switch (action.dispatchType) {
       case 'action:login':
-        run = () => { login(); };
+        run = dispatch('action:login', login);
         pending = loginBusy;
         disabled = sessionBusy || downloadBusy;
         break;
       case 'action:status':
-        run = () => { status(); };
+        run = dispatch('action:status', status);
         pending = checkBusy;
         disabled = sessionBusy;
         break;
       case 'action:install-browser':
-        run = () => { installBrowser(); };
+        run = dispatch('action:install-browser', installBrowser);
         pending = installing;
         disabled = downloadBusy || loginBusy;
         break;
       case 'daemon:start':
-        run = () => { startDaemon(); };
+        run = dispatch('daemon:start', startDaemon);
         pending = daemonPending;
         break;
       case 'action:setupAll':
-        run = () => { setupAll(); };
+        run = dispatch('action:setupAll', setupAll);
         pending = setupAllPending || anyIdePending;
         break;
       case 'action:setupIde': {
         const { ideId } = action;
-        if (ideId) run = () => { setupIde(ideId); };
+        if (ideId) run = dispatch('action:setupIde', () => setupIde(ideId));
         pending = idePending;
         disabled = setupAllPending;
         break;
@@ -79,8 +98,17 @@ export function NextAction({ action, navigate }: NextActionProps) {
   }
 
   return (
-    <ActionButton variant="primary" pending={pending} disabled={disabled} onClick={run}>
-      {action.label}
-    </ActionButton>
+    <>
+      {action && (
+        <ActionButton variant="primary" pending={pending} disabled={disabled} onClick={run}>
+          {action.label}
+        </ActionButton>
+      )}
+      <OutcomeFeedback
+        outcome={outcome}
+        successMessage={DONE[started.type]}
+        failureMessage="That action did not complete."
+      />
+    </>
   );
 }

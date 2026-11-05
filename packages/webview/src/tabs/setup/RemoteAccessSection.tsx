@@ -4,8 +4,10 @@ import { ActionButton } from '../../components/ActionButton.js';
 import { Disclosure } from '../../components/Disclosure.js';
 import { Feedback } from '../../components/Feedback.js';
 import { FormField } from '../../components/FormField.js';
+import { OutcomeFeedback } from '../../components/SettingRow.js';
 import { StatusDot, type DotVariant } from '../../components/StatusDot.js';
 import { copyText } from '../../lib/clipboard.js';
+import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useFlash } from '../../lib/useFlash.js';
 import { useStore } from '../../store.js';
 
@@ -64,6 +66,28 @@ export function RemoteAccessSection() {
   const namedHost = tunnel?.namedTunnelHostname ?? null;
   const summary = STATUS[status];
 
+  const [tunnelAction, setTunnelAction] = React.useState<{ id: string | null; kind: 'enable' | 'disable' }>({ id: null, kind: 'enable' });
+  const [tokenActionId, setTokenActionId] = React.useState<string | null>(null);
+  const tunnelOutcome = useActionOutcome(tunnelAction.id);
+  const tokenOutcome = useActionOutcome(tokenActionId);
+
+  // A typed token leaves this component only once the host confirms it was
+  // stored; a failure keeps it so nothing has to be pasted again.
+  React.useEffect(() => {
+    if (tunnelOutcome.outcome?.ok && tunnelAction.kind === 'enable') setNgrokToken('');
+  }, [tunnelOutcome.outcome, tunnelAction.kind]);
+  React.useEffect(() => {
+    if (!tokenOutcome.outcome?.ok) return;
+    setNgrokToken('');
+    setReplacingToken(false);
+  }, [tokenOutcome.outcome]);
+
+  const runTunnel = (kind: 'enable' | 'disable', start: () => string | null) => {
+    tunnelOutcome.clearOutcome();
+    tokenOutcome.clearOutcome();
+    setTunnelAction({ id: start(), kind });
+  };
+
   const enable = () => {
     // The token travels with the enable request so the host stores and uses it
     // atomically; no race with a separate set-token message.
@@ -72,15 +96,13 @@ export function RemoteAccessSection() {
       provider === 'cf-named' ? namedHostname.trim() || undefined
       : provider === 'ngrok' ? ngrokDomain.trim() || undefined
       : undefined;
-    enableTunnel(provider, authtoken, domain);
-    // The host owns the token from here; never keep the secret in component state.
-    if (authtoken) setNgrokToken('');
+    runTunnel('enable', () => enableTunnel(provider, authtoken, domain));
   };
 
   const saveToken = () => {
-    setNgrokAuthtoken(ngrokToken.trim());
-    setNgrokToken('');
-    setReplacingToken(false);
+    tunnelOutcome.clearOutcome();
+    tokenOutcome.clearOutcome();
+    setTokenActionId(setNgrokAuthtoken(ngrokToken.trim()));
   };
 
   return (
@@ -170,11 +192,21 @@ export function RemoteAccessSection() {
                     <ActionButton variant="primary" pending={pending} disabled={!ngrokToken.trim()} onClick={saveToken}>
                       Save token
                     </ActionButton>
-                    <ActionButton onClick={() => { setNgrokToken(''); setReplacingToken(false); }}>Cancel</ActionButton>
+                    <ActionButton
+                      onClick={() => { setNgrokToken(''); setReplacingToken(false); tokenOutcome.clearOutcome(); }}
+                    >
+                      Cancel
+                    </ActionButton>
                   </div>
                 )}
               </>
             )}
+            {/* Mounted outside the replace form, which closes when the save succeeds. */}
+            <OutcomeFeedback
+              outcome={tokenOutcome.outcome}
+              successMessage="ngrok token saved."
+              failureMessage="The ngrok token was not saved. It is still in the field."
+            />
             <FormField label="Reserved domain (optional)">
               {control => (
                 <input
@@ -244,7 +276,7 @@ export function RemoteAccessSection() {
 
         <div className="form-actions">
           {live ? (
-            <ActionButton pending={pending} onClick={disableTunnel}>
+            <ActionButton pending={pending} onClick={() => runTunnel('disable', disableTunnel)}>
               Disable remote access
             </ActionButton>
           ) : (
@@ -253,6 +285,13 @@ export function RemoteAccessSection() {
             </ActionButton>
           )}
         </div>
+        <OutcomeFeedback
+          outcome={tunnelOutcome.outcome}
+          successMessage={tunnelAction.kind === 'enable' ? 'Remote access enabled.' : 'Remote access disabled.'}
+          failureMessage={tunnelAction.kind === 'enable'
+            ? 'Remote access could not be enabled.'
+            : 'Remote access could not be disabled.'}
+        />
       </div>
     </Disclosure>
   );

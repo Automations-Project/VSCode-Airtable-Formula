@@ -174,7 +174,9 @@ describe('Remote access', () => {
     render(<Setup />);
 
     expect(toggle('Remote access')).toHaveAttribute('aria-expanded', 'true');
-    expect(within(remote()).getByRole('status')).toHaveTextContent(label);
+    // The summary's own state line; the panel also holds per-action result regions.
+    const summary = within(remote()).getAllByRole('status').find(node => node.classList.contains('service-status'));
+    expect(summary).toHaveTextContent(label);
   });
 
   function seedAutoDisabled(windowMs: number): void {
@@ -280,7 +282,11 @@ describe('Remote access', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save token' }));
 
     expect(posted('tunnel:set-ngrok-authtoken')).toEqual([expect.objectContaining({ authtoken: 'new_tok' })]);
+    // The typed token stays until the host confirms it stored it, then the field closes.
+    expect(screen.getByLabelText('ngrok auth token')).toHaveValue('  new_tok ');
+    act(() => useStore.getState().markActionDone(posted('tunnel:set-ngrok-authtoken')[0]!.id as string, { ok: true }));
     expect(screen.queryByLabelText('ngrok auth token')).not.toBeInTheDocument();
+    expect(within(remote()).getByText('Auth token stored')).toBeVisible();
   });
 
   it('cancels replacing the ngrok token without posting', async () => {
@@ -378,7 +384,7 @@ describe('Remote access', () => {
     expect(screen.getByRole('button', { name: 'Enable remote access' })).toBeDisabled();
   });
 
-  it('clears the typed ngrok token once Enable is dispatched, so Replace starts empty', async () => {
+  it('clears the typed ngrok token once Enable succeeds, so Replace starts empty', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: false } });
     render(<Setup />);
     await userEvent.click(toggle('Remote access'));
@@ -388,7 +394,8 @@ describe('Remote access', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Enable remote access' }));
 
     expect(posted('tunnel:enable')).toEqual([expect.objectContaining({ authtoken: 'tok_secret' })]);
-    expect(screen.getByLabelText('ngrok auth token')).toHaveValue('');
+    // Kept until the host answers, so a failed enable never loses the secret.
+    expect(screen.getByLabelText('ngrok auth token')).toHaveValue('tok_secret');
 
     // Host acknowledges, tunnel stops, and the token is now stored.
     act(() => {
@@ -619,6 +626,9 @@ describe('Official Airtable MCP', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save token' }));
 
     expect(posted('action:save-airtable-pat')).toEqual([expect.objectContaining({ pat: 'pat123.secret' })]);
+    // Held until the host confirms the save (a failure must not lose it), then cleared.
+    expect(field).toHaveValue('pat123.secret');
+    act(() => useStore.getState().markActionDone(posted('action:save-airtable-pat')[0]!.id as string, { ok: true }));
     expect(field).toHaveValue('');
   });
 

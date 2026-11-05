@@ -24,6 +24,11 @@ function service(): HTMLElement {
   return screen.getByRole('region', { name: 'Local service' });
 }
 
+/** The service's own state line (the section also holds per-action result regions). */
+function serviceStatus(): HTMLElement {
+  return within(service()).getAllByRole('status').find(node => node.classList.contains('service-status')) as HTMLElement;
+}
+
 function editors(): HTMLElement {
   return screen.getByRole('region', { name: 'Editors' });
 }
@@ -85,7 +90,7 @@ describe('Local service transport', () => {
 
     render(<Setup />);
 
-    expect(within(service()).getByRole('status')).toHaveTextContent('Running and healthy');
+    expect(serviceStatus()).toHaveTextContent('Running and healthy');
     expect(within(service()).queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -95,7 +100,7 @@ describe('Local service transport', () => {
     render(<Setup />);
 
     expect(within(service()).getByRole('alert')).toHaveTextContent(/failed (its )?health check/i);
-    expect(within(service()).getByRole('status')).toHaveTextContent('Running, not healthy');
+    expect(serviceStatus()).toHaveTextContent('Running, not healthy');
   });
 
   it('offers Start only when stopped and posts daemon:start', async () => {
@@ -103,7 +108,7 @@ describe('Local service transport', () => {
 
     render(<Setup />);
 
-    expect(within(service()).getByRole('status')).toHaveTextContent('Stopped');
+    expect(serviceStatus()).toHaveTextContent('Stopped');
     expect(screen.queryByRole('button', { name: 'Restart service' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop service' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Start service' }));

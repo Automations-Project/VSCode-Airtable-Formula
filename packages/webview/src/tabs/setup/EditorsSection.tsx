@@ -3,6 +3,8 @@ import type { IdeStatus } from '@shared/types.js';
 import { ActionButton } from '../../components/ActionButton.js';
 import { EditorCard } from '../../components/EditorCard.js';
 import { Section } from '../../components/Section.js';
+import { OutcomeFeedback } from '../../components/SettingRow.js';
+import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { summarizeClients } from '../../selectors/readiness.js';
 import { useStore } from '../../store.js';
 
@@ -15,6 +17,8 @@ export function EditorsSection() {
   const setupAll = useStore(s => s.setupAll);
   const unconfigureIde = useStore(s => s.unconfigureIde);
   const openIdeDocs = useStore(s => s.openIdeDocs);
+  const [setupAllId, setSetupAllId] = React.useState<string | null>(null);
+  const setupAllOutcome = useActionOutcome(setupAllId);
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
@@ -51,12 +55,21 @@ export function EditorsSection() {
         <ActionButton
           variant="primary"
           pending={setupAllPending || pendingIdeActions.size > 0}
-          onClick={setupAll}
+          onClick={() => {
+            setupAllOutcome.clearOutcome();
+            setSetupAllId(setupAll());
+          }}
         >
           Setup all detected editors
         </ActionButton>
       ) : undefined}
     >
+      {/* Outside the button's condition: a successful setup-all usually removes the button. */}
+      <OutcomeFeedback
+        outcome={setupAllOutcome.outcome}
+        successMessage="All detected editors set up."
+        failureMessage="Setting up the detected editors did not complete."
+      />
       {ideStatuses.length === 0 ? (
         <p className="empty-note" role="status" aria-busy="true">Scanning for installed editors…</p>
       ) : (

@@ -1,9 +1,11 @@
 import React from 'react';
 import type { IdeId, IdeStatus } from '@shared/types.js';
+import { useActionOutcome } from '../lib/useActionOutcome.js';
 import { summarizeClients, type ClientSummary } from '../selectors/readiness.js';
 import { ActionButton } from './ActionButton.js';
 import { IdeIcon, type IdeIconTone } from './IdeIcon.js';
 import { Pill } from './Pill.js';
+import { OutcomeFeedback } from './SettingRow.js';
 
 // VS Code forks: LSP is always "on" via the host extension — no separate config row.
 const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
@@ -24,10 +26,13 @@ type RowTone = 'ok' | 'bad' | 'info';
 
 const ROW_ICON_TONE: Record<RowTone, IdeIconTone> = { ok: 'ok', bad: 'bad', info: 'info' };
 
+type CardActionKind = 'setup' | 'update' | 'remove';
+
 interface EditorCardProps {
   status: IdeStatus;
-  onSetup: () => void;
-  onUnconfigure: () => void;
+  /** Start the action; returns its id, or null when it was refused. */
+  onSetup: () => string | null;
+  onUnconfigure: () => string | null;
   /** Opens the editor's install/docs page through the host. Omit to hide Docs. */
   onDocs?: () => void;
   /** True only while THIS editor's own action is in flight. */
@@ -68,6 +73,18 @@ export function EditorCard({
   const mcpTone: RowTone = status.mcpConfigured ? 'ok' : 'bad';
   const lspTone: RowTone = status.lspConfigured ? 'ok' : 'bad';
   const lspRowText = `LSP ${status.lspConfigured ? 'configured' : 'not configured'}`;
+
+  const [action, setAction] = React.useState<{ id: string | null; kind: CardActionKind }>({ id: null, kind: 'setup' });
+  const { outcome, clearOutcome } = useActionOutcome(action.id);
+  const run = (kind: CardActionKind, start: () => string | null) => {
+    clearOutcome();
+    setAction({ id: start(), kind });
+  };
+  const done: Record<CardActionKind, string> = {
+    setup: `${label} set up.`,
+    update: `${label} updated.`,
+    remove: `${label} configuration removed.`,
+  };
 
   return (
     <article
@@ -145,7 +162,7 @@ export function EditorCard({
             pending={loading}
             disabled={locked}
             aria-label={`Set up ${label}`}
-            onClick={onSetup}
+            onClick={() => run('setup', onSetup)}
           >
             {loading ? 'Setting up…' : 'Set up'}
           </ActionButton>
@@ -156,7 +173,7 @@ export function EditorCard({
               pending={loading}
               disabled={locked}
               aria-label={`Update ${label}`}
-              onClick={onSetup}
+              onClick={() => run('update', onSetup)}
             >
               {loading ? 'Updating…' : 'Update'}
             </ActionButton>
@@ -164,7 +181,7 @@ export function EditorCard({
               variant="danger"
               disabled={loading || locked}
               aria-label={`Remove ${label} configuration`}
-              onClick={onUnconfigure}
+              onClick={() => run('remove', onUnconfigure)}
             >
               Remove
             </ActionButton>
@@ -176,6 +193,11 @@ export function EditorCard({
           </ActionButton>
         )}
       </div>
+      <OutcomeFeedback
+        outcome={outcome}
+        successMessage={done[action.kind]}
+        failureMessage={`The ${label} configuration did not change.`}
+      />
     </article>
   );
 }

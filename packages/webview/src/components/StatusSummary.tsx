@@ -1,10 +1,12 @@
 import React from 'react';
 import type { DashboardTabId } from '@shared/types.js';
 import type { ReadinessIssue, ReadinessModel } from '../selectors/readiness.js';
+import { useActionOutcome } from '../lib/useActionOutcome.js';
 import { useStore } from '../store.js';
 import { ActionButton } from './ActionButton.js';
 import type { NavigateFn } from './NextAction.js';
 import { Section } from './Section.js';
+import { OutcomeFeedback } from './SettingRow.js';
 
 const TAB_LABELS: Record<DashboardTabId, string> = {
   overview: 'Overview',
@@ -39,6 +41,8 @@ export function StatusSummary({ readiness, navigate }: StatusSummaryProps) {
   const lastChecked = useStore(s => s.auth.lastChecked);
   const browser = useStore(s => s.auth.browser);
   const refresh = useStore(s => s.refresh);
+  const [refreshId, setRefreshId] = React.useState<string | null>(null);
+  const refreshOutcome = useActionOutcome(refreshId);
   const { terms, issues } = readiness;
   const browserLabel = browser?.found ? browser.label : undefined;
 
@@ -46,8 +50,20 @@ export function StatusSummary({ readiness, navigate }: StatusSummaryProps) {
     <Section
       id="overview-status"
       title="Status"
-      actions={<ActionButton onClick={refresh}>Refresh status</ActionButton>}
+      actions={(
+        <ActionButton
+          pending={refreshOutcome.pending}
+          onClick={() => { refreshOutcome.clearOutcome(); setRefreshId(refresh()); }}
+        >
+          Refresh status
+        </ActionButton>
+      )}
     >
+      <OutcomeFeedback
+        outcome={refreshOutcome.outcome}
+        successMessage="Status refreshed."
+        failureMessage="The status could not be refreshed."
+      />
       {issues.length > 0 && (
         <ul className="issue-list">
           {issues.map(issue => (

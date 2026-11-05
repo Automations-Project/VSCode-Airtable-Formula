@@ -112,18 +112,20 @@ interface Store extends DashboardState {
   openIdeDocs: (ideId: IdeId) => string;
   openToolConfig: () => string;
   changeSetting: (change: WebviewSettingChange) => string;
-  enableTunnel: (provider: TunnelProviderId, authtoken?: string, domain?: string) => void;
-  disableTunnel: () => void;
-  setNgrokAuthtoken: (authtoken: string) => void;
-  startDaemon: () => void;
-  stopDaemon: () => void;
-  restartDaemon: () => void;
-  copyBearerToken: () => void;
-  rotateToken: () => void;
-  saveAirtablePat: (pat: string) => void;
-  copyAirtablePat: () => void;
-  configureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
-  unconfigureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
+  /** Setup actions return their id (for per-control outcomes), or null when refused
+   *  because a conflicting action of the same kind is already in flight. */
+  enableTunnel: (provider: TunnelProviderId, authtoken?: string, domain?: string) => string | null;
+  disableTunnel: () => string | null;
+  setNgrokAuthtoken: (authtoken: string) => string | null;
+  startDaemon: () => string | null;
+  stopDaemon: () => string | null;
+  restartDaemon: () => string | null;
+  copyBearerToken: () => string;
+  rotateToken: () => string | null;
+  saveAirtablePat: (pat: string) => string | null;
+  copyAirtablePat: () => string | null;
+  configureOfficialAirtable: (ideId: IdeId) => string | null;
+  unconfigureOfficialAirtable: (ideId: IdeId) => string | null;
   /** Prompt actions return their action id so callers can await completion
    *  (via pendingActions + consumeActionResult) before navigating away, or null
    *  when refused: another prompt action, or a discard confirmation, is in flight. */
@@ -248,6 +250,28 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension(message(id));
     return id;
   };
+
+  /** Start an action in one exclusive pending set, unless that set already holds one. */
+  const runExclusive = (
+    held: () => ReadonlySet<string>,
+    begin: (id: string) => void,
+    message: (id: string) => WebviewMessage,
+  ): string | null => {
+    if (held().size > 0) return null;
+    const id = randomId();
+    begin(id);
+    sendToExtension(message(id));
+    return id;
+  };
+
+  const runTunnelAction = (message: (id: string) => WebviewMessage) =>
+    runExclusive(() => get().pendingTunnelActions, beginTunnelAction, message);
+
+  const runOfficialAction = (message: (id: string) => WebviewMessage) =>
+    runExclusive(() => get().pendingOfficialActions, beginOfficialAction, message);
+
+  const runDaemonAction = (timeoutMs: number | undefined, message: (id: string) => WebviewMessage) =>
+    runExclusive(() => get().pendingDaemonActions, id => beginDaemonAction(id, timeoutMs), message);
 
   /** A prompt action, unless another prompt action or a discard confirmation is in flight. */
   const runPromptAction = (scope: string, message: (id: string) => WebviewMessage): string | null =>
@@ -453,89 +477,43 @@ export const useStore = create<Store>((set, get) => {
 
   // Tunnel actions are mutually exclusive: a second one while one is in flight
   // is dropped, so a double click can never start two tunnels.
-  enableTunnel: (provider, authtoken, domain) => {
-    if (get().pendingTunnelActions.size > 0) return;
-    const id = randomId();
-    beginTunnelAction(id);
-    sendToExtension({ type: 'tunnel:enable', id, provider, authtoken, domain });
-  },
+  enableTunnel: (provider, authtoken, domain) =>
+    runTunnelAction(id => ({ type: 'tunnel:enable', id, provider, authtoken, domain })),
 
-  disableTunnel: () => {
-    if (get().pendingTunnelActions.size > 0) return;
-    const id = randomId();
-    beginTunnelAction(id);
-    sendToExtension({ type: 'tunnel:disable', id });
-  },
+  disableTunnel: () => runTunnelAction(id => ({ type: 'tunnel:disable', id })),
 
-  setNgrokAuthtoken: (authtoken) => {
-    if (get().pendingTunnelActions.size > 0) return;
-    const id = randomId();
-    beginTunnelAction(id);
-    sendToExtension({ type: 'tunnel:set-ngrok-authtoken', id, authtoken });
-  },
+  setNgrokAuthtoken: (authtoken) =>
+    runTunnelAction(id => ({ type: 'tunnel:set-ngrok-authtoken', id, authtoken })),
 
-  startDaemon: () => {
-    const id = randomId();
-    beginDaemonAction(id);
-    sendToExtension({ type: 'daemon:start', id });
-  },
+  startDaemon: () => runDaemonAction(undefined, id => ({ type: 'daemon:start', id })),
 
-  stopDaemon: () => {
-    // Graceful wait (10s) + kill escalation (3s) can exceed the default expiry.
-    const id = randomId();
-    beginDaemonAction(id, 30_000);
-    sendToExtension({ type: 'daemon:stop', id });
-  },
+  // Graceful wait (10s) + kill escalation (3s) can exceed the default expiry.
+  stopDaemon: () => runDaemonAction(30_000, id => ({ type: 'daemon:stop', id })),
 
-  restartDaemon: () => {
-    const id = randomId();
-    beginDaemonAction(id, 45_000);
-    sendToExtension({ type: 'daemon:restart', id });
-  },
+  restartDaemon: () => runDaemonAction(45_000, id => ({ type: 'daemon:restart', id })),
 
   copyBearerToken: () => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'daemon:copy-bearer-token', id });
+    return id;
   },
 
-  rotateToken: () => {
-    // Daemon-scoped: rotating invalidates connected clients, so daemon
-    // controls should reflect the in-flight rotation too.
-    const id = randomId();
-    beginDaemonAction(id);
-    sendToExtension({ type: 'daemon:rotate-token', id });
-  },
+  // Daemon-scoped: rotating invalidates connected clients, so daemon
+  // controls should reflect the in-flight rotation too.
+  rotateToken: () => runDaemonAction(undefined, id => ({ type: 'daemon:rotate-token', id })),
 
   // Official-Airtable actions share one in-flight slot: they all touch the same
   // PAT / editor config files, so overlapping ones are dropped.
-  saveAirtablePat: (pat) => {
-    if (get().pendingOfficialActions.size > 0) return;
-    const id = randomId();
-    beginOfficialAction(id);
-    sendToExtension({ type: 'action:save-airtable-pat', id, pat });
-  },
+  saveAirtablePat: (pat) => runOfficialAction(id => ({ type: 'action:save-airtable-pat', id, pat })),
 
-  copyAirtablePat: () => {
-    if (get().pendingOfficialActions.size > 0) return;
-    const id = randomId();
-    beginOfficialAction(id);
-    sendToExtension({ type: 'action:copy-airtable-pat', id });
-  },
+  copyAirtablePat: () => runOfficialAction(id => ({ type: 'action:copy-airtable-pat', id })),
 
-  configureOfficialAirtable: (ideId) => {
-    if (get().pendingOfficialActions.size > 0) return;
-    const id = randomId();
-    beginOfficialAction(id);
-    sendToExtension({ type: 'action:configure-official-airtable', id, ideId });
-  },
+  configureOfficialAirtable: (ideId) =>
+    runOfficialAction(id => ({ type: 'action:configure-official-airtable', id, ideId })),
 
-  unconfigureOfficialAirtable: (ideId) => {
-    if (get().pendingOfficialActions.size > 0) return;
-    const id = randomId();
-    beginOfficialAction(id);
-    sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
-  },
+  unconfigureOfficialAirtable: (ideId) =>
+    runOfficialAction(id => ({ type: 'action:unconfigure-official-airtable', id, ideId })),
 
   savePrompt: (prompt) =>
     runPromptAction(`prompt:save:${prompt.name}`, id => ({ type: 'action:save-prompt', id, prompt })),
