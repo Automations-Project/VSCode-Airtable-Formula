@@ -64,7 +64,7 @@ describe('webview document', () => {
 
     expect(html).toContain('<meta http-equiv="Content-Security-Policy" content="');
     expect(html).toContain("script-src 'nonce-abc123'");
-    expect(html.match(/<script\b[^>]*>/g)).toEqual([
+    expect(html.match(/<script\b[^>]*>/gi)).toEqual([
       '<script nonce="abc123" src="vscode-webview://test/ext/dist/webview/main.js">',
     ]);
   });
@@ -72,7 +72,7 @@ describe('webview document', () => {
   it('has no executable inline script, inline style, or style attribute', () => {
     const html = render();
 
-    for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+    for (const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)) {
       expect(script[1]).toBe('');
     }
     expect(html).not.toMatch(/<style[\s>]/i);
