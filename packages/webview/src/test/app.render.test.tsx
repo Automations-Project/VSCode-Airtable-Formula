@@ -197,12 +197,12 @@ describe('App rendered shell', () => {
     useStore.setState({ activeTab: 'settings', loading: false });
     render(<App />);
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Auto-configure on install' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Include agent files' }));
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({
       type: 'setting:change',
-      change: { key: 'mcp.autoConfigureOnInstall', value: false },
+      change: { key: 'ai.includeAgents', value: true },
     });
     expect(message.id).toMatch(/^[0-9a-f]{24}$/);
     expect(useStore.getState().pendingActions.has(message.id)).toBe(true);

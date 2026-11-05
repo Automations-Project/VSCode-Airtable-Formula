@@ -344,7 +344,7 @@ export function AccountSection() {
   return (
     <Section
       id="account-settings"
-      title="Airtable account"
+      title="Account and authentication"
       description="How the MCP server signs in to Airtable and keeps that session alive."
       busy={sessionBusy}
     >

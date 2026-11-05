@@ -9,5 +9,4 @@
 @import './styles/forms.css' layer(components);
 @import './styles/settings.css' layer(components);
 @import './styles/prompts.css' layer(components);
-@import './styles/legacy.css' layer(components);
 @import './styles/accessibility.css' layer(accessibility);

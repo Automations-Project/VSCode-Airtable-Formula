@@ -18,7 +18,7 @@ describe('Settings Support and About', () => {
   });
 
   it('shows the extension and bundled MCP server versions', () => {
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(screen.getByText('2.1.32')).toBeVisible();
     expect(screen.getByText('2.4.15')).toBeVisible();
@@ -26,17 +26,17 @@ describe('Settings Support and About', () => {
 
   it('shows an update notice only when a different MCP server version is published', () => {
     useStore.setState({ versions: { extension: '2.1.32', mcpServerBundled: '2.4.15', mcpServerPublished: '2.5.0' } });
-    const { unmount } = render(<Settings />);
+    const { unmount } = render(<Settings navigate={vi.fn()} />);
     expect(screen.getByText('Update available: 2.5.0')).toBeVisible();
     unmount();
 
     useStore.setState({ versions: { extension: '2.1.32', mcpServerBundled: '2.4.15', mcpServerPublished: '2.4.15' } });
-    const same = render(<Settings />);
+    const same = render(<Settings navigate={vi.fn()} />);
     expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
     same.unmount();
 
     useStore.setState({ versions: { extension: '2.1.32', mcpServerBundled: '2.4.15' } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
   });
 
@@ -47,7 +47,7 @@ describe('Settings Support and About', () => {
     ['Open Chrome website', 'chrome'],
   ] as const)('routes %s through the opaque %s link id', async (name, link) => {
     const user = userEvent.setup();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name }));
 

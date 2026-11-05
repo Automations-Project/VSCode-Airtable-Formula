@@ -2,6 +2,7 @@ import React from 'react';
 import type { WebviewSettingChange } from '@shared/messages.js';
 import { useActionOutcome, useScopePending } from '../lib/useActionOutcome.js';
 import { settingScope, useStore, type ActionOutcome } from '../store.js';
+import { ActionButton } from './ActionButton.js';
 import { Feedback } from './Feedback.js';
 
 /** Attributes a row spreads onto its one native control. */
@@ -146,6 +147,80 @@ export function SettingSelectRow({ label, description, value, options, change }:
           {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       )}
+    </SettingRow>
+  );
+}
+
+interface SettingNumberRowProps {
+  label: string;
+  description?: React.ReactNode;
+  value: number;
+  min: number;
+  max: number;
+  /** Builds the typed change for a validated integer. */
+  change: (value: number) => WebviewSettingChange;
+}
+
+/** A whole number within [min, max]; anything else (blank, decimal, exponent, sign) is not a draft worth sending. */
+function parseDraft(draft: string, min: number, max: number): number | null {
+  const text = draft.trim();
+  if (!/^\d+$/.test(text)) return null;
+  const value = Number(text);
+  return value >= min && value <= max ? value : null;
+}
+
+/**
+ * A bounded integer setting. The typed text is a local draft: nothing is sent per
+ * keystroke, only a valid draft on Apply or Enter, and an invalid one never leaves
+ * the webview. A rejected change keeps the draft; a new saved value replaces it.
+ */
+export function SettingNumberRow({ label, description, value, min, max, change }: SettingNumberRowProps) {
+  const { pending, outcome, send } = useSettingChange(change(value));
+  const [draft, setDraft] = React.useState(String(value));
+  React.useEffect(() => setDraft(String(value)), [value]);
+
+  const parsed = parseDraft(draft, min, max);
+  const invalid = parsed === null;
+  const unchanged = parsed === value;
+  const error = `Enter a whole number from ${min} to ${max}.`;
+
+  return (
+    <SettingRow label={label} description={description} pending={pending} outcome={outcome}>
+      {control => {
+        const errorId = `${control.id}-error`;
+        const describedBy = [control['aria-describedby'], invalid ? errorId : null].filter(Boolean).join(' ');
+        return (
+          <form
+            className="setting-number"
+            onSubmit={event => {
+              event.preventDefault();
+              if (!pending && parsed !== null && !unchanged) send(change(parsed));
+            }}
+          >
+            <input
+              {...control}
+              className="form-control setting-number__input"
+              type="number"
+              inputMode="numeric"
+              min={min}
+              max={max}
+              value={draft}
+              aria-describedby={describedBy || undefined}
+              aria-invalid={invalid || undefined}
+              onChange={event => setDraft(event.target.value)}
+            />
+            <ActionButton
+              type="submit"
+              aria-label={`Apply ${label}`}
+              pending={pending}
+              disabled={invalid || unchanged}
+            >
+              Apply
+            </ActionButton>
+            {invalid && <p id={errorId} className="form-field__error setting-number__error" role="alert">{error}</p>}
+          </form>
+        );
+      }}
     </SettingRow>
   );
 }

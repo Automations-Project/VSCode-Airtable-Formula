@@ -31,6 +31,7 @@ export interface ActionOutcome {
  *   browser:choice:<k>    browser selection: pick (native file dialog) / select
  *   setting:<key>         one Settings row
  *   storage:open:<id>     one storage entry being opened
+ *   debug:<kind>          start / stop / export of a debug session (mutually exclusive; export opens a save dialog)
  */
 /** Matches a key EXACTLY, or any scope nested under it (key + ':' ...). Never a bare string prefix:
  *  'setting:mcp.category:viewSection' must not match '...:viewSectionDestructive'. */
@@ -91,9 +92,10 @@ interface Store extends DashboardState {
   installBrowser: () => string | null;
   removeBrowser: () => string | null;
   unconfigureIde: (ideId: IdeId) => void;
-  debugStartSession: () => void;
-  debugStopAndExport: () => void;
-  debugExport: () => void;
+  /** Return the action id, or null when another debug action is already in flight. */
+  debugStartSession: () => string | null;
+  debugStopAndExport: () => string | null;
+  debugExport: () => string | null;
   markActionDone: (id: string, outcome: ActionOutcome) => void;
   manualLogin: () => string | null;
   backupSession: () => string | null;
@@ -376,23 +378,15 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'action:unconfigureIde', id, ideId });
   },
 
-  debugStartSession: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:debug.startSession', id });
-  },
+  // Stop & Export and Export wait on a native save dialog.
+  debugStartSession: () =>
+    runScoped('debug:start', ['debug'], 600_000, id => ({ type: 'action:debug.startSession', id })),
 
-  debugStopAndExport: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:debug.stopAndExport', id });
-  },
+  debugStopAndExport: () =>
+    runScoped('debug:stop', ['debug'], 600_000, id => ({ type: 'action:debug.stopAndExport', id })),
 
-  debugExport: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:debug.export', id });
-  },
+  debugExport: () =>
+    runScoped('debug:export', ['debug'], 600_000, id => ({ type: 'action:debug.export', id })),
 
   // Manual login waits for the user to finish in the browser (up to ~5.5m).
   manualLogin: () => runScoped('session:login', ['session', 'browser:download'], 360_000, id => ({ type: 'action:manualLogin', id })),

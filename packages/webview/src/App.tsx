@@ -141,7 +141,7 @@ export function App() {
           {activeTab === 'overview' && <Overview navigate={navigate} />}
           {activeTab === 'setup' && <Setup />}
           {activeTab === 'prompts' && <Prompts />}
-          {activeTab === 'settings' && <Settings />}
+          {activeTab === 'settings' && <Settings navigate={navigate} />}
         </>
       )}
     </AppShell>

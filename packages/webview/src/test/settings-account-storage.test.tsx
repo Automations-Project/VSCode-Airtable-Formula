@@ -29,15 +29,15 @@ function settle(id: unknown, outcome: { ok: boolean; error?: string; cancelled?:
   act(() => useStore.getState().markActionDone(String(id), outcome));
 }
 
-const account = () => screen.getByRole('region', { name: 'Airtable account' });
+const account = () => screen.getByRole('region', { name: 'Account and authentication' });
 const browserSection = () => screen.getByRole('region', { name: 'Browser' });
-const storageSection = () => screen.getByRole('region', { name: 'Storage and data' });
+const storageSection = () => screen.getByRole('region', { name: 'Storage and session backup' });
 
 beforeEach(() => seed());
 
 describe('Settings focus targets', () => {
   it('exposes focusable Account, Browser and Storage headings for navigate() landings', () => {
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     for (const id of ['account-settings-heading', 'browser-settings-heading', 'storage-settings-heading']) {
       const heading = document.getElementById(id);
@@ -46,14 +46,14 @@ describe('Settings focus targets', () => {
       heading?.focus();
       expect(document.activeElement).toBe(heading);
     }
-    expect(screen.getByRole('heading', { name: 'Airtable account' })).toHaveAttribute('id', 'account-settings-heading');
+    expect(screen.getByRole('heading', { name: 'Account and authentication' })).toHaveAttribute('id', 'account-settings-heading');
     expect(screen.getByRole('heading', { name: 'Browser' })).toHaveAttribute('id', 'browser-settings-heading');
   });
 
   it('keeps the Browser heading present when the connection mode does not use a browser', () => {
     seed({ settings: { mcp: { authMode: 'byo' } } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(document.getElementById('browser-settings-heading')).toHaveAttribute('tabindex', '-1');
     expect(within(browserSection()).getByText(/not used/i)).toBeVisible();
@@ -66,7 +66,7 @@ describe('Browser selection', () => {
     const user = userEvent.setup();
     seed({ auth: { status: 'valid', hasCredentials: true, availableBrowsers: [CHROME, EDGE] } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const browser = screen.getByRole('combobox', { name: 'Browser selection' });
     expect(within(browser).getByRole('option', { name: 'Automatic' })).toHaveValue('auto');
@@ -83,7 +83,7 @@ describe('Browser selection', () => {
     const user = userEvent.setup();
     seed({ auth: { availableBrowsers: [CHROME, EDGE] } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     await user.selectOptions(screen.getByRole('combobox', { name: 'Browser selection' }), 'edge');
 
     expect(lastPostedMessage()).toMatchObject({
@@ -107,7 +107,7 @@ describe('Browser selection', () => {
       settings: { auth: { browserChoice: { mode: 'custom', label: 'Brave Browser' } } },
     });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const select = screen.getByRole('combobox', { name: 'Browser selection' });
     expect(select).toHaveDisplayValue('Brave Browser (custom)');
@@ -119,7 +119,7 @@ describe('Browser selection', () => {
       settings: { auth: { browserChoice: { mode: 'detected', browserId: 'edge', label: 'Microsoft Edge' } } },
     });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(screen.getByRole('combobox', { name: 'Browser selection' })).toHaveDisplayValue('Microsoft Edge (not detected)');
   });
@@ -128,7 +128,7 @@ describe('Browser selection', () => {
     const user = userEvent.setup();
     seed({ auth: { status: 'chrome-missing', browser: { found: false }, availableBrowsers: [] } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(within(browserSection()).getByRole('alert')).toHaveTextContent(/No Chromium-based browser/);
     await user.click(screen.getByRole('button', { name: 'Get Google Chrome' }));
@@ -140,7 +140,7 @@ describe('Browser selection', () => {
   it('downloads the bundled Chromium, showing native progress and a failure alert', async () => {
     const user = userEvent.setup();
     seed({ auth: { browser: { found: false }, availableBrowsers: [] } });
-    const view = render(<Settings />);
+    const view = render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Download bundled Chromium' }));
     expect(lastPostedMessage()).toMatchObject({ type: 'action:install-browser' });
@@ -150,13 +150,13 @@ describe('Browser selection', () => {
     seed({
       auth: { browser: { found: false }, availableBrowsers: [], browserDownload: { status: 'downloading', progress: 42 } },
     });
-    view.rerender(<Settings />);
+    view.rerender(<Settings navigate={vi.fn()} />);
     expect(screen.getByRole('progressbar', { name: /Downloading Chromium/ })).toHaveAttribute('value', '42');
 
     seed({
       auth: { browser: { found: false }, availableBrowsers: [], browserDownload: { status: 'error', error: 'ECONNRESET' } },
     });
-    view.rerender(<Settings />);
+    view.rerender(<Settings navigate={vi.fn()} />);
     expect(within(browserSection()).getAllByRole('alert').some(a => /Download failed/.test(a.textContent ?? ''))).toBe(true);
   });
 
@@ -169,7 +169,7 @@ describe('Browser selection', () => {
       },
     });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Remove bundled Chromium' }));
 
     expect(lastPostedMessage()).toMatchObject({ type: 'action:removeBrowser' });
@@ -178,7 +178,7 @@ describe('Browser selection', () => {
   it('a slow custom-browser picker disables only the browser choice, and survives a remount', async () => {
     const user = userEvent.setup();
     seed({ auth: { availableBrowsers: [CHROME] }, storage: { entries: [{ id: 'tool-config', label: 'Tool Config', exists: true }] } });
-    const first = render(<Settings />);
+    const first = render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Choose custom browser executable' }));
     const picker = screen.getByRole('button', { name: 'Choose custom browser executable' });
@@ -189,11 +189,11 @@ describe('Browser selection', () => {
     expect(screen.getByRole('button', { name: 'Check Airtable session' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Back up session data' })).toBeEnabled();
     expect(screen.getByRole('combobox', { name: 'Connection mode' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: 'Auto-configure on install' })).toBeEnabled();
+    expect(screen.getByRole('switch', { name: 'Include agent files' })).toBeEnabled();
 
     const id = lastPostedMessage().id;
     first.unmount();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Choose custom browser executable' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Choose custom browser executable' }));
     expect(posted('action:selectCustomBrowser')).toHaveLength(1);
@@ -206,7 +206,7 @@ describe('Browser selection', () => {
   it('keeps a login and a bundled-Chromium install from running at once, in both directions', async () => {
     const user = userEvent.setup();
     seed({ auth: { browser: { found: false }, availableBrowsers: [] } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Download bundled Chromium' }));
     expect(screen.getByRole('button', { name: 'Log in to Airtable in browser' })).toBeDisabled();
@@ -220,7 +220,7 @@ describe('Browser selection', () => {
   it('reports a failed browser choice with the host error', async () => {
     const user = userEvent.setup();
     seed({ auth: { availableBrowsers: [CHROME, EDGE] } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Browser selection' }), 'chrome');
     settle(lastPostedMessage().id, { ok: false, error: 'Browser could not be saved' });
@@ -234,7 +234,7 @@ describe('Account and session', () => {
     const user = userEvent.setup();
     seed({ auth: { status: 'valid', userId: 'usr_test' } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(within(account()).getByText('Active')).toBeVisible();
     expect(within(account()).getByText('usr_test')).toBeVisible();
@@ -246,7 +246,7 @@ describe('Account and session', () => {
     const user = userEvent.setup();
     seed({ settings: { auth: { loginMode: 'auto' } } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Log in to Airtable' }));
 
     expect(lastPostedMessage()).toMatchObject({ type: 'action:login' });
@@ -254,12 +254,12 @@ describe('Account and session', () => {
 
   it('validates stored credentials in direct-login mode and has no login in cookie mode', () => {
     seed({ settings: { mcp: { authMode: 'direct-login' } } });
-    const direct = render(<Settings />);
+    const direct = render(<Settings navigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Validate Airtable credentials' })).toBeVisible();
     direct.unmount();
 
     seed({ settings: { mcp: { authMode: 'byo' } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /Log in to Airtable|Validate Airtable credentials/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check Airtable session' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Log out of Airtable' })).toBeVisible();
@@ -267,7 +267,7 @@ describe('Account and session', () => {
 
   it('checks and logs out through tracked actions', async () => {
     const user = userEvent.setup();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Check Airtable session' }));
     expect(lastPostedMessage()).toMatchObject({ type: 'action:status' });
@@ -279,14 +279,14 @@ describe('Account and session', () => {
   it('shows an auth error with friendly text in the account section', () => {
     seed({ auth: { status: 'error', error: 'ENOTFOUND airtable.com' } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(within(account()).getByRole('alert')).toHaveTextContent('Network error');
   });
 
   it('disables login while a logout is in flight and busies only the logout button', async () => {
     const user = userEvent.setup();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Log out of Airtable' }));
 
@@ -303,12 +303,12 @@ describe('Account and session', () => {
 
   it('keeps the session guard across a remount and clears it on every settle path', async () => {
     const user = userEvent.setup();
-    const first = render(<Settings />);
+    const first = render(<Settings navigate={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Log out of Airtable' }));
     const id = lastPostedMessage().id;
     first.unmount();
 
-    const second = render(<Settings />);
+    const second = render(<Settings navigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Log in to Airtable in browser' })).toBeDisabled();
     settle(id, { ok: false, error: 'Logout failed' });
     expect(screen.getByRole('button', { name: 'Log in to Airtable in browser' })).toBeEnabled();
@@ -316,7 +316,7 @@ describe('Account and session', () => {
     second.unmount();
 
     // The auto-expiry path settles through markActionDone as well.
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'Check Airtable session' }));
     settle(lastPostedMessage().id, { ok: false });
     expect(screen.getByRole('button', { name: 'Check Airtable session' })).toBeEnabled();
@@ -325,7 +325,7 @@ describe('Account and session', () => {
   it('also locks the session actions while the session is being checked or logged in', () => {
     seed({ auth: { status: 'logging-in' } });
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Log in to Airtable in browser' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Log out of Airtable' })).toBeDisabled();
@@ -333,7 +333,7 @@ describe('Account and session', () => {
 
   it('describes that changing the connection mode restarts the active transport', async () => {
     const user = userEvent.setup();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(within(account()).getByText(/restarts or reprovisions the active transport/i)).toBeVisible();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Connection mode' }), 'byo');
@@ -345,7 +345,7 @@ describe('Account and session', () => {
 
   it('switches login mode with a stable switch name', async () => {
     const user = userEvent.setup();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const toggle = screen.getByRole('switch', { name: 'Automatic login' });
     expect(toggle).not.toBeChecked();
@@ -366,7 +366,7 @@ describe('Credentials and cookie', () => {
   it('saves direct-login credentials and clears the secrets only after a confirmed result', async () => {
     const user = userEvent.setup();
     seed({ settings: { mcp: { authMode: 'direct-login' } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await openCredentials(user);
     await user.type(screen.getByLabelText('Airtable email'), 'me@example.com');
@@ -397,7 +397,7 @@ describe('Credentials and cookie', () => {
   it('keeps the typed credentials and announces the host error when saving fails', async () => {
     const user = userEvent.setup();
     seed({ settings: { mcp: { authMode: 'direct-login' } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await openCredentials(user);
     await user.type(screen.getByLabelText('Airtable email'), 'me@example.com');
@@ -414,7 +414,7 @@ describe('Credentials and cookie', () => {
   it('cancels the credentials form without sending anything and drops the typed secrets', async () => {
     const user = userEvent.setup();
     seed({ settings: { mcp: { authMode: 'direct-login' } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await openCredentials(user);
     await user.type(screen.getByLabelText('Airtable password'), 'hunter2');
@@ -426,14 +426,14 @@ describe('Credentials and cookie', () => {
   });
 
   it('offers credentials in browser mode only when login mode is automatic', () => {
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /credentials$/i })).not.toBeInTheDocument();
   });
 
   it('saves the BYO cookie, keeping it on failure and clearing it on a confirmed save', async () => {
     const user = userEvent.setup();
     seed({ settings: { mcp: { authMode: 'byo' } }, auth: { hasCookie: false } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const field = screen.getByLabelText('Airtable session cookie');
     await user.type(field, 'brw=1; session=2');
@@ -453,7 +453,7 @@ describe('Credentials and cookie', () => {
   it('clears a saved BYO cookie by a named action', async () => {
     const user = userEvent.setup();
     seed({ settings: { mcp: { authMode: 'byo' } }, auth: { hasCookie: true } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Clear saved cookie' }));
 
@@ -465,7 +465,7 @@ describe('Auto-refresh and per-row setting feedback', () => {
   it('keeps a non-preset refresh interval selected and writable', async () => {
     const user = userEvent.setup();
     seed({ settings: { auth: { autoRefresh: true, refreshIntervalHours: 7 } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const interval = screen.getByRole('combobox', { name: 'Check interval' });
     expect(interval).toHaveDisplayValue('7 hours (current)');
@@ -479,7 +479,7 @@ describe('Auto-refresh and per-row setting feedback', () => {
   });
 
   it('offers the presets without a current marker when the value is a preset', () => {
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const interval = screen.getByRole('combobox', { name: 'Check interval' });
     expect(interval).toHaveValue('12');
@@ -490,7 +490,7 @@ describe('Auto-refresh and per-row setting feedback', () => {
   it('writes the 7-hour value even if the user re-selects it', async () => {
     const user = userEvent.setup();
     seed({ settings: { auth: { refreshIntervalHours: 7 } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Check interval' }), '4');
     expect(lastPostedMessage()).toMatchObject({ change: { key: 'auth.refreshIntervalHours', value: 4 } });
@@ -499,7 +499,7 @@ describe('Auto-refresh and per-row setting feedback', () => {
   it('reports row success with role=status and failure with role=alert and the host error', async () => {
     const user = userEvent.setup();
     seed({ settings: { auth: { loginMode: 'auto' } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const row = () => screen.getByRole('switch', { name: 'Auto-refresh session' });
     await user.click(row());
@@ -509,7 +509,7 @@ describe('Auto-refresh and per-row setting feedback', () => {
     expect(row()).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('combobox', { name: 'Check interval' })).toBeEnabled();
     expect(screen.getByRole('combobox', { name: 'Connection mode' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: 'Auto-configure on install' })).toBeEnabled();
+    expect(screen.getByRole('switch', { name: 'Include agent files' })).toBeEnabled();
 
     settle(first, { ok: true });
     expect(row()).toBeEnabled();
@@ -525,17 +525,17 @@ describe('Auto-refresh and per-row setting feedback', () => {
   it('keeps the row guard across a remount', async () => {
     const user = userEvent.setup();
     seed({ settings: { auth: { loginMode: 'auto' } } });
-    const first = render(<Settings />);
+    const first = render(<Settings navigate={vi.fn()} />);
     await user.click(screen.getByRole('switch', { name: 'Auto-refresh session' }));
     first.unmount();
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     expect(screen.getByRole('switch', { name: 'Auto-refresh session' })).toBeDisabled();
     expect(screen.getByRole('switch', { name: 'Automatic login' })).toBeEnabled();
   });
 });
 
-describe('Storage and data', () => {
+describe('Storage and session backup', () => {
   const entries = [
     { id: 'tool-config' as const, label: 'Tool Config', exists: true, sizeBytes: 2048 },
     { id: 'browser-profile' as const, label: 'Browser Profile', exists: false },
@@ -544,7 +544,7 @@ describe('Storage and data', () => {
   it('opens a storage entry by id and never posts its path', async () => {
     const user = userEvent.setup();
     seed({ storage: { entries } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Open Tool Config' }));
 
@@ -561,7 +561,7 @@ describe('Storage and data', () => {
         ],
       },
     });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const region = storageSection();
     expect(within(region).getByText('Tool Config')).toBeVisible();
@@ -574,7 +574,7 @@ describe('Storage and data', () => {
   it('guards a single entry while its open is in flight, across a remount', async () => {
     const user = userEvent.setup();
     seed({ storage: { entries: [entries[0]!, { id: 'bundled-chromium', label: 'Bundled Chromium', exists: true }] } });
-    const first = render(<Settings />);
+    const first = render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Open Tool Config' }));
     expect(screen.getByRole('button', { name: 'Open Tool Config' })).toBeDisabled();
@@ -583,7 +583,7 @@ describe('Storage and data', () => {
     const id = lastPostedMessage().id;
     first.unmount();
 
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Open Tool Config' })).toBeDisabled();
     settle(id, { ok: false, error: 'Could not open the folder' });
     expect(screen.getByRole('button', { name: 'Open Tool Config' })).toBeEnabled();
@@ -592,7 +592,7 @@ describe('Storage and data', () => {
   it('keeps backup and restore available and says restore replaces current session data', async () => {
     const user = userEvent.setup();
     seed({ storage: { entries } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(within(storageSection()).getByText(/replaces your current session data/i)).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Back up session data' }));
@@ -610,7 +610,7 @@ describe('Storage and data', () => {
   it('reports the host failure for a restore with role=alert', async () => {
     const user = userEvent.setup();
     seed({ storage: { entries } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Restore session data' }));
     settle(lastPostedMessage().id, { ok: false, error: 'Restore failed: bad archive' });
@@ -622,7 +622,7 @@ describe('Storage and data', () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, 'confirm');
     seed({ storage: { entries } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Restore session data' }));
 
@@ -631,7 +631,7 @@ describe('Storage and data', () => {
 
   it('disables backup when nothing exists to back up', () => {
     seed({ storage: { entries: [entries[1]!] } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Back up session data' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Restore session data' })).toBeEnabled();
@@ -644,7 +644,7 @@ describe('Settings accessibility and presentation', () => {
       auth: { availableBrowsers: [CHROME, EDGE] },
       storage: { entries: [{ id: 'tool-config', label: 'Tool Config', exists: true, sizeBytes: 12 }] },
     });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     for (const region of [account(), browserSection(), storageSection()]) {
       const result = await axe.run(region, { rules: { 'color-contrast': { enabled: false } } });
@@ -657,7 +657,7 @@ describe('Settings accessibility and presentation', () => {
       auth: { availableBrowsers: [CHROME], browser: { found: false } },
       storage: { entries: [{ id: 'tool-config', label: 'Tool Config', exists: true }] },
     });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     for (const region of [account(), browserSection(), storageSection()]) {
       expect(region.querySelectorAll('[style]')).toHaveLength(0);
@@ -679,7 +679,7 @@ describe('Scope matching is exact', () => {
   it('does not let an in-flight destructive category lock its prefix sibling, in either direction', async () => {
     const user = userEvent.setup();
     seedCustomProfile();
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
     const plain = () => screen.getByRole('switch', { name: 'View Sections' });
     const destructive = () => screen.getByRole('switch', { name: 'View Sections (destructive)' });
 
@@ -701,7 +701,7 @@ describe('Outcome status regions stay in the accessibility tree', () => {
   it('mounts the status node before the message and the same node receives the text', async () => {
     const user = userEvent.setup();
     seed({ settings: { auth: { loginMode: 'auto' } } });
-    render(<Settings />);
+    render(<Settings navigate={vi.fn()} />);
 
     const row = screen.getByRole('switch', { name: 'Auto-refresh session' }).closest('.setting-row')!;
     const status = row.querySelector('[role="status"]');

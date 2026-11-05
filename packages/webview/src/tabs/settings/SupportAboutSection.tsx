@@ -1,6 +1,8 @@
 import React from 'react';
 import { ActionButton } from '../../components/ActionButton.js';
+import { OutcomeFeedback } from '../../components/SettingRow.js';
 import { Section } from '../../components/Section.js';
+import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useStore } from '../../store.js';
 
 const SUPPORT_LINKS = [
@@ -13,6 +15,8 @@ const SUPPORT_LINKS = [
 export function SupportAboutSection() {
   const versions = useStore(state => state.versions);
   const openLink = useStore(state => state.openLink);
+  const [actionId, setActionId] = React.useState<string | null>(null);
+  const { outcome, clearOutcome } = useActionOutcome(actionId);
 
   return (
     <Section
@@ -38,11 +42,18 @@ export function SupportAboutSection() {
       </dl>
       <div className="support-actions">
         {SUPPORT_LINKS.map(link => (
-          <ActionButton key={link.id} onClick={() => openLink(link.id)}>
+          <ActionButton
+            key={link.id}
+            onClick={() => {
+              clearOutcome();
+              setActionId(openLink(link.id));
+            }}
+          >
             {link.label}
           </ActionButton>
         ))}
       </div>
+      <OutcomeFeedback outcome={outcome} successMessage="Opened." failureMessage="The link could not be opened." />
     </Section>
   );
 }

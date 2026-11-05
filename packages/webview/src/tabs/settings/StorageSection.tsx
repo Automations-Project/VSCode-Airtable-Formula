@@ -102,7 +102,7 @@ export function StorageSection() {
   return (
     <Section
       id="storage-settings"
-      title="Storage and data"
+      title="Storage and session backup"
       description="Where the extension keeps its browser profile and tool configuration."
     >
       <div className="settings-stack">
