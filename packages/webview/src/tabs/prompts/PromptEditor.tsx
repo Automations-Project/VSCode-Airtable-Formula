@@ -46,7 +46,7 @@ const CANCELLED_TEXT: Record<PromptActionKind, string> = {
 interface PromptEditorProps {
   initial: PromptDef;
   isNew: boolean;
-  /** Names already taken, so a new prompt cannot silently overwrite one. */
+  /** Names already in use, so a new or renamed prompt cannot silently overwrite one. */
   existingNames: readonly string[];
   onStatus: (status: PromptStatus) => void;
   onExit: (exit: PromptExit) => void;
@@ -87,7 +87,9 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
   // Derived, not latched: typing a change and typing it back is clean again.
   const dirty = editableKey(draft) !== editableKey(initial);
   const errors = validatePromptDraft(draft);
-  const nameTaken = isNew && existingNames.includes(name);
+  // The host saves by name, so any name other than this prompt's own that is
+  // already in use (built-ins included) would be overwritten silently.
+  const nameTaken = name !== initial.name && existingNames.includes(name);
   const nameError = name === '' || initial.isBuiltin
     ? undefined
     : nameTaken

@@ -191,6 +191,63 @@ describe('Prompt editor validation', () => {
     expect(screen.getByRole('button', { name: 'Save prompt' })).toBeDisabled();
   });
 
+  describe('renaming an existing prompt', () => {
+    async function openA() {
+      const user = userEvent.setup();
+      seed([prompt({ name: 'prompt-a' }), prompt({ name: 'prompt-b', description: 'Other' })]);
+      render(<Prompts />);
+      await user.click(screen.getByRole('button', { name: /prompt-a/ }));
+      return { user, field: screen.getByRole('textbox', { name: 'Slash command name' }) };
+    }
+
+    it('blocks renaming onto another prompt and posts nothing', async () => {
+      const { user, field } = await openA();
+
+      await user.clear(field);
+      await user.type(field, 'prompt-b');
+
+      expect(screen.getByRole('alert')).toHaveTextContent('A prompt named prompt-b already exists');
+      expect(field).toHaveAttribute('aria-invalid', 'true');
+      expect(field).toHaveAccessibleDescription(/already exists/);
+      expect(screen.getByRole('button', { name: 'Save prompt' })).toBeDisabled();
+      await user.click(screen.getByRole('button', { name: 'Save prompt' }));
+      expect(posted('action:save-prompt')).toHaveLength(0);
+    });
+
+    it('blocks renaming onto a built-in prompt', async () => {
+      const user = userEvent.setup();
+      seed([prompt({ name: 'prompt-a' }), prompt({ name: 'airtable-help', isBuiltin: true })]);
+      render(<Prompts />);
+      await user.click(screen.getByRole('button', { name: /prompt-a/ }));
+      const field = screen.getByRole('textbox', { name: 'Slash command name' });
+
+      await user.clear(field);
+      await user.type(field, 'airtable-help');
+
+      expect(screen.getByRole('alert')).toHaveTextContent('already exists');
+      expect(screen.getByRole('button', { name: 'Save prompt' })).toBeDisabled();
+    });
+
+    it('still saves a rename to an unused name', async () => {
+      const { user, field } = await openA();
+
+      await user.clear(field);
+      await user.type(field, 'prompt-c');
+      await user.click(screen.getByRole('button', { name: 'Save prompt' }));
+
+      expect(posted('action:save-prompt').at(-1)?.prompt).toMatchObject({ name: 'prompt-c' });
+    });
+
+    it('still saves other edits under its own name', async () => {
+      const { user } = await openA();
+
+      await editDescription(user, 'Changed');
+      await user.click(screen.getByRole('button', { name: 'Save prompt' }));
+
+      expect(posted('action:save-prompt').at(-1)?.prompt).toMatchObject({ name: 'prompt-a', description: 'Changed' });
+    });
+  });
+
   it('rejects an argument name that does not match the shared pattern', async () => {
     const { user } = await renderPromptEditor();
     await user.click(screen.getByRole('button', { name: 'Add argument' }));
