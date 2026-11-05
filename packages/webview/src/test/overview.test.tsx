@@ -28,10 +28,43 @@ function postedTypes(): unknown[] {
 describe('Overview readiness formula', () => {
   beforeEach(() => seed());
 
-  it('exposes one accessible sentence for the visual formula', () => {
+  function formulaSentence(): string {
+    return document.querySelector('.readiness-formula > .visually-hidden')?.textContent ?? '';
+  }
+
+  it('speaks the ready formula from each term and the result', () => {
     render(<Overview navigate={vi.fn()} />);
 
-    expect(screen.getByText('Session plus service plus clients equals ready')).toBeInTheDocument();
+    expect(formulaSentence()).toBe(
+      'Session: signed in, plus service: daemon on :8723, plus clients: 1 of 1 detected editor ready, equals ready.',
+    );
+  });
+
+  it('never claims "equals ready" for a blocked formula', () => {
+    seed({ auth: { status: 'expired' } });
+    render(<Overview navigate={vi.fn()} />);
+
+    expect(formulaSentence()).toBe(
+      'Session: session expired, plus service: daemon on :8723, plus clients: 1 of 1 detected editor ready, equals sign in.',
+    );
+  });
+
+  it('speaks a pending formula as pending', () => {
+    seed({ loading: true });
+    render(<Overview navigate={vi.fn()} />);
+
+    expect(formulaSentence()).toBe(
+      'Session: checking session, plus service: checking service, plus clients: checking editors, equals checking.',
+    );
+  });
+
+  it('says one sentence that is read in place, not announced as a live region', () => {
+    seed({ auth: { status: 'checking' } });
+    render(<Overview navigate={vi.fn()} />);
+
+    const sentence = screen.getByText(/^Session: checking session, plus service/);
+    expect(document.querySelectorAll('.readiness-formula > .visually-hidden')).toHaveLength(1);
+    expect(sentence.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
   });
 
   it('shows the visual terms and result', () => {
