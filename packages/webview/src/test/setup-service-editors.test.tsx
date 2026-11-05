@@ -338,6 +338,25 @@ describe('Editors section', () => {
     expect(posted('action:setupAll')).toHaveLength(0);
   });
 
+  it('holds per-editor actions while setup-all runs, so the two never overlap', async () => {
+    seed({
+      ideStatuses: [
+        ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
+        ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
+      ],
+    });
+    render(<Setup />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
+    const setUpCursor = screen.getByRole('button', { name: 'Set up Cursor' });
+    expect(setUpCursor).toBeDisabled();
+    await userEvent.click(setUpCursor);
+    expect(posted('action:setupIde')).toHaveLength(0);
+
+    act(() => useStore.getState().markActionDone(posted('action:setupAll')[0]!.id as string, { ok: false }));
+    expect(screen.getByRole('button', { name: 'Set up Cursor' })).toBeEnabled();
+  });
+
   it('does not lock Setup all on an unrelated pending action', () => {
     useStore.setState({
       ...makeDashboardState({

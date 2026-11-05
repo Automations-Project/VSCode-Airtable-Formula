@@ -32,6 +32,9 @@ export interface ActionOutcome {
  *   setting:<key>         one Settings row
  *   storage:open:<id>     one storage entry being opened
  *   debug:<kind>          start / stop / export of a debug session (mutually exclusive; export opens a save dialog)
+ *   prompt:<kind>:<name>  save / delete / reset of one prompt. Every prompt action conflicts with every
+ *                         other one: the host rewrites the single prompts.json read-modify-write, so two
+ *                         in flight could lose one update. Nothing outside Prompts conflicts with them.
  */
 /** Matches a key EXACTLY, or any scope nested under it (key + ':' ...). Never a bare string prefix:
  *  'setting:mcp.category:viewSection' must not match '...:viewSectionDestructive'. */
@@ -78,9 +81,11 @@ interface Store extends DashboardState {
   applyState: (state: DashboardState) => void;
   applyIdeStatus: (statuses: IdeStatus[]) => void;
   applyAuthState: (state: AuthState) => void;
-  setupIde: (ideId: IdeId) => void;
-  setupAll: () => void;
-  refresh: () => void;
+  /** Editor actions return their id, or null when refused: one editor's own action, or
+   *  setup-all against any per-editor action (in both directions), is already in flight. */
+  setupIde: (ideId: IdeId) => string | null;
+  setupAll: () => string | null;
+  refresh: () => string;
   /** Scoped actions return their action id, or null when refused because a
    *  conflicting action is already in flight. */
   login: () => string | null;
@@ -91,7 +96,7 @@ interface Store extends DashboardState {
   clearCookie: () => string | null;
   installBrowser: () => string | null;
   removeBrowser: () => string | null;
-  unconfigureIde: (ideId: IdeId) => void;
+  unconfigureIde: (ideId: IdeId) => string | null;
   /** Return the action id, or null when another debug action is already in flight. */
   debugStartSession: () => string | null;
   debugStopAndExport: () => string | null;
@@ -120,10 +125,11 @@ interface Store extends DashboardState {
   configureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
   unconfigureOfficialAirtable: (ideId: import('@shared/types.js').IdeId) => void;
   /** Prompt actions return their action id so callers can await completion
-   *  (via pendingActions + consumeActionResult) before navigating away. */
-  savePrompt: (prompt: PromptDef) => string;
-  deletePrompt: (name: string) => string;
-  resetPrompt: (name: string) => string;
+   *  (via pendingActions + consumeActionResult) before navigating away, or null
+   *  when refused: another prompt action, or a discard confirmation, is in flight. */
+  savePrompt: (prompt: PromptDef) => string | null;
+  deletePrompt: (name: string) => string | null;
+  resetPrompt: (name: string) => string | null;
   /** Read and clear the bounded outcome recorded by markActionDone. Undefined
    *  when no result was recorded (e.g. id unknown). */
   consumeActionResult: (id: string) => ActionOutcome | undefined;
@@ -232,6 +238,21 @@ export const useStore = create<Store>((set, get) => {
     return id;
   };
 
+  /** One editor's setup/update/remove, unless that editor or a setup-all is in flight. */
+  const runIdeAction = (ideId: IdeId, message: (id: string) => WebviewMessage): string | null => {
+    const { pendingIdeActions, pendingSetupAll } = get();
+    if (pendingIdeActions.has(ideId) || pendingSetupAll.size > 0) return null;
+    const id = randomId();
+    beginAction(id);
+    set(s => ({ pendingIdeActions: new Map(s.pendingIdeActions).set(ideId, id) }));
+    sendToExtension(message(id));
+    return id;
+  };
+
+  /** A prompt action, unless another prompt action or a discard confirmation is in flight. */
+  const runPromptAction = (scope: string, message: (id: string) => WebviewMessage): string | null =>
+    get().promptDiscardPending ? null : runScoped(scope, ['prompt'], undefined, message);
+
   return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
@@ -311,27 +332,23 @@ export const useStore = create<Store>((set, get) => {
   applyIdeStatus: (statuses) => set({ ideStatuses: statuses }),
   applyAuthState: (state) => set({ auth: state }),
 
-  setupIde: (ideId) => {
-    const id = randomId();
-    beginAction(id);
-    set(s => {
-      const nextIde = new Map(s.pendingIdeActions);
-      nextIde.set(ideId, id);
-      return { pendingIdeActions: nextIde };
-    });
-    sendToExtension({ type: 'action:setupIde', id, ideId });
-  },
+  setupIde: (ideId) => runIdeAction(ideId, id => ({ type: 'action:setupIde', id, ideId })),
 
+  // Setup-all rewrites every detected editor, so it never overlaps a per-editor action.
   setupAll: () => {
+    const { pendingSetupAll, pendingIdeActions } = get();
+    if (pendingSetupAll.size > 0 || pendingIdeActions.size > 0) return null;
     const id = randomId();
     beginSetupAllAction(id);
     sendToExtension({ type: 'action:setupAll', id });
+    return id;
   },
 
   refresh: () => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:refresh', id });
+    return id;
   },
 
   // Installing or removing the bundled Chromium also excludes a login: it would drive that very browser.
@@ -367,16 +384,7 @@ export const useStore = create<Store>((set, get) => {
       { type: 'action:removeBrowser', id }
     )),
 
-  unconfigureIde: (ideId) => {
-    const id = randomId();
-    beginAction(id);
-    set(s => {
-      const nextIde = new Map(s.pendingIdeActions);
-      nextIde.set(ideId, id);
-      return { pendingIdeActions: nextIde };
-    });
-    sendToExtension({ type: 'action:unconfigureIde', id, ideId });
-  },
+  unconfigureIde: (ideId) => runIdeAction(ideId, id => ({ type: 'action:unconfigureIde', id, ideId })),
 
   // Stop & Export and Export wait on a native save dialog.
   debugStartSession: () =>
@@ -529,26 +537,14 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'action:unconfigure-official-airtable', id, ideId });
   },
 
-  savePrompt: (prompt) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:save-prompt', id, prompt });
-    return id;
-  },
+  savePrompt: (prompt) =>
+    runPromptAction(`prompt:save:${prompt.name}`, id => ({ type: 'action:save-prompt', id, prompt })),
 
-  deletePrompt: (name) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:delete-prompt', id, name });
-    return id;
-  },
+  deletePrompt: (name) =>
+    runPromptAction(`prompt:delete:${name}`, id => ({ type: 'action:delete-prompt', id, name })),
 
-  resetPrompt: (name) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:reset-prompt', id, name });
-    return id;
-  },
+  resetPrompt: (name) =>
+    runPromptAction(`prompt:reset:${name}`, id => ({ type: 'action:reset-prompt', id, name })),
 
   consumeActionResult: (id) => {
     const result = actionResults.get(id);

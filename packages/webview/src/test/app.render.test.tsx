@@ -450,14 +450,14 @@ describe('App rendered shell', () => {
     vi.useFakeTimers();
     render(<App />);
 
-    const completedActionId = useStore.getState().deletePrompt('completed-result');
+    const completedActionId = useStore.getState().deletePrompt('completed-result')!;
     useStore.getState().markActionDone(completedActionId, { ok: false });
     expect(useStore.getState().consumeActionResult(completedActionId)).toEqual({ ok: false });
     useStore.getState().markActionDone(completedActionId, { ok: false });
 
     const pendingActionId = useStore.getState().savePrompt({
       name: 'leftover-timer', description: '', arguments: [], template: '', isBuiltin: false, isModified: false,
-    });
+    })!;
     expect(useStore.getState().pendingActions.has(pendingActionId)).toBe(true);
 
     await resetWebviewStore();

@@ -447,6 +447,46 @@ describe('Saving', () => {
     expect(save).toBeDisabled();
   });
 
+  it('is not held by an unrelated long action elsewhere in the dashboard', async () => {
+    const { user } = await renderPromptEditor();
+    // A bundled-Chromium download can run for ten minutes; it has nothing to do with prompts.
+    act(() => { useStore.getState().installBrowser(); });
+    await editDescription(user, 'Changed');
+
+    const save = screen.getByRole('button', { name: 'Save prompt' });
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByRole('button', { name: 'Delete prompt' })).toBeEnabled();
+    await user.click(save);
+    expect(posted('action:save-prompt')).toHaveLength(1);
+  });
+
+  it('holds prompt actions while a discard confirmation is open', async () => {
+    const { user } = await renderPromptEditor();
+    await editDescription(user, 'Changed');
+    await user.click(screen.getByRole('button', { name: 'Back to prompts' }));
+    expect(useStore.getState().promptDiscardPending).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Save prompt' }));
+    await user.click(screen.getByRole('button', { name: 'Delete prompt' }));
+
+    expect(posted('action:save-prompt')).toHaveLength(0);
+    expect(posted('action:delete-prompt')).toHaveLength(0);
+    answerConfirmation(false);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save prompt' })).toBeEnabled());
+  });
+
+  it('refuses a prompt action in the store while another prompt action is in flight', () => {
+    seed();
+    const first = useStore.getState().savePrompt(prompt({ description: 'One' }));
+
+    expect(first).not.toBeNull();
+    expect(useStore.getState().deletePrompt('inspect-base')).toBeNull();
+    expect(useStore.getState().resetPrompt('inspect-base')).toBeNull();
+    finish(first!, { ok: true });
+    expect(useStore.getState().deletePrompt('inspect-base')).not.toBeNull();
+  });
+
   it('blocks a second save from a remounted editor while the first is in flight', async () => {
     const { user, unmount } = await renderPromptEditor();
     await editDescription(user, 'Changed');

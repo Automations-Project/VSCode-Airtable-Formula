@@ -31,8 +31,10 @@ export function EditorsSection() {
       <EditorCard
         status={status}
         includeAgents={includeAgents}
-        // Only this editor's own action locks its card; unrelated work never does.
+        // Only this editor's own action, or a setup-all rewriting every editor,
+        // holds its card; unrelated work never does.
         loading={pendingIdeActions.has(status.ideId)}
+        locked={setupAllPending}
         onSetup={() => setupIde(status.ideId)}
         onUnconfigure={() => unconfigureIde(status.ideId)}
         onDocs={() => openIdeDocs(status.ideId)}

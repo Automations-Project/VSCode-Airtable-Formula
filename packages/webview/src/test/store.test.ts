@@ -60,6 +60,24 @@ describe('store', () => {
     expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:setupIde', ideId: 'cursor' }));
   });
 
+  it('keeps setup-all and per-editor setup from overlapping, in both directions', () => {
+    const one = useStore.getState().setupIde('cursor');
+    expect(one).not.toBeNull();
+    expect(useStore.getState().setupAll()).toBeNull();
+    expect(useStore.getState().setupIde('cursor')).toBeNull();
+    // A different editor is independent of this one.
+    expect(useStore.getState().unconfigureIde('windsurf')).not.toBeNull();
+    for (const id of useStore.getState().pendingIdeActions.values()) useStore.getState().markActionDone(id, { ok: true });
+
+    const all = useStore.getState().setupAll();
+    expect(all).not.toBeNull();
+    expect(useStore.getState().setupAll()).toBeNull();
+    expect(useStore.getState().setupIde('cursor')).toBeNull();
+    expect(useStore.getState().unconfigureIde('windsurf')).toBeNull();
+    expect(vi.mocked(sendToExtension).mock.calls.map(([m]) => (m as { type: string }).type))
+      .toEqual(['action:setupIde', 'action:unconfigureIde', 'action:setupAll']);
+  });
+
   it('refresh sends action:refresh message', () => {
     useStore.getState().refresh();
     expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:refresh' }));
@@ -261,7 +279,7 @@ describe('action result confirmation (PromptEditor wait-for-result)', () => {
     const id = useStore.getState().savePrompt({
       name: 'my-prompt', description: 'd', arguments: [], template: 't',
       isBuiltin: false, isModified: false,
-    });
+    })!;
     expect(typeof id).toBe('string');
     expect(id.length).toBeGreaterThan(0);
     expect(useStore.getState().pendingActions.has(id!)).toBe(true);
@@ -269,7 +287,7 @@ describe('action result confirmation (PromptEditor wait-for-result)', () => {
   });
 
   it('markActionDone records a consumable result and clears pending', () => {
-    const id = useStore.getState().deletePrompt('my-prompt');
+    const id = useStore.getState().deletePrompt('my-prompt')!;
     useStore.getState().markActionDone(id, { ok: false, error: 'Could not delete prompt' });
     expect(useStore.getState().pendingActions.has(id!)).toBe(false);
     expect(useStore.getState().consumeActionResult(id)).toEqual({
@@ -281,7 +299,7 @@ describe('action result confirmation (PromptEditor wait-for-result)', () => {
   });
 
   it('resetPrompt success result round-trips as true', () => {
-    const id = useStore.getState().resetPrompt('built-in');
+    const id = useStore.getState().resetPrompt('built-in')!;
     useStore.getState().markActionDone(id, { ok: true });
     expect(useStore.getState().consumeActionResult(id)).toEqual({ ok: true });
   });

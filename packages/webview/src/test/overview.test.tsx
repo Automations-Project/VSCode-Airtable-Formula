@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -134,6 +134,68 @@ describe('Overview next action', () => {
     expect(vscodeApiMock.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'action:setupIde', ideId: 'cursor' }),
     );
+  });
+
+  it('does not hold Set up all on unrelated long actions', async () => {
+    const [cursor] = makeDashboardState().ideStatuses;
+    seed({
+      ideStatuses: [
+        { ...cursor!, mcpConfigured: false },
+        { ...cursor!, ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false },
+      ],
+    });
+    // A ten-minute Chromium download and an open save dialog: neither touches editors.
+    useStore.getState().installBrowser();
+    useStore.getState().backupSession();
+    render(<Overview navigate={vi.fn()} />);
+    const setupAll = screen.getByRole('button', { name: 'Set up all editors' });
+
+    expect(setupAll).toBeEnabled();
+    expect(setupAll).not.toHaveAttribute('aria-disabled');
+    await userEvent.click(setupAll);
+    expect(postedTypes()).toContain('action:setupAll');
+  });
+
+  it('does not hold Sign in on unrelated actions', async () => {
+    seed({ auth: { status: 'expired', hasCredentials: true } });
+    useStore.getState().debugExport();
+    useStore.getState().openStoragePath('tool-config');
+    render(<Overview navigate={vi.fn()} />);
+    const signIn = screen.getByRole('button', { name: 'Sign in' });
+
+    expect(signIn).toBeEnabled();
+    expect(signIn).not.toHaveAttribute('aria-disabled');
+    await userEvent.click(signIn);
+    expect(postedTypes()).toContain('action:login');
+  });
+
+  it('does not hold Check session on unrelated actions', async () => {
+    seed({ auth: { status: 'unknown' } });
+    useStore.getState().installBrowser();
+    useStore.getState().debugExport();
+    render(<Overview navigate={vi.fn()} />);
+    const check = screen.getByRole('button', { name: 'Check session' });
+
+    expect(check).toBeEnabled();
+    expect(check).not.toHaveAttribute('aria-disabled');
+    await userEvent.click(check);
+    expect(postedTypes()).toContain('action:status');
+  });
+
+  it('holds Sign in while a conflicting session or browser action is in flight', () => {
+    seed({ auth: { status: 'expired', hasCredentials: true } });
+    const logout = useStore.getState().logout();
+    const view = render(<Overview navigate={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled();
+    act(() => useStore.getState().markActionDone(logout!, { ok: true }));
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+    view.unmount();
+
+    // A login drives the very browser a bundled-Chromium install is replacing.
+    useStore.getState().installBrowser();
+    render(<Overview navigate={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled();
   });
 
   it('holds the daemon action while a daemon action is in flight', async () => {

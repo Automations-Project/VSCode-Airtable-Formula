@@ -6,6 +6,7 @@ import { ActionButton } from '../../components/ActionButton.js';
 import { Feedback } from '../../components/Feedback.js';
 import { FormField } from '../../components/FormField.js';
 import { Section } from '../../components/Section.js';
+import { useScopePending } from '../../lib/useActionOutcome.js';
 import { useStore } from '../../store.js';
 import { hasPromptDraftErrors, validatePromptDraft } from './validation.js';
 
@@ -61,10 +62,15 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
   const savePrompt = useStore(s => s.savePrompt);
   const deletePrompt = useStore(s => s.deletePrompt);
   const resetPrompt = useStore(s => s.resetPrompt);
+  // Read only to notice when this editor's own action settles; never used as a lock.
   const pendingActions = useStore(s => s.pendingActions);
   const consumeActionResult = useStore(s => s.consumeActionResult);
   const setPromptEditorDirty = useStore(s => s.setPromptEditorDirty);
   const guardPromptNavigation = useStore(s => s.guardPromptNavigation);
+  // Prompt actions conflict only with prompt actions (they share one host file)
+  // and with an open discard confirmation; unrelated dashboard work never holds them.
+  const promptActionPending = useScopePending('prompt');
+  const discardPending = useStore(s => s.promptDiscardPending);
 
   const [name, setName] = React.useState(initial.name);
   const [description, setDescription] = React.useState(initial.description);
@@ -95,7 +101,7 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
     : nameTaken
       ? `A prompt named ${name} already exists.`
       : errors.name;
-  const busy = inFlight !== null || pendingActions.size > 0;
+  const busy = inFlight !== null || promptActionPending || discardPending;
   const canSave = dirty && !hasPromptDraftErrors(errors) && !nameTaken && !busy;
 
   React.useEffect(() => {
@@ -124,10 +130,12 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
     setActionError(outcome?.error?.trim().slice(0, MAX_ACTION_ERROR_LENGTH) || DEFAULT_ACTION_ERROR);
   }, [pendingActions, inFlight, consumeActionResult, onExit, onStatus]);
 
-  function begin(kind: PromptActionKind, targetName: string, send: () => string): void {
+  function begin(kind: PromptActionKind, targetName: string, send: () => string | null): void {
     if (busy) return;
+    const id = send();
+    if (id === null) return;
     setActionError(null);
-    setInFlight({ id: send(), kind, name: targetName });
+    setInFlight({ id, kind, name: targetName });
     onStatus({ text: PENDING_TEXT[kind], busy: true });
   }
 

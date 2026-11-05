@@ -32,6 +32,8 @@ interface EditorCardProps {
   onDocs?: () => void;
   /** True only while THIS editor's own action is in flight. */
   loading: boolean;
+  /** A conflicting action (setup-all) is rewriting every editor: hold this card's actions. */
+  locked?: boolean;
   /** Whether agent files count toward readiness (mirrors the ai.includeAgents setting). */
   includeAgents?: boolean;
 }
@@ -46,6 +48,7 @@ export function EditorCard({
   onUnconfigure,
   onDocs,
   loading,
+  locked = false,
   includeAgents = false,
 }: EditorCardProps) {
   const { ideId, label } = status;
@@ -140,6 +143,7 @@ export function EditorCard({
           <ActionButton
             variant="primary"
             pending={loading}
+            disabled={locked}
             aria-label={`Set up ${label}`}
             onClick={onSetup}
           >
@@ -150,6 +154,7 @@ export function EditorCard({
           <>
             <ActionButton
               pending={loading}
+              disabled={locked}
               aria-label={`Update ${label}`}
               onClick={onSetup}
             >
@@ -157,7 +162,7 @@ export function EditorCard({
             </ActionButton>
             <ActionButton
               variant="danger"
-              disabled={loading}
+              disabled={loading || locked}
               aria-label={`Remove ${label} configuration`}
               onClick={onUnconfigure}
             >
