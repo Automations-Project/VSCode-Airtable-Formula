@@ -150,16 +150,23 @@ describe('Prompt editor validation', () => {
     expect(screen.getByRole('button', { name: 'Save prompt' })).toBeEnabled();
   });
 
+  // Only a new prompt chooses its name (an existing prompt's name is locked).
+  async function renderNewPromptEditor() {
+    const user = userEvent.setup();
+    seed();
+    render(<Prompts />);
+    await user.click(screen.getByRole('button', { name: 'New prompt' }));
+    return { user, field: screen.getByRole('textbox', { name: 'Slash command name' }) };
+  }
+
   it.each([
     ['starts with a digit', '1abc'],
     ['has uppercase letters', 'Abc'],
     ['has an underscore', 'a_b'],
     ['is over 64 characters', 'a'.repeat(65)],
   ])('rejects a prompt name that %s', async (_label, name) => {
-    const { user } = await renderPromptEditor({ name: 'inspect-base' });
-    const field = screen.getByRole('textbox', { name: 'Slash command name' });
+    const { user, field } = await renderNewPromptEditor();
 
-    await user.clear(field);
     await user.type(field, name);
 
     expect(field).toHaveAttribute('aria-invalid', 'true');
@@ -168,10 +175,8 @@ describe('Prompt editor validation', () => {
   });
 
   it('accepts a 64-character lowercase hyphenated prompt name', async () => {
-    const { user } = await renderPromptEditor();
-    const field = screen.getByRole('textbox', { name: 'Slash command name' });
+    const { user, field } = await renderNewPromptEditor();
 
-    await user.clear(field);
     await user.type(field, `a${'-b'.repeat(31)}c`);
 
     expect((field as HTMLInputElement).value).toHaveLength(64);
@@ -191,7 +196,11 @@ describe('Prompt editor validation', () => {
     expect(screen.getByRole('button', { name: 'Save prompt' })).toBeDisabled();
   });
 
-  describe('renaming an existing prompt', () => {
+  // The host saves by name, so a "rename" would silently leave both prompts.
+  // An existing prompt's name is therefore locked; a new prompt picks its name.
+  describe('the name of an existing prompt', () => {
+    const LOCKED = "Prompt names can't be changed after creation. Create a new prompt to use a different name.";
+
     async function openA() {
       const user = userEvent.setup();
       seed([prompt({ name: 'prompt-a' }), prompt({ name: 'prompt-b', description: 'Other' })]);
@@ -200,42 +209,44 @@ describe('Prompt editor validation', () => {
       return { user, field: screen.getByRole('textbox', { name: 'Slash command name' }) };
     }
 
-    it('blocks renaming onto another prompt and posts nothing', async () => {
-      const { user, field } = await openA();
+    it('is locked for an existing custom prompt, and says why', async () => {
+      const { field } = await openA();
 
-      await user.clear(field);
-      await user.type(field, 'prompt-b');
-
-      expect(screen.getByRole('alert')).toHaveTextContent('A prompt named prompt-b already exists');
-      expect(field).toHaveAttribute('aria-invalid', 'true');
-      expect(field).toHaveAccessibleDescription(/already exists/);
-      expect(screen.getByRole('button', { name: 'Save prompt' })).toBeDisabled();
-      await user.click(screen.getByRole('button', { name: 'Save prompt' }));
-      expect(posted('action:save-prompt')).toHaveLength(0);
+      expect(field).toBeDisabled();
+      expect(field).toHaveValue('prompt-a');
+      expect(field).toHaveAccessibleDescription(expect.stringContaining(LOCKED));
     });
 
-    it('blocks renaming onto a built-in prompt', async () => {
-      const user = userEvent.setup();
-      seed([prompt({ name: 'prompt-a' }), prompt({ name: 'airtable-help', isBuiltin: true })]);
-      render(<Prompts />);
-      await user.click(screen.getByRole('button', { name: /prompt-a/ }));
+    it('is locked for a built-in prompt with the same explanation', async () => {
+      await renderPromptEditor({ name: 'airtable-help', isBuiltin: true, isModified: false });
       const field = screen.getByRole('textbox', { name: 'Slash command name' });
 
-      await user.clear(field);
-      await user.type(field, 'airtable-help');
-
-      expect(screen.getByRole('alert')).toHaveTextContent('already exists');
-      expect(screen.getByRole('button', { name: 'Save prompt' })).toBeDisabled();
+      expect(field).toBeDisabled();
+      expect(field).toHaveAccessibleDescription(expect.stringContaining(LOCKED));
     });
 
-    it('still saves a rename to an unused name', async () => {
+    it('can never post a rename: a save keeps the prompt its own name', async () => {
       const { user, field } = await openA();
 
-      await user.clear(field);
-      await user.type(field, 'prompt-c');
+      await user.type(field, '-renamed');
+      await editDescription(user, 'Changed');
       await user.click(screen.getByRole('button', { name: 'Save prompt' }));
 
-      expect(posted('action:save-prompt').at(-1)?.prompt).toMatchObject({ name: 'prompt-c' });
+      expect(field).toHaveValue('prompt-a');
+      expect(posted('action:save-prompt').at(-1)?.prompt).toMatchObject({ name: 'prompt-a', description: 'Changed' });
+    });
+
+    it('stays editable for a new prompt, without the lock explanation', async () => {
+      const user = userEvent.setup();
+      seed();
+      render(<Prompts />);
+      await user.click(screen.getByRole('button', { name: 'New prompt' }));
+      const field = screen.getByRole('textbox', { name: 'Slash command name' });
+
+      expect(field).toBeEnabled();
+      expect(field).not.toHaveAccessibleDescription(expect.stringContaining('after creation'));
+      await user.type(field, 'fresh');
+      expect(field).toHaveValue('fresh');
     });
 
     it('still saves other edits under its own name', async () => {

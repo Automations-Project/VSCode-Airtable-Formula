@@ -47,7 +47,7 @@ const CANCELLED_TEXT: Record<PromptActionKind, string> = {
 interface PromptEditorProps {
   initial: PromptDef;
   isNew: boolean;
-  /** Names already in use, so a new or renamed prompt cannot silently overwrite one. */
+  /** Names already in use, so a new prompt cannot silently overwrite one. */
   existingNames: readonly string[];
   onStatus: (status: PromptStatus) => void;
   onExit: (exit: PromptExit) => void;
@@ -93,10 +93,12 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
   // Derived, not latched: typing a change and typing it back is clean again.
   const dirty = editableKey(draft) !== editableKey(initial);
   const errors = validatePromptDraft(draft);
-  // The host saves by name, so any name other than this prompt's own that is
-  // already in use (built-ins included) would be overwritten silently.
-  const nameTaken = name !== initial.name && existingNames.includes(name);
-  const nameError = name === '' || initial.isBuiltin
+  // The host saves by name: a changed name would write a second prompt and
+  // leave the first one in place. So an existing prompt's name is locked, and a
+  // new prompt may not take a name already in use (built-ins included).
+  const nameLocked = !isNew;
+  const nameTaken = !nameLocked && existingNames.includes(name);
+  const nameError = name === '' || nameLocked
     ? undefined
     : nameTaken
       ? `A prompt named ${name} already exists.`
@@ -198,7 +200,12 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
         <div className="form-stack">
           <FormField
             label="Slash command name"
-            description={<>Appears as <code>/{name || '…'}</code> in MCP clients.</>}
+            description={(
+              <>
+                Appears as <code>/{name || '…'}</code> in MCP clients.
+                {nameLocked && " Prompt names can't be changed after creation. Create a new prompt to use a different name."}
+              </>
+            )}
             error={nameError}
             required
           >
@@ -208,7 +215,7 @@ export function PromptEditor({ initial, isNew, existingNames, onStatus, onExit }
                 className="form-control form-control--mono"
                 value={name}
                 onChange={event => setName(event.target.value)}
-                disabled={initial.isBuiltin}
+                disabled={nameLocked}
                 placeholder="my-prompt"
                 autoComplete="off"
                 spellCheck={false}
