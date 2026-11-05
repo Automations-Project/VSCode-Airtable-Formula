@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { DashboardTabs } from '../components/DashboardTabs.js';
@@ -140,5 +140,37 @@ describe('DashboardTabs', () => {
     await user.keyboard('{ArrowRight}');
 
     await waitFor(() => expect(overview).toHaveFocus());
+  });
+
+  it.each([
+    ['altKey', 'ArrowLeft'],
+    ['altKey', 'ArrowRight'],
+    ['ctrlKey', 'ArrowRight'],
+    ['metaKey', 'ArrowLeft'],
+    ['shiftKey', 'ArrowRight'],
+    ['ctrlKey', 'Home'],
+    ['altKey', 'End'],
+  ] as const)('leaves %s+%s to the browser and the host', (modifier, key) => {
+    const onRequestSelect = vi.fn().mockResolvedValue(true);
+    render(<DashboardTabs tabs={tabs} activeTab="setup" onRequestSelect={onRequestSelect} />);
+    const setup = screen.getByRole('tab', { name: 'Setup' });
+    setup.focus();
+
+    // fireEvent returns false when the handler called preventDefault.
+    const notPrevented = fireEvent.keyDown(setup, { key, [modifier]: true });
+
+    expect(notPrevented).toBe(true);
+    expect(onRequestSelect).not.toHaveBeenCalled();
+    expect(setup).toHaveFocus();
+  });
+
+  it('still handles the bare arrow key and prevents its default', () => {
+    const onRequestSelect = vi.fn().mockResolvedValue(true);
+    render(<DashboardTabs tabs={tabs} activeTab="setup" onRequestSelect={onRequestSelect} />);
+
+    const notPrevented = fireEvent.keyDown(screen.getByRole('tab', { name: 'Setup' }), { key: 'ArrowRight' });
+
+    expect(notPrevented).toBe(false);
+    expect(onRequestSelect).toHaveBeenCalledWith('prompts');
   });
 });

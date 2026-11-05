@@ -148,6 +148,16 @@
   transition-timing-function: var(--ease-std);
 }
 
+/* Invisible halo: the 18px track keeps a 26px pointer target. */
+.setting-switch::after {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  bottom: -4px;
+  left: -4px;
+  content: '';
+}
+
 .setting-switch::before {
   position: absolute;
   top: 2px;

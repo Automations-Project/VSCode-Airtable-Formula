@@ -35,6 +35,9 @@ export function DashboardTabs({
     event: React.KeyboardEvent<HTMLButtonElement>,
     index: number,
   ): void {
+    // Alt+Arrow is browser/history navigation and Ctrl/Cmd/Shift chords belong to
+    // the editor or assistive tech: only the bare key moves between tabs.
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.key === 'ArrowRight') {
       event.preventDefault();
       void requestActivate(index + 1);

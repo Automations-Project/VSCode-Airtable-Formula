@@ -36,8 +36,11 @@ describe('App rendered shell', () => {
     expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
     expect(screen.getByRole('tabpanel'))
       .toHaveAttribute('aria-labelledby', 'dashboard-tab-overview');
-    expect(screen.queryByRole('button', { name: 'Open GitHub (external link)' }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    for (const name of [/support/i, /docs|documentation/i, /changelog/i, /github/i]) {
+      expect(screen.queryByRole('button', { name }), String(name)).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name }), String(name)).not.toBeInTheDocument();
+    }
   });
 
   it('keeps focus on a selected top-level tab instead of moving it into the panel', async () => {

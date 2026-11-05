@@ -28,9 +28,17 @@ button,
 input,
 select,
 textarea {
-  min-height: 28px;
   color: inherit;
   font: inherit;
+}
+
+/* Text-like controls only: checkboxes and radios keep their natural size and get
+   their 24px hit area from the label (or a halo) that owns them. */
+button,
+select,
+textarea,
+input:not([type='checkbox'], [type='radio']) {
+  min-height: 28px;
 }
 
 button {

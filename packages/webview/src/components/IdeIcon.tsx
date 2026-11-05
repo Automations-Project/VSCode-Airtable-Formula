@@ -38,13 +38,12 @@ interface IdeIconProps {
   tone?: IdeIconTone;
 }
 
-// The vendored artwork carries its own inline `style` attribute; drop it so the
-// wrapper's class owns presentation (the svg width/height attributes set the size).
+// The vendored artwork is static, style-free and script-free (a test scans every
+// asset), so it is injected as shipped; only the 1em box becomes the requested size.
 function sizedSvg(svg: string, size: number): string {
   return svg
     .replace(/width="1em"/g, `width="${size}"`)
-    .replace(/height="1em"/g, `height="${size}"`)
-    .replace(/\sstyle="[^"]*"/g, '');
+    .replace(/height="1em"/g, `height="${size}"`);
 }
 
 /** Decorative: every use sits beside a text label. */
