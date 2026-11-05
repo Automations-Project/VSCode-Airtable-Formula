@@ -31,6 +31,25 @@ describe('global CSS reset', () => {
   });
 });
 
+describe('design tokens', () => {
+  // Every shipped source, as text: a token is "used" when something reads it.
+  const sources = import.meta.glob('../**/*.{css,ts,tsx}', {
+    query: '?raw', import: 'default', eager: true,
+  }) as Record<string, string>;
+
+  it('declares no alias that nothing reads', () => {
+    const tokens = sources['../styles/tokens.css'];
+    expect(tokens, 'tokens.css source').toBeDefined();
+    // An alias is a token whose whole value is another token, e.g. `--fg: var(--text-primary);`.
+    const aliases = [...tokens!.matchAll(/^\s*(--[\w-]+):\s*var\(--[\w-]+\)\s*;/gm)].map(match => match[1]!);
+    const reads = (name: string) => new RegExp(`var\\(${name}[,)\\s]`);
+
+    const unused = aliases.filter(name => !Object.values(sources).some(text => reads(name).test(text)));
+
+    expect(unused).toEqual([]);
+  });
+});
+
 describe('empty live regions', () => {
   const selectors = ['.outcome-status:empty', '.prompt-status:empty', '.snippet-card__flash:empty'];
 
