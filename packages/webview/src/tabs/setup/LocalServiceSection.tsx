@@ -6,6 +6,7 @@ import { OutcomeFeedback } from '../../components/SettingRow.js';
 import { StatusDot, type DotVariant } from '../../components/StatusDot.js';
 import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useFlash } from '../../lib/useFlash.js';
+import { useFocusFallback } from '../../lib/useFocusFallback.js';
 import { useStore } from '../../store.js';
 import { formatUptime } from './snippets.js';
 
@@ -45,6 +46,10 @@ export function LocalServiceSection() {
   const [tokenAction, setTokenAction] = React.useState<{ id: string | null; kind: TokenKind }>({ id: null, kind: 'copy' });
   const lifecycleOutcome = useActionOutcome(lifecycle.id);
   const tokenOutcome = useActionOutcome(tokenAction.id);
+  // Start and Restart are one slot (one node, the label changes); when Stop
+  // goes away with the service, focus lands on that slot.
+  const lifecycleSlot = React.useRef<HTMLButtonElement>(null);
+  const stopFallback = useFocusFallback<HTMLButtonElement>(() => lifecycleSlot.current);
 
   const runLifecycle = (kind: LifecycleKind, start: () => string | null) => {
     lifecycleOutcome.clearOutcome();
@@ -94,13 +99,22 @@ export function LocalServiceSection() {
       title="Local service"
       description="One shared MCP and language server that your editors connect to."
       busy={busy}
-      actions={running ? (
+      actions={(
         <>
-          <ActionButton pending={busy} onClick={() => runLifecycle('restart', restartDaemon)}>Restart service</ActionButton>
-          <ActionButton variant="danger" pending={busy} onClick={() => runLifecycle('stop', stopDaemon)}>Stop service</ActionButton>
+          <ActionButton
+            ref={lifecycleSlot}
+            variant={running ? 'secondary' : 'primary'}
+            pending={busy}
+            onClick={() => (running ? runLifecycle('restart', restartDaemon) : runLifecycle('start', startDaemon))}
+          >
+            {running ? 'Restart service' : 'Start service'}
+          </ActionButton>
+          {running && (
+            <ActionButton ref={stopFallback} variant="danger" pending={busy} onClick={() => runLifecycle('stop', stopDaemon)}>
+              Stop service
+            </ActionButton>
+          )}
         </>
-      ) : (
-        <ActionButton variant="primary" pending={busy} onClick={() => runLifecycle('start', startDaemon)}>Start service</ActionButton>
       )}
     >
       <p className="service-status" role="status">

@@ -1,6 +1,7 @@
 import React from 'react';
 import type { IdeId, IdeStatus } from '@shared/types.js';
 import { useActionOutcome } from '../lib/useActionOutcome.js';
+import { useFocusFallback } from '../lib/useFocusFallback.js';
 import { summarizeClients, type ClientSummary } from '../selectors/readiness.js';
 import { ActionButton } from './ActionButton.js';
 import { IdeIcon, type IdeIconTone } from './IdeIcon.js';
@@ -86,6 +87,16 @@ export function EditorCard({
     remove: `${label} configuration removed.`,
   };
 
+  // Set up and Update are one slot (one node, the label changes); when Remove
+  // goes away with the configuration, focus lands on that slot.
+  const primarySlot = React.useRef<HTMLButtonElement>(null);
+  const removeFallback = useFocusFallback<HTMLButtonElement>(() => primarySlot.current);
+  const primaryKind: CardActionKind = primaryConfigured ? 'update' : 'setup';
+  const primaryText = primaryConfigured ? 'Update' : 'Set up';
+  const primaryBusyText = primaryConfigured ? 'Updating…' : 'Setting up…';
+  // While Remove runs, the primary slot is held but does not claim to be updating.
+  const primaryLabel = loading && action.kind !== 'remove' ? primaryBusyText : primaryText;
+
   return (
     <article
       className="editor-card"
@@ -156,36 +167,29 @@ export function EditorCard({
       )}
 
       <div className="editor-card__actions">
-        {status.detected && !primaryConfigured && (
+        {status.detected && (
           <ActionButton
-            variant="primary"
+            ref={primarySlot}
+            variant={primaryConfigured ? 'secondary' : 'primary'}
             pending={loading}
             disabled={locked}
-            aria-label={`Set up ${label}`}
-            onClick={() => run('setup', onSetup)}
+            aria-label={`${primaryText} ${label}`}
+            onClick={() => run(primaryKind, onSetup)}
           >
-            {loading ? 'Setting up…' : 'Set up'}
+            {primaryLabel}
           </ActionButton>
         )}
         {status.detected && primaryConfigured && (
-          <>
-            <ActionButton
-              pending={loading}
-              disabled={locked}
-              aria-label={`Update ${label}`}
-              onClick={() => run('update', onSetup)}
-            >
-              {loading ? 'Updating…' : 'Update'}
-            </ActionButton>
-            <ActionButton
-              variant="danger"
-              disabled={loading || locked}
-              aria-label={`Remove ${label} configuration`}
-              onClick={() => run('remove', onUnconfigure)}
-            >
-              Remove
-            </ActionButton>
-          </>
+          <ActionButton
+            ref={removeFallback}
+            variant="danger"
+            pending={loading}
+            disabled={locked}
+            aria-label={`Remove ${label} configuration`}
+            onClick={() => run('remove', onUnconfigure)}
+          >
+            Remove
+          </ActionButton>
         )}
         {!status.detected && onDocs && (
           <ActionButton aria-label={`Docs for ${label}`} onClick={onDocs}>

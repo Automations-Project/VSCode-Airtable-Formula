@@ -9,6 +9,7 @@ import { StatusDot, type DotVariant } from '../../components/StatusDot.js';
 import { copyText } from '../../lib/clipboard.js';
 import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useFlash } from '../../lib/useFlash.js';
+import { useFocusFallback } from '../../lib/useFocusFallback.js';
 import { useStore } from '../../store.js';
 
 const PROVIDERS: ReadonlyArray<{ id: TunnelProviderId; label: string }> = [
@@ -70,6 +71,9 @@ export function RemoteAccessSection() {
   const [tokenActionId, setTokenActionId] = React.useState<string | null>(null);
   const tunnelOutcome = useActionOutcome(tunnelAction.id);
   const tokenOutcome = useActionOutcome(tokenActionId);
+  // Save and Cancel close the replace form; focus returns to Replace token.
+  const replaceButton = React.useRef<HTMLButtonElement>(null);
+  const replaceFormFallback = useFocusFallback<HTMLDivElement>(() => replaceButton.current);
 
   // A typed token leaves this component only once the host confirms it was
   // stored; a failure keeps it so nothing has to be pasted again.
@@ -166,7 +170,9 @@ export function RemoteAccessSection() {
                   <StatusDot variant="ok" />
                   <span>Auth token stored</span>
                 </span>
-                <ActionButton disabled={locked} onClick={() => setReplacingToken(true)}>Replace token</ActionButton>
+                <ActionButton ref={replaceButton} disabled={locked} onClick={() => setReplacingToken(true)}>
+                  Replace token
+                </ActionButton>
               </div>
             ) : (
               <>
@@ -183,12 +189,14 @@ export function RemoteAccessSection() {
                       placeholder="Paste token from the ngrok dashboard"
                       value={ngrokToken}
                       disabled={locked}
+                      // Replace token unmounts as the field appears: the field takes its focus.
+                      autoFocus={replacingToken}
                       onChange={e => setNgrokToken(e.target.value)}
                     />
                   )}
                 </FormField>
                 {replacingToken && (
-                  <div className="form-actions">
+                  <div ref={replaceFormFallback} className="form-actions">
                     <ActionButton variant="primary" pending={pending} disabled={!ngrokToken.trim()} onClick={saveToken}>
                       Save token
                     </ActionButton>

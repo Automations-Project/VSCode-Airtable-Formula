@@ -1,6 +1,7 @@
 import React from 'react';
 import type { DashboardTabId } from '@shared/types.js';
 import { useActionOutcome, useScopePending } from '../lib/useActionOutcome.js';
+import { useFocusFallback } from '../lib/useFocusFallback.js';
 import type { ReadinessAction } from '../selectors/readiness.js';
 import { useStore } from '../store.js';
 import { ActionButton } from './ActionButton.js';
@@ -49,6 +50,8 @@ export function NextAction({ action, navigate }: NextActionProps) {
   const setupAllPending = useStore(s => s.pendingSetupAll.size > 0);
   const [started, setStarted] = React.useState<{ id: string | null; type: DispatchType }>({ id: null, type: 'action:status' });
   const { outcome, clearOutcome } = useActionOutcome(started.id);
+  // One node across next actions (only its label changes); when none is left, focus lands on the tab heading.
+  const buttonFallback = useFocusFallback<HTMLButtonElement>(() => document.getElementById('overview-heading'));
 
   let pending = false;
   let disabled = false;
@@ -100,7 +103,7 @@ export function NextAction({ action, navigate }: NextActionProps) {
   return (
     <>
       {action && (
-        <ActionButton variant="primary" pending={pending} disabled={disabled} onClick={run}>
+        <ActionButton ref={buttonFallback} variant="primary" pending={pending} disabled={disabled} onClick={run}>
           {action.label}
         </ActionButton>
       )}

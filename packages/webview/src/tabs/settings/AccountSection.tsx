@@ -8,6 +8,7 @@ import { Section } from '../../components/Section.js';
 import { StatusDot, type DotVariant } from '../../components/StatusDot.js';
 import { friendlyError } from '../../lib/friendlyError.js';
 import { useActionOutcome, useScopePending } from '../../lib/useActionOutcome.js';
+import { useFocusFallback } from '../../lib/useFocusFallback.js';
 import { useStore } from '../../store.js';
 
 const STATUS: Record<AuthStatus, { text: string; dot: DotVariant }> = {
@@ -144,6 +145,10 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
   const [otpSecret, setOtpSecret] = React.useState('');
   const [actionId, setActionId] = React.useState<string | null>(null);
   const { outcome, clearOutcome } = useActionOutcome(actionId);
+  // The form replaces its open button, and the button replaces the form on Save
+  // or Cancel: focus moves into the form on open and back to the button on close.
+  const editButton = React.useRef<HTMLButtonElement>(null);
+  const formFallback = useFocusFallback<HTMLFormElement>(() => editButton.current);
 
   const reset = () => {
     setEmail('');
@@ -175,6 +180,7 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
       {!open && (
         <div className="settings-actions">
           <ActionButton
+            ref={editButton}
             disabled={sessionBusy}
             onClick={() => { clearOutcome(); setOpen(true); }}
           >
@@ -184,6 +190,7 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
       )}
       {open && (
         <form
+          ref={formFallback}
           className="form-stack"
           onSubmit={e => { e.preventDefault(); submit(); }}
         >
@@ -194,8 +201,12 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
                 className="form-control"
                 type="email"
                 autoComplete="off"
+                // Mounted only when the user opened the form, replacing the button they used.
+                autoFocus
                 value={email}
-                disabled={saving}
+                // readOnly, not disabled, while saving: Enter submits from inside a field,
+                // and a field that becomes disabled drops focus to <body>.
+                readOnly={saving}
                 onChange={e => setEmail(e.target.value)}
               />
             )}
@@ -208,7 +219,7 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
                 type="password"
                 autoComplete="off"
                 value={password}
-                disabled={saving}
+                readOnly={saving}
                 onChange={e => setPassword(e.target.value)}
               />
             )}
@@ -224,7 +235,7 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
                 type="password"
                 autoComplete="off"
                 value={otpSecret}
-                disabled={saving}
+                readOnly={saving}
                 onChange={e => setOtpSecret(e.target.value)}
               />
             )}
@@ -265,6 +276,9 @@ function CookiePanel({ hasCookie }: { hasCookie: boolean }) {
   const [action, setAction] = React.useState<{ id: string | null; kind: 'save' | 'clear' }>({ id: null, kind: 'save' });
   const { outcome, clearOutcome } = useActionOutcome(action.id);
   const trimmed = cookie.trim();
+  // Clear goes away once nothing is saved; the next thing to do is paste a cookie.
+  const cookieField = React.useRef<HTMLTextAreaElement>(null);
+  const clearFallback = useFocusFallback<HTMLButtonElement>(() => cookieField.current);
 
   // Cleared only after the host confirms the save; a failed save keeps the value.
   React.useEffect(() => {
@@ -284,6 +298,7 @@ function CookiePanel({ hasCookie }: { hasCookie: boolean }) {
         {control => (
           <textarea
             {...control}
+            ref={cookieField}
             className="form-control form-control--mono"
             rows={3}
             placeholder="brw=…; __Host-airtable-session=…"
@@ -308,6 +323,7 @@ function CookiePanel({ hasCookie }: { hasCookie: boolean }) {
         </ActionButton>
         {hasCookie && (
           <ActionButton
+            ref={clearFallback}
             pending={cookieBusy && action.kind === 'clear'}
             disabled={sessionBusy}
             onClick={() => {

@@ -7,6 +7,7 @@ import { ProgressField } from '../../components/ProgressField.js';
 import { Section } from '../../components/Section.js';
 import { friendlyError } from '../../lib/friendlyError.js';
 import { useActionOutcome, useScopePending } from '../../lib/useActionOutcome.js';
+import { useFocusFallback } from '../../lib/useFocusFallback.js';
 import { useStore } from '../../store.js';
 
 type FoundBrowser = Extract<BrowserInfo, { found: true }>;
@@ -128,6 +129,11 @@ function BundledChromium() {
   const downloading = download?.status === 'downloading';
   const downloaded = download?.status === 'done';
   const downloadError = download?.status === 'error' ? friendlyError(download.error) : undefined;
+  // Download and Remove are one slot: one node from Download, through the
+  // download itself, to Remove. When the slot goes away, focus lands on the heading.
+  const removeMode = installed && !downloading;
+  const showSlot = (missing && !downloaded) || downloading || installed;
+  const slotFallback = useFocusFallback<HTMLButtonElement>(() => document.getElementById('browser-settings-heading'));
 
   return (
     <div className="settings-subpanel">
@@ -155,29 +161,20 @@ function BundledChromium() {
         {missing && (
           <ActionButton onClick={() => openLink('chrome')}>Get Google Chrome</ActionButton>
         )}
-        {missing && !downloading && !downloaded && (
+        {showSlot && (
           <ActionButton
-            variant="primary"
-            pending={installing}
+            ref={slotFallback}
+            variant={removeMode ? 'secondary' : 'primary'}
+            pending={installing || removing || downloading}
             disabled={busy}
             onClick={() => {
               clearOutcome();
-              setAction({ id: installBrowser(), kind: 'install' });
+              setAction(removeMode
+                ? { id: removeBrowser(), kind: 'remove' }
+                : { id: installBrowser(), kind: 'install' });
             }}
           >
-            Download bundled Chromium
-          </ActionButton>
-        )}
-        {installed && !downloading && (
-          <ActionButton
-            pending={removing}
-            disabled={busy}
-            onClick={() => {
-              clearOutcome();
-              setAction({ id: removeBrowser(), kind: 'remove' });
-            }}
-          >
-            Remove bundled Chromium
+            {removeMode ? 'Remove bundled Chromium' : 'Download bundled Chromium'}
           </ActionButton>
         )}
       </div>

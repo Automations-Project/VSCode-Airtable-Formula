@@ -5,6 +5,7 @@ import { EditorCard } from '../../components/EditorCard.js';
 import { Section } from '../../components/Section.js';
 import { OutcomeFeedback } from '../../components/SettingRow.js';
 import { useActionOutcome } from '../../lib/useActionOutcome.js';
+import { useFocusFallback } from '../../lib/useFocusFallback.js';
 import { summarizeClients } from '../../selectors/readiness.js';
 import { useStore } from '../../store.js';
 
@@ -19,6 +20,8 @@ export function EditorsSection() {
   const openIdeDocs = useStore(s => s.openIdeDocs);
   const [setupAllId, setSetupAllId] = React.useState<string | null>(null);
   const setupAllOutcome = useActionOutcome(setupAllId);
+  // A successful setup-all usually leaves at most one editor needing work, which removes the button.
+  const setupAllFallback = useFocusFallback<HTMLButtonElement>(() => document.getElementById('editors-heading'));
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
@@ -53,6 +56,7 @@ export function EditorsSection() {
       description={description}
       actions={needWork > 1 ? (
         <ActionButton
+          ref={setupAllFallback}
           variant="primary"
           pending={setupAllPending || pendingIdeActions.size > 0}
           onClick={() => {
