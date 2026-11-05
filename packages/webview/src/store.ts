@@ -35,7 +35,7 @@ interface Store extends DashboardState {
   applyIdeStatus: (statuses: IdeStatus[]) => void;
   applyAuthState: (state: AuthState) => void;
   setupIde: (ideId: IdeId) => void;
-  setupAll: () => void;
+  setupAll: () => string;
   refresh: () => void;
   login: () => void;
   logout: () => void;
@@ -209,6 +209,7 @@ export const useStore = create<Store>((set, get) => {
     const id = randomId();
     beginAction(id);
     sendToExtension({ type: 'action:setupAll', id });
+    return id;
   },
 
   refresh: () => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -240,6 +240,47 @@ describe('Editors section', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     expect(posted('action:setupAll')).toHaveLength(1);
+  });
+
+  it('blocks a duplicate Setup all while its own action is in flight', async () => {
+    seed({
+      ideStatuses: [
+        ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
+        ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
+      ],
+    });
+
+    render(<Setup />);
+
+    const button = screen.getByRole('button', { name: 'Setup all detected editors' });
+    await userEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    await userEvent.click(button);
+    expect(posted('action:setupAll')).toHaveLength(1);
+
+    const { id } = posted('action:setupAll')[0] as { id: string };
+    act(() => useStore.getState().markActionDone(id, { ok: true }));
+
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute('aria-busy');
+  });
+
+  it('does not lock Setup all on an unrelated pending action', () => {
+    useStore.setState({
+      ...makeDashboardState({
+        ideStatuses: [
+          ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false }),
+          ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
+        ],
+      }),
+      activeTab: 'setup',
+      pendingActions: new Set(['unrelated']),
+    });
+
+    render(<Setup />);
+
+    expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeEnabled();
   });
 
   it('hides Setup all detected editors when at most one editor needs work', () => {
