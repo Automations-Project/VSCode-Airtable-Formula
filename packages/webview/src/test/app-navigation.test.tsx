@@ -20,13 +20,14 @@ describe('App header status', () => {
 
   it.each([
     ['loading', { loading: true }, 'Loading status'],
-    ['checking the session', { auth: { status: 'checking' } }, 'Sign in required'],
-    ['signing in', { auth: { status: 'logging-in' } }, 'Sign in required'],
+    // Pending states read as pending: a signed-in user's periodic check must not say "Sign in required".
+    ['checking the session', { auth: { status: 'checking' } }, 'Checking session'],
+    ['signing in', { auth: { status: 'logging-in' } }, 'Signing in'],
     ['a missing browser', { auth: { status: 'chrome-missing' } }, 'Browser required'],
     ['an expired session', { auth: { status: 'expired' } }, 'Sign in required'],
     ['an unchecked session', { auth: { status: 'unknown' } }, 'Sign in required'],
     ['a stopped service', { daemon: undefined }, 'Service needs attention'],
-    ['a starting service', { daemon: { running: false, healthy: false, starting: true, port: null } }, 'Service needs attention'],
+    ['a starting service', { daemon: { running: false, healthy: false, starting: true, port: null } }, 'Starting service'],
     ['an unhealthy service', { daemon: { running: true, healthy: false } }, 'Service needs attention'],
     ['no clients', { ideStatuses: [] }, 'Client setup needed'],
     ['an unusable client', { ideStatuses: [{ ...cursor!, mcpConfigured: false }] }, 'Client setup needed'],

@@ -19,16 +19,18 @@ const TABS = [
   { id: 'settings' as const, label: 'Settings' },
 ];
 
-// Header texts keyed on the typed reason, never on a display label. Pending
-// session/service states keep their long-standing texts (the header is a live region).
+// Header texts keyed on the typed reason, never on a display label. The header
+// is a live region, so pending states say they are pending: every periodic
+// session check passes through `session-checking`, and announcing "Sign in
+// required" there would be a false claim to a signed-in user.
 const HEADER_STATUS: Record<ReadinessReason, string> = {
   loading: 'Loading status',
   'browser-missing': 'Browser required',
-  'session-checking': 'Sign in required',
-  'session-signing-in': 'Sign in required',
+  'session-checking': 'Checking session',
+  'session-signing-in': 'Signing in',
   'session-unchecked': 'Sign in required',
   'session-invalid': 'Sign in required',
-  'service-starting': 'Service needs attention',
+  'service-starting': 'Starting service',
   'service-stopped': 'Service needs attention',
   'service-unhealthy': 'Service needs attention',
   'no-clients': 'Client setup needed',
