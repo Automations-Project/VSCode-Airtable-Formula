@@ -11,7 +11,7 @@ import type {
   TunnelProviderId,
   WebviewLinkId,
 } from '@shared/types.js';
-import type { WebviewBrowserChoice, WebviewSettingChange } from '@shared/messages.js';
+import type { WebviewBrowserChoice, WebviewMessage, WebviewSettingChange } from '@shared/messages.js';
 import { getPersistedState, sendToExtension, setPersistedState } from './lib/vscode.js';
 import { requestHostConfirmation } from './lib/confirmation.js';
 import { randomId } from './lib/utils.js';
@@ -22,9 +22,32 @@ export interface ActionOutcome {
   cancelled?: boolean;
 }
 
+/**
+ * Scope keys for `pendingScoped` (actionId -> scope). A scope names the thing an
+ * in-flight action works on, so controls derive disabled/aria-busy from the
+ * store and the guard survives a tab switch or remount:
+ *   session:<kind>        login, logout, check, credentials, cookie, backup, restore (mutually exclusive)
+ *   browser:download:<k>  bundled Chromium install / remove
+ *   browser:choice:<k>    browser selection: pick (native file dialog) / select
+ *   setting:<key>         one Settings row
+ *   storage:open:<id>     one storage entry being opened
+ */
+export function scopePending(pending: ReadonlyMap<string, string>, prefix: string): boolean {
+  for (const scope of pending.values()) {
+    if (scope.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+export function settingScope(change: WebviewSettingChange): string {
+  return change.key === 'mcp.category' ? `setting:${change.key}:${change.category}` : `setting:${change.key}`;
+}
+
 interface Store extends DashboardState {
   activeTab: DashboardTabId;
   pendingActions: Set<string>;
+  /** In-flight actions by scope (see `scopePending`). Cleared on every settle path. */
+  pendingScoped: Map<string, string>;
   pendingIdeActions: Map<string, string>; // ideId → actionId
   /** Daemon start/stop/restart in flight — daemon controls disable on THIS,
    *  not on the global pendingActions, so an unrelated slow action (e.g. an
@@ -55,25 +78,27 @@ interface Store extends DashboardState {
   setupIde: (ideId: IdeId) => void;
   setupAll: () => void;
   refresh: () => void;
-  login: () => void;
-  logout: () => void;
-  status: () => void;
-  saveCredentials: (email: string, password: string, otpSecret: string) => void;
-  saveCookie: (cookie: string) => string;
-  clearCookie: () => string;
-  installBrowser: () => void;
-  removeBrowser: () => void;
+  /** Scoped actions return their action id, or null when refused because a
+   *  conflicting action is already in flight. */
+  login: () => string | null;
+  logout: () => string | null;
+  status: () => string | null;
+  saveCredentials: (email: string, password: string, otpSecret: string) => string | null;
+  saveCookie: (cookie: string) => string | null;
+  clearCookie: () => string | null;
+  installBrowser: () => string | null;
+  removeBrowser: () => string | null;
   unconfigureIde: (ideId: IdeId) => void;
   debugStartSession: () => void;
   debugStopAndExport: () => void;
   debugExport: () => void;
   markActionDone: (id: string, outcome: ActionOutcome) => void;
-  manualLogin: () => void;
-  backupSession: () => void;
-  restoreSession: () => void;
-  selectCustomBrowser: () => void;
-  setBrowserChoice: (choice: WebviewBrowserChoice) => string;
-  openStoragePath: (entryId: StorageEntryId) => string;
+  manualLogin: () => string | null;
+  backupSession: () => string | null;
+  restoreSession: () => string | null;
+  selectCustomBrowser: () => string | null;
+  setBrowserChoice: (choice: WebviewBrowserChoice) => string | null;
+  openStoragePath: (entryId: StorageEntryId) => string | null;
   openLink: (link: WebviewLinkId) => string;
   openIdeDocs: (ideId: IdeId) => string;
   openToolConfig: () => string;
@@ -182,6 +207,27 @@ export const useStore = create<Store>((set, get) => {
     set(s => ({ pendingOfficialActions: new Set([...s.pendingOfficialActions, id]) }));
   };
 
+  /** beginAction + membership in the scoped pending map. */
+  const beginScoped = (id: string, scope: string, timeoutMs?: number) => {
+    beginAction(id, timeoutMs);
+    set(s => ({ pendingScoped: new Map(s.pendingScoped).set(id, scope) }));
+  };
+
+  /** Start a scoped action unless one of `conflicts` (scope prefixes) is in flight. */
+  const runScoped = (
+    scope: string,
+    conflicts: string[],
+    timeoutMs: number | undefined,
+    message: (id: string) => WebviewMessage,
+  ): string | null => {
+    const pending = get().pendingScoped;
+    if (conflicts.some(prefix => scopePending(pending, prefix))) return null;
+    const id = randomId();
+    beginScoped(id, scope, timeoutMs);
+    sendToExtension(message(id));
+    return id;
+  };
+
   return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
@@ -192,6 +238,7 @@ export const useStore = create<Store>((set, get) => {
   prompts: { prompts: [] },
   activeTab: 'overview',
   pendingActions: new Set(),
+  pendingScoped: new Map(),
   pendingIdeActions: new Map(),
   pendingDaemonActions: new Set(),
   pendingSetupAll: new Set(),
@@ -283,58 +330,38 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'action:refresh', id });
   },
 
-  login: () => {
-    const id = randomId();
-    // Auto-login drives a real browser — can legitimately take minutes.
-    beginAction(id, 360_000);
-    sendToExtension({ type: 'action:login', id });
-  },
+  // Installing or removing the bundled Chromium also excludes a login: it would drive that very browser.
+  // Session actions share one in-flight slot: login vs logout, restore vs backup
+  // and credential saves all touch the same session files, so a second is refused.
+  // Auto-login drives a real browser — can legitimately take minutes.
+  login: () => runScoped('session:login', ['session:', 'browser:download:'], 360_000, id => ({ type: 'action:login', id })),
 
-  logout: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:logout', id });
-  },
+  logout: () => runScoped('session:logout', ['session:'], undefined, id => ({ type: 'action:logout', id })),
 
-  status: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:status', id });
-  },
+  status: () => runScoped('session:check', ['session:'], undefined, id => ({ type: 'action:status', id })),
 
-  saveCredentials: (email, password, otpSecret) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:saveCredentials', id, email, password, otpSecret });
-  },
+  saveCredentials: (email, password, otpSecret) =>
+    runScoped('session:credentials', ['session:'], undefined, id => (
+      { type: 'action:saveCredentials', id, email, password, otpSecret }
+    )),
 
   // Cookie mutations use the same tracked action lifecycle as every other
   // host mutation; the host also refreshes auth state after completion.
-  saveCookie: (cookie) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'auth:saveCookie', id, cookie });
-    return id;
-  },
-  clearCookie: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'auth:clearCookie', id });
-    return id;
-  },
+  saveCookie: (cookie) =>
+    runScoped('session:cookie', ['session:'], undefined, id => ({ type: 'auth:saveCookie', id, cookie })),
+  clearCookie: () =>
+    runScoped('session:cookie', ['session:'], undefined, id => ({ type: 'auth:clearCookie', id })),
 
-  installBrowser: () => {
-    const id = randomId();
-    // Chromium download can take minutes on slow connections.
-    beginAction(id, 600_000);
-    sendToExtension({ type: 'action:install-browser', id });
-  },
+  // Chromium download can take minutes on slow connections.
+  installBrowser: () =>
+    runScoped('browser:download:install', ['browser:download:', 'session:login'], 600_000, id => (
+      { type: 'action:install-browser', id }
+    )),
 
-  removeBrowser: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:removeBrowser', id });
-  },
+  removeBrowser: () =>
+    runScoped('browser:download:remove', ['browser:download:', 'session:login'], undefined, id => (
+      { type: 'action:removeBrowser', id }
+    )),
 
   unconfigureIde: (ideId) => {
     const id = randomId();
@@ -365,45 +392,32 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'action:debug.export', id });
   },
 
-  manualLogin: () => {
-    const id = randomId();
-    // Manual login waits for the user to finish in the browser (up to ~5.5m).
-    beginAction(id, 360_000);
-    sendToExtension({ type: 'action:manualLogin', id });
-  },
+  // Manual login waits for the user to finish in the browser (up to ~5.5m).
+  manualLogin: () => runScoped('session:login', ['session:', 'browser:download:'], 360_000, id => ({ type: 'action:manualLogin', id })),
 
-  backupSession: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:backupSession', id });
-  },
+  // Backup and restore wait on native dialogs (restore also on a host confirmation).
+  backupSession: () =>
+    runScoped('session:backup', ['session:'], 600_000, id => ({ type: 'action:backupSession', id })),
 
-  restoreSession: () => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:restoreSession', id });
-  },
+  restoreSession: () =>
+    runScoped('session:restore', ['session:'], 600_000, id => ({ type: 'action:restoreSession', id })),
 
-  selectCustomBrowser: () => {
-    const id = randomId();
-    // Long timeout — the native file dialog stays open until the user acts.
-    beginAction(id, 600_000);
-    sendToExtension({ type: 'action:selectCustomBrowser', id });
-  },
+  // Long timeout — the native file dialog stays open until the user acts. It
+  // shares a scope with the dropdown because both change the one browser choice.
+  selectCustomBrowser: () =>
+    runScoped('browser:choice:pick', ['browser:choice:'], 600_000, id => (
+      { type: 'action:selectCustomBrowser', id }
+    )),
 
-  setBrowserChoice: (choice) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:setBrowserChoice', id, choice });
-    return id;
-  },
+  setBrowserChoice: (choice) =>
+    runScoped('browser:choice:select', ['browser:choice:'], undefined, id => (
+      { type: 'action:setBrowserChoice', id, choice }
+    )),
 
-  openStoragePath: (entryId) => {
-    const id = randomId();
-    beginAction(id);
-    sendToExtension({ type: 'action:openStoragePath', id, entryId });
-    return id;
-  },
+  openStoragePath: (entryId) =>
+    runScoped(`storage:open:${entryId}`, [`storage:open:${entryId}`], undefined, id => (
+      { type: 'action:openStoragePath', id, entryId }
+    )),
 
   openLink: (link) => {
     const id = randomId();
@@ -428,7 +442,7 @@ export const useStore = create<Store>((set, get) => {
 
   changeSetting: (change) => {
     const id = randomId();
-    beginAction(id);
+    beginScoped(id, settingScope(change));
     sendToExtension({ type: 'setting:change', id, change });
     return id;
   },
@@ -570,8 +584,11 @@ export const useStore = create<Store>((set, get) => {
       nextTunnel.delete(id);
       const nextOfficial = new Set(s.pendingOfficialActions);
       nextOfficial.delete(id);
+      const nextScoped = new Map(s.pendingScoped);
+      nextScoped.delete(id);
       return {
         pendingActions: next,
+        pendingScoped: nextScoped,
         pendingIdeActions: nextIde,
         pendingDaemonActions: nextDaemon,
         pendingSetupAll: nextSetupAll,

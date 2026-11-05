@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { useStore } from '../store.js';
 import type { WebviewSettingChange } from '@shared/messages.js';
 import type { ToolCategories } from '@shared/types.js';
-import { friendlyError } from '../lib/friendlyError.js';
-import { StatusDot } from '../components/StatusDot.js';
+import { SettingSelectRow, SettingSwitchRow } from '../components/SettingRow.js';
+import { useScopePending } from '../lib/useActionOutcome.js';
+import { AccountSection } from './settings/AccountSection.js';
+import { BrowserSection } from './settings/BrowserSection.js';
+import { StorageSection } from './settings/StorageSection.js';
 import { SupportAboutSection } from './settings/SupportAboutSection.js';
-import { LogIn, LogOut, RefreshCw, Shield, Key, Clock, Globe, AlertTriangle, Download, Trash2, Sliders, FileJson, FolderOpen, ChevronDown, ChevronRight, Archive, Upload } from 'lucide-react';
+import { Sliders, FileJson } from 'lucide-react';
 
 type BooleanSettingKey =
   | 'auth.autoRefresh'
@@ -29,107 +32,29 @@ function SettingToggle({
   settingKey?: BooleanSettingKey;
   category?: keyof ToolCategories;
 }) {
-  const changeSetting = useStore(s => s.changeSetting);
-  const toggle = () => {
-    const change: WebviewSettingChange = category
-      ? { key: 'mcp.category', category, value: !value }
-      : { key: settingKey!, value: !value };
-    changeSetting(change);
-  };
   return (
-    <div className="toggle-row">
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>{label}</div>
-        {desc && <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>{desc}</div>}
-      </div>
-      <label className="toggle-switch" aria-label={`${label} toggle`}>
-        <input
-          type="checkbox"
-          checked={value}
-          onChange={toggle}
-          aria-label={label}
-          role="switch"
-          aria-checked={value}
-        />
-        <span className="toggle-track" aria-hidden="true" />
-      </label>
-    </div>
+    <SettingSwitchRow
+      label={label}
+      description={desc}
+      checked={value}
+      change={next => (category
+        ? { key: 'mcp.category', category, value: next }
+        : { key: settingKey!, value: next }) as WebviewSettingChange}
+    />
   );
-}
-
-function AuthStatusLabel({ status }: { status: string }) {
-  const labels: Record<string, { text: string; variant: 'ok' | 'warn' | 'off' | 'err' | 'info' }> = {
-    unknown:          { text: 'Not checked',  variant: 'off'  },
-    checking:         { text: 'Checking...',   variant: 'info' },
-    valid:            { text: 'Active',        variant: 'ok'   },
-    expired:          { text: 'Expired',       variant: 'warn' },
-    error:            { text: 'Error',         variant: 'warn' },
-    'logging-in':     { text: 'Logging in...', variant: 'info' },
-    'chrome-missing': { text: 'Browser missing', variant: 'err' },
-  };
-  const l = labels[status] || labels.unknown;
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      <StatusDot variant={l.variant} />
-      <span style={{ fontSize: '0.72rem', fontWeight: 500 }}>{l.text}</span>
-    </span>
-  );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 export function Settings() {
   const settings = useStore(s => s.settings);
-  const auth = useStore(s => s.auth);
   const debug = useStore(s => s.debug);
-  const {
-    saveCredentials,
-    saveCookie,
-    clearCookie,
-    login,
-    logout,
-    status,
-    installBrowser,
-    removeBrowser,
-    manualLogin,
-    openStoragePath,
-    openToolConfig,
-    backupSession,
-    restoreSession,
-    selectCustomBrowser,
-    setBrowserChoice,
-    changeSetting,
-  } = useStore();
+  const openToolConfig = useStore(s => s.openToolConfig);
+  const changeSetting = useStore(s => s.changeSetting);
 
-  const [settingsPending, setSettingsPending] = useState(false);
-
-  // Clear pending indicator when a fresh state arrives from the extension
-  useEffect(() => { setSettingsPending(false); }, [settings]);
-
-  const changeHeavySetting = useCallback((change: WebviewSettingChange) => {
-    setSettingsPending(true);
-    changeSetting(change);
-  }, [changeSetting]);
-  const availableBrowsers = (auth.availableBrowsers ?? []).filter(
-    (browser): browser is Extract<typeof browser, { found: true }> => browser.found,
-  );
-  const browserChoice = settings.auth.browserChoice;
+  const serverSourcePending = useScopePending('setting:mcp.serverSource');
+  const toolProfilePending = useScopePending('setting:mcp.toolProfile');
   const debugStartSession = useStore(s => s.debugStartSession);
   const debugStopAndExport = useStore(s => s.debugStopAndExport);
   const debugExport = useStore(s => s.debugExport);
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [otpSecret, setOtpSecret] = useState('');
-  const [cookie, setCookie] = useState('');
-  const [showCreds, setShowCreds] = useState(false);
-  const [storageOpen, setStorageOpen] = useState(false);
-  const storage = useStore(s => s.storage);
 
   const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     changeSetting({
@@ -138,578 +63,11 @@ export function Settings() {
     });
   };
 
-  const handleIntervalChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    changeSetting({
-      key: 'auth.refreshIntervalHours',
-      value: Number(e.target.value),
-    });
-  };
-
-  const resetCredsForm = () => {
-    setEmail('');
-    setPassword('');
-    setOtpSecret('');
-  };
-
-  const handleSaveCredentials = () => {
-    if (!email || !password) return;
-    saveCredentials(email, password, otpSecret);
-    resetCredsForm();
-    setShowCreds(false);
-  };
-
-  const loginMode = settings.auth.loginMode ?? 'manual';
-  const isManual = loginMode === 'manual';
-
-  // Connection mode is primary: it decides which credential fields render.
-  //   browser      → login-mode toggle + browser dropdown; Auto → email/pw/TOTP form
-  //   direct-login → email/pw/TOTP form (always; no browser, no login-mode toggle)
-  //   byo          → session-cookie field
-  const authMode = settings.mcp.authMode ?? 'browser';
-  const showCredsForm = authMode === 'direct-login' || (authMode === 'browser' && !isManual);
-
-  const handleSaveCookie = () => {
-    const trimmed = cookie.trim();
-    if (!trimmed) return;
-    // Keep the value on submit so a failed save doesn't lose the user's input.
-    // The field clears via the effect below once the save is confirmed (hasCookie flips true).
-    saveCookie(trimmed);
-  };
-
-  // Clear the cookie input only after the save is confirmed by the extension.
-  useEffect(() => { if (auth.hasCookie) setCookie(''); }, [auth.hasCookie]);
-
-  const isBusy = auth.status === 'checking' || auth.status === 'logging-in';
-  const browserFound = auth.browser?.found ?? true; // optimistic until probe runs
-  const browserLabel = auth.browser?.found ? auth.browser.label : undefined;
-  const browserIsDownloaded = auth.browser?.found && auth.browser.downloaded === true;
-  const chromeMissing = auth.browser && auth.browser.found === false;
-  const dl = auth.browserDownload;
-  const downloading = dl?.status === 'downloading';
-  const downloadDone = dl?.status === 'done';
-  const downloadError = dl?.status === 'error';
-
   return (
-    <div className="stack stack-lg" style={{ position: 'relative' }}>
-      {settingsPending && <div className="settings-pending-bar" />}
-
-      {/* Airtable Account */}
-      <div className="glass-panel">
-        <div className="section-header">
-          <div className="eyebrow">Authentication</div>
-          <div className="title">Airtable Account</div>
-        </div>
-        <div className="stack stack-sm">
-          {authMode === 'browser' && (
-            <div className="toggle-row" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 8, marginBottom: 4 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Login mode</div>
-                <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', marginTop: 1 }}>
-                  {isManual ? 'You log in through the browser — no credentials stored' : 'Automated login with stored credentials'}
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.68rem' }}>
-                <span style={{ color: isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: isManual ? 600 : 400 }}>Manual</span>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    aria-checked={!isManual}
-                    aria-label={isManual ? 'Switch to automatic login with stored credentials' : 'Switch to manual login in the browser'}
-                    checked={!isManual}
-                    onChange={() => changeSetting({
-                      key: 'auth.loginMode',
-                      value: isManual ? 'auto' : 'manual',
-                    })}
-                  />
-                  <span className="toggle-track" />
-                </label>
-                <span style={{ color: !isManual ? 'var(--fg)' : 'var(--fg-muted)', fontWeight: !isManual ? 600 : 400 }}>Auto</span>
-              </div>
-            </div>
-          )}
-
-          {showCredsForm && (
-            <div className="list-row">
-              <Shield size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-              <span style={{ fontSize: '0.72rem', flex: 1 }}>Credentials stored in OS keychain</span>
-              <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'}>
-                {auth.hasCredentials ? 'Saved' : 'Not set'}
-              </span>
-            </div>
-          )}
-
-          {authMode === 'browser' && (
-          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            <Globe size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.72rem', flex: 1 }}>
-              Browser for authentication
-              <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                {availableBrowsers.length > 0
-                  ? `Detected: ${availableBrowsers.map(b => b.label).filter(Boolean).join(', ')}`
-                  : 'No browsers detected'}
-              </span>
-            </span>
-            <select
-              className="select-input"
-              value={
-                browserChoice?.mode === 'detected'
-                  ? browserChoice.browserId
-                  : browserChoice?.mode === 'custom'
-                    ? 'custom'
-                    : 'auto'
-              }
-              onChange={e => {
-                const val = e.target.value;
-                if (val === 'custom') {
-                  selectCustomBrowser();
-                } else if (val === 'auto') {
-                  setBrowserChoice({ mode: 'auto' });
-                } else {
-                  const browser = availableBrowsers.find(b => b.id === val);
-                  if (browser) {
-                    setBrowserChoice({
-                      mode: 'detected',
-                      browserId: browser.id,
-                    });
-                  }
-                }
-              }}
-            >
-              <option value="auto">Auto (pick best available)</option>
-              {availableBrowsers.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.label}{b.downloaded ? ' (bundled)' : ''}
-                </option>
-              ))}
-              <option disabled>──────</option>
-              <option value="custom">Custom path...</option>
-            </select>
-          </div>
-          )}
-
-          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.72rem', flex: 1 }}>
-              Connection mode
-              <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                How the MCP authenticates — Cookie &amp; Direct login use no browser
-              </span>
-            </span>
-            <select
-              className="select-input"
-              value={settings.mcp.authMode ?? 'browser'}
-              onChange={e => changeHeavySetting({
-                key: 'mcp.authMode',
-                value: e.target.value as 'browser' | 'byo' | 'direct-login',
-              })}
-            >
-              <option value="browser">Browser (log in via Chrome)</option>
-              <option value="byo">Cookie — no browser</option>
-              <option value="direct-login">Direct login — no browser</option>
-            </select>
-          </div>
-
-          <div className="list-row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            <Sliders size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-            <span style={{ fontSize: '0.72rem', flex: 1 }}>
-              HTTP client
-              <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                Transport for API calls (impit impersonates Chrome's TLS)
-              </span>
-            </span>
-            <select
-              className="select-input"
-              value={settings.mcp.httpClient ?? 'fetch'}
-              onChange={e => changeHeavySetting({
-                key: 'mcp.httpClient',
-                value: e.target.value as 'fetch' | 'impit',
-              })}
-            >
-              <option value="fetch">Automatic (fetch)</option>
-              <option value="impit">Chrome impersonation (impit)</option>
-            </select>
-          </div>
-
-          {authMode === 'byo' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
-              <div className="list-row" style={{ padding: 0 }}>
-                <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-                <span style={{ fontSize: '0.72rem', flex: 1 }}>Cookie stored in OS keychain</span>
-                <span className={auth.hasCookie ? 'chip chip-ok' : 'chip chip-warn'}>
-                  {auth.hasCookie ? 'Set' : 'Not set'}
-                </span>
-              </div>
-              <label style={{ fontSize: '0.7rem', fontWeight: 500 }} htmlFor="byo-cookie-input">Airtable session cookie</label>
-              <textarea
-                id="byo-cookie-input"
-                className="input-field"
-                placeholder="brw=…; __Host-airtable-session=…"
-                aria-label="Airtable session cookie"
-                value={cookie}
-                onChange={e => setCookie(e.target.value)}
-                rows={3}
-                style={{ fontSize: '0.7rem', fontFamily: 'var(--font-mono)', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--fg)', resize: 'vertical' }}
-              />
-              <div style={{ fontSize: '0.6rem', color: 'var(--fg-muted)', lineHeight: 1.4 }}>
-                Paste the Cookie header from a logged-in Airtable browser session
-                (DevTools → Network → any airtable.com request → Cookie).
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleSaveCookie}
-                  disabled={!cookie.trim()}
-                  style={{ flex: 1, fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8, cursor: cookie.trim() ? 'pointer' : 'not-allowed', opacity: cookie.trim() ? 1 : 0.5 }}
-                >
-                  Save to Keychain
-                </button>
-                {auth.hasCookie && (
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => clearCookie()}
-                    style={{ fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8 }}
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {authMode === 'browser' && browserIsDownloaded && !downloading && (
-            <div className="list-row">
-              <Download size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-              <span style={{ fontSize: '0.72rem', flex: 1 }}>
-                Bundled Chromium installed
-                <span style={{ display: 'block', fontSize: '0.62rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                  Stored in extension global storage (~170 MB)
-                </span>
-              </span>
-              <button
-                className="btn btn-ghost"
-                onClick={removeBrowser}
-                style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-                title="Remove the downloaded Chromium"
-              >
-                <Trash2 size={11} /> Remove
-              </button>
-            </div>
-          )}
-
-          {authMode === 'browser' && chromeMissing && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', background: 'var(--bg-error)', border: '1px solid var(--border-error)', borderRadius: 8 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <AlertTriangle size={14} style={{ color: 'var(--at-red)', flexShrink: 0, marginTop: 1 }} />
-                <div style={{ fontSize: '0.66rem', lineHeight: 1.4, color: 'var(--fg)' }}>
-                  No Chromium-based browser found. The headless auth flow needs a real browser to drive Airtable's login page.
-                  {' '}
-                  <a
-                    href="https://www.google.com/chrome/"
-                    style={{ color: 'var(--fg-info)', textDecoration: 'underline' }}
-                  >
-                    Install Google Chrome
-                  </a>
-                  {' '}or download a bundled Chromium (~170 MB) below.
-                </div>
-              </div>
-
-              {!downloading && !downloadDone && (
-                <button
-                  className="btn btn-primary"
-                  onClick={installBrowser}
-                  style={{ fontSize: '0.72rem', padding: '6px 12px', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer' }}
-                >
-                  <Download size={12} /> Download bundled Chromium
-                </button>
-              )}
-
-              {downloading && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--fg-muted)', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Downloading Chromium...</span>
-                    <span>{dl?.progress ?? 0}%</span>
-                  </div>
-                  <div style={{ height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${dl?.progress ?? 0}%`,
-                        height: '100%',
-                        background: 'var(--at-blue)',
-                        transition: 'width 0.2s ease',
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {downloadError && (() => {
-                const fe = friendlyError(dl?.error);
-                return (
-                  <div style={{ fontSize: '0.62rem', color: 'var(--fg-warn)' }} title={fe?.raw}>
-                    Download failed: {fe?.message}
-                    {fe?.hint && (
-                      <span style={{ display: 'block', color: 'var(--fg-muted)', marginTop: 2 }}>{fe.hint}</span>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-
-          {showCredsForm && !showCreds && (
-            <button type="button" className="action-card" onClick={() => setShowCreds(true)}>
-              <div className="icon-badge icon-badge-blue">
-                <Key size={13} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 600 }}>
-                  {auth.hasCredentials ? 'Update credentials' : 'Set credentials'}
-                </div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--fg-subtle)', marginTop: 1 }}>
-                  Email, password, and optional TOTP secret
-                </div>
-              </div>
-            </button>
-          )}
-
-          {showCredsForm && showCreds && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0' }}>
-              <input
-                className="input-field"
-                type="email"
-                placeholder="Airtable email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--fg)' }}
-              />
-              <input
-                className="input-field"
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--fg)' }}
-              />
-              <input
-                className="input-field"
-                type="password"
-                placeholder="2FA secret (optional)"
-                aria-label="Two-factor authentication TOTP secret, optional"
-                value={otpSecret}
-                onChange={e => setOtpSecret(e.target.value)}
-                style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--fg)' }}
-              />
-              <div style={{ fontSize: '0.6rem', color: 'var(--fg-muted)', lineHeight: 1.4 }}>
-                2FA secret: the base32 code Airtable shows when you set up an authenticator
-                app (also called a TOTP secret). Leave empty if 2FA is disabled.
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleSaveCredentials}
-                  disabled={!email || !password}
-                  style={{ flex: 1, fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8, cursor: email && password ? 'pointer' : 'not-allowed', opacity: email && password ? 1 : 0.5 }}
-                >
-                  Save to Keychain
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => { resetCredsForm(); setShowCreds(false); }}
-                  style={{ fontSize: '0.72rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Session Management */}
-      <div className="glass-panel">
-        <div className="section-header">
-          <div className="eyebrow">Authentication</div>
-          <div className="title">Session</div>
-        </div>
-        <div className="stack stack-sm">
-          <div className="list-row">
-            <AuthStatusLabel status={auth.status} />
-            <div style={{ flex: 1 }} />
-            {auth.userId && (
-              <span className="chip chip-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem' }}>
-                {auth.userId}
-              </span>
-            )}
-          </div>
-
-          {auth.error && (() => {
-            const fe = friendlyError(auth.error);
-            return (
-              <div style={{ fontSize: '0.65rem', color: 'var(--fg-warn)', padding: '4px 8px', background: 'var(--bg-warn)', borderRadius: 6 }} title={fe?.raw}>
-                {fe?.message}
-                {fe?.hint && (
-                  <span style={{ display: 'block', color: 'var(--fg-muted)', marginTop: 2 }}>{fe.hint}</span>
-                )}
-              </div>
-            );
-          })()}
-
-          {(auth.lastChecked || auth.lastLogin) && (
-            <div style={{ display: 'flex', gap: 12, fontSize: '0.62rem', color: 'var(--fg-muted)' }}>
-              {auth.lastChecked && <span>Checked: {new Date(auth.lastChecked).toLocaleTimeString()}</span>}
-              {auth.lastLogin && <span>Login: {new Date(auth.lastLogin).toLocaleTimeString()}</span>}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {/* byo has no Login button — the cookie field above IS how you
-                authenticate. direct-login validates stored creds (no browser);
-                browser keeps the loginMode-driven manual/auto behavior. */}
-            {authMode !== 'byo' && (
-              <button
-                type="button"
-                className="action-card"
-                onClick={authMode === 'browser' && isManual ? manualLogin : login}
-                disabled={isBusy}
-                style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}
-              >
-                <div className="icon-badge icon-badge-green" style={{ width: 22, height: 22 }}>
-                  <LogIn size={11} />
-                </div>
-                <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>
-                  {authMode === 'direct-login'
-                    ? 'Validate credentials'
-                    : isManual ? 'Login in Browser' : 'Login'}
-                </span>
-              </button>
-            )}
-            <button type="button" className="action-card" onClick={status} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
-              <div className="icon-badge icon-badge-blue" style={{ width: 22, height: 22 }}>
-                <RefreshCw size={11} />
-              </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Check</span>
-            </button>
-            <button type="button" className="action-card" onClick={logout} disabled={isBusy} style={{ flex: 1, minWidth: 100, opacity: isBusy ? 0.5 : 1 }}>
-              <div className="icon-badge icon-badge-pink" style={{ width: 22, height: 22 }}>
-                <LogOut size={11} />
-              </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>Logout</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Storage & Data */}
-      <div className="glass-panel">
-        <div
-          className="section-header"
-          onClick={() => setStorageOpen(!storageOpen)}
-          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-        >
-          <div>
-            <div className="eyebrow">Diagnostics</div>
-            <div className="title">Storage & Data</div>
-          </div>
-          {storageOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </div>
-        {storageOpen && (
-          <div className="stack stack-sm">
-            {storage?.entries?.map((entry, i) => (
-              <div key={i} className="list-row" style={{ flexWrap: 'wrap' }}>
-                <FolderOpen size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 500 }}>{entry.label}</span>
-                    {entry.exists
-                      ? <span style={{ fontSize: '0.62rem', color: 'var(--fg-muted)' }}>{entry.sizeBytes != null ? formatBytes(entry.sizeBytes) : '...'}</span>
-                      : <span className="chip chip-warn" style={{ fontSize: '0.58rem' }}>Missing</span>
-                    }
-                  </div>
-                  <div style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: entry.exists ? 'var(--fg-subtle)' : 'var(--fg-muted)', marginTop: 1, wordBreak: 'break-all' }}>
-                    {entry.id}
-                  </div>
-                </div>
-                {entry.exists && (
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => openStoragePath(entry.id)}
-                    style={{ fontSize: '0.62rem', padding: '2px 8px', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}
-                    title="Open in file explorer"
-                  >
-                    Open ↗
-                  </button>
-                )}
-              </div>
-            ))}
-
-            {!isManual && (
-              <div className="list-row">
-                <Key size={14} style={{ color: 'var(--fg-muted)', flexShrink: 0 }} />
-                <span style={{ fontSize: '0.72rem', flex: 1 }}>OS Keychain</span>
-                <span className={auth.hasCredentials ? 'chip chip-ok' : 'chip chip-warn'} style={{ fontSize: '0.58rem' }}>
-                  {auth.hasCredentials ? 'Credentials: Saved' : 'Credentials: Not set'}
-                </span>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 6, paddingTop: 4, borderTop: '1px solid var(--border)', marginTop: 4 }}>
-              <button
-                className="btn btn-ghost"
-                onClick={backupSession}
-                disabled={!storage?.entries?.some(e => e.exists)}
-                style={{ flex: 1, fontSize: '0.68rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              >
-                <Archive size={11} /> Backup Session
-              </button>
-              <button
-                className="btn btn-ghost"
-                onClick={restoreSession}
-                style={{ flex: 1, fontSize: '0.68rem', padding: '5px 12px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              >
-                <Upload size={11} /> Restore Session
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Auto-Refresh settings */}
-      <div className="glass-panel">
-        <div className="section-header">
-          <div className="eyebrow">Authentication</div>
-          <div className="title">Auto-Refresh</div>
-        </div>
-        <div className="stack stack-sm">
-          <SettingToggle
-            label={isManual ? 'Monitor session health' : 'Auto-refresh session'}
-            desc={isManual ? 'Periodically check session status and notify when expired' : 'Periodically check and re-login when session expires'}
-            value={settings.auth.autoRefresh}
-            settingKey="auth.autoRefresh"
-          />
-          {settings.auth.autoRefresh && (
-            <div className="toggle-row">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Clock size={13} style={{ color: 'var(--fg-muted)' }} />
-                <span style={{ fontSize: '0.78rem', fontWeight: 500 }}>Check interval</span>
-              </div>
-              <select
-                className="select-input"
-                value={settings.auth.refreshIntervalHours}
-                onChange={handleIntervalChange}
-              >
-                <option value={1}>1 hour</option>
-                <option value={4}>4 hours</option>
-                <option value={8}>8 hours</option>
-                <option value={12}>12 hours</option>
-                <option value={24}>24 hours</option>
-                <option value={48}>48 hours</option>
-                <option value={168}>1 week</option>
-              </select>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="stack stack-lg">
+      <AccountSection />
+      <BrowserSection />
+      <StorageSection />
 
       {/* MCP Server settings */}
       <div className="glass-panel">
@@ -730,7 +88,8 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.serverSource ?? 'bundled'}
-              onChange={e => changeHeavySetting({
+              disabled={serverSourcePending}
+              onChange={e => changeSetting({
                 key: 'mcp.serverSource',
                 value: e.target.value as 'bundled' | 'npx',
               })}
@@ -739,6 +98,16 @@ export function Settings() {
               <option value="npx">npx</option>
             </select>
           </div>
+          <SettingSelectRow
+            label="HTTP client"
+            description="Transport for API calls. impit impersonates Chrome's TLS."
+            value={settings.mcp.httpClient ?? 'fetch'}
+            options={[
+              { value: 'fetch', label: 'Automatic (fetch)' },
+              { value: 'impit', label: 'Chrome impersonation (impit)' },
+            ]}
+            change={value => ({ key: 'mcp.httpClient', value: value as 'fetch' | 'impit' })}
+          />
           <div className="toggle-row">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>Daemon port</div>
@@ -753,7 +122,7 @@ export function Settings() {
               min={0}
               max={65535}
               value={settings.mcp.daemonPort ?? 8723}
-              onChange={e => changeHeavySetting({
+              onChange={e => changeSetting({
                 key: 'mcp.daemonPort',
                 value: Number(e.target.value),
               })}
@@ -780,7 +149,8 @@ export function Settings() {
             <select
               className="select-input"
               value={settings.mcp.toolProfile.profile}
-              onChange={e => changeHeavySetting({
+              disabled={toolProfilePending}
+              onChange={e => changeSetting({
                 key: 'mcp.toolProfile',
                 value: e.target.value as 'read-only' | 'safe-write' | 'full' | 'custom',
               })}

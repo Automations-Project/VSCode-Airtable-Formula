@@ -1,0 +1,244 @@
+/* Settings: account, browser, storage, and per-row setting feedback. */
+.settings-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.settings-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.settings-group__title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-subpanel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.settings-status-line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: 600;
+}
+
+.settings-id {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+  font-weight: 400;
+}
+
+.settings-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.feedback__hint {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+}
+
+/* A labelled setting: copy and control side by side, feedback underneath. */
+.setting-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(8em, auto);
+  align-items: center;
+  column-gap: var(--space-4);
+}
+
+.setting-row__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.setting-row__label {
+  font-weight: 600;
+}
+
+.setting-row__description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+}
+
+.setting-row__control {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.setting-row__control > .form-control {
+  width: auto;
+  max-width: 100%;
+}
+
+/* Feedback sits under the row. An empty status region takes no space but stays mounted for screen readers. */
+.setting-row > .outcome-status,
+.setting-row > .feedback {
+  min-width: 0;
+  margin-top: var(--space-2);
+  grid-column: 1 / -1;
+}
+
+.outcome-status:empty {
+  display: none;
+}
+
+.outcome-status {
+  margin: 0;
+  color: var(--status-success);
+}
+
+/* Native checkbox drawn as a switch: it keeps its role, focus and disabled behaviour. */
+.setting-switch {
+  position: relative;
+  width: 34px;
+  min-height: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-input);
+  border-radius: 9px;
+  background: var(--surface-input);
+  cursor: pointer;
+  appearance: none;
+  transition-property: background-color, border-color;
+  transition-duration: 120ms;
+  transition-timing-function: var(--ease-std);
+}
+
+.setting-switch::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  content: '';
+  transition-property: background-color, transform;
+  transition-duration: 120ms;
+  transition-timing-function: var(--ease-std);
+}
+
+.setting-switch:checked {
+  border-color: var(--brand-session);
+  background: var(--brand-session);
+}
+
+.setting-switch:checked::before {
+  background: #ffffff;
+  transform: translateX(16px);
+}
+
+.setting-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (forced-colors: active) {
+  .setting-switch:checked {
+    background: Highlight;
+  }
+
+  .setting-switch::before {
+    background: ButtonText;
+  }
+}
+
+/* Storage entries. */
+.storage-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  list-style: none;
+}
+
+.storage-entry {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-default);
+}
+
+.storage-entry__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 8em;
+  flex-direction: column;
+}
+
+.storage-entry__label {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.storage-entry__meta {
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+}
+
+.storage-entry__meta:empty {
+  display: none;
+}
+
+.storage-entry > .outcome-status,
+.storage-entry > .feedback {
+  min-width: 0;
+  flex: 1 0 100%;
+}
+
+@media (max-width: 420px) {
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setting-row__control {
+    justify-content: flex-start;
+  }
+
+  .setting-row__control > .form-control {
+    width: 100%;
+  }
+
+  .settings-actions > .action-button {
+    flex: 1 1 100%;
+  }
+}

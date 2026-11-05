@@ -275,8 +275,7 @@ describe('App rendered shell', () => {
     });
     render(<App />);
 
-    fireEvent.click(screen.getByText('Storage & Data'));
-    fireEvent.click(screen.getByRole('button', { name: 'Open ↗' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Tool config' }));
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({

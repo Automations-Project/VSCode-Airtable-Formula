@@ -66,9 +66,6 @@
 }
 
 .icon-badge-blue { color: var(--brand-session); }
-.icon-badge-pink { color: var(--brand-attention); }
-.icon-badge-green { color: var(--status-success); }
-.icon-badge-yellow { color: var(--status-warning); }
 
 .chip {
   display: inline-flex;
@@ -84,7 +81,6 @@
   white-space: nowrap;
 }
 
-.chip-ok { border-color: var(--status-success); color: var(--status-success); }
 .chip-warn { border-color: var(--status-warning); color: var(--status-warning); }
 .chip-info { border-color: var(--status-info); color: var(--status-info); }
 .chip-muted { color: var(--text-secondary); }
@@ -103,60 +99,6 @@
 
 .toggle-row {
   justify-content: space-between;
-}
-
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-  flex: 0 0 auto;
-}
-
-.toggle-switch input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  border: 1px solid var(--border-default);
-  border-radius: 20px;
-  background: var(--surface-input);
-  cursor: pointer;
-  transition-property: background-color, border-color;
-  transition-duration: 160ms;
-}
-
-.toggle-track::after {
-  position: absolute;
-  bottom: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--text-secondary);
-  content: '';
-  transition-property: background-color, transform;
-  transition-duration: 160ms;
-}
-
-.toggle-switch input:checked + .toggle-track {
-  border-color: var(--brand-session);
-  background: var(--brand-session);
-}
-
-.toggle-switch input:checked + .toggle-track::after {
-  background: #ffffff;
-  transform: translateX(16px);
-}
-
-.toggle-switch input:focus-visible + .toggle-track {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 .btn {
@@ -206,11 +148,9 @@
 }
 
 .stack-sm { gap: var(--space-2); }
-.stack-md { gap: var(--space-4); }
 .stack-lg { gap: var(--space-5); }
 
-.select-input,
-.input-field {
+.select-input {
   max-width: 100%;
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--border-input);
@@ -228,35 +168,11 @@
   cursor: pointer;
 }
 
-.select-input:focus,
-.input-field:focus {
+.select-input:focus {
   border-color: var(--focus-ring);
 }
 
 .select-input option {
   background: var(--surface-input);
   color: var(--text-primary);
-}
-
-@keyframes settings-progress {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(250%); }
-}
-
-.settings-pending-bar {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 2px;
-  overflow: hidden;
-}
-
-.settings-pending-bar::after {
-  position: absolute;
-  width: 40%;
-  height: 100%;
-  background: var(--brand-session);
-  content: '';
-  animation: settings-progress 1.1s ease-in-out infinite;
 }

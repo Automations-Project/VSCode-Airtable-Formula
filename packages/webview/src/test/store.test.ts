@@ -7,7 +7,7 @@ vi.mock('../lib/vscode.js', () => ({
   setPersistedState: vi.fn(),
 }));
 
-import { useStore } from '../store.js';
+import { scopePending, useStore } from '../store.js';
 import { getPersistedState, sendToExtension, setPersistedState } from '../lib/vscode.js';
 
 beforeEach(() => {
@@ -90,7 +90,7 @@ describe('store', () => {
     }));
     expect(vi.mocked(sendToExtension).mock.calls[0]?.[0]).not.toHaveProperty('path');
     expect(id).toMatch(/^[0-9a-f]{24}$/);
-    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+    expect(useStore.getState().pendingActions.has(id!)).toBe(true);
   });
 
   it('sends detected browser id without an executable', () => {
@@ -105,7 +105,7 @@ describe('store', () => {
       id,
     }));
     expect(vi.mocked(sendToExtension).mock.calls[0]?.[0]).not.toHaveProperty('executablePath');
-    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+    expect(useStore.getState().pendingActions.has(id!)).toBe(true);
   });
 
   it('opens links by opaque id instead of sending a raw URL', () => {
@@ -140,12 +140,13 @@ describe('store', () => {
       id,
       change: { key: 'mcp.browserIdleParkMinutes', value: 45 },
     });
-    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+    expect(useStore.getState().pendingActions.has(id!)).toBe(true);
   });
 
   it('tracks cookie mutations with cryptographic action ids', () => {
-    const saveId = useStore.getState().saveCookie('session=value');
-    const clearId = useStore.getState().clearCookie();
+    const saveId = useStore.getState().saveCookie('session=value') as string;
+    useStore.getState().markActionDone(saveId, { ok: true });
+    const clearId = useStore.getState().clearCookie() as string;
 
     expect(sendToExtension).toHaveBeenNthCalledWith(1, {
       type: 'auth:saveCookie',
@@ -159,7 +160,46 @@ describe('store', () => {
     expect(saveId).toMatch(/^[0-9a-f]{24}$/);
     expect(clearId).toMatch(/^[0-9a-f]{24}$/);
     expect(saveId).not.toBe(clearId);
-    expect(useStore.getState().pendingActions).toEqual(new Set([saveId, clearId]));
+    expect(useStore.getState().pendingActions).toEqual(new Set([clearId]));
+  });
+
+  it('refuses a second session action while one is in flight and releases on settle', () => {
+    const first = useStore.getState().logout() as string;
+
+    expect(useStore.getState().login()).toBeNull();
+    expect(useStore.getState().manualLogin()).toBeNull();
+    expect(useStore.getState().restoreSession()).toBeNull();
+    expect(useStore.getState().saveCredentials('a@b.c', 'pw', '')).toBeNull();
+    expect(sendToExtension).toHaveBeenCalledTimes(1);
+
+    useStore.getState().markActionDone(first, { ok: false });
+    expect(useStore.getState().pendingScoped.size).toBe(0);
+    expect(useStore.getState().login()).toMatch(/^[0-9a-f]{24}$/);
+  });
+
+  it('keeps the browser picker, bundled-Chromium and storage-entry scopes independent', () => {
+    const pick = useStore.getState().selectCustomBrowser();
+    expect(pick).not.toBeNull();
+
+    expect(useStore.getState().setBrowserChoice({ mode: 'auto' })).toBeNull();
+    expect(useStore.getState().selectCustomBrowser()).toBeNull();
+    expect(useStore.getState().installBrowser()).not.toBeNull();
+    expect(useStore.getState().removeBrowser()).toBeNull();
+    // A login would drive the browser being installed, so it waits.
+    expect(useStore.getState().login()).toBeNull();
+    expect(useStore.getState().openStoragePath('tool-config')).not.toBeNull();
+    expect(useStore.getState().openStoragePath('tool-config')).toBeNull();
+    expect(useStore.getState().openStoragePath('browser-profile')).not.toBeNull();
+  });
+
+  it('scopes a setting change to its key so only that row is pending', () => {
+    const id = useStore.getState().changeSetting({ key: 'mcp.category', category: 'read', value: false });
+
+    expect(scopePending(useStore.getState().pendingScoped, 'setting:mcp.category:read')).toBe(true);
+    expect(scopePending(useStore.getState().pendingScoped, 'setting:mcp.category:sync')).toBe(false);
+    expect(scopePending(useStore.getState().pendingScoped, 'setting:auth.autoRefresh')).toBe(false);
+    useStore.getState().markActionDone(id, { ok: true });
+    expect(useStore.getState().pendingScoped.size).toBe(0);
   });
 
   it('applies a parsed IDE status update without replacing dashboard state', () => {
@@ -214,14 +254,14 @@ describe('action result confirmation (PromptEditor wait-for-result)', () => {
     });
     expect(typeof id).toBe('string');
     expect(id.length).toBeGreaterThan(0);
-    expect(useStore.getState().pendingActions.has(id)).toBe(true);
+    expect(useStore.getState().pendingActions.has(id!)).toBe(true);
     expect(sendToExtension).toHaveBeenCalledWith(expect.objectContaining({ type: 'action:save-prompt', id }));
   });
 
   it('markActionDone records a consumable result and clears pending', () => {
     const id = useStore.getState().deletePrompt('my-prompt');
     useStore.getState().markActionDone(id, { ok: false, error: 'Could not delete prompt' });
-    expect(useStore.getState().pendingActions.has(id)).toBe(false);
+    expect(useStore.getState().pendingActions.has(id!)).toBe(false);
     expect(useStore.getState().consumeActionResult(id)).toEqual({
       ok: false,
       error: 'Could not delete prompt',
