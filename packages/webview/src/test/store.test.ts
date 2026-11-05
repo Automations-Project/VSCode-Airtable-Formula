@@ -192,6 +192,16 @@ describe('store', () => {
     expect(useStore.getState().openStoragePath('browser-profile')).not.toBeNull();
   });
 
+  it('matches scopes exactly or by nesting, never by bare string prefix', () => {
+    const pending = new Map([['a', 'setting:mcp.category:viewSectionDestructive'], ['b', 'session:login']]);
+
+    expect(scopePending(pending, 'setting:mcp.category:viewSectionDestructive')).toBe(true);
+    expect(scopePending(pending, 'setting:mcp.category:viewSection')).toBe(false);
+    expect(scopePending(pending, 'setting:mcp.category')).toBe(true);
+    expect(scopePending(pending, 'session')).toBe(true);
+    expect(scopePending(pending, 'sess')).toBe(false);
+  });
+
   it('scopes a setting change to its key so only that row is pending', () => {
     const id = useStore.getState().changeSetting({ key: 'mcp.category', category: 'read', value: false });
 

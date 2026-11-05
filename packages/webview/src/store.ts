@@ -32,9 +32,11 @@ export interface ActionOutcome {
  *   setting:<key>         one Settings row
  *   storage:open:<id>     one storage entry being opened
  */
-export function scopePending(pending: ReadonlyMap<string, string>, prefix: string): boolean {
+/** Matches a key EXACTLY, or any scope nested under it (key + ':' ...). Never a bare string prefix:
+ *  'setting:mcp.category:viewSection' must not match '...:viewSectionDestructive'. */
+export function scopePending(pending: ReadonlyMap<string, string>, key: string): boolean {
   for (const scope of pending.values()) {
-    if (scope.startsWith(prefix)) return true;
+    if (scope === key || scope.startsWith(key + ':')) return true;
   }
   return false;
 }
@@ -221,7 +223,7 @@ export const useStore = create<Store>((set, get) => {
     message: (id: string) => WebviewMessage,
   ): string | null => {
     const pending = get().pendingScoped;
-    if (conflicts.some(prefix => scopePending(pending, prefix))) return null;
+    if (conflicts.some(key => scopePending(pending, key))) return null;
     const id = randomId();
     beginScoped(id, scope, timeoutMs);
     sendToExtension(message(id));
@@ -334,32 +336,32 @@ export const useStore = create<Store>((set, get) => {
   // Session actions share one in-flight slot: login vs logout, restore vs backup
   // and credential saves all touch the same session files, so a second is refused.
   // Auto-login drives a real browser — can legitimately take minutes.
-  login: () => runScoped('session:login', ['session:', 'browser:download:'], 360_000, id => ({ type: 'action:login', id })),
+  login: () => runScoped('session:login', ['session', 'browser:download'], 360_000, id => ({ type: 'action:login', id })),
 
-  logout: () => runScoped('session:logout', ['session:'], undefined, id => ({ type: 'action:logout', id })),
+  logout: () => runScoped('session:logout', ['session'], undefined, id => ({ type: 'action:logout', id })),
 
-  status: () => runScoped('session:check', ['session:'], undefined, id => ({ type: 'action:status', id })),
+  status: () => runScoped('session:check', ['session'], undefined, id => ({ type: 'action:status', id })),
 
   saveCredentials: (email, password, otpSecret) =>
-    runScoped('session:credentials', ['session:'], undefined, id => (
+    runScoped('session:credentials', ['session'], undefined, id => (
       { type: 'action:saveCredentials', id, email, password, otpSecret }
     )),
 
   // Cookie mutations use the same tracked action lifecycle as every other
   // host mutation; the host also refreshes auth state after completion.
   saveCookie: (cookie) =>
-    runScoped('session:cookie', ['session:'], undefined, id => ({ type: 'auth:saveCookie', id, cookie })),
+    runScoped('session:cookie', ['session'], undefined, id => ({ type: 'auth:saveCookie', id, cookie })),
   clearCookie: () =>
-    runScoped('session:cookie', ['session:'], undefined, id => ({ type: 'auth:clearCookie', id })),
+    runScoped('session:cookie', ['session'], undefined, id => ({ type: 'auth:clearCookie', id })),
 
   // Chromium download can take minutes on slow connections.
   installBrowser: () =>
-    runScoped('browser:download:install', ['browser:download:', 'session:login'], 600_000, id => (
+    runScoped('browser:download:install', ['browser:download', 'session:login'], 600_000, id => (
       { type: 'action:install-browser', id }
     )),
 
   removeBrowser: () =>
-    runScoped('browser:download:remove', ['browser:download:', 'session:login'], undefined, id => (
+    runScoped('browser:download:remove', ['browser:download', 'session:login'], undefined, id => (
       { type: 'action:removeBrowser', id }
     )),
 
@@ -393,24 +395,24 @@ export const useStore = create<Store>((set, get) => {
   },
 
   // Manual login waits for the user to finish in the browser (up to ~5.5m).
-  manualLogin: () => runScoped('session:login', ['session:', 'browser:download:'], 360_000, id => ({ type: 'action:manualLogin', id })),
+  manualLogin: () => runScoped('session:login', ['session', 'browser:download'], 360_000, id => ({ type: 'action:manualLogin', id })),
 
   // Backup and restore wait on native dialogs (restore also on a host confirmation).
   backupSession: () =>
-    runScoped('session:backup', ['session:'], 600_000, id => ({ type: 'action:backupSession', id })),
+    runScoped('session:backup', ['session'], 600_000, id => ({ type: 'action:backupSession', id })),
 
   restoreSession: () =>
-    runScoped('session:restore', ['session:'], 600_000, id => ({ type: 'action:restoreSession', id })),
+    runScoped('session:restore', ['session'], 600_000, id => ({ type: 'action:restoreSession', id })),
 
   // Long timeout — the native file dialog stays open until the user acts. It
   // shares a scope with the dropdown because both change the one browser choice.
   selectCustomBrowser: () =>
-    runScoped('browser:choice:pick', ['browser:choice:'], 600_000, id => (
+    runScoped('browser:choice:pick', ['browser:choice'], 600_000, id => (
       { type: 'action:selectCustomBrowser', id }
     )),
 
   setBrowserChoice: (choice) =>
-    runScoped('browser:choice:select', ['browser:choice:'], undefined, id => (
+    runScoped('browser:choice:select', ['browser:choice'], undefined, id => (
       { type: 'action:setBrowserChoice', id, choice }
     )),
 

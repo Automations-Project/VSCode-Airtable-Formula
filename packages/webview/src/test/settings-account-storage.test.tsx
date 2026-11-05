@@ -664,3 +664,54 @@ describe('Settings accessibility and presentation', () => {
     }
   });
 });
+
+describe('Scope matching is exact', () => {
+  function seedCustomProfile() {
+    seed();
+    useStore.setState(state => ({
+      settings: {
+        ...state.settings,
+        mcp: { ...state.settings.mcp, toolProfile: { ...state.settings.mcp.toolProfile, profile: 'custom' } },
+      },
+    }));
+  }
+
+  it('does not let an in-flight destructive category lock its prefix sibling, in either direction', async () => {
+    const user = userEvent.setup();
+    seedCustomProfile();
+    render(<Settings />);
+    const plain = () => screen.getByRole('switch', { name: 'View Sections' });
+    const destructive = () => screen.getByRole('switch', { name: 'View Sections (destructive)' });
+
+    await user.click(destructive());
+    expect(destructive()).toBeDisabled();
+    expect(destructive()).toHaveAttribute('aria-busy', 'true');
+    expect(plain()).toBeEnabled();
+    expect(plain()).not.toHaveAttribute('aria-busy');
+    settle(lastPostedMessage().id, { ok: true });
+
+    await user.click(plain());
+    expect(plain()).toBeDisabled();
+    expect(destructive()).toBeEnabled();
+    expect(destructive()).not.toHaveAttribute('aria-busy');
+  });
+});
+
+describe('Outcome status regions stay in the accessibility tree', () => {
+  it('mounts the status node before the message and the same node receives the text', async () => {
+    const user = userEvent.setup();
+    seed({ settings: { auth: { loginMode: 'auto' } } });
+    render(<Settings />);
+
+    const row = screen.getByRole('switch', { name: 'Auto-refresh session' }).closest('.setting-row')!;
+    const status = row.querySelector('[role="status"]');
+    expect(status).not.toBeNull();
+    expect(status).toBeEmptyDOMElement();
+
+    await user.click(screen.getByRole('switch', { name: 'Auto-refresh session' }));
+    settle(lastPostedMessage().id, { ok: true });
+
+    expect(await within(row as HTMLElement).findByText('Saved')).toBe(status);
+    expect(row.querySelector('[role="status"]')).toBe(status);
+  });
+});

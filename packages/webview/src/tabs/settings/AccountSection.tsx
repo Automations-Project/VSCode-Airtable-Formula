@@ -62,11 +62,11 @@ function SessionPanel({ authMode, isManual }: { authMode: string; isManual: bool
   const manualLogin = useStore(s => s.manualLogin);
   const logout = useStore(s => s.logout);
   const check = useStore(s => s.status);
-  const sessionBusy = useScopePending('session:');
+  const sessionBusy = useScopePending('session');
   const loginBusy = useScopePending('session:login');
   const logoutBusy = useScopePending('session:logout');
   const checkBusy = useScopePending('session:check');
-  const browserBusy = useScopePending('browser:download:');
+  const browserBusy = useScopePending('browser:download');
   const [action, setAction] = React.useState<{ id: string | null; kind: SessionKind }>({ id: null, kind: 'check' });
   const { outcome, clearOutcome } = useActionOutcome(action.id);
 
@@ -136,7 +136,7 @@ function SessionPanel({ authMode, isManual }: { authMode: string; isManual: bool
 
 function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
   const saveCredentials = useStore(s => s.saveCredentials);
-  const sessionBusy = useScopePending('session:');
+  const sessionBusy = useScopePending('session');
   const saving = useScopePending('session:credentials');
   const [open, setOpen] = React.useState(false);
   const [email, setEmail] = React.useState('');
@@ -259,7 +259,7 @@ function CredentialsPanel({ hasCredentials }: { hasCredentials: boolean }) {
 function CookiePanel({ hasCookie }: { hasCookie: boolean }) {
   const saveCookie = useStore(s => s.saveCookie);
   const clearCookie = useStore(s => s.clearCookie);
-  const sessionBusy = useScopePending('session:');
+  const sessionBusy = useScopePending('session');
   const cookieBusy = useScopePending('session:cookie');
   const [cookie, setCookie] = React.useState('');
   const [action, setAction] = React.useState<{ id: string | null; kind: 'save' | 'clear' }>({ id: null, kind: 'save' });
@@ -331,7 +331,7 @@ function CookiePanel({ hasCookie }: { hasCookie: boolean }) {
 export function AccountSection() {
   const settings = useStore(s => s.settings);
   const auth = useStore(s => s.auth);
-  const sessionBusy = useScopePending('session:');
+  const sessionBusy = useScopePending('session');
 
   const authMode = settings.mcp.authMode ?? 'browser';
   const isManual = (settings.auth.loginMode ?? 'manual') === 'manual';

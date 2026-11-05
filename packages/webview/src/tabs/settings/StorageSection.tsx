@@ -50,7 +50,7 @@ function StorageEntryRow({ entry }: { entry: StorageEntry }) {
 function SessionBackup({ canBackUp }: { canBackUp: boolean }) {
   const backupSession = useStore(s => s.backupSession);
   const restoreSession = useStore(s => s.restoreSession);
-  const sessionBusy = useScopePending('session:');
+  const sessionBusy = useScopePending('session');
   const backingUp = useScopePending('session:backup');
   const restoring = useScopePending('session:restore');
   const [action, setAction] = React.useState<{ id: string | null; kind: 'backup' | 'restore' }>({ id: null, kind: 'backup' });

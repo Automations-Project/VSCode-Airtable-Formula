@@ -38,7 +38,7 @@ function BrowserChoice() {
   const choice = useStore(s => s.settings.auth.browserChoice);
   const setBrowserChoice = useStore(s => s.setBrowserChoice);
   const selectCustomBrowser = useStore(s => s.selectCustomBrowser);
-  const choosing = useScopePending('browser:choice:');
+  const choosing = useScopePending('browser:choice');
   const picking = useScopePending('browser:choice:pick');
   const [selectId, setSelectId] = React.useState<string | null>(null);
   const [pickId, setPickId] = React.useState<string | null>(null);
@@ -113,7 +113,7 @@ function BundledChromium() {
   const installBrowser = useStore(s => s.installBrowser);
   const removeBrowser = useStore(s => s.removeBrowser);
   const openLink = useStore(s => s.openLink);
-  const downloadBusy = useScopePending('browser:download:');
+  const downloadBusy = useScopePending('browser:download');
   // A login drives the browser, so it also holds the install and remove buttons.
   const loginBusy = useScopePending('session:login');
   const busy = downloadBusy || loginBusy;

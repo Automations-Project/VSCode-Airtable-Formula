@@ -219,8 +219,17 @@
   color: var(--status-success);
 }
 
+/* Empty but rendered (see .prompt-status:empty): stays in the accessibility tree, adds no gap. */
 .snippet-card__flash:empty {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* Native progress with a visible label. */

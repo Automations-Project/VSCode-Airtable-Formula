@@ -24,7 +24,7 @@ export function useActionOutcome(actionId: string | null) {
   return { pending, outcome, clearOutcome: () => setOutcome(null) };
 }
 
-/** True while any in-flight action's scope starts with `prefix` (see `scopePending`). */
-export function useScopePending(prefix: string): boolean {
-  return useStore(state => scopePending(state.pendingScoped, prefix));
+/** True while an in-flight action holds `key` exactly, or a scope nested under it (see `scopePending`). */
+export function useScopePending(key: string): boolean {
+  return useStore(state => scopePending(state.pendingScoped, key));
 }

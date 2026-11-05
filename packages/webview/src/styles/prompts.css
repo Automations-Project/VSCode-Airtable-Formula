@@ -5,8 +5,18 @@
   font-weight: 600;
 }
 
+/* Empty but rendered: display:none would drop the live region from the accessibility tree.
+   Out of flow, so it adds no gap. */
 .prompt-status:empty {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .prompt-hint {

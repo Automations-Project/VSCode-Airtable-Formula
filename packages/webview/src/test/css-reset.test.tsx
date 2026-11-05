@@ -30,3 +30,20 @@ describe('global CSS reset', () => {
     expect(universal!.style.padding).toBe('0px');
   });
 });
+
+describe('empty live regions', () => {
+  const selectors = ['.outcome-status:empty', '.prompt-status:empty', '.snippet-card__flash:empty'];
+
+  // display:none removes the node from the accessibility tree, so a screen
+  // reader only meets the region when its text arrives and often misses it.
+  it.each(selectors)('%s stays rendered while empty', selector => {
+    const rule = layerRules('components').find(
+      r => r.selectorText?.split(',').map(s => s.trim()).includes(selector),
+    );
+
+    expect(rule, selector).toBeDefined();
+    expect(rule!.style.display).not.toBe('none');
+    // Out of flow, so an empty region adds no gap row inside a flex or grid parent.
+    expect(rule!.style.position).toBe('absolute');
+  });
+});
