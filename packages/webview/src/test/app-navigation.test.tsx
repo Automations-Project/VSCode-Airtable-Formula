@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App.js';
 import { useStore } from '../store.js';
 import { makeDashboardState, type DashboardStateOverrides } from './dashboard-state.fixture.js';
+import { vscodeApiMock } from './test-setup.js';
 
 function seed(overrides: DashboardStateOverrides = {}): void {
   useStore.setState({ ...makeDashboardState(overrides), activeTab: 'overview' });
@@ -83,7 +84,7 @@ describe('App cross-tab navigation focus', () => {
     expect(document.getElementById('dashboard-panel-setup')).toContainElement(document.activeElement as HTMLElement);
   });
 
-  it('focuses the panel when navigating without any target id', async () => {
+  it('focuses the destination tab heading when navigating without any target id', async () => {
     const user = userEvent.setup();
     seed();
     render(<App />);
@@ -91,7 +92,7 @@ describe('App cross-tab navigation focus', () => {
     await user.click(screen.getByRole('button', { name: /Prompts/ }));
 
     await waitFor(() => expect(useStore.getState().activeTab).toBe('prompts'));
-    await waitFor(() => expect(screen.getByRole('tabpanel')).toHaveFocus());
+    await waitFor(() => expect(document.getElementById('prompts-heading')).toHaveFocus());
   });
 
   it('prefers the destination tab heading over the panel when the target is missing', async () => {
@@ -110,5 +111,62 @@ describe('App cross-tab navigation focus', () => {
     render(<App />);
 
     expect(screen.getByRole('tabpanel')).toHaveAttribute('tabindex', '-1');
+  });
+});
+
+describe('App navigate() and the Prompts discard guard', () => {
+  function answerConfirmation(confirmed: boolean): void {
+    const request = vscodeApiMock.postMessage.mock.calls
+      .map(([message]) => message)
+      .filter(message => message.type === 'confirmation:request')
+      .at(-1) as { id: string; kind: string };
+    expect(request.kind).toBe('discard-prompt-edits');
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'confirmation:result', id: request.id, confirmed },
+    }));
+  }
+
+  beforeEach(() => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+      setTimeout(() => callback(0), 0);
+      return 0;
+    });
+  });
+
+  it('asks the host before a cross-surface navigate() leaves unsaved prompt edits', async () => {
+    const user = userEvent.setup();
+    seed({ daemon: undefined });
+    useStore.setState({ promptEditorDirty: true });
+    render(<App />);
+    const link = screen.getByRole('button', { name: 'Open Setup: Local service stopped' });
+
+    await user.click(link);
+
+    expect(vscodeApiMock.postMessage.mock.calls.filter(([m]) => m.type === 'confirmation:request')).toHaveLength(1);
+    expect(useStore.getState().activeTab).toBe('overview');
+
+    answerConfirmation(false);
+
+    await waitFor(() => expect(link).toHaveFocus());
+    expect(useStore.getState().activeTab).toBe('overview');
+    expect(useStore.getState().promptEditorDirty).toBe(true);
+
+    await user.click(link);
+    answerConfirmation(true);
+
+    await waitFor(() => expect(useStore.getState().activeTab).toBe('setup'));
+    await waitFor(() => expect(document.getElementById('local-service-heading')).toHaveFocus());
+    expect(useStore.getState().promptEditorDirty).toBe(false);
+  });
+
+  it('navigates without asking when no prompt edit is unsaved', async () => {
+    const user = userEvent.setup();
+    seed({ daemon: undefined });
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Open Setup: Local service stopped' }));
+
+    expect(vscodeApiMock.postMessage.mock.calls.some(([m]) => m.type === 'confirmation:request')).toBe(false);
+    await waitFor(() => expect(document.getElementById('local-service-heading')).toHaveFocus());
   });
 });

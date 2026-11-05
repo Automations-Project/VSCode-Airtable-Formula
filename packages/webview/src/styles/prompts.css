@@ -1,0 +1,195 @@
+/* Prompts: list rows, editor layout, argument rows and the tab status line. */
+
+.prompt-status {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.prompt-status:empty {
+  display: none;
+}
+
+.prompt-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+}
+
+.prompt-hint code,
+.prompt-reconnect-list code,
+.form-field__description code {
+  font-family: var(--font-mono);
+}
+
+.prompt-reconnect-list {
+  display: flex;
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* List. */
+.prompt-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+}
+
+.prompt-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  background: var(--surface-input);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  transition-property: background-color, border-color;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
+}
+
+.prompt-row:hover {
+  border-color: var(--focus-ring);
+  background: var(--surface-hover);
+}
+
+.prompt-row__head {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prompt-row__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.prompt-row__description {
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The state is always spelled out in the badge text, never colour alone. */
+.prompt-badge {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.prompt-badge[data-tone='warning'] {
+  border-color: var(--status-warning);
+  color: var(--status-warning);
+}
+
+/* Editor. */
+.prompt-editor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.prompt-subheading {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.prompt-arguments-block {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.prompt-arguments-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.prompt-arguments {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+/* Name and description sit side by side only while there is room for both. */
+.prompt-argument {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+}
+
+.prompt-argument__controls {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.prompt-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prompt-check input {
+  accent-color: var(--brand-session);
+}
+
+.prompt-template {
+  min-height: 12em;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+@media (max-width: 420px) {
+  .prompt-argument {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Remove drops below the fields instead of sharing a cramped row. */
+  .prompt-argument__controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .prompt-argument__controls > .action-button {
+    width: 100%;
+  }
+}

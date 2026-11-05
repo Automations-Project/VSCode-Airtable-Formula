@@ -333,10 +333,10 @@ describe('App rendered shell', () => {
     });
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /\/my-prompt/ }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt description' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
       target: { value: 'Unsaved local description' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save prompt' }));
     const request = vscodeApiMock.postMessage.mock.calls.find(
       ([message]) => message.type === 'action:save-prompt',
     )?.[0] as { id: string };
@@ -353,7 +353,7 @@ describe('App rendered shell', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/^Could not save settings/);
     expect(alert.textContent).toHaveLength(300);
-    expect(screen.getByRole('textbox', { name: 'Prompt description' }))
+    expect(screen.getByRole('textbox', { name: 'Description' }))
       .toHaveValue('Unsaved local description');
     expect(screen.getByRole('button', { name: 'Back to prompts' })).toBeInTheDocument();
   });
@@ -361,14 +361,14 @@ describe('App rendered shell', () => {
   it('keeps prompt edits after a cancelled save', async () => {
     useStore.setState({ activeTab: 'prompts', loading: false });
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt name' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'New prompt' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Slash command name' }), {
       target: { value: 'new-prompt' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt template' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Template' }), {
       target: { value: 'Unsaved template' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save prompt' }));
     const request = vscodeApiMock.postMessage.mock.calls.find(
       ([message]) => message.type === 'action:save-prompt',
     )?.[0] as { id: string };
@@ -382,9 +382,66 @@ describe('App rendered shell', () => {
       },
     }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The action was cancelled.');
-    expect(screen.getByRole('textbox', { name: 'Prompt template' }))
+    expect(await screen.findByText('Save cancelled')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Template' }))
       .toHaveValue('Unsaved template');
+  });
+
+  it('guards top-level tab changes while a Prompts edit is unsaved', async () => {
+    const user = userEvent.setup();
+    useStore.setState({
+      activeTab: 'prompts',
+      loading: false,
+      prompts: {
+        prompts: [{
+          name: 'my-prompt', description: 'Original', arguments: [], template: 'T', isBuiltin: false, isModified: false,
+        }],
+      },
+    });
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: /\/my-prompt/ }));
+    await user.type(screen.getByRole('textbox', { name: 'Description' }), ' edited');
+    const promptsTab = screen.getByRole('tab', { name: 'Prompts' });
+    const settingsTab = screen.getByRole('tab', { name: 'Settings' });
+    const answer = (confirmed: boolean) => {
+      const request = vscodeApiMock.postMessage.mock.calls
+        .map(([message]) => message)
+        .filter(message => message.type === 'confirmation:request')
+        .at(-1) as { id: string; kind: string };
+      expect(request.kind).toBe('discard-prompt-edits');
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'confirmation:result', id: request.id, confirmed },
+      }));
+    };
+
+    await user.click(settingsTab);
+    answer(false);
+
+    await waitFor(() => expect(promptsTab).toHaveFocus());
+    expect(promptsTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('Original edited');
+
+    await user.click(settingsTab);
+    answer(true);
+
+    await waitFor(() => expect(settingsTab).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(settingsTab).toHaveFocus());
+    expect(screen.getByRole('tabpanel')).not.toHaveFocus();
+    expect(useStore.getState().promptEditorDirty).toBe(false);
+  });
+
+  it('does not ask again when the already-selected Prompts tab is clicked mid-edit', async () => {
+    const user = userEvent.setup();
+    useStore.setState({ activeTab: 'prompts', loading: false });
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: 'New prompt' }));
+    await user.type(screen.getByRole('textbox', { name: 'Slash command name' }), 'abc');
+
+    await user.click(screen.getByRole('tab', { name: 'Prompts' }));
+
+    expect(vscodeApiMock.postMessage.mock.calls.some(([m]) => m.type === 'confirmation:request')).toBe(false);
+    expect(screen.getByRole('textbox', { name: 'Slash command name' })).toHaveValue('abc');
   });
 
   it('reset clears real pending and completed action sidecars', async () => {

@@ -45,6 +45,7 @@ export function App() {
     applyIdeStatus,
     applyAuthState,
     markActionDone,
+    guardPromptNavigation,
     loading,
     auth,
     settings,
@@ -95,20 +96,33 @@ export function App() {
     ideStatuses,
   }).reason];
 
-  function requestTab(tab: DashboardTabId): boolean {
-    setTab(tab);
-    return true;
+  // Every way out of a tab goes through guardPromptNavigation, so unsaved
+  // Prompts edits are never discarded without the host confirmation.
+  function requestTab(tab: DashboardTabId): boolean | Promise<boolean> {
+    if (tab === activeTab) return true;
+    return guardPromptNavigation(() => setTab(tab));
   }
 
   function navigate(tab: DashboardTabId, focusTargetId?: string): void {
-    setTab(tab);
-    // Move focus to the requested heading, else the tab's own heading, else the
-    // panel, so it never falls back to <body> when the clicked control unmounts.
-    requestAnimationFrame(() => {
-      const landing = (focusTargetId ? document.getElementById(focusTargetId) : null)
-        ?? document.getElementById(`${tab}-heading`)
-        ?? document.getElementById(`dashboard-panel-${tab}`);
-      landing?.focus();
+    const origin = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const go = () => {
+      setTab(tab);
+      // Move focus to the requested heading, else the tab's own heading, else the
+      // panel, so it never falls back to <body> when the clicked control unmounts.
+      requestAnimationFrame(() => {
+        const landing = (focusTargetId ? document.getElementById(focusTargetId) : null)
+          ?? document.getElementById(`${tab}-heading`)
+          ?? document.getElementById(`dashboard-panel-${tab}`);
+        landing?.focus();
+      });
+    };
+    if (tab === activeTab) {
+      go();
+      return;
+    }
+    void guardPromptNavigation(go).then(accepted => {
+      // A refused navigation leaves focus on the control the user used.
+      if (!accepted && origin?.isConnected) origin.focus();
     });
   }
 

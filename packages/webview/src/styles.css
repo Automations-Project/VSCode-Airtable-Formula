@@ -7,5 +7,6 @@
 @import './styles/readiness.css' layer(components);
 @import './styles/setup.css' layer(components);
 @import './styles/forms.css' layer(components);
+@import './styles/prompts.css' layer(components);
 @import './styles/legacy.css' layer(components);
 @import './styles/accessibility.css' layer(accessibility);

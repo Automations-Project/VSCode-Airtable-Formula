@@ -13,6 +13,7 @@ import type {
 } from '@shared/types.js';
 import type { WebviewBrowserChoice, WebviewSettingChange } from '@shared/messages.js';
 import { getPersistedState, sendToExtension, setPersistedState } from './lib/vscode.js';
+import { requestHostConfirmation } from './lib/confirmation.js';
 import { randomId } from './lib/utils.js';
 
 export interface ActionOutcome {
@@ -37,6 +38,15 @@ interface Store extends DashboardState {
   pendingTunnelActions: Set<string>;
   /** Official Airtable MCP work (PAT save/copy, per-editor configure/remove) in flight. */
   pendingOfficialActions: Set<string>;
+  /** True while the Prompts editor holds edits that differ from what is saved.
+   *  Lives in the store so every way of leaving the tab can consult it. */
+  promptEditorDirty: boolean;
+  /** A discard confirmation is open; a second request is refused, not queued. */
+  promptDiscardPending: boolean;
+  setPromptEditorDirty: (dirty: boolean) => void;
+  /** Runs `navigate` now when nothing is unsaved, otherwise only after the host
+   *  confirms discarding. Resolves true when `navigate` ran. */
+  guardPromptNavigation: (navigate: () => void) => Promise<boolean>;
   setTab: (tab: Store['activeTab']) => void;
   hydratePersistedState: () => void;
   applyState: (state: DashboardState) => void;
@@ -187,6 +197,33 @@ export const useStore = create<Store>((set, get) => {
   pendingSetupAll: new Set(),
   pendingTunnelActions: new Set(),
   pendingOfficialActions: new Set(),
+  promptEditorDirty: false,
+  promptDiscardPending: false,
+
+  setPromptEditorDirty: (dirty) => {
+    if (get().promptEditorDirty !== dirty) set({ promptEditorDirty: dirty });
+  },
+
+  guardPromptNavigation: async (navigate) => {
+    if (!get().promptEditorDirty) {
+      navigate();
+      return true;
+    }
+    if (get().promptDiscardPending) return false;
+
+    set({ promptDiscardPending: true });
+    let confirmed = false;
+    try {
+      confirmed = await requestHostConfirmation('discard-prompt-edits');
+    } finally {
+      set({ promptDiscardPending: false });
+    }
+    if (!confirmed) return false;
+
+    set({ promptEditorDirty: false });
+    navigate();
+    return true;
+  },
 
   setTab: (tab) => {
     set({ activeTab: tab });
