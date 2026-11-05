@@ -1,187 +1,8 @@
 import React from 'react';
 import { useStore } from '../store.js';
-import { IdeCard } from '../components/IdeCard.js';
-
-// ---------------------------------------------------------------------------
-// Pure helpers — exported for unit testing in setup.test.tsx
-// ---------------------------------------------------------------------------
-
-export function formatUptime(ms: number | null | undefined): string {
-  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
-  if (ms < 60_000) return '< 1m';
-  if (ms < 3_600_000) {
-    const m = Math.floor(ms / 60_000);
-    const s = Math.floor((ms % 60_000) / 1000);
-    return `${m}m ${s}s`;
-  }
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.floor((ms % 3_600_000) / 60_000);
-  return `${h}h ${m}m`;
-}
-
-export function getMcpSnippet(ide: string, variant: 'http' | 'stdio', port: number | string): string {
-  if (variant === 'stdio') {
-    return `"airtable": {
-  "command": "npx",
-  "args": ["-y", "airtable-user-mcp"]
-}`;
-  }
-
-  // HTTP variant — port may be a number/placeholder, or a full https:// tunnel URL.
-  // When a tunnel URL is passed, use it directly (no 127.0.0.1 prefix).
-  const mcpUrl = (typeof port === 'string' && port.startsWith('http'))
-    ? `${port}/mcp`
-    : `http://127.0.0.1:${port}/mcp`;
-
-  // Each IDE has a slightly different key name (Pitfall 2 in RESEARCH.md)
-  // Windsurf: serverUrl (not url)
-  if (ide === 'windsurf') {
-    return `"airtable": {
-  "serverUrl": "${mcpUrl}",
-  "headers": {
-    "Authorization": "Bearer {{BEARER_TOKEN}}"
-  }
-}`;
-  }
-
-  // Cursor + Cline: url only (no type: http)
-  if (ide === 'cursor' || ide === 'cline') {
-    return `"airtable": {
-  "url": "${mcpUrl}",
-  "headers": {
-    "Authorization": "Bearer {{BEARER_TOKEN}}"
-  }
-}`;
-  }
-
-  // claude-code, claude-desktop (and any future IDE) — type: "http" + url
-  return `"airtable": {
-  "type": "http",
-  "url": "${mcpUrl}",
-  "headers": {
-    "Authorization": "Bearer {{BEARER_TOKEN}}"
-  }
-}`;
-}
-
-export function getLspSnippet(ide: string, variant: 'tcp' | 'stdio', port: number | string): string {
-  // Neovim uses Lua format (D-10: vim.lsp.config API — Neovim 0.11+ native LSP)
-  if (ide === 'neovim') {
-    if (variant === 'tcp') {
-      return `vim.lsp.config('airtable_formula', {
-  cmd = vim.lsp.rpc.connect('127.0.0.1', ${port}),
-  filetypes = { 'formula', 'airtable-script', 'airtable-automation' },
-  root_markers = { '.git' },
-})
-vim.lsp.enable('airtable_formula')`;
-    }
-    return `vim.lsp.config('airtable_formula', {
-  cmd = { 'npx', '-y', 'airtable-user-lsp', '--stdio' },
-  filetypes = { 'formula', 'airtable-script', 'airtable-automation' },
-  root_markers = { '.git' },
-})
-vim.lsp.enable('airtable_formula')`;
-  }
-
-  // Zed — JSON binary format
-  if (ide === 'zed') {
-    if (variant === 'tcp') {
-      return `{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "airtable-user-lsp",
-        "arguments": ["--tcp-client", "127.0.0.1:${port}"]
-      }
-    }
-  }
-}`;
-    }
-    return `{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "airtable-user-lsp",
-        "arguments": ["--stdio"]
-      }
-    }
-  }
-}`;
-  }
-
-  // OpenCode — opencode.json format
-  if (ide === 'opencode') {
-    if (variant === 'tcp') {
-      return `{
-  "$schema": "https://opencode.ai/config.json",
-  "lsp": {
-    "airtable-formula": {
-      "command": ["npx", "-y", "airtable-user-lsp"],
-      "extensions": [".formula", ".ats", ".ata"],
-      "initialization": {
-        "host": "127.0.0.1",
-        "port": ${port}
-      }
-    }
-  }
-}`;
-    }
-    return `{
-  "$schema": "https://opencode.ai/config.json",
-  "lsp": {
-    "airtable-formula": {
-      "command": ["npx", "-y", "airtable-user-lsp", "--stdio"],
-      "extensions": [".formula", ".ats", ".ata"]
-    }
-  }
-}`;
-  }
-
-  // Claude Code — .lsp.json plugin format (D-11: plugin-based, not settings.json key)
-  // TCP variant: uses transport: "socket" (partially verified — see RESEARCH.md Assumption A2)
-  if (variant === 'tcp') {
-    return `{
-  "airtable-formula": {
-    "command": "npx",
-    "args": ["-y", "airtable-user-lsp", "--stdio"],
-    "transport": "socket",
-    "extensionToLanguage": {
-      ".formula": "airtable-formula",
-      ".ats": "airtable-script",
-      ".ata": "airtable-automation"
-    }
-  }
-}`;
-  }
-
-  // Claude Code stdio (fully verified format)
-  return `{
-  "airtable-formula": {
-    "command": "npx",
-    "args": ["-y", "airtable-user-lsp", "--stdio"],
-    "extensionToLanguage": {
-      ".formula": "airtable-formula",
-      ".ats": "airtable-script",
-      ".ata": "airtable-automation"
-    }
-  }
-}`;
-}
-
-export function getOfficialAirtableSnippet(ide: string): string {
-  const isWindsurf = ide === 'windsurf' || ide === 'windsurf-next';
-  // Windsurf uses 'serverUrl'; everyone else uses 'url'.
-  // Claude Code and most MCP clients require "type": "http" to recognise
-  // remote HTTP servers — without it the entry is silently ignored.
-  const urlKey = isWindsurf ? 'serverUrl' : 'url';
-  const typeField = isWindsurf ? '' : '\n  "type": "http",';
-  return `"airtable": {${typeField}
-  "${urlKey}": "https://mcp.airtable.com/mcp",
-  "headers": {
-    "Authorization": "Bearer {{AIRTABLE_PAT}}"
-  }
-}`;
-}
+import { EditorsSection } from './setup/EditorsSection.js';
+import { LocalServiceSection } from './setup/LocalServiceSection.js';
+import { getLspSnippet, getMcpSnippet, getOfficialAirtableSnippet } from './setup/snippets.js';
 
 // ---------------------------------------------------------------------------
 // Module-level constants — defined outside component to avoid re-creation per render
@@ -225,21 +46,9 @@ const LSP_VARIANT_TABS = [
 ] as const;
 
 export function Setup() {
-  const { ideStatuses, pendingActions, pendingIdeActions, pendingDaemonActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
+  const { ideStatuses, pendingActions, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon, copyBearerToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
 
-  const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
-  const detected = ideStatuses.filter(ide => ide.detected);
-  const undetected = ideStatuses.filter(ide => !ide.detected);
-  const detectedMcp = detected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId));
-  const detectedLsp = detected.filter(ide => LSP_EDITOR_IDS.has(ide.ideId));
-  const pending = detected.filter(ide =>
-    LSP_EDITOR_IDS.has(ide.ideId) ? !ide.lspConfigured : !ide.mcpConfigured
-  );
   const isLoading = pendingActions.size > 0;
-  // Daemon controls disable on daemon-specific pending state only — an
-  // unrelated slow action (open file dialog, long install) must not lock the
-  // user out of stopping the daemon.
-  const daemonBusy = pendingDaemonActions.size > 0 || !!daemon?.starting;
   // Derive tunnel pending state from store pendingActions (consistent with IDE actions)
   const isTunnelPending = pendingActions.size > 0;
 
@@ -249,9 +58,7 @@ export function Setup() {
   const [namedHostnameInput, setNamedHostnameInput] = React.useState('');
   const [editNgrokToken, setEditNgrokToken] = React.useState(false);
   const [copiedUrl, setCopiedUrl] = React.useState(false);
-  const [copiedDaemonUrl, setCopiedDaemonUrl] = React.useState(false);
   const [copiedToken, setCopiedToken] = React.useState(false);
-  const [rotatedToken, setRotatedToken] = React.useState(false);
   const [patInput, setPatInput] = React.useState('');
   const [copiedPat, setCopiedPat] = React.useState(false);
 
@@ -305,12 +112,6 @@ export function Setup() {
     setTimeout(() => setCopiedToken(false), 1500);
   };
 
-  const handleRotateToken = () => {
-    rotateToken();
-    setRotatedToken(true);
-    setTimeout(() => setRotatedToken(false), 2000);
-  };
-
   const handleCopyPat = () => {
     copyAirtablePat();
     setCopiedPat(true);
@@ -339,121 +140,10 @@ export function Setup() {
     : 'Expose your local MCP server via a public HTTPS URL';
 
   return (
-    <div className="stack stack-lg">
-
-      {/* Daemon Status Block — always visible */}
-      <div className="glass-panel">
-        <div className="section-header">
-          <div className="eyebrow">Daemon</div>
-          <div className="title">MCP Server Status</div>
-          <div className="detail">{daemon?.running ? 'Local daemon running on this machine' : 'Start the daemon to enable MCP and LSP features'}</div>
-        </div>
-
-        {/* Status chip */}
-        <div style={{ marginBottom: 8 }}>
-          {daemon?.running
-            ? daemon.healthy
-              ? <span className="chip chip-ok">Running · Healthy</span>
-              : <span className="chip chip-warn">Running · Degraded</span>
-            : daemon?.starting
-              ? <span className="chip chip-info">Starting...</span>
-              : <span className="chip chip-muted">Stopped</span>}
-        </div>
-
-        {/* Key-value rows — only when running */}
-        {daemon?.running && (
-          <div className="stack stack-sm" style={{ marginBottom: 8 }}>
-            <div className="list-row">
-              <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>MCP Port</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>{daemon.port}</span>
-            </div>
-
-            {daemon.port_lsp !== null && (
-              <div className="list-row">
-                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>LSP Port</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>{daemon.port_lsp}</span>
-              </div>
-            )}
-
-            {daemon.tunnelUrl && (
-              <div className="list-row" style={{ alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flexShrink: 0 }}>Tunnel URL</span>
-                <span
-                  title={daemon.tunnelUrl}
-                  style={{
-                    fontFamily: 'var(--font-mono)', fontSize: '0.7rem',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0,
-                    textAlign: 'right',
-                  }}
-                >
-                  {daemon.tunnelUrl}
-                </span>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  aria-label="Copy tunnel URL"
-                  onClick={() => {
-                    if (daemon.tunnelUrl) {
-                      navigator.clipboard.writeText(daemon.tunnelUrl).catch(() => undefined);
-                      setCopiedDaemonUrl(true);
-                      setTimeout(() => setCopiedDaemonUrl(false), 1500);
-                    }
-                  }}
-                >
-                  {copiedDaemonUrl ? 'Copied!' : 'Copy'}
-                </button>
-              </div>
-            )}
-
-            <div className="list-row">
-              <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Uptime</span>
-              <span style={{ fontSize: '0.7rem' }}>{formatUptime(daemon.uptime)}</span>
-            </div>
-
-            {/* Bearer token row — value stays in extension host (D-07) */}
-            <div className="list-row" style={{ alignItems: 'center' }}>
-              <span style={{ fontSize: '0.7rem', color: 'var(--fg-muted)', flex: 1 }}>Bearer Token</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', letterSpacing: '0.15em', color: 'var(--fg-muted)' }}>•••••••••••••••••</span>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={handleCopyToken}
-                disabled={isLoading}
-                title="Copy bearer token to clipboard"
-                style={{ marginLeft: 8 }}
-              >
-                {copiedToken ? 'Copied!' : 'Copy'}
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={handleRotateToken}
-                disabled={daemonBusy}
-                aria-busy={daemonBusy}
-                title="Rotate bearer token — all connected clients will need the new token"
-                style={{ marginLeft: 4, color: rotatedToken ? 'var(--fg-ok)' : undefined }}
-              >
-                {rotatedToken ? 'Rotated!' : 'Rotate'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Daemon controls */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {!daemon?.running ? (
-            <button className="btn btn-primary btn-sm" onClick={startDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
-              {daemon?.starting ? 'Starting...' : 'Start Daemon'}
-            </button>
-          ) : (
-            <>
-              <button className="btn btn-ghost btn-sm" onClick={restartDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1 }}>
-                {daemon?.starting ? 'Restarting...' : 'Restart'}
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={stopDaemon} disabled={daemonBusy} aria-busy={daemonBusy} style={{ opacity: daemonBusy ? 0.6 : 1, color: 'var(--fg-err)' }}>
-                {daemonBusy && !daemon?.starting ? 'Stopping...' : 'Stop'}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+    <section className="tab-stack" aria-labelledby="setup-heading">
+      <h1 id="setup-heading" className="tab-heading" tabIndex={-1}>Setup</h1>
+      <LocalServiceSection />
+      <EditorsSection />
 
       {/* Tunnel section */}
       <div className="glass-panel">
@@ -693,115 +383,6 @@ export function Setup() {
           )}
         </div>
       </div>
-
-      {/* Summary header */}
-      <div className="glass-panel">
-        <div className="section-header">
-          <div className="eyebrow">IDE Configuration</div>
-          <div className="title">Setup</div>
-          <div className="detail">
-            {detected.length} IDE{detected.length !== 1 ? 's' : ''} detected
-            {pending.length > 0 && <> &middot; <span style={{ color: 'var(--fg-warn)' }}>{pending.length} need setup</span></>}
-          </div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {pending.length > 0 && (
-            <button className="btn btn-primary" onClick={setupAll} disabled={isLoading} style={{ opacity: isLoading ? 0.6 : 1 }}>
-              {isLoading ? 'Setting up...' : 'Setup all'}
-            </button>
-          )}
-          {pending.length === 0 && detected.length > 0 && (
-            <span className="chip chip-ok">All configured</span>
-          )}
-        </div>
-      </div>
-
-      {/* Detected — AI Clients / Code Assistants (MCP) */}
-      {detectedMcp.length > 0 && (
-        <div className="glass-panel">
-          <div className="section-header">
-            <div className="eyebrow">Detected · AI Clients</div>
-            <div className="title">Code Assistants</div>
-            <div className="detail">Configured via MCP server entry</div>
-          </div>
-          <div className="stack stack-sm">
-            {detectedMcp.map(ide => (
-              <IdeCard
-                key={ide.ideId}
-                status={ide}
-                onSetup={() => setupIde(ide.ideId)}
-                onUnconfigure={() => unconfigureIde(ide.ideId)}
-                loading={pendingIdeActions.has(ide.ideId)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Detected — Code Editors (LSP) */}
-      {detectedLsp.length > 0 && (
-        <div className="glass-panel">
-          <div className="section-header">
-            <div className="eyebrow">Detected · Code Editors</div>
-            <div className="title">LSP Editors</div>
-            <div className="detail">Configured via language server protocol</div>
-          </div>
-          <div className="stack stack-sm">
-            {detectedLsp.map(ide => (
-              <IdeCard
-                key={ide.ideId}
-                status={ide}
-                onSetup={() => setupIde(ide.ideId)}
-                onUnconfigure={() => unconfigureIde(ide.ideId)}
-                loading={pendingIdeActions.has(ide.ideId)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Undetected — split by type */}
-      {undetected.length > 0 && (
-        <>
-          {undetected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId)).length > 0 && (
-            <div className="glass-panel">
-              <div className="section-header">
-                <div className="eyebrow">Not detected · AI Clients</div>
-                <div className="title">Other Code Assistants</div>
-              </div>
-              <div className="stack stack-sm">
-                {undetected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId)).map(ide => (
-                  <IdeCard key={ide.ideId} status={ide} onSetup={() => {}} onUnconfigure={() => {}} loading={false} />
-                ))}
-              </div>
-            </div>
-          )}
-          {undetected.filter(ide => LSP_EDITOR_IDS.has(ide.ideId)).length > 0 && (
-            <div className="glass-panel">
-              <div className="section-header">
-                <div className="eyebrow">Not detected · Code Editors</div>
-                <div className="title">Other LSP Editors</div>
-              </div>
-              <div className="stack stack-sm">
-                {undetected.filter(ide => LSP_EDITOR_IDS.has(ide.ideId)).map(ide => (
-                  <IdeCard key={ide.ideId} status={ide} onSetup={() => {}} onUnconfigure={() => {}} loading={false} />
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {ideStatuses.length === 0 && (
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '14px 12px' }} aria-busy="true" aria-label="Scanning for installed IDEs">
-          {[0, 1, 2].map(i => (
-            <div key={i} className="skeleton-row" style={{ animationDelay: `${i * 120}ms` }} />
-          ))}
-          <div style={{ textAlign: 'center', color: 'var(--fg-muted)', fontSize: '0.68rem', marginTop: 2 }}>
-            Scanning for installed IDEs…
-          </div>
-        </div>
-      )}
 
       {/* MCP Config Snippets — D-06, D-07, D-08, D-12, D-13 */}
       <div className="glass-panel">
@@ -1162,6 +743,6 @@ export function Setup() {
         </div>
       </div>
 
-    </div>
+    </section>
   );
 }

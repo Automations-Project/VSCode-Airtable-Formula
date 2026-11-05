@@ -5,17 +5,6 @@
   text-transform: uppercase;
 }
 
-.skeleton-row {
-  height: 38px;
-  border-radius: var(--radius-2);
-  background: var(--surface-hover);
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes skeleton-pulse {
-  50% { opacity: 0.55; }
-}
-
 .glass-panel {
   padding: var(--space-4);
   border: 1px solid var(--border-default);
@@ -130,14 +119,6 @@
   justify-content: space-between;
 }
 
-.ide-card .list-row {
-  padding: 7px 2px;
-  border: 0;
-  border-top: 1px solid var(--border-default);
-  border-radius: 0;
-  background: transparent;
-}
-
 .toggle-switch {
   position: relative;
   display: inline-block;
@@ -190,36 +171,6 @@
 .toggle-switch input:focus-visible + .toggle-track {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-}
-
-.ide-card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: var(--space-4);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-2);
-  background: var(--surface-raised);
-  transition-property: border-color;
-  transition-duration: 160ms;
-}
-
-.ide-card:hover,
-.ide-card-ready {
-  border-color: var(--brand-session);
-}
-
-.ide-card-undetected {
-  border-style: dashed;
-  opacity: 0.65;
-}
-
-.ide-card > div:first-child {
-  padding-bottom: var(--space-3);
-}
-
-.ide-card > div:last-child {
-  padding-top: var(--space-3);
 }
 
 .btn {

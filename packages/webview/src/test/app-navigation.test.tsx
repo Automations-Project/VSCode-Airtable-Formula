@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App.js';
 import { useStore } from '../store.js';
 import { makeDashboardState, type DashboardStateOverrides } from './dashboard-state.fixture.js';
@@ -39,6 +39,18 @@ describe('App header status', () => {
   });
 });
 
+// Simulates a destination whose target heading is not rendered (yet), whatever
+// headings Setup currently owns.
+function dropFocusTargetBeforeFocus(id: string): void {
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+    setTimeout(() => {
+      document.getElementById(id)?.removeAttribute('id');
+      callback(0);
+    }, 0);
+    return 0;
+  });
+}
+
 describe('App cross-tab navigation focus', () => {
   beforeEach(() => {
     // Like the browser, run the frame callback after React has committed the click.
@@ -48,13 +60,20 @@ describe('App cross-tab navigation focus', () => {
     });
   });
 
-  afterEach(() => {
-    document.getElementById('setup-heading')?.remove();
+  it('focuses the Local service heading when Overview links to it', async () => {
+    const user = userEvent.setup();
+    seed({ daemon: undefined });
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Open Setup: Local service stopped' }));
+
+    await waitFor(() => expect(document.getElementById('local-service-heading')).toHaveFocus());
   });
 
   it('lands focus inside the destination tab when the target heading does not exist yet', async () => {
     const user = userEvent.setup();
     seed({ daemon: undefined });
+    dropFocusTargetBeforeFocus('local-service-heading');
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: 'Open Setup: Local service stopped' }));
@@ -78,15 +97,12 @@ describe('App cross-tab navigation focus', () => {
   it('prefers the destination tab heading over the panel when the target is missing', async () => {
     const user = userEvent.setup();
     seed({ daemon: undefined });
-    const heading = document.createElement('h1');
-    heading.id = 'setup-heading';
-    heading.tabIndex = -1;
-    document.body.append(heading);
+    dropFocusTargetBeforeFocus('local-service-heading');
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: 'Open Setup: Local service stopped' }));
 
-    await waitFor(() => expect(heading).toHaveFocus());
+    await waitFor(() => expect(document.getElementById('setup-heading')).toHaveFocus());
   });
 
   it('never makes the panel a positive tab stop', () => {

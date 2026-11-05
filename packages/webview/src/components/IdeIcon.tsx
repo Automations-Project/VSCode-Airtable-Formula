@@ -30,30 +30,34 @@ const IDE_ICONS: Record<IdeId | 'mcp', string> = {
   'mcp':            mcpSvg,
 };
 
+export type IdeIconTone = 'default' | 'muted' | 'ok' | 'warn' | 'bad' | 'info';
+
 interface IdeIconProps {
   ideId: IdeId | 'mcp';
   size?: number;
-  color?: string;
+  tone?: IdeIconTone;
 }
 
-export function IdeIcon({ ideId, size = 16, color }: IdeIconProps) {
+// The vendored artwork carries its own inline `style` attribute; drop it so the
+// wrapper's class owns presentation (the svg width/height attributes set the size).
+function sizedSvg(svg: string, size: number): string {
+  return svg
+    .replace(/width="1em"/g, `width="${size}"`)
+    .replace(/height="1em"/g, `height="${size}"`)
+    .replace(/\sstyle="[^"]*"/g, '');
+}
+
+/** Decorative: every use sits beside a text label. */
+export function IdeIcon({ ideId, size = 16, tone = 'default' }: IdeIconProps) {
   const svg = IDE_ICONS[ideId];
   if (!svg) return null;
 
   return (
     <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: size,
-        height: size,
-        color: color ?? 'var(--fg-subtle)',
-        flexShrink: 0,
-      }}
-      dangerouslySetInnerHTML={{
-        __html: svg.replace(/width="1em"/g, `width="${size}"`).replace(/height="1em"/g, `height="${size}"`),
-      }}
+      className="ide-icon"
+      data-tone={tone}
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: sizedSvg(svg, size) }}
     />
   );
 }

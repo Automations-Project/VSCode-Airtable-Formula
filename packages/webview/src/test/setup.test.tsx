@@ -6,7 +6,7 @@ vi.mock('../lib/vscode.js', () => ({
   onExtensionMessage: vi.fn(() => () => {}),
 }));
 
-import { formatUptime, getMcpSnippet, getLspSnippet } from '../tabs/Setup.js';
+import { formatUptime, getMcpSnippet, getLspSnippet } from '../tabs/setup/snippets.js';
 
 // ---------------------------------------------------------------------------
 // formatUptime
