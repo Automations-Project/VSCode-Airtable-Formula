@@ -17,6 +17,8 @@ metadata:
 
 Expert assistance for writing, debugging, and optimizing Airtable formulas.
 
+This folder is installed and updated by the Airtable Formula VS Code extension; local edits are replaced on the next update.
+
 ## When to Use
 
 - Writing new Airtable formulas

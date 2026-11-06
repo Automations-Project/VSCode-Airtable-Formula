@@ -29,6 +29,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   `pnpm generate:agent-dirs` rewrites it and `pnpm check:agent-dirs` diffs it against upstream in CI.
 - **Settings → AI skill** group with the scope select and a `Remove skill` button; the remove only
   deletes our own folder.
+- **The folder says it is managed.** `SKILL.md` states that the folder is installed and updated by
+  the Airtable Formula VS Code extension and that local edits are replaced on the next update.
 
 **Changed**
 
