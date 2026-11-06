@@ -1,19 +1,18 @@
 import React from 'react';
 
 interface AirtableLogoProps {
-  size?: number;
+  className?: string;
 }
 
-export function AirtableLogo({ size = 24 }: AirtableLogoProps) {
+export function AirtableLogo({ className }: AirtableLogoProps) {
+  const classes = ['airtable-logo', className].filter(Boolean).join(' ');
+
   return (
-    <span className="at-logo-wrapper" style={{ width: size, height: size }}>
-      <span className="at-logo-glow" />
+    <span className={classes} aria-hidden="true">
       <svg
         viewBox="0 0 1402 1175"
         xmlns="http://www.w3.org/2000/svg"
-        width={size}
-        height={size}
-        style={{ position: 'relative', zIndex: 1, display: 'block' }}
+        focusable="false"
       >
         {/* Top yellow */}
         <path fill="#fcb400" d="m626 15.8l-522.7 216.5c-29 12-28.7 53.4 0.5 65l524.9 208.3c11.4 4.5 23.2 8 35.2 10.3 12 2.3 24.3 3.5 36.5 3.5 12.3 0 24.5-1.2 36.6-3.5 12-2.3 23.8-5.8 35.2-10.3l524.9-208.3c29.2-11.6 29.5-53 0.5-65l-522.7-216.5c-11.8-4.9-24-8.6-36.5-11.1-12.5-2.5-25.2-3.8-38-3.8-12.7 0-25.4 1.3-37.9 3.8-12.5 2.5-24.7 6.2-36.5 11.1z" />

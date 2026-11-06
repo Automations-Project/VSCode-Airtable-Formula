@@ -1,0 +1,45 @@
+:root {
+  color-scheme: light dark;
+
+  --surface-base: var(--vscode-sideBar-background, #1f1f1f);
+  --surface-raised: var(--vscode-editorWidget-background, #252526);
+  --surface-input: var(--vscode-input-background, #313131);
+  --surface-hover: var(--vscode-list-hoverBackground, #2a2d2e);
+  --surface-active: var(--vscode-list-activeSelectionBackground, #04395e);
+
+  --text-primary: var(--vscode-foreground, #cccccc);
+  --text-secondary: var(--vscode-descriptionForeground, #9d9d9d);
+  --text-link: var(--vscode-textLink-foreground, #3794ff);
+  --text-link-active: var(--vscode-textLink-activeForeground, #4daafc);
+  --text-danger: var(--vscode-errorForeground, #f48771);
+
+  --border-default: var(--vscode-panel-border, #3c3c3c);
+  --border-input: var(--vscode-input-border, var(--border-default));
+  --focus-ring: var(--vscode-focusBorder, #007fd4);
+
+  --status-success: var(--vscode-testing-iconPassed, #73c991);
+  --status-warning: var(--vscode-editorWarning-foreground, #cca700);
+  --status-error: var(--vscode-testing-iconFailed, #f14c4c);
+  --status-info: var(--vscode-notificationsInfoIcon-foreground, #75beff);
+
+  --brand-session: #166ee1;
+  --brand-service: #18bfff;
+  --brand-clients: #fcb400;
+  --brand-attention: #f82b60;
+
+  --font-ui: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --font-mono: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, monospace);
+
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+
+  --radius-1: 2px;
+  --radius-2: 4px;
+  --radius-3: 6px;
+
+  --ease-std: cubic-bezier(0.2, 0.1, 0.2, 1);
+}

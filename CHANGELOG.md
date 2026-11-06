@@ -6,6 +6,34 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Changed — Native Airtable Workbench (2026-11-07)
+
+- **The dashboard now looks like part of VS Code.** Colours come from your active theme (light, dark and
+  high-contrast), with Airtable colours kept to small accents. The ambient animation and the footer are gone.
+- **Overview leads with readiness.** One line shows your session, service and editors adding up to READY (or
+  what is missing), followed by the single next action to take and an ordered list of any issues. Links
+  in the issue list jump straight to the matching section on another tab.
+- **Setup is split into sections.** Local service, Editors, Remote access, Manual config and Official Airtable
+  MCP each have their own heading. Every button reports its result right next to itself, and the bearer
+  token is never shown on screen.
+- **Prompts are a list and an editor.** Opening a prompt takes you to a separate editor with inline
+  validation. If you leave with unsaved edits, whether by switching tabs, pressing Back or following a
+  link, VS Code asks before discarding them, and a prompt's name is locked once created (changing it
+  used to silently make a copy).
+- **Settings come in eight groups.** Account, Browser, Tool safety, Storage, Formula & scripting,
+  Diagnostics, Advanced runtime, and Support & About. Each row shows its own pending state and result,
+  and the daemon port is checked as a whole number from 0 to 65535 before anything is saved.
+- **Keyboard and screen-reader support.** The tabs follow the WAI-ARIA pattern with arrow-key navigation,
+  focus is kept on the control you are using instead of dropping to the page body, and the readiness
+  line is read aloud as a sentence.
+- **Stricter webview security.** Only scripts carrying a fresh per-render nonce may run, and the dashboard
+  uses no inline styles.
+- **Enabling a remote tunnel now waits up to six minutes before reporting failure.** A first-time enable
+  that has to download cloudflared or walk the named-tunnel wizard used to show "could not be enabled"
+  after one minute while the work was still going on.
+- **Maintainers: the gzipped webview bundle has a no-growth gate.** `pnpm build` fails if the dashboard JavaScript grows more than 1 KiB past the recorded
+  baseline; `pnpm bundle:record` accepts a deliberate increase.
+
 ### Fixed — Zed language-server setup never worked and is removed (2026-11-07)
 
 - **Setup no longer offers Zed, and the docs no longer claim Zed support for the language server.**

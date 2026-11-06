@@ -8,7 +8,7 @@ import type {
 } from '@shared/types.js';
 
 type SettingsOverride = Omit<Partial<SettingsSnapshot>, 'mcp' | 'ai' | 'formula' | 'script' | 'auth' | 'debug'> & {
-  mcp?: Partial<SettingsSnapshot['mcp']> & { toolProfile?: Partial<SettingsSnapshot['mcp']['toolProfile']> };
+  mcp?: Omit<Partial<SettingsSnapshot['mcp']>, 'toolProfile'> & { toolProfile?: Partial<SettingsSnapshot['mcp']['toolProfile']> };
   ai?: Partial<SettingsSnapshot['ai']>;
   formula?: Partial<SettingsSnapshot['formula']>;
   script?: Partial<SettingsSnapshot['script']>;

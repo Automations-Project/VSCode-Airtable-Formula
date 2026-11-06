@@ -35,6 +35,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { basename, join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import {
@@ -380,6 +381,35 @@ export function assertVsix(file, target) {
         `${[...allowed].join(', ')}. An extra .node beside the pinned ones is never verified ` +
         'by digest and must not be published.'
       );
+    }
+  }
+
+  // 6. Every bare module extension.js require()s must ship inside the VSIX.
+  //    tsup externalizes everything in `dependencies`; a workspace package
+  //    there that nothing vendors into dist/node_modules packages fine, passes
+  //    every unit test, and then fails activation on install ("Cannot find
+  //    module") — the dashboard spins forever. Hit twice: language-services,
+  //    then @airtable-formula/shared after PR #25 gave it runtime imports.
+  const bundleEntry = entries.get('extension/dist/extension.js');
+  if (!bundleEntry) {
+    problems.push('extension/dist/extension.js is missing — not a built VSIX');
+  } else {
+    const source = readMember(buf, bundleEntry).toString('utf8');
+    const bare = new Set(
+      [...source.matchAll(/\brequire\("([^"./][^"]*)"\)/g)].map((m) => m[1])
+    );
+    for (const spec of [...bare].sort()) {
+      if (spec === 'vscode' || spec.startsWith('node:') || builtinModules.includes(spec)) continue;
+      const parts = spec.split('/');
+      const pkg = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+      const shipped = ['extension/dist/node_modules/', 'extension/node_modules/']
+        .some((prefix) => entries.has(`${prefix}${pkg}/package.json`));
+      if (!shipped) {
+        problems.push(
+          `dist/extension.js require()s "${spec}" but ${pkg} is not in the VSIX — activation ` +
+          'fails with "Cannot find module". Bundle it (devDependencies) or vendor it in prepare-package-deps.mjs'
+        );
+      }
     }
   }
 

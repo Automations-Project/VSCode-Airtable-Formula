@@ -1,11 +1,17 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App.js';
+import { ActionButton } from '../components/ActionButton.js';
 import { requestHostConfirmation } from '../lib/confirmation.js';
 import { useStore } from '../store.js';
 import { makeDashboardState } from './dashboard-state.fixture.js';
 import { resetWebviewStore, vscodeApiMock } from './test-setup.js';
+// jsdom does not apply CSS imported through @layer. Import the same shipped
+// owner files directly so this remains a real computed-style contract.
+import '../styles/sections.css';
+import '../styles/accessibility.css';
 
 describe('App rendered shell', () => {
   beforeEach(() => {
@@ -15,7 +21,50 @@ describe('App rendered shell', () => {
   it('renders the real loading state in a DOM', () => {
     render(<App />);
 
-    expect(screen.getByText('Loading dashboard…')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading Airtable Control…');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('renders a labelled tablist and linked active panel without a persistent footer', () => {
+    useStore.setState({ loading: false, activeTab: 'overview' });
+
+    render(<App />);
+
+    expect(screen.getByRole('tablist', { name: 'Dashboard sections' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Overview' }))
+      .toHaveAttribute('aria-controls', 'dashboard-panel-overview');
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByRole('tabpanel'))
+      .toHaveAttribute('aria-labelledby', 'dashboard-tab-overview');
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument();
+    for (const name of [/support/i, /docs|documentation/i, /changelog/i, /github/i]) {
+      expect(screen.queryByRole('button', { name }), String(name)).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name }), String(name)).not.toBeInTheDocument();
+    }
+  });
+
+  it('keeps focus on a selected top-level tab instead of moving it into the panel', async () => {
+    const user = userEvent.setup();
+    useStore.setState({ loading: false, activeTab: 'overview' });
+    render(<App />);
+
+    const settingsTab = screen.getByRole('tab', { name: 'Settings' });
+    await user.click(settingsTab);
+
+    await waitFor(() => expect(settingsTab).toHaveFocus());
+    expect(settingsTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByRole('tabpanel'))
+      .toHaveAttribute('aria-labelledby', 'dashboard-tab-settings');
+    expect(screen.getByRole('tabpanel')).not.toHaveFocus();
+  });
+
+  it('computes the reduced-motion transition contract for actions', () => {
+    document.body.classList.add('vscode-reduce-motion');
+
+    render(<ActionButton>Refresh status</ActionButton>);
+
+    expect(getComputedStyle(screen.getByRole('button')).transitionDuration).toBe('0.01ms');
   });
 
   it('can mutate the singleton store during a rendered test', () => {
@@ -131,11 +180,11 @@ describe('App rendered shell', () => {
     await expect(confirmation).resolves.toBe(true);
   });
 
-  it('opens footer links by opaque id with a pending action lifecycle', () => {
-    useStore.setState({ loading: false });
+  it('opens Settings support links by opaque id with a pending action lifecycle', () => {
+    useStore.setState({ activeTab: 'settings', loading: false });
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open GitHub (external link)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open GitHub repository' }));
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({
@@ -151,12 +200,12 @@ describe('App rendered shell', () => {
     useStore.setState({ activeTab: 'settings', loading: false });
     render(<App />);
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Auto-configure on install' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Include agent files' }));
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({
       type: 'setting:change',
-      change: { key: 'mcp.autoConfigureOnInstall', value: false },
+      change: { key: 'ai.includeAgents', value: true },
     });
     expect(message.id).toMatch(/^[0-9a-f]{24}$/);
     expect(useStore.getState().pendingActions.has(message.id)).toBe(true);
@@ -229,8 +278,7 @@ describe('App rendered shell', () => {
     });
     render(<App />);
 
-    fireEvent.click(screen.getByText('Storage & Data'));
-    fireEvent.click(screen.getByRole('button', { name: 'Open ↗' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Tool config' }));
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({
@@ -287,10 +335,10 @@ describe('App rendered shell', () => {
     });
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: /\/my-prompt/ }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt description' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
       target: { value: 'Unsaved local description' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save prompt' }));
     const request = vscodeApiMock.postMessage.mock.calls.find(
       ([message]) => message.type === 'action:save-prompt',
     )?.[0] as { id: string };
@@ -307,7 +355,7 @@ describe('App rendered shell', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/^Could not save settings/);
     expect(alert.textContent).toHaveLength(300);
-    expect(screen.getByRole('textbox', { name: 'Prompt description' }))
+    expect(screen.getByRole('textbox', { name: 'Description' }))
       .toHaveValue('Unsaved local description');
     expect(screen.getByRole('button', { name: 'Back to prompts' })).toBeInTheDocument();
   });
@@ -315,14 +363,14 @@ describe('App rendered shell', () => {
   it('keeps prompt edits after a cancelled save', async () => {
     useStore.setState({ activeTab: 'prompts', loading: false });
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt name' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'New prompt' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Slash command name' }), {
       target: { value: 'new-prompt' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt template' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Template' }), {
       target: { value: 'Unsaved template' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save prompt' }));
     const request = vscodeApiMock.postMessage.mock.calls.find(
       ([message]) => message.type === 'action:save-prompt',
     )?.[0] as { id: string };
@@ -336,23 +384,80 @@ describe('App rendered shell', () => {
       },
     }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The action was cancelled.');
-    expect(screen.getByRole('textbox', { name: 'Prompt template' }))
+    expect(await screen.findByText('Save cancelled')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Template' }))
       .toHaveValue('Unsaved template');
+  });
+
+  it('guards top-level tab changes while a Prompts edit is unsaved', async () => {
+    const user = userEvent.setup();
+    useStore.setState({
+      activeTab: 'prompts',
+      loading: false,
+      prompts: {
+        prompts: [{
+          name: 'my-prompt', description: 'Original', arguments: [], template: 'T', isBuiltin: false, isModified: false,
+        }],
+      },
+    });
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: /\/my-prompt/ }));
+    await user.type(screen.getByRole('textbox', { name: 'Description' }), ' edited');
+    const promptsTab = screen.getByRole('tab', { name: 'Prompts' });
+    const settingsTab = screen.getByRole('tab', { name: 'Settings' });
+    const answer = (confirmed: boolean) => {
+      const request = vscodeApiMock.postMessage.mock.calls
+        .map(([message]) => message)
+        .filter(message => message.type === 'confirmation:request')
+        .at(-1) as { id: string; kind: string };
+      expect(request.kind).toBe('discard-prompt-edits');
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'confirmation:result', id: request.id, confirmed },
+      }));
+    };
+
+    await user.click(settingsTab);
+    answer(false);
+
+    await waitFor(() => expect(promptsTab).toHaveFocus());
+    expect(promptsTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('Original edited');
+
+    await user.click(settingsTab);
+    answer(true);
+
+    await waitFor(() => expect(settingsTab).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(settingsTab).toHaveFocus());
+    expect(screen.getByRole('tabpanel')).not.toHaveFocus();
+    expect(useStore.getState().promptEditorDirty).toBe(false);
+  });
+
+  it('does not ask again when the already-selected Prompts tab is clicked mid-edit', async () => {
+    const user = userEvent.setup();
+    useStore.setState({ activeTab: 'prompts', loading: false });
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: 'New prompt' }));
+    await user.type(screen.getByRole('textbox', { name: 'Slash command name' }), 'abc');
+
+    await user.click(screen.getByRole('tab', { name: 'Prompts' }));
+
+    expect(vscodeApiMock.postMessage.mock.calls.some(([m]) => m.type === 'confirmation:request')).toBe(false);
+    expect(screen.getByRole('textbox', { name: 'Slash command name' })).toHaveValue('abc');
   });
 
   it('reset clears real pending and completed action sidecars', async () => {
     vi.useFakeTimers();
     render(<App />);
 
-    const completedActionId = useStore.getState().deletePrompt('completed-result');
+    const completedActionId = useStore.getState().deletePrompt('completed-result')!;
     useStore.getState().markActionDone(completedActionId, { ok: false });
     expect(useStore.getState().consumeActionResult(completedActionId)).toEqual({ ok: false });
     useStore.getState().markActionDone(completedActionId, { ok: false });
 
     const pendingActionId = useStore.getState().savePrompt({
       name: 'leftover-timer', description: '', arguments: [], template: '', isBuiltin: false, isModified: false,
-    });
+    })!;
     expect(useStore.getState().pendingActions.has(pendingActionId)).toBe(true);
 
     await resetWebviewStore();

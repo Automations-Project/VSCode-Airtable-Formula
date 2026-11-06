@@ -6,7 +6,8 @@ vi.mock('../lib/vscode.js', () => ({
   onExtensionMessage: vi.fn(() => () => {}),
 }));
 
-import { formatUptime, getMcpSnippet, getLspSnippet, LSP_IDE_TABS } from '../tabs/Setup.js';
+import { formatUptime, getMcpSnippet, getLspSnippet } from '../tabs/setup/snippets.js';
+import { LSP_CLIENTS } from '../tabs/setup/ManualConfigSection.js';
 
 // ---------------------------------------------------------------------------
 // formatUptime
@@ -123,7 +124,7 @@ describe('getLspSnippet lsp port snippet', () => {
   // Zed starts only language servers that a Zed extension (or a built-in adapter)
   // registers, so a settings.json `lsp` entry is never used: zed-industries/zed#52653.
   it('offers no Zed snippet', () => {
-    expect(LSP_IDE_TABS.map(tab => tab.id)).not.toContain('zed');
+    expect(LSP_CLIENTS.map(client => client.id)).not.toContain('zed');
     expect(getLspSnippet('zed', 'stdio', 2087)).not.toContain('"binary"');
   });
 

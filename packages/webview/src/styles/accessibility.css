@@ -1,0 +1,64 @@
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.vscode-reduce-motion *,
+.vscode-reduce-motion *::before,
+.vscode-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+}
+
+.vscode-reduce-motion .action-button {
+  transition-duration: 0.01ms !important;
+}
+
+@media (max-width: 420px) {
+  .section-heading,
+  .about-version {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .about-version dd {
+    text-align: left;
+  }
+}
+
+@media (max-width: 320px) {
+  .app-header {
+    padding-inline: var(--space-3);
+  }
+
+  .app-panel {
+    padding: var(--space-3);
+  }
+
+  .app-status {
+    max-width: 44%;
+  }
+}
+
+.vscode-high-contrast .section,
+.vscode-high-contrast-light .section {
+  border-color: var(--vscode-contrastBorder, currentColor);
+}
+
+@media (forced-colors: active) {
+  :where(button, a, input, select, textarea, summary):focus-visible {
+    outline-color: Highlight;
+  }
+
+  .app-tab[aria-selected='true']::after {
+    background: Highlight;
+  }
+}

@@ -585,8 +585,12 @@ export async function startDaemonServer(options = {}) {
         res.status(428).json({ ok: false, error: check.reason, needsInstall, action: check.action });
         return;
       }
-      // Persist settings before starting (D-03)
-      writeTunnelSettings(options.configDir, { enabled: true, provider, ngrokDomain: domain ?? null });
+      // Persist settings before starting (D-03). An explicit enable is a fresh
+      // decision, so it clears a previous 401-burst auto-disable and its reason
+      // (writeTunnelSettings would otherwise carry them forward indefinitely).
+      writeTunnelSettings(options.configDir, {
+        enabled: true, provider, ngrokDomain: domain ?? null, autoDisabled: false, autoDisabledReason: null,
+      });
       activeTunnel = await p.start({
         port: getBoundPort(httpServer),
         configDir: options.configDir,
@@ -620,7 +624,8 @@ export async function startDaemonServer(options = {}) {
         await activeTunnel.stop().catch(() => undefined);
         activeTunnel = null;
       }
-      writeTunnelSettings(options.configDir, { enabled: false });
+      // A user's disable is a normal "off", not an auto-disable: clear the flag.
+      writeTunnelSettings(options.configDir, { enabled: false, autoDisabled: false, autoDisabledReason: null });
       options.onTunnelUrlChange?.(null);
       publishEvent('daemon:tunnel-stopped', {});
       res.json({ ok: true });

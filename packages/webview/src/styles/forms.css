@@ -1,0 +1,277 @@
+/* Form primitives, disclosure sections, snippets and progress (Setup advanced sections). */
+
+/* Disclosure: a heading that contains the toggle button. */
+.disclosure-section--nested {
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-default);
+}
+
+.disclosure-header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.disclosure-title {
+  min-width: 0;
+}
+
+.disclosure-trigger {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  color: inherit;
+  font-weight: inherit;
+  text-align: start;
+}
+
+.disclosure-chevron {
+  flex: 0 0 auto;
+  width: 1ch;
+  color: var(--text-secondary);
+}
+
+.disclosure-summary {
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.disclosure-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.disclosure-panel[hidden] {
+  display: none;
+}
+
+/* Fields. */
+.form-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.form-field {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 12em;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.form-field__label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* Decorative marker (empty alt text): the control itself carries `required`. */
+.form-field__label[data-required]::after {
+  content: " *" / "";
+}
+
+.form-field__description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+}
+
+.form-field__error {
+  margin: 0;
+  color: var(--text-danger);
+}
+
+.form-control {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-2);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+
+.form-control--mono {
+  font-family: var(--font-mono);
+}
+
+.form-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.form-control[aria-invalid='true'] {
+  border-color: var(--status-error);
+}
+
+/* A row of controls that wraps instead of overflowing, and stacks when narrow. */
+.form-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.form-row > .form-control {
+  flex: 1 1 12em;
+  width: auto;
+}
+
+.form-row--fields {
+  align-items: flex-start;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.form-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.form-value {
+  min-width: 0;
+  flex: 1 1 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Official editors. */
+.official-editors {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.official-editor {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-default);
+}
+
+.official-editor__name {
+  min-width: 0;
+  flex: 1 1 8em;
+  overflow-wrap: anywhere;
+}
+
+.official-editor__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+/* A row's own result wraps onto its own line under the row. */
+.official-editor > .outcome-status,
+.official-editor > .feedback {
+  min-width: 0;
+  flex: 1 0 100%;
+}
+
+/* Snippets scroll inside their own container, never the page. */
+.snippet-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.snippet-card__code {
+  max-width: 100%;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-size: max(11px, 0.92em);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.snippet-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.snippet-card__flash {
+  color: var(--status-success);
+}
+
+/* Empty but rendered (see .prompt-status:empty): stays in the accessibility tree, adds no gap. */
+.snippet-card__flash:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Native progress with a visible label. */
+.progress-field {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.progress-field > label {
+  font-weight: 600;
+}
+
+.progress-field > progress {
+  min-width: 8em;
+  height: 8px;
+  flex: 1 1 8em;
+  accent-color: var(--brand-session);
+}
+
+@media (max-width: 420px) {
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-row > .form-control,
+  .form-value {
+    flex-basis: auto;
+  }
+
+  .form-actions > .action-button,
+  .form-row > .action-button {
+    width: 100%;
+  }
+}

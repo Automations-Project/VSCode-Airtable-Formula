@@ -1,0 +1,122 @@
+.section {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+}
+
+.section-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.section-heading__copy {
+  min-width: 0;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.section-description {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: max(11px, 0.92em);
+}
+
+.section-actions,
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.section-body {
+  min-width: 0;
+}
+
+.feedback {
+  padding: var(--space-4);
+  border: 1px solid var(--border-default);
+  border-inline-start: 3px solid var(--status-info);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.feedback[data-variant='success'] {
+  border-inline-start-color: var(--status-success);
+}
+
+.feedback[data-variant='warning'] {
+  border-inline-start-color: var(--status-warning);
+}
+
+.feedback[data-variant='error'] {
+  border-inline-start-color: var(--status-error);
+}
+
+.action-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  line-height: 1.2;
+  text-align: center;
+  transition-property: background-color, border-color, color;
+  transition-duration: 120ms;
+  transition-timing-function: var(--ease-std);
+}
+
+.action-button:hover:not(:disabled, [aria-disabled='true']) {
+  border-color: var(--focus-ring);
+  background: var(--surface-hover);
+}
+
+.action-button[data-variant='primary'] {
+  border-color: var(--brand-session);
+  background: var(--brand-session);
+  color: #ffffff;
+}
+
+.action-button[data-variant='danger'] {
+  border-color: var(--status-error);
+  color: var(--text-danger);
+}
+
+.about-versions {
+  display: grid;
+  margin: 0 0 var(--space-4);
+  gap: var(--space-2);
+}
+
+.about-version {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.about-version dt {
+  color: var(--text-secondary);
+}
+
+.about-version dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  text-align: right;
+}
