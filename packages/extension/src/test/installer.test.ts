@@ -68,6 +68,7 @@ describe('skill installer', () => {
     fs.mkdirSync(path.join(target, 'airtable-formula'), { recursive: true });
     fs.writeFileSync(path.join(target, 'airtable-formula', 'AGENT.md'), 'old');
     fs.mkdirSync(path.join(target, `.airtable-formula.tmp-${process.pid}`), { recursive: true });
+    fs.mkdirSync(path.join(target, '.airtable-formula.tmp-424242'), { recursive: true });   // left by a crashed install (another pid)
     await installSkill('global', env);
     expect(fs.existsSync(path.join(target, 'airtable-formula', 'AGENT.md'))).toBe(false);
     expect(fs.readdirSync(target)).toEqual(['airtable-formula']);
@@ -98,6 +99,23 @@ describe('skill installer', () => {
     expect(mdc).toMatch(/^---\n[\s\S]*globs: \["\*\*\/\*\.formula"\][\s\S]*alwaysApply: false\n---\n/);
     expect(mdc).toContain('.agents/skills/airtable-formula/SKILL.md');
     expect(mdc).toContain('2.3.0');
+  });
+
+  it('project install refuses to follow a symlink inside the workspace', async () => {
+    const elsewhere = path.join(root, 'elsewhere');                   // outside ws: must stay untouched
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(path.join(ws, '.cursor'), { recursive: true });
+    fs.symlinkSync(elsewhere, path.join(ws, '.cursor', 'rules'), 'junction');
+    const outsideLegacy = path.join(root, 'elsewhere-cline');         // a legacy file reached through a link is not deleted
+    fs.mkdirSync(outsideLegacy, { recursive: true });
+    fs.writeFileSync(path.join(outsideLegacy, 'airtable-formula-rules.md'), 'theirs');
+    fs.symlinkSync(outsideLegacy, path.join(ws, '.clinerules'), 'junction');
+    const r = await installSkill('project', env);
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+    expect(r.failed.some(f => f.message.startsWith('refused:'))).toBe(true);
+    expect(fs.existsSync(path.join(outsideLegacy, 'airtable-formula-rules.md'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.agents', 'skills', 'airtable-formula', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.claude', 'skills', 'airtable-formula', 'SKILL.md'))).toBe(true);
   });
 
   it('check reports installed / outdated / missing / unsupported per IDE', async () => {

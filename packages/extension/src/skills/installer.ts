@@ -97,6 +97,7 @@ const IDE_BY_AGENT = new Map(
 );
 
 type DirStatus = { status: 'installed' | 'outdated' | 'missing'; version?: string };
+type Failure = { dir: string; message: string };
 const SEVERITY = { installed: 0, outdated: 1, missing: 2 } as const;
 
 function canonicalDir(scope: SkillScope, env: SkillEnv, ws: string): string {
@@ -166,12 +167,24 @@ function readStatus(dir: string, version: string): DirStatus {
   return { status: found === version ? 'installed' : 'outdated', version: found };
 }
 
+const TMP_PREFIX = `.${SKILL_DIR_NAME}.tmp-`;
+
+/** Best-effort removal of every `.airtable-formula.tmp-*` in `target`, whichever process (or crash) left it. */
+function clearTmpDirs(target: string): void {
+  let names: string[];
+  try { names = fs.readdirSync(target); } catch { return; }
+  for (const name of names.filter(n => n.startsWith(TMP_PREFIX))) {
+    try { fs.rmSync(path.join(target, name), { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
 /** Copy the skill into `<target>/.airtable-formula.tmp-<pid>`, stamp the version, then swap it in. */
 function installInto(target: string, env: SkillEnv): void {
   const final = path.join(target, SKILL_DIR_NAME);
-  const tmp = path.join(target, `.${SKILL_DIR_NAME}.tmp-${process.pid}`);
+  const tmp = path.join(target, `${TMP_PREFIX}${process.pid}`);
   try {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    clearTmpDirs(target);
+    fs.rmSync(tmp, { recursive: true, force: true });   // strict for our own: never copy into a leftover
     fs.mkdirSync(target, { recursive: true });
     fs.cpSync(env.skillSourceDir, tmp, { recursive: true });
     const skillMd = path.join(tmp, 'SKILL.md');
@@ -200,7 +213,7 @@ function cursorPointerRule(version: string): string {
 }
 
 /** Deletes `files` that exist; records what went and what could not. */
-function removeFiles(files: string[], removed: string[], failed: { dir: string; message: string }[]): void {
+function removeFiles(files: string[], removed: string[], failed: Failure[]): void {
   for (const file of files) {
     try {
       if (!fs.existsSync(file)) continue;
@@ -214,6 +227,34 @@ function removeFiles(files: string[], removed: string[], failed: { dir: string; 
 
 function legacyFiles(ws: string): string[] {
   return LEGACY_WORKSPACE_FILES.map(rel => path.join(ws, rel));
+}
+
+/**
+ * Project scope writes and deletes inside a repository the user did not author,
+ * and fs calls follow symbolic links (junctions on Windows), so a committed
+ * `.cursor/rules -> ~/.ssh` would redirect us outside the workspace. Walks `abs`
+ * from the workspace root one component at a time; returns the refusal message
+ * when an existing component is a link, else null. Global scope never calls this.
+ */
+function symlinkRefusal(ws: string, abs: string): string | null {
+  const rel = path.relative(ws, abs);
+  let cur = ws;
+  for (const part of rel.split(path.sep)) {
+    cur = path.join(cur, part);
+    let isLink: boolean;
+    try { isLink = fs.lstatSync(cur).isSymbolicLink(); } catch { return null; }   // missing: nothing below it exists
+    if (isLink) return `refused: ${rel.split(path.sep).join('/')} contains a symbolic link`;
+  }
+  return null;
+}
+
+/** `files` minus the ones symlinkRefusal rejects; rejections are recorded when `failed` is given. */
+function withoutSymlinks(ws: string, files: string[], failed?: Failure[]): string[] {
+  return files.filter(file => {
+    const refused = symlinkRefusal(ws, file);
+    if (refused && failed) failed.push({ dir: file, message: refused });
+    return !refused;
+  });
 }
 
 // ── exports ──────────────────────────────────────────────────────────────────
@@ -246,7 +287,7 @@ export function resolveTargets(scope: SkillScope, env: SkillEnv): { targets: str
   return { targets, byIde };
 }
 
-type InstallResult = { written: string[]; failed: { dir: string; message: string }[]; noWorkspace?: true };
+type InstallResult = { written: string[]; failed: Failure[]; noWorkspace?: true };
 let inflight: Promise<InstallResult> | null = null;
 
 /**
@@ -262,11 +303,14 @@ async function runInstall(scope: SkillScope, env: SkillEnv): Promise<InstallResu
   const ws = env.workspaceRoot;
   if (scope === 'project' && !ws) return { written: [], failed: [], noWorkspace: true };
   const written: string[] = [];
-  const failed: { dir: string; message: string }[] = [];
+  const failed: Failure[] = [];
   for (const target of resolveTargets(scope, env).targets) {
+    const final = path.join(target, SKILL_DIR_NAME);
+    const refused = scope === 'project' && ws ? symlinkRefusal(ws, final) : null;
+    if (refused) { failed.push({ dir: target, message: refused }); continue; }
     try {
       installInto(target, env);
-      written.push(path.join(target, SKILL_DIR_NAME));
+      written.push(final);
     } catch (err) {
       failed.push({ dir: target, message: messageOf(err) });
     }
@@ -274,14 +318,18 @@ async function runInstall(scope: SkillScope, env: SkillEnv): Promise<InstallResu
   if (scope === 'project' && ws) {
     if (env.detectedIdes.includes('cursor')) {
       const rule = path.join(ws, CURSOR_POINTER_RULE);
-      try {
-        fs.mkdirSync(path.dirname(rule), { recursive: true });
-        fs.writeFileSync(rule, cursorPointerRule(env.version), 'utf8');
-      } catch (err) {
-        failed.push({ dir: path.dirname(rule), message: messageOf(err) });
+      const refused = symlinkRefusal(ws, rule);
+      if (refused) failed.push({ dir: path.dirname(rule), message: refused });
+      else {
+        try {
+          fs.mkdirSync(path.dirname(rule), { recursive: true });
+          fs.writeFileSync(rule, cursorPointerRule(env.version), 'utf8');
+        } catch (err) {
+          failed.push({ dir: path.dirname(rule), message: messageOf(err) });
+        }
       }
     }
-    removeFiles(legacyFiles(ws), [], failed);
+    removeFiles(withoutSymlinks(ws, legacyFiles(ws)), [], failed);
   }
   return { written, failed };
 }
@@ -303,13 +351,16 @@ export async function checkSkill(scope: SkillScope, env: SkillEnv): Promise<Reco
 }
 
 /** Deletes `<target>/airtable-formula` (and, in project scope, the pointer rule and legacy files). Never the parents. */
-export async function removeSkill(scope: SkillScope, env: SkillEnv): Promise<{ removed: string[]; failed: { dir: string; message: string }[] }> {
+export async function removeSkill(scope: SkillScope, env: SkillEnv): Promise<{ removed: string[]; failed: Failure[] }> {
   const removed: string[] = [];
-  const failed: { dir: string; message: string }[] = [];
+  const failed: Failure[] = [];
   const ws = env.workspaceRoot;
-  if (scope === 'project' && !ws) return { removed, failed };
-  removeFiles(resolveTargets(scope, env).targets.map(t => path.join(t, SKILL_DIR_NAME)), removed, failed);
-  if (scope === 'project' && ws) removeFiles([path.join(ws, CURSOR_POINTER_RULE), ...legacyFiles(ws)], removed, failed);
+  const folders = resolveTargets(scope, env).targets.map(t => path.join(t, SKILL_DIR_NAME));
+  if (scope === 'global') removeFiles(folders, removed, failed);
+  else if (ws) {
+    removeFiles(withoutSymlinks(ws, [...folders, path.join(ws, CURSOR_POINTER_RULE)], failed), removed, failed);
+    removeFiles(withoutSymlinks(ws, legacyFiles(ws)), removed, failed);
+  }
   return { removed, failed };
 }
 
