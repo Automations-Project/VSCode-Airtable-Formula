@@ -46,7 +46,7 @@ describe('Editors outcomes', () => {
 
   it('reports a failed setup-all with the host error', async () => {
     seed({ ideStatuses: twoNeedWork });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     settleLast('action:setupAll', { ok: false, error: 'EACCES: Cursor settings are read-only' });
@@ -56,7 +56,7 @@ describe('Editors outcomes', () => {
 
   it('confirms setup-all only on success, and keeps saying so after its button goes away', async () => {
     seed({ ideStatuses: twoNeedWork });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     expect(statusText(region('Editors'))).not.toMatch(/set up/i);
@@ -70,7 +70,7 @@ describe('Editors outcomes', () => {
 
   it('reports a per-editor failure on that editor card only', async () => {
     seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor' }), ide({ ideId: 'windsurf', label: 'Windsurf' })] });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Update Cursor' }));
     settleLast('action:setupIde', { ok: false, error: 'ENOENT: mcp.json' });
@@ -81,7 +81,7 @@ describe('Editors outcomes', () => {
 
   it('confirms set up and remove on the card that ran them', async () => {
     seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', mcpConfigured: false })] });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     const cursor = () => screen.getByRole('article', { name: 'Cursor' });
 
     await userEvent.click(screen.getByRole('button', { name: 'Set up Cursor' }));
@@ -96,15 +96,15 @@ describe('Editors outcomes', () => {
 
   it('reports a skill install on the card that started it, and confirms an update after its button goes away', async () => {
     seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'missing' } })] });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     const cursor = () => screen.getByRole('article', { name: 'Cursor' });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Install skill' }));
+    await userEvent.click(within(cursor()).getByRole('button', { name: 'Install skill' }));
     settleLast('action:installSkill', { ok: false, error: 'EACCES: ~/.cursor/skills' });
     expect(within(cursor()).getByRole('alert')).toHaveTextContent('EACCES: ~/.cursor/skills');
 
     act(() => useStore.setState({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'outdated' } })] }));
-    await userEvent.click(screen.getByRole('button', { name: 'Update skill' }));
+    await userEvent.click(within(cursor()).getByRole('button', { name: 'Update skill' }));
     act(() => useStore.setState({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor' })] }));
     settleLast('action:installSkill', { ok: true });
     expect(screen.queryByRole('button', { name: 'Update skill' })).not.toBeInTheDocument();
@@ -116,7 +116,7 @@ describe('Editors outcomes', () => {
 describe('Local service outcomes', () => {
   it('reports a failed stop with the host error', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Stop service' }));
     settleLast('daemon:stop', { ok: false, error: 'Daemon did not exit.' });
@@ -126,7 +126,7 @@ describe('Local service outcomes', () => {
 
   it('confirms a restart request only once the host accepts it', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Restart service' }));
     expect(statusText(region('Local service'))).not.toMatch(/requested/);
@@ -137,7 +137,7 @@ describe('Local service outcomes', () => {
 
   it('says "Token rotated" only after the host confirms, and shows a failed rotation', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(within(region('Local service')).getByText('Safety'));
 
     await userEvent.click(screen.getByRole('button', { name: 'Rotate token' }));
@@ -155,7 +155,7 @@ describe('Local service outcomes', () => {
 
   it('says "Token copied" only after the host copied it', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(within(region('Local service')).getByText('Safety'));
 
     await userEvent.click(screen.getByRole('button', { name: 'Copy token' }));
@@ -169,7 +169,7 @@ describe('Local service outcomes', () => {
 describe('Remote access outcomes', () => {
   it('reports a failed disable with the host error', async () => {
     seed({ tunnel: { status: 'active', url: 'https://abc.trycloudflare.com', provider: 'cf-quick' } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Disable remote access' }));
     settleLast('tunnel:disable', { ok: false, error: 'connect ECONNREFUSED 127.0.0.1:8723' });
@@ -179,7 +179,7 @@ describe('Remote access outcomes', () => {
 
   it('keeps the typed ngrok token through a failed enable, and clears it on success', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: false } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: 'Remote access' }));
     await userEvent.type(screen.getByLabelText('ngrok auth token'), 'tok_secret');
 
@@ -198,7 +198,7 @@ describe('Remote access outcomes', () => {
 
   it('keeps a replacement ngrok token through a failed save and closes the field on success', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: true } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: 'Remote access' }));
     await userEvent.click(screen.getByRole('button', { name: 'Replace token' }));
     await userEvent.type(screen.getByLabelText('ngrok auth token'), 'new_tok');
@@ -225,7 +225,7 @@ describe('Official Airtable MCP outcomes', () => {
 
   it('keeps the typed PAT through a failed save and reports the host error', async () => {
     seed({ officialAirtable: { patSet: false, ideConfigured: {} } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await openOfficial();
     const field = screen.getByLabelText('Personal access token');
 
@@ -241,7 +241,7 @@ describe('Official Airtable MCP outcomes', () => {
 
   it('clears the typed PAT only once the host saved it', async () => {
     seed({ officialAirtable: { patSet: false, ideConfigured: {} } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await openOfficial();
 
     await userEvent.type(screen.getByLabelText('Personal access token'), 'pat123.secret');
@@ -254,7 +254,7 @@ describe('Official Airtable MCP outcomes', () => {
 
   it('reports a failed per-editor remove with the host error on that editor', async () => {
     seed({ officialAirtable: { patSet: true, ideConfigured: { cursor: true } } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await openOfficial();
 
     await userEvent.click(screen.getByRole('button', { name: 'Remove Cursor' }));
@@ -266,7 +266,7 @@ describe('Official Airtable MCP outcomes', () => {
 
   it('says "Token copied" only after the host copied the saved PAT', async () => {
     seed({ officialAirtable: { patSet: true, ideConfigured: { cursor: true } } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await openOfficial();
 
     await userEvent.click(screen.getByRole('button', { name: 'Copy saved token' }));

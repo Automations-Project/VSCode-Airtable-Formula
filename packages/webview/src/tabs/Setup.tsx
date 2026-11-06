@@ -1,6 +1,8 @@
 import React from 'react';
+import type { NavigateFn } from '../components/NextAction.js';
 import { ProgressField } from '../components/ProgressField.js';
 import { useStore } from '../store.js';
+import { AiSkillSection } from './setup/AiSkillSection.js';
 import { EditorsSection } from './setup/EditorsSection.js';
 import { LocalServiceSection } from './setup/LocalServiceSection.js';
 import { ManualConfigSection } from './setup/ManualConfigSection.js';
@@ -20,13 +22,14 @@ function BrowserDownloadNotice() {
   );
 }
 
-export function Setup() {
+export function Setup({ navigate }: { navigate: NavigateFn }) {
   return (
     <section className="tab-stack" aria-labelledby="setup-heading">
       <h1 id="setup-heading" className="tab-heading" tabIndex={-1}>Setup</h1>
       <BrowserDownloadNotice />
       <LocalServiceSection />
       <EditorsSection />
+      <AiSkillSection navigate={navigate} />
       <RemoteAccessSection />
       <ManualConfigSection />
       <OfficialAirtableSection />

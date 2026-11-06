@@ -44,14 +44,15 @@ function visibleSnippets(): HTMLElement[] {
 describe('Setup section order and focus targets', () => {
   beforeEach(() => seed());
 
-  it('renders the five sections in the locked order', () => {
-    render(<Setup />);
+  it('renders the six sections in the locked order', () => {
+    render(<Setup navigate={vi.fn()} />);
 
     const names = screen.getAllByRole('region').map(r => r.getAttribute('aria-labelledby'));
     expect(names).toEqual([
       'setup-heading',
       'local-service-heading',
       'editors-heading',
+      'ai-skill-heading',
       'remote-access-heading',
       'manual-config-heading',
       'official-airtable-heading',
@@ -59,7 +60,7 @@ describe('Setup section order and focus targets', () => {
   });
 
   it('exposes a focusable remote-access-heading for the Overview readiness link', () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const heading = document.getElementById('remote-access-heading');
     expect(heading).not.toBeNull();
@@ -73,7 +74,7 @@ describe('Setup section order and focus targets', () => {
 describe('Disclosure', () => {
   it('exposes aria-expanded and aria-controls on its trigger and toggles the panel', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     for (const name of ['Remote access', 'Manual configuration', 'Official Airtable MCP']) {
       const trigger = toggle(name);
@@ -91,7 +92,7 @@ describe('Disclosure', () => {
 
   it('is a keyboard operable native button inside a heading', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const trigger = toggle('Manual configuration');
     expect(trigger.tagName).toBe('BUTTON');
@@ -140,7 +141,7 @@ describe('FormField', () => {
 describe('Remote access', () => {
   it('is collapsed when disabled and healthy', () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Remote access')).toHaveAttribute('aria-expanded', 'false');
     expect(within(remote()).getByText('Disabled')).toBeInTheDocument();
@@ -150,7 +151,7 @@ describe('Remote access', () => {
     seed({
       tunnel: { status: 'error', url: null, provider: 'ngrok', ngrokAuthtokenSet: false, autoDisabledReason: null },
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     // Error auto-opens the section, so no click is needed (a click would collapse it).
     expect(toggle('Remote access')).toHaveAttribute('aria-expanded', 'true');
@@ -171,7 +172,7 @@ describe('Remote access', () => {
         provider: 'cf-quick', ngrokAuthtokenSet: false, autoDisabledReason: null,
       },
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Remote access')).toHaveAttribute('aria-expanded', 'true');
     // The summary's own state line; the panel also holds per-action result regions.
@@ -190,7 +191,7 @@ describe('Remote access', () => {
 
   it('leaves an auto-disabled tunnel collapsed: it is a note, not a repair', () => {
     seedAutoDisabled(60_000);
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Remote access')).toHaveAttribute('aria-expanded', 'false');
     expect(within(remote()).getByText('Auto-disabled')).toBeInTheDocument();
@@ -199,7 +200,7 @@ describe('Remote access', () => {
 
   it('explains auto-disable as status text, never an alert re-announced on every visit', async () => {
     seedAutoDisabled(60_000);
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     const note = within(remote()).getByText(/Remote access was turned off after/);
@@ -210,7 +211,7 @@ describe('Remote access', () => {
 
   it('omits the duration when the host reported no window', async () => {
     seedAutoDisabled(0);
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     const note = within(remote()).getByText(/Remote access was turned off after/);
@@ -220,7 +221,7 @@ describe('Remote access', () => {
 
   it('opens on demand and needs a healthy service before enabling controls', async () => {
     seed({ daemon: { running: false, healthy: false, port: null, port_lsp: null, uptime: null } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(toggle('Remote access'));
 
@@ -231,7 +232,7 @@ describe('Remote access', () => {
 
   it('treats a running but unhealthy service as not ready', async () => {
     seed({ daemon: { running: true, healthy: false } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(toggle('Remote access'));
 
@@ -240,7 +241,7 @@ describe('Remote access', () => {
 
   it('offers Cloudflare quick tunnel with no extra inputs and posts tunnel:enable', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     expect(screen.queryByLabelText(/auth token/i)).not.toBeInTheDocument();
@@ -254,7 +255,7 @@ describe('Remote access', () => {
 
   it('collects the ngrok token and reserved domain', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Tunnel provider' }), 'ngrok');
 
@@ -271,7 +272,7 @@ describe('Remote access', () => {
 
   it('shows a stored ngrok token as a status and lets it be replaced', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: true } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     expect(screen.queryByLabelText('ngrok auth token')).not.toBeInTheDocument();
@@ -291,7 +292,7 @@ describe('Remote access', () => {
 
   it('cancels replacing the ngrok token without posting', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: true } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     await userEvent.click(screen.getByRole('button', { name: 'Replace token' }));
@@ -304,7 +305,7 @@ describe('Remote access', () => {
 
   it('requires a hostname for a first-time named tunnel and posts it trimmed', async () => {
     seed({ tunnel: { provider: 'cf-named', namedTunnelHostname: null } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     const hostname = screen.getByLabelText('Hostname');
@@ -319,7 +320,7 @@ describe('Remote access', () => {
 
   it('shows the configured named hostname and makes a new one optional', async () => {
     seed({ tunnel: { provider: 'cf-named', namedTunnelHostname: 'mcp.example.com' } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     expect(within(remote()).getByText('Configured')).toBeVisible();
@@ -334,7 +335,7 @@ describe('Remote access', () => {
     seed({
       tunnel: { status: 'active', url: 'https://abc.trycloudflare.com', provider: 'cf-quick' },
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
 
     expect(screen.getByRole('combobox', { name: 'Tunnel provider' })).toBeDisabled();
@@ -355,7 +356,7 @@ describe('Remote access', () => {
     ['starting', { running: false, healthy: false, port: null, port_lsp: null, uptime: null }],
   ] as const)('keeps Disable reachable when the tunnel is %s and the service is down', async (status, daemon) => {
     seed({ tunnel: { status, url: null, provider: 'cf-quick' }, daemon });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.queryByRole('button', { name: 'Enable remote access' })).not.toBeInTheDocument();
     const disable = screen.getByRole('button', { name: 'Disable remote access' });
@@ -367,7 +368,7 @@ describe('Remote access', () => {
 
   it('still holds Disable while its own pending action is in flight', async () => {
     seed({ tunnel: { status: 'active', url: null, provider: 'cf-quick' }, daemon: { running: false, healthy: false } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Disable remote access' }));
 
@@ -378,7 +379,7 @@ describe('Remote access', () => {
 
   it('keeps Enable disabled while the service is not ready', async () => {
     seed({ tunnel: { status: 'disabled' }, daemon: { running: false, healthy: false, port: null, port_lsp: null, uptime: null } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     expect(screen.getByRole('button', { name: 'Enable remote access' })).toBeDisabled();
@@ -386,7 +387,7 @@ describe('Remote access', () => {
 
   it('clears the typed ngrok token once Enable succeeds, so Replace starts empty', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: false } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     const token = screen.getByLabelText('ngrok auth token');
@@ -410,7 +411,7 @@ describe('Remote access', () => {
 
   it('holds the pending guard in the store so it survives a remount and blocks duplicates', async () => {
     seed();
-    const first = render(<Setup />);
+    const first = render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
     await userEvent.click(screen.getByRole('button', { name: 'Enable remote access' }));
 
@@ -420,7 +421,7 @@ describe('Remote access', () => {
 
     // Tab switch: component-local state is lost, the store guard is not.
     first.unmount();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
     expect(screen.getByRole('button', { name: 'Enable remote access' })).toHaveAttribute('aria-disabled', 'true');
     await userEvent.click(screen.getByRole('button', { name: 'Enable remote access' }));
@@ -429,7 +430,7 @@ describe('Remote access', () => {
 
   it('does not lock tunnel controls on an unrelated pending action', async () => {
     useStore.setState({ ...makeDashboardState(), activeTab: 'setup', pendingActions: new Set(['unrelated']) });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
 
     expect(screen.getByRole('button', { name: 'Enable remote access' })).toBeEnabled();
@@ -441,7 +442,7 @@ describe('Browser download progress', () => {
     seed({
       auth: { status: 'chrome-missing', hasCredentials: false, browserDownload: { status: 'downloading', progress: 42 } },
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const bar = screen.getByRole('progressbar', { name: 'Bundled Chromium download' });
     expect(bar.tagName).toBe('PROGRESS');
@@ -452,14 +453,14 @@ describe('Browser download progress', () => {
 
   it('does not render progress when nothing is downloading', () => {
     seed({ auth: { status: 'chrome-missing', hasCredentials: false, browserDownload: { status: 'idle' } } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
   it('clamps out-of-range progress', () => {
     seed({ auth: { status: 'chrome-missing', hasCredentials: false, browserDownload: { status: 'downloading', progress: 180 } } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('progressbar', { name: 'Bundled Chromium download' })).toHaveAttribute('value', '100');
   });
@@ -469,7 +470,7 @@ describe('Manual configuration', () => {
   beforeEach(() => seed());
 
   it('is collapsed by default and exposes MCP and LSP as separate disclosures', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Manual configuration')).toHaveAttribute('aria-expanded', 'false');
     expect(visibleSnippets()).toHaveLength(0);
@@ -481,7 +482,7 @@ describe('Manual configuration', () => {
   });
 
   it('uses native selects named Client and Protocol and renders one snippet', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
 
@@ -496,7 +497,7 @@ describe('Manual configuration', () => {
   });
 
   it('switches the MCP snippet with the selects', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
 
@@ -509,7 +510,7 @@ describe('Manual configuration', () => {
 
   it('points HTTP snippets at the public tunnel URL when active', async () => {
     seed({ tunnel: { status: 'active', url: 'https://abc.trycloudflare.com' } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
 
@@ -518,7 +519,7 @@ describe('Manual configuration', () => {
   });
 
   it('shows one snippet at a time: opening LSP closes MCP', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
     await userEvent.click(toggle('LSP server'));
@@ -536,7 +537,7 @@ describe('Manual configuration', () => {
 
   it('copies the snippet to the clipboard and announces it', async () => {
     const user = userEvent.setup();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     await user.click(toggle('Manual configuration'));
     await user.click(toggle('MCP server'));
@@ -551,7 +552,7 @@ describe('Manual configuration', () => {
 
   it('does not claim success when the clipboard rejects', async () => {
     const user = userEvent.setup();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
     await user.click(toggle('Manual configuration'));
     await user.click(toggle('LSP server'));
@@ -563,7 +564,7 @@ describe('Manual configuration', () => {
   });
 
   it('renders the snippet as a scrollable code region without inline styles', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
 
@@ -575,7 +576,7 @@ describe('Manual configuration', () => {
   });
 
   it('keeps bearer-token copy in the Local service Safety disclosure only', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
 
@@ -585,7 +586,7 @@ describe('Manual configuration', () => {
   });
 
   it('shows no token placeholder note for stdio snippets', async () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
     await userEvent.selectOptions(within(manual()).getByRole('combobox', { name: 'Protocol' }), 'stdio');
@@ -595,7 +596,7 @@ describe('Manual configuration', () => {
 
   it('falls back to port placeholders without a daemon', async () => {
     seed({ daemon: undefined });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
 
@@ -606,7 +607,7 @@ describe('Manual configuration', () => {
 describe('Official Airtable MCP', () => {
   it('is collapsed by default and labelled as complementary', async () => {
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Official Airtable MCP')).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(toggle('Official Airtable MCP'));
@@ -615,7 +616,7 @@ describe('Official Airtable MCP', () => {
 
   it('labels the PAT field, never echoes a saved PAT, and posts Save', async () => {
     seed({ officialAirtable: { patSet: false, ideConfigured: {} } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Official Airtable MCP'));
 
     const field = screen.getByLabelText('Personal access token');
@@ -634,7 +635,7 @@ describe('Official Airtable MCP', () => {
 
   it('shows a saved PAT only as status text, with Update and Copy actions', async () => {
     seed({ officialAirtable: { patSet: true, ideConfigured: {} } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     // PAT saved but not applied anywhere is a configuration issue, so it opens.
     expect(toggle('Official Airtable MCP')).toHaveAttribute('aria-expanded', 'true');
@@ -661,7 +662,7 @@ describe('Official Airtable MCP', () => {
       ],
       officialAirtable: { patSet: true, ideConfigured: { cursor: true, cline: false } },
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     // A saved PAT with one editor already configured is healthy, so it starts collapsed.
     expect(toggle('Official Airtable MCP')).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(toggle('Official Airtable MCP'));
@@ -679,7 +680,7 @@ describe('Official Airtable MCP', () => {
 
   it('disables Configure until a PAT is saved', async () => {
     seed({ officialAirtable: { patSet: false, ideConfigured: {} } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Official Airtable MCP'));
 
     expect(screen.getByRole('button', { name: 'Configure Cursor' })).toBeDisabled();
@@ -688,14 +689,14 @@ describe('Official Airtable MCP', () => {
 
   it('blocks duplicate configure actions through the store-held pending set', async () => {
     seed({ officialAirtable: { patSet: true, ideConfigured: { cursor: false } } });
-    const first = render(<Setup />);
+    const first = render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Configure Cursor' }));
     expect(useStore.getState().pendingOfficialActions.size).toBe(1);
     expect(screen.getByRole('button', { name: 'Configure Cursor' })).toHaveAttribute('aria-disabled', 'true');
 
     first.unmount();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Configure Cursor' })).toHaveAttribute('aria-disabled', 'true');
     await userEvent.click(screen.getByRole('button', { name: 'Configure Cursor' }));
     expect(posted('action:configure-official-airtable')).toHaveLength(1);
@@ -713,7 +714,7 @@ describe('Official Airtable MCP', () => {
       activeTab: 'setup',
       pendingActions: new Set(['unrelated']),
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Configure Cursor' })).toBeEnabled();
   });
@@ -721,7 +722,7 @@ describe('Official Airtable MCP', () => {
   it('selects the official snippet client with a native select and copies it', async () => {
     const user = userEvent.setup();
     seed({ officialAirtable: { patSet: false, ideConfigured: {} } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     const writeText = vi.spyOn(navigator.clipboard, 'writeText');
     await user.click(toggle('Official Airtable MCP'));
 
@@ -739,14 +740,14 @@ describe('Official Airtable MCP', () => {
 
   it('opens when a configured editor has no saved PAT', () => {
     seed({ officialAirtable: { patSet: false, ideConfigured: { cursor: true } } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Official Airtable MCP')).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('stays collapsed when a PAT is saved and an editor is configured', () => {
     seed({ officialAirtable: { patSet: true, ideConfigured: { cursor: true } } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(toggle('Official Airtable MCP')).toHaveAttribute('aria-expanded', 'false');
   });
@@ -755,7 +756,7 @@ describe('Official Airtable MCP', () => {
 describe('Narrow-width form markup', () => {
   it('uses plain wrapping form rows with no forced column roles or inline styles', async () => {
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: false } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Remote access'));
     await userEvent.click(toggle('Official Airtable MCP'));
 
@@ -782,7 +783,7 @@ describe('Setup accessibility', () => {
       officialAirtable: { patSet: false, ideConfigured: {} },
       auth: { status: 'chrome-missing', hasCredentials: false, browserDownload: { status: 'downloading', progress: 10 } },
     });
-    const { container } = render(<Setup />);
+    const { container } = render(<Setup navigate={vi.fn()} />);
     await userEvent.click(toggle('Manual configuration'));
     await userEvent.click(toggle('MCP server'));
     await userEvent.click(toggle('Official Airtable MCP'));

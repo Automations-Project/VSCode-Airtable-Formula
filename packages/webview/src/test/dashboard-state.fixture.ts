@@ -1,4 +1,5 @@
 import type {
+  AiSkillClient,
   AuthState,
   DaemonStatusInfo,
   DashboardState,
@@ -16,13 +17,23 @@ type SettingsOverride = Omit<Partial<SettingsSnapshot>, 'mcp' | 'ai' | 'formula'
   debug?: Partial<SettingsSnapshot['debug']>;
 };
 
-export interface DashboardStateOverrides extends Omit<Partial<DashboardState>, 'settings' | 'auth' | 'daemon' | 'tunnel' | 'ideStatuses'> {
+export interface DashboardStateOverrides extends Omit<Partial<DashboardState>, 'settings' | 'auth' | 'daemon' | 'tunnel' | 'ideStatuses' | 'versions'> {
   settings?: SettingsOverride;
+  versions?: Partial<DashboardState['versions']>;
   auth?: Partial<AuthState>;
   daemon?: Partial<DaemonStatusInfo> | undefined;
   tunnel?: Partial<TunnelState> | undefined;
   ideStatuses?: IdeStatus[];
 }
+
+/** One of each mark and state: the standard folder, a client with our logo, a monogram, and both absent groups. */
+export const CLIENTS: AiSkillClient[] = [
+  { id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'installed', canonical: true },
+  { id: 'cursor', name: 'Cursor', ideId: 'cursor', dir: '~/.cursor/skills', status: 'installed', canonical: true },
+  { id: 'gemini-cli', name: 'Gemini CLI', dir: '~/.gemini/skills', status: 'missing', canonical: true },
+  { id: 'codex', name: 'Codex', dir: '~/.agents/skills', status: 'absent', canonical: true },
+  { id: 'devin', name: 'Devin', dir: '~/.devin/skills', status: 'absent', canonical: false },
+];
 
 export function makeDashboardState(overrides: DashboardStateOverrides = {}): DashboardState {
   const settings: SettingsSnapshot = {
@@ -60,7 +71,7 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
     ideStatuses: overrides.ideStatuses ?? ideStatuses,
     versions: { extension: '2.1.32', mcpServerBundled: '2.4.15', ...overrides.versions },
     aiSkillCount: overrides.aiSkillCount ?? 1,
-    aiSkillClients: overrides.aiSkillClients ?? [],
+    aiSkillClients: overrides.aiSkillClients ?? CLIENTS,
     loading: overrides.loading ?? false,
     settings: {
       ...settings,

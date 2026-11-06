@@ -45,7 +45,7 @@ describe('Setup focus targets', () => {
   beforeEach(() => seed());
 
   it('exposes focusable headings for every navigate() landing', () => {
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     for (const id of ['setup-heading', 'local-service-heading', 'editors-heading']) {
       const heading = document.getElementById(id);
@@ -64,7 +64,7 @@ describe('Local service transport', () => {
   it('does not render daemon lifecycle controls in direct stdio mode', () => {
     seed({ settings: { mcp: { useDaemon: false } }, daemon: undefined });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('heading', { name: 'Local service' })).toBeVisible();
     expect(screen.getByText('Direct stdio mode')).toBeVisible();
@@ -78,7 +78,7 @@ describe('Local service transport', () => {
   it('explains that each client owns its process in stdio mode', () => {
     seed({ settings: { mcp: { useDaemon: false } }, daemon: undefined });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(service()).getByText(/each (editor|client)[^.]*own process/i)).toBeVisible();
   });
@@ -86,7 +86,7 @@ describe('Local service transport', () => {
   it('reports a healthy running service with role=status', () => {
     seed();
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(serviceStatus()).toHaveTextContent('Running and healthy');
     expect(within(service()).queryByRole('alert')).not.toBeInTheDocument();
@@ -95,7 +95,7 @@ describe('Local service transport', () => {
   it('reports an unhealthy running service with role=alert', () => {
     seed({ daemon: { running: true, healthy: false } });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(service()).getByRole('alert')).toHaveTextContent(/failed (its )?health check/i);
     expect(serviceStatus()).toHaveTextContent('Running, not healthy');
@@ -104,7 +104,7 @@ describe('Local service transport', () => {
   it('offers Start only when stopped and posts daemon:start', async () => {
     seed({ daemon: { running: false, healthy: false, port: null, port_lsp: null, uptime: null } });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(serviceStatus()).toHaveTextContent('Stopped');
     expect(screen.queryByRole('button', { name: 'Restart service' })).not.toBeInTheDocument();
@@ -116,7 +116,7 @@ describe('Local service transport', () => {
   it('offers Restart and Stop when running', async () => {
     seed();
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.queryByRole('button', { name: 'Start service' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Restart service' }));
@@ -130,7 +130,7 @@ describe('Local service transport', () => {
   it('posts daemon:stop from Stop service', async () => {
     seed();
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Stop service' }));
     expect(posted('daemon:stop')).toHaveLength(1);
@@ -139,7 +139,7 @@ describe('Local service transport', () => {
   it('shows ports and uptime only when present', () => {
     seed({ daemon: { port: 8723, port_lsp: null, uptime: null } });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(service()).getByText('MCP port')).toBeVisible();
     expect(within(service()).getByText('8723')).toBeVisible();
@@ -150,7 +150,7 @@ describe('Local service transport', () => {
   it('shows LSP port and uptime when the daemon reports them', () => {
     seed({ daemon: { port: 8723, port_lsp: 8724, uptime: 2 * 3_600_000 + 15 * 60_000 } });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(service()).getByText('LSP port')).toBeVisible();
     expect(within(service()).getByText('8724')).toBeVisible();
@@ -165,7 +165,7 @@ describe('Local service transport', () => {
       pendingActions: new Set(['abc123']),
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Restart service' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Stop service' })).toHaveAttribute('aria-disabled', 'true');
@@ -181,7 +181,7 @@ describe('Local service transport', () => {
       pendingActions: new Set(['unrelated']),
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Restart service' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Stop service' })).toBeEnabled();
@@ -191,7 +191,7 @@ describe('Local service transport', () => {
   it('keeps bearer-token copy and rotation behind a Safety disclosure', async () => {
     seed();
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const safety = within(service()).getByText('Safety');
     expect(safety.closest('details')).not.toHaveAttribute('open');
@@ -212,7 +212,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const cursor = within(editors()).getByRole('heading', { name: 'Cursor' });
     const zed = within(editors()).getByRole('heading', { name: 'Zed' });
@@ -227,7 +227,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const summary = within(editors()).getByText('Show available editors');
     expect(summary.closest('details')).not.toHaveAttribute('open');
@@ -243,7 +243,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     expect(posted('action:setupAll')).toHaveLength(1);
@@ -257,7 +257,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const button = screen.getByRole('button', { name: 'Setup all detected editors' });
     await userEvent.click(button);
@@ -281,10 +281,10 @@ describe('Editors section', () => {
       ],
     });
 
-    const first = render(<Setup />);
+    const first = render(<Setup navigate={vi.fn()} />);
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     first.unmount();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const button = screen.getByRole('button', { name: 'Setup all detected editors' });
     expect(button).toHaveAttribute('aria-disabled', 'true');
@@ -310,7 +310,7 @@ describe('Editors section', () => {
     expect(screen.getByRole('button', { name: 'Set up all editors' })).toHaveAttribute('aria-disabled', 'true');
     overview.unmount();
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toHaveAttribute('aria-disabled', 'true');
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     expect(posted('action:setupAll')).toHaveLength(1);
@@ -348,7 +348,7 @@ describe('Editors section', () => {
         ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
       ],
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Setup all detected editors' }));
     const setUpCursor = screen.getByRole('button', { name: 'Set up Cursor' });
@@ -372,7 +372,7 @@ describe('Editors section', () => {
       pendingActions: new Set(['unrelated']),
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Setup all detected editors' })).toBeEnabled();
   });
@@ -385,7 +385,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.queryByRole('button', { name: 'Setup all detected editors' })).not.toBeInTheDocument();
   });
@@ -398,7 +398,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(within(editors()).getByText('Show available editors'));
     await userEvent.click(screen.getByRole('button', { name: 'Docs for Zed' }));
@@ -416,7 +416,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(card('Cursor')).getByText('Ready')).toBeVisible();
     expect(within(card('Claude Code')).getByText('Needs setup')).toBeVisible();
@@ -429,7 +429,7 @@ describe('Editors section', () => {
       ideStatuses: [ide({ ideId: 'opencode', label: 'OpenCode', mcpConfigured: true, lspConfigured: false })],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const opencode = within(card('OpenCode'));
     expect(opencode.getByText('MCP configured')).toBeVisible();
@@ -447,7 +447,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const cursor = within(card('Cursor'));
     expect(cursor.getByText('AI skill')).toBeVisible();
@@ -477,7 +477,7 @@ describe('Editors section', () => {
       ideStatuses: [ide({ ideId: 'claude-desktop', label: 'Claude Desktop', aiSkill: { status: 'unsupported' } })],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(card('Claude Desktop')).queryByText('AI skill')).not.toBeInTheDocument();
     expect(within(card('Claude Desktop')).getByText('Ready')).toBeVisible();
@@ -488,7 +488,7 @@ describe('Editors section', () => {
       ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', mcpServerHealthy: false })],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(card('Cursor')).getByText('Server path missing')).toBeVisible();
     expect(within(card('Cursor')).getByText('Needs setup')).toBeVisible();
@@ -502,7 +502,7 @@ describe('Editors section', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.queryByRole('button', { name: 'Remove Windsurf configuration' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Set up Windsurf' }));
@@ -514,7 +514,7 @@ describe('Editors section', () => {
   it('posts setupIde from Update for a configured editor', async () => {
     seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor' })] });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Update Cursor' }));
     expect(posted('action:setupIde').map(message => message.ideId)).toEqual(['cursor']);
@@ -533,7 +533,7 @@ describe('Editors section', () => {
       pendingActions: new Set(['abc123']),
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Update Cursor' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Update Windsurf' })).not.toHaveAttribute('aria-disabled');
@@ -545,7 +545,7 @@ describe('Editors section', () => {
   it('shows a static scanning note, not a skeleton, while no editors are known', () => {
     seed({ ideStatuses: [] });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     expect(within(editors()).getByText('Scanning for installed editors…')).toBeVisible();
   });
@@ -560,7 +560,7 @@ describe('Setup service and editors markup', () => {
       ],
     });
 
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     for (const region of [service(), editors()]) {
       expect(region.querySelectorAll('[style]')).toHaveLength(0);
@@ -574,7 +574,7 @@ describe('Setup service and editors markup', () => {
         ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
       ],
     });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     // Scoped to the migrated sections; the remaining Setup content moves in later tasks.
     for (const region of [service(), editors()]) {
