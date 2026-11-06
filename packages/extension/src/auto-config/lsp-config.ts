@@ -6,39 +6,6 @@ import { IDE_CONFIGS } from './ide-configs.js';
 import { readConfigFile, writeConfigAtomic } from './ide-detection.js';
 
 const LSP_SERVER_KEY = 'airtable-lsp';
-const LSP_NPX_CMD   = 'npx';
-const LSP_NPX_ARGS  = ['-y', 'airtable-user-lsp', '--stdio'];
-
-// ── Zed: JSON merge into settings.json ─────────────────────────────────────
-
-async function configureZed(configPath: string): Promise<void> {
-  const existing = await readConfigFile(configPath);
-  const lsp = (existing['lsp'] ?? {}) as Record<string, unknown>;
-  lsp[LSP_SERVER_KEY] = {
-    binary: { path: LSP_NPX_CMD, arguments: LSP_NPX_ARGS },
-  };
-  existing['lsp'] = lsp;
-  await writeConfigAtomic(configPath, existing);
-}
-
-async function unconfigureZed(configPath: string): Promise<void> {
-  const existing = await readConfigFile(configPath);
-  const lsp = existing['lsp'] as Record<string, unknown> | undefined;
-  if (lsp) {
-    delete lsp[LSP_SERVER_KEY];
-    if (Object.keys(lsp).length === 0) delete existing['lsp'];
-    else existing['lsp'] = lsp;
-  }
-  await writeConfigAtomic(configPath, existing);
-}
-
-async function isZedConfigured(configPath: string): Promise<boolean> {
-  try {
-    const existing = await readConfigFile(configPath);
-    const lsp = existing['lsp'] as Record<string, unknown> | undefined;
-    return typeof lsp === 'object' && lsp !== null && LSP_SERVER_KEY in lsp;
-  } catch { return false; }
-}
 
 // ── Helix: TOML append to languages.toml ────────────────────────────────────
 
@@ -263,7 +230,7 @@ export async function configureLspForIde(ideId: IdeId): Promise<void> {
   if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
   switch (cfg.lspConfigFormat) {
     case 'json-merge':
-      return ideId === 'opencode' ? configureOpenCode(cfg.lspConfigPath) : configureZed(cfg.lspConfigPath);
+      return configureOpenCode(cfg.lspConfigPath);
     case 'toml-append':  return configureHelix(cfg.lspConfigPath);
     case 'lua-write':    return configureNeovim(cfg.lspConfigPath);
   }
@@ -274,7 +241,7 @@ export async function unconfigureLspForIde(ideId: IdeId): Promise<void> {
   if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
   switch (cfg.lspConfigFormat) {
     case 'json-merge':
-      return ideId === 'opencode' ? unconfigureOpenCode(cfg.lspConfigPath) : unconfigureZed(cfg.lspConfigPath);
+      return unconfigureOpenCode(cfg.lspConfigPath);
     case 'toml-append':  return unconfigureHelix(cfg.lspConfigPath);
     case 'lua-write':    return unconfigureNeovim(cfg.lspConfigPath);
   }
@@ -285,7 +252,7 @@ export async function isLspConfigured(ideId: IdeId): Promise<boolean> {
   if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return false;
   switch (cfg.lspConfigFormat) {
     case 'json-merge':
-      return ideId === 'opencode' ? isOpenCodeLspConfigured(cfg.lspConfigPath) : isZedConfigured(cfg.lspConfigPath);
+      return isOpenCodeLspConfigured(cfg.lspConfigPath);
     case 'toml-append':  return isHelixConfigured(cfg.lspConfigPath);
     case 'lua-write':    return isNeovimConfigured(cfg.lspConfigPath);
   }

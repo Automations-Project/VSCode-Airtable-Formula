@@ -15,7 +15,7 @@ vi.mock('vscode', () => ({
   },
 }));
 
-import { buildNpxServerEntry, buildServerEntry } from '../auto-config/index.js';
+import { buildNpxServerEntry, buildServerEntry, getAllIdeStatuses, isLspConfigured, IDE_CONFIGS } from '../auto-config/index.js';
 
 describe('mergeServerEntry', () => {
   it('adds server to empty config', () => {
@@ -203,5 +203,23 @@ describe('writeConfigAtomic (H10)', () => {
     // The sandbox must not contain any lingering .tmp files.
     const lingering = fs.readdirSync(sandbox).filter(f => f.endsWith('.tmp'));
     expect(lingering).toEqual([]);
+  });
+});
+
+// Zed starts only language servers that a Zed extension (or a built-in adapter)
+// registers. The `lsp.airtable-lsp` settings entry Setup used to write was never
+// started: zed-industries/zed#52653 ("not planned").
+describe('Zed has no LSP auto-config', () => {
+  it('is not an LSP target', async () => {
+    expect(IDE_CONFIGS.zed.capabilities).toEqual([]);
+    expect(IDE_CONFIGS.zed.lspConfigPath).toBeUndefined();
+    expect(await isLspConfigured('zed')).toBe(false);
+  });
+
+  it('is not offered in Setup, like any editor with nothing to configure', async () => {
+    const ids = (await getAllIdeStatuses()).map(status => status.ideId);
+    expect(ids).not.toContain('zed');
+    expect(ids).toContain('helix');
+    for (const id of ids) expect(IDE_CONFIGS[id].capabilities.length).toBeGreaterThan(0);
   });
 });
