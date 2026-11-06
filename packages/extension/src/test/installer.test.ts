@@ -69,15 +69,18 @@ describe('skill installer', () => {
     expect(r.written).toContain(path.join(home, '.cursor', 'skills', 'airtable-formula'));
   });
 
-  it('install is atomic: replaces an old folder wholesale and clears a stale tmp dir', async () => {
+  it('install is atomic: replaces an old folder wholesale and clears stale tmp dirs, never a live process\'s', async () => {
     const target = path.join(home, '.cursor', 'skills');
     fs.mkdirSync(path.join(target, 'airtable-formula'), { recursive: true });
     fs.writeFileSync(path.join(target, 'airtable-formula', 'AGENT.md'), 'old');
     fs.mkdirSync(path.join(target, `.airtable-formula.tmp-${process.pid}`), { recursive: true });
-    fs.mkdirSync(path.join(target, '.airtable-formula.tmp-424242'), { recursive: true });   // left by a crashed install (another pid)
+    fs.mkdirSync(path.join(target, '.airtable-formula.tmp-424242'), { recursive: true });   // left by a crashed install (dead pid)
+    const live = `.airtable-formula.tmp-old-${process.ppid}`;   // another window's swap in flight (its pid is alive)
+    fs.mkdirSync(path.join(target, live), { recursive: true });
     await installSkill('global', env);
     expect(fs.existsSync(path.join(target, 'airtable-formula', 'AGENT.md'))).toBe(false);
-    expect(fs.readdirSync(target)).toEqual(['airtable-formula']);
+    expect(fs.readFileSync(path.join(target, 'airtable-formula', 'SKILL.md'), 'utf8')).toContain('version: 2.3.0');
+    expect(fs.readdirSync(target).sort()).toEqual([live, 'airtable-formula'].sort());
   });
 
   it('install keeps the previous folder when swapping in the new one fails', async () => {

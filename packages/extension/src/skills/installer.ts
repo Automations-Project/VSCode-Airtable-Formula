@@ -155,12 +155,24 @@ function readStatus(dir: string, version: string): DirStatus {
 }
 
 const TMP_PREFIX = `.${SKILL_DIR_NAME}.tmp-`;
+const TMP_PID = /^\.airtable-formula\.tmp-(?:old-)?(\d+)$/;
 
-/** Best-effort removal of every `.airtable-formula.tmp-*` in `target`, whichever process (or crash) left it. */
+/** True while `pid` runs. EPERM means it exists but is not ours to signal: still alive. */
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+/**
+ * Best-effort removal of `.airtable-formula.tmp-*` leftovers in `target`. An entry named for another
+ * live pid is that process's swap in flight (two VS Code windows installing into the same dir) and is
+ * left alone; ours, a dead pid's, or one with no pid in its name are removed.
+ */
 function clearTmpDirs(target: string): void {
   let names: string[];
   try { names = fs.readdirSync(target); } catch { return; }
   for (const name of names.filter(n => n.startsWith(TMP_PREFIX))) {
+    const pid = Number(TMP_PID.exec(name)?.[1]);
+    if (pid && pid !== process.pid && pidAlive(pid)) continue;
     try { fs.rmSync(path.join(target, name), { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
@@ -174,7 +186,7 @@ function clearTmpDirs(target: string): void {
 function installInto(target: string, env: SkillEnv): void {
   const final = path.join(target, SKILL_DIR_NAME);
   const tmp = path.join(target, `${TMP_PREFIX}${process.pid}`);
-  const old = path.join(target, `${TMP_PREFIX}old-${process.pid}`);   // the prefix sweep collects a leftover
+  const old = path.join(target, `${TMP_PREFIX}old-${process.pid}`);   // a leftover: our next sweep, or any once this pid is gone
   try {
     clearTmpDirs(target);
     fs.rmSync(tmp, { recursive: true, force: true });   // strict for our own: never copy into a leftover
