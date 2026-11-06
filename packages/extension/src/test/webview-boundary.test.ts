@@ -71,7 +71,21 @@ const dependencies = vi.hoisted(() => ({
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
   readdir: vi.fn(async () => []),
+  ideConfigs: {} as Record<string, { capabilities: string[] }>,
 }));
+
+const skill = vi.hoisted(() => {
+  const env = { home: '/h', workspaceRoot: null, version: '0', skillSourceDir: '/s', detectedIdes: [] };
+  return {
+    env,
+    scope: 'global' as 'global' | 'project',   // ai.installScope the settings mock answers
+    installSkill: vi.fn(async () => ({ written: [], failed: [] })),
+    checkSkill: vi.fn(async () => ({})),
+    removeSkill: vi.fn(async () => ({ removed: [], failed: [] })),
+    listSkillClients: vi.fn(async () => [{ id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'missing', canonical: true }]),
+    skillEnv: vi.fn(async () => env),
+  };
+});
 
 vi.mock('../auto-config/index.js', () => ({
   getAllIdeStatuses: dependencies.getAllIdeStatuses,
@@ -83,8 +97,14 @@ vi.mock('../auto-config/index.js', () => ({
   unconfigureOfficialAirtableMcp: vi.fn(),
   isOfficialAirtableConfigured: vi.fn(),
 }));
-vi.mock('../auto-config/ide-configs.js', () => ({ IDE_CONFIGS: {} }));
-vi.mock('../skills/installer.js', () => ({ installAiFiles: vi.fn(), checkAiFiles: vi.fn() }));
+vi.mock('../auto-config/ide-configs.js', () => ({ IDE_CONFIGS: dependencies.ideConfigs }));
+vi.mock('../skills/installer.js', () => ({
+  installSkill: skill.installSkill,
+  checkSkill: skill.checkSkill,
+  removeSkill: skill.removeSkill,
+  listSkillClients: skill.listSkillClients,
+}));
+vi.mock('../skills/host-env.js', () => ({ skillEnv: skill.skillEnv }));
 vi.mock('../settings.js', () => ({
   getSettings: () => ({
     mcp: {
@@ -97,7 +117,7 @@ vi.mock('../settings.js', () => ({
       httpClient: 'fetch',
       browserIdleParkMinutes: 30,
     },
-    ai: { autoInstallFiles: true, includeAgents: false },
+    ai: { autoInstallFiles: true, installScope: skill.scope },
     formula: { formatterVersion: 'v2' },
     script: { beautifyStyle: 'default', minifyLevel: 'standard' },
     auth: {
@@ -191,7 +211,9 @@ describe('DashboardProvider webview trust boundary', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    skill.scope = 'global';
     vscodeMock.configValues.clear();
+    for (const key of Object.keys(dependencies.ideConfigs)) delete dependencies.ideConfigs[key];
     dependencies.stat.mockImplementation(async (itemPath: string) => ({
       isDirectory: () => itemPath.endsWith('.chrome-profile') || itemPath.endsWith('chromium'),
       size: 12,
@@ -972,5 +994,91 @@ describe('DashboardProvider webview trust boundary', () => {
       ok: true,
       value: stateMessage,
     });
+  });
+
+  it('action:installSkill runs one scope-wide install and answers the action', async () => {
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:installSkill', id: 'skill1' });
+
+    await waitForResult('skill1');
+    expect(skill.installSkill).toHaveBeenCalledOnce();
+    expect(skill.installSkill).toHaveBeenCalledWith('global', skill.env);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'skill1', ok: true });
+  });
+
+  it('action:removeSkill runs removeSkill with the configured scope', async () => {
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:removeSkill', id: 'skill2' });
+
+    await waitForResult('skill2');
+    expect(skill.removeSkill).toHaveBeenCalledOnce();
+    expect(skill.removeSkill).toHaveBeenCalledWith('global', skill.env);
+    expect(skill.installSkill).not.toHaveBeenCalled();
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'skill2', ok: true });
+  });
+
+  it('action:removeSkill in project scope with no folder open warns instead of answering removed', async () => {
+    skill.scope = 'project';
+    skill.skillEnv.mockResolvedValueOnce({ ...skill.env, workspaceRoot: null });
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:removeSkill', id: 'skill3' });
+
+    await waitForResult('skill3');
+    expect(skill.removeSkill).not.toHaveBeenCalled();
+    const warning = 'Open a folder to install the AI skill into a project, or switch airtableFormula.ai.installScope to global.';
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(warning);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'skill3', ok: false, error: warning });
+  });
+
+  it('action:setupAll installs the skill once, not once per IDE', async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'] };
+    dependencies.ideConfigs['claude-code'] = { capabilities: ['mcp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', detected: true },
+      { ideId: 'claude-code', detected: true },
+    ]);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup1' });
+
+    await waitForResult('setup1');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(2);
+    expect(skill.installSkill).toHaveBeenCalledOnce();
+    expect(skill.installSkill).toHaveBeenCalledWith('global', skill.env);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup1', ok: true });
+  });
+
+  it('state:update carries the client ledger from listSkillClients', async () => {
+    const { provider } = mountProvider();
+
+    await provider.pushState();
+
+    const stateMessage = vscodeMock.postMessage.mock.calls
+      .map(call => call[0])
+      .find(message => message.type === 'state:update');
+    expect(stateMessage.payload.aiSkillClients).toEqual([
+      { id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'missing', canonical: true },
+    ]);
+    expect(skill.listSkillClients).toHaveBeenCalledWith('global', skill.env);
+    expect(stateMessage.payload.settings.ai).toEqual({ autoInstallFiles: true, installScope: 'global' });
+    expect(parseExtensionMessage(stateMessage)).toEqual({ ok: true, value: stateMessage });
+  });
+
+  it('persists ai.installScope through the generic setting arm', async () => {
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'setting:change', id: 'scope1', change: { key: 'ai.installScope', value: 'project' } });
+
+    await waitForResult('scope1');
+    expect(dependencies.updateWebviewSetting).toHaveBeenCalledWith({ key: 'ai.installScope', value: 'project' });
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'scope1', ok: true });
   });
 });

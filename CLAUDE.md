@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-VS Code extension for Airtable formula editing with MCP server integration and AI skills installer. Published as `airtable-formula` by `Nskha` on the VS Code Marketplace.
+VS Code extension for Airtable formula editing with MCP server integration and AI skill installer. Published as `airtable-formula` by `Nskha` on the VS Code Marketplace.
 
 ## Commands
 
@@ -23,6 +23,8 @@ pnpm package:targets      # package + verify ALL 8 platform-specific .vsix (rele
 pnpm assert:vsix          # verify the .node binaries inside artifacts/*.vsix (byte-exact vs pins)
 pnpm check:binary-digests # re-derive the native-binary pins from the registry and diff (network)
 pnpm record:binary-digests # rewrite scripts/native-binary-digests.json — only after an impit/ngrok bump
+pnpm generate:agent-dirs  # regenerate packages/extension/src/skills/agent-dirs.json from the pinned vercel-labs/skills
+pnpm check:agent-dirs     # diff agent-dirs.json against upstream (network; its own CI step)
 ```
 
 ### Per-package
@@ -164,8 +166,14 @@ Key subsystems:
 - **Auth manager** — `src/mcp/auth-manager.ts` manages credential storage (VS Code SecretStorage), session health checks, programmatic login, auto-refresh timer, and browser detection/download orchestration.
 - **Browser download** — `src/mcp/browser-download.ts` spawns `patchright-core install chromium` on demand for users without system Chrome/Edge/Chromium.
 - **Auto-config** — `src/auto-config/` detects installed IDEs (Cursor, Windsurf, Claude Desktop/Code, Cline, Amp) and writes MCP server entries to their config files.
-- **Skills installer** — `src/skills/` installs AI-specific rules/skills/workflows into IDE config directories.
+- **AI skill installer** — `src/skills/` installs ONE Agent-Skills-standard folder, `airtable-formula/` (`SKILL.md` + `references/{rules,functions,mcp-tools,workflows}.md`), into every AI client's skills directory. See "AI skill installer" below.
 - **Formatter** — `src/commands/` provides beautify and minify commands using vendored engines in `src/vendor/`.
+
+#### AI skill installer
+
+`src/skills/installer.ts` exposes `installSkill` / `checkSkill` / `removeSkill` / `listSkillClients(scope, env)` over an explicit `SkillEnv` (home, workspace, version, skill source dir, detected IDEs). Targets = the canonical dir (`~/.agents/skills` global / `.agents/skills` project) + the dirs of detected editors (`IDE_TO_AGENTS`) + (global only) any table agent whose global dir's parent exists; each gets `<dir>/airtable-formula/`. Install is atomic per target (tmp copy, rename-aside swap, stale `.airtable-formula.tmp-*` cleanup, rollback on failure); `check` parses `metadata.version` in `SKILL.md` → `installed` / `outdated` / `missing` (`unsupported` for claude-desktop/helix/neovim); `remove` deletes only our folder. Project scope only: a Cursor pointer rule `.cursor/rules/airtable-formula.mdc` and deletion of the 11 legacy workspace files; project-scope writes refuse any path containing a symlink, and the host passes no workspace when VS Code's workspace trust is off. The skill source is `dist/skills/airtable-formula` (copied at build; `scripts/assert-vsix-binaries.mjs` check 7 asserts `SKILL.md` is in every VSIX; `scripts/check-tool-sync.mjs` reads the canonical tool count from `references/mcp-tools.md` and `references/rules.md`).
+
+**Directory table is generated.** `src/skills/agent-dirs.json` (`{ id, name, project, global, universal, readsCanonicalGlobally }`) is produced by `scripts/generate-agent-dirs.mjs` from the pinned upstream `vercel-labs/skills` `src/agents.ts` (`SKILLS_REF`, a commit SHA; skip list `['openclaw', 'reasonix']`; `MIN_AGENTS = 70`; today 77 agents + 2 skipped). `pnpm generate:agent-dirs` rewrites it; `pnpm check:agent-dirs` diffs it against upstream (network — its own CI step, NOT part of `pnpm test`; the parser's offline unit test runs in `pnpm test:scripts`). Update path: bump `SKILLS_REF`, regenerate, commit the JSON diff. Hand-maintained extras live in `EXTRA_AGENTS` in `installer.ts` (today only `windsurf-next`). The generator carries a `ponytail:` comment naming the planned swap to Vercel's `getSupportedAgents()` API once it is published — at that point the scraper and `SKILLS_REF` go away.
 
 ### Extension ↔ Webview data flow
 Extension computes `DashboardState` → sends `state:update` message → webview Zustand store updates → React re-renders. User actions in webview send typed `WebviewMessage` back → extension handles in `DashboardProvider`.
@@ -279,7 +287,8 @@ All under `airtableFormula.*`:
 - `mcp.daemonPort` — fixed TCP port for the shared MCP daemon HTTP server (default 8723, kept stable across restarts; 0 = automatic/ephemeral; falls back to an automatic port if the chosen port is busy; takes effect on next daemon restart)
 - `mcp.authMode` — `browser` (default; headless Chrome mints the cookie, calls go direct-HTTP) / `byo` (cookie-only, no browser; cookie from `~/.airtable-user-mcp/credentials.json` or `AIRTABLE_COOKIE`) / `direct-login` (browser-free email+password+TOTP; `login.json` or `AIRTABLE_EMAIL/PASSWORD/TOTP_SECRET`). Injected as `AIRTABLE_AUTH_MODE` into the spawned server via `buildDaemonEnv`/`registration.ts` (non-default only). Takes effect on next daemon/server restart.
 - `mcp.httpClient` — `fetch` (default) / `impit` (Chrome-TLS impersonation fallback). Injected as `AIRTABLE_HTTP_CLIENT`. `impit` must be available to the server (optionalDependency; add to the vendored deps for the bundled path).
-- `ai.autoInstallFiles` — auto-install AI skills/rules on first launch
+- `ai.autoInstallFiles` — auto-install/update the AI skill on launch when a detected client is missing it (also reverses Remove skill on the next launch)
+- `ai.installScope` — `global` (default; once per machine, nothing written into repositories) / `project` (into the open workspace). `ai.includeAgents` was removed (agent content lives in `references/workflows.md`).
 - `formula.formatterVersion` — `v1` or `v2` beautifier/minifier engine
 
 ## Keeping tool categories in sync

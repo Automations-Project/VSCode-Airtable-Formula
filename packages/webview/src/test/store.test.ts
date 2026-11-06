@@ -12,11 +12,11 @@ import { getPersistedState, sendToExtension, setPersistedState } from '../lib/vs
 
 beforeEach(() => {
   useStore.setState({
-    ideStatuses: [], versions: { extension: '—', mcpServerBundled: '—' }, aiFilesCount: 0, loading: true,
+    ideStatuses: [], versions: { extension: '—', mcpServerBundled: '—' }, aiSkillCount: 0, aiSkillClients: [], loading: true,
     activeTab: 'overview', pendingActions: new Set(),
     settings: {
       mcp: { autoConfigureOnInstall: true, notifyOnUpdates: true, toolProfile: { profile: 'safe-write', enabledCount: 54, totalCount: 72, categories: { read: true, recordRead: true, tableWrite: true, tableDestructive: true, fieldWrite: true, fieldDestructive: true, recordDestructive: false, viewWrite: true, viewDestructive: true, viewSection: true, viewSectionDestructive: true, formWrite: true, extension: true, recordWrite: true, sync: false, daemon: false, localWrite: true } }, serverSource: 'bundled', daemonPort: 0, authMode: 'browser', httpClient: 'fetch', useDaemon: true, browserIdleParkMinutes: 30 },
-      ai: { autoInstallFiles: true, includeAgents: false },
+      ai: { autoInstallFiles: true, installScope: 'global' },
       formula: { formatterVersion: 'v2' },
       script: { beautifyStyle: 'default', minifyLevel: 'standard' },
       auth: { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' },
@@ -47,7 +47,7 @@ describe('store', () => {
   it('applyState replaces dashboard data and clears loading', () => {
     const current = useStore.getState();
     useStore.getState().applyState({
-      ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' }, aiFilesCount: 3, loading: false,
+      ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' }, aiSkillCount: 3, aiSkillClients: [], loading: false,
       settings: current.settings,
       auth: current.auth,
     });
@@ -76,6 +76,42 @@ describe('store', () => {
     expect(useStore.getState().unconfigureIde('windsurf')).toBeNull();
     expect(vi.mocked(sendToExtension).mock.calls.map(([m]) => (m as { type: string }).type))
       .toEqual(['action:setupIde', 'action:unconfigureIde', 'action:setupAll']);
+  });
+
+  it('starts with no AI skill data and nothing in flight', () => {
+    expect(useStore.getInitialState()).toMatchObject({
+      aiSkillCount: 0,
+      aiSkillClients: [],
+      pendingSkill: false,
+      settings: { ai: { installScope: 'global' } },
+    });
+  });
+
+  it('runs one AI skill install or remove at a time, cleared by its result', () => {
+    expect(useStore.getState().pendingSkill).toBe(false);
+    const install = useStore.getState().installSkill();
+    expect(install).not.toBeNull();
+    expect(useStore.getState().pendingSkill).toBe(true);
+    expect(useStore.getState().installSkill()).toBeNull();
+    expect(useStore.getState().removeSkill()).toBeNull();
+    // An unrelated action settling does not release the skill slot.
+    useStore.getState().markActionDone(useStore.getState().refresh(), { ok: true });
+    expect(useStore.getState().pendingSkill).toBe(true);
+
+    useStore.getState().markActionDone(install!, { ok: false, error: 'EACCES' });
+    expect(useStore.getState().pendingSkill).toBe(false);
+    const remove = useStore.getState().removeSkill();
+    expect(remove).not.toBeNull();
+    expect(useStore.getState().installSkill()).toBeNull();
+    useStore.getState().markActionDone(remove!, { ok: true });
+    expect(useStore.getState().pendingSkill).toBe(false);
+
+    expect(vi.mocked(sendToExtension).mock.calls.map(([m]) => m))
+      .toEqual([
+        { type: 'action:installSkill', id: install },
+        { type: 'action:refresh', id: expect.any(String) },
+        { type: 'action:removeSkill', id: remove },
+      ]);
   });
 
   it('refresh sends action:refresh message', () => {
@@ -237,7 +273,7 @@ describe('store', () => {
       label: 'Cursor',
       detected: true,
       mcpConfigured: false,
-      aiFiles: { skills: 'ok' as const, rules: 'ok' as const, workflows: 'ok' as const, agents: 'ok' as const },
+      aiSkill: { status: 'installed' as const, version: '2.0.10' },
     }];
 
     useStore.getState().applyIdeStatus(statuses);
@@ -252,7 +288,7 @@ describe('store daemon field', () => {
     const current = useStore.getState();
     useStore.getState().applyState({
       ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' },
-      aiFilesCount: 0, loading: false,
+      aiSkillCount: 0, aiSkillClients: [], loading: false,
       settings: current.settings,
       auth: current.auth,
       daemon: { running: true, healthy: true, port: 3100, port_lsp: 2087, tunnelUrl: null, uptime: 90_000 },
@@ -266,7 +302,7 @@ describe('store daemon field', () => {
     const current = useStore.getState();
     useStore.getState().applyState({
       ideStatuses: [], versions: { extension: '2.0.10', mcpServerBundled: '2.1.0' },
-      aiFilesCount: 0, loading: false,
+      aiSkillCount: 0, aiSkillClients: [], loading: false,
       settings: current.settings,
       auth: current.auth,
     });

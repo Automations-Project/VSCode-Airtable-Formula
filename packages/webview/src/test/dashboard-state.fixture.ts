@@ -1,4 +1,5 @@
 import type {
+  AiSkillClient,
   AuthState,
   DaemonStatusInfo,
   DashboardState,
@@ -16,13 +17,23 @@ type SettingsOverride = Omit<Partial<SettingsSnapshot>, 'mcp' | 'ai' | 'formula'
   debug?: Partial<SettingsSnapshot['debug']>;
 };
 
-export interface DashboardStateOverrides extends Omit<Partial<DashboardState>, 'settings' | 'auth' | 'daemon' | 'tunnel' | 'ideStatuses'> {
+export interface DashboardStateOverrides extends Omit<Partial<DashboardState>, 'settings' | 'auth' | 'daemon' | 'tunnel' | 'ideStatuses' | 'versions'> {
   settings?: SettingsOverride;
+  versions?: Partial<DashboardState['versions']>;
   auth?: Partial<AuthState>;
   daemon?: Partial<DaemonStatusInfo> | undefined;
   tunnel?: Partial<TunnelState> | undefined;
   ideStatuses?: IdeStatus[];
 }
+
+/** One of each mark and state: the standard folder, a client with our logo, a monogram, and both absent groups. */
+export const CLIENTS: AiSkillClient[] = [
+  { id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'installed', canonical: true },
+  { id: 'cursor', name: 'Cursor', ideId: 'cursor', dir: '~/.cursor/skills', status: 'installed', canonical: true },
+  { id: 'gemini-cli', name: 'Gemini CLI', dir: '~/.gemini/skills', status: 'missing', canonical: true },
+  { id: 'codex', name: 'Codex', dir: '~/.agents/skills', status: 'absent', canonical: true },
+  { id: 'devin', name: 'Devin', dir: '~/.devin/skills', status: 'absent', canonical: false },
+];
 
 export function makeDashboardState(overrides: DashboardStateOverrides = {}): DashboardState {
   const settings: SettingsSnapshot = {
@@ -41,7 +52,7 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
       serverSource: 'bundled', daemonPort: 8723, authMode: 'browser', httpClient: 'fetch',
       useDaemon: true, browserIdleParkMinutes: 30,
     },
-    ai: { autoInstallFiles: true, includeAgents: false },
+    ai: { autoInstallFiles: true, installScope: 'global' },
     formula: { formatterVersion: 'v2' },
     script: { beautifyStyle: 'default', minifyLevel: 'standard' },
     auth: { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' },
@@ -53,13 +64,14 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
   const ideStatuses: IdeStatus[] = [{
     ideId: 'cursor', label: 'Cursor', detected: true, version: '1.0.0',
     mcpConfigured: true, mcpServerHealthy: true,
-    aiFiles: { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' },
+    aiSkill: { status: 'installed', version: '2.1.32' },
   }];
 
   return {
     ideStatuses: overrides.ideStatuses ?? ideStatuses,
     versions: { extension: '2.1.32', mcpServerBundled: '2.4.15', ...overrides.versions },
-    aiFilesCount: overrides.aiFilesCount ?? 4,
+    aiSkillCount: overrides.aiSkillCount ?? 1,
+    aiSkillClients: overrides.aiSkillClients ?? CLIENTS,
     loading: overrides.loading ?? false,
     settings: {
       ...settings,

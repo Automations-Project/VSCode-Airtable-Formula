@@ -1,8 +1,9 @@
 import React from 'react';
-import type { IdeId, IdeStatus } from '@shared/types.js';
+import type { AiSkillStatus, IdeId, IdeStatus } from '@shared/types.js';
 import { useActionOutcome } from '../lib/useActionOutcome.js';
 import { useFocusFallback } from '../lib/useFocusFallback.js';
 import { summarizeClients, type ClientSummary } from '../selectors/readiness.js';
+import { useStore } from '../store.js';
 import { ActionButton } from './ActionButton.js';
 import { IdeIcon, type IdeIconTone } from './IdeIcon.js';
 import { Pill } from './Pill.js';
@@ -11,11 +12,16 @@ import { OutcomeFeedback } from './SettingRow.js';
 // VS Code forks: LSP is always "on" via the host extension — no separate config row.
 const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
 
-// Pure LSP editors: no MCP, no AI files — only LSP config matters.
+// Pure LSP editors: no MCP — the LSP config is their setup.
 const LSP_EDITORS = new Set<IdeId>(['helix', 'neovim']);
 
-// IDEs that actually install AI skill/rules/workflow files.
-const AI_FILES_IDES = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline', 'claude-code']);
+// Editors the skill installer has a skills folder for (the host's IDE_TO_AGENTS keys).
+const AI_SKILL_IDES = new Set<IdeId>([
+  'cursor', 'windsurf', 'windsurf-next', 'cline', 'claude-code', 'amp', 'opencode', 'codex-cli', 'zed',
+]);
+
+// The skill is one scope-wide unit; the card offers it only while it needs installing or updating.
+const SKILL_ACTION: Partial<Record<AiSkillStatus, string>> = { missing: 'Install skill', outdated: 'Update skill' };
 
 const STATE_LABELS: Record<ClientSummary['state'], string> = {
   ready: 'Ready',
@@ -40,8 +46,8 @@ interface EditorCardProps {
   loading: boolean;
   /** A conflicting action (setup-all) is rewriting every editor: hold this card's actions. */
   locked?: boolean;
-  /** Whether agent files count toward readiness (mirrors the ai.includeAgents setting). */
-  includeAgents?: boolean;
+  /** Installs or updates the AI skill for the whole scope, not just this editor; null when refused. */
+  onInstallSkill: () => string | null;
 }
 
 function LspBadge() {
@@ -55,7 +61,7 @@ export function EditorCard({
   onDocs,
   loading,
   locked = false,
-  includeAgents = false,
+  onInstallSkill,
 }: EditorCardProps) {
   const { ideId, label } = status;
   const headingId = `editor-${ideId}-heading`;
@@ -63,11 +69,14 @@ export function EditorCard({
   const isVscodeFamily = VSCODE_FAMILY.has(ideId);
   // lspConfigured is only defined for detected IDEs with LSP capability.
   const hasLspStatus = status.lspConfigured !== undefined;
-  const hasAiFiles = AI_FILES_IDES.has(ideId);
+  const hasAiSkill = AI_SKILL_IDES.has(ideId);
+  const skill = status.aiSkill;
+  const skillVersion = skill.status === 'installed' && skill.version ? `v${skill.version}` : '';
+  const skillAction = SKILL_ACTION[skill.status];
   const primaryConfigured = isLspEditor ? !!status.lspConfigured : status.mcpConfigured;
 
   // Same derivation as the Overview, so both tabs always agree on the state.
-  const summary = status.detected ? summarizeClients([status], includeAgents)[0] : undefined;
+  const summary = status.detected ? summarizeClients([status])[0] : undefined;
   const state = summary?.state;
   const stateLabel = summary ? STATE_LABELS[summary.state] : 'Not detected';
 
@@ -96,6 +105,13 @@ export function EditorCard({
   const primaryBusyText = primaryConfigured ? 'Updating…' : 'Setting up…';
   // While Remove runs, the primary slot is held but does not claim to be updating.
   const primaryLabel = loading && action.kind !== 'remove' ? primaryBusyText : primaryText;
+
+  // Any skill install or remove in flight, from any card or Settings, holds this button.
+  const skillPending = useStore(s => s.pendingSkill);
+  const [skillRun, setSkillRun] = React.useState<{ id: string | null; update: boolean }>({ id: null, update: false });
+  const skillOutcome = useActionOutcome(skillRun.id);
+  // Install / Update goes away once the skill is current; focus lands on the primary slot.
+  const skillFallback = useFocusFallback<HTMLButtonElement>(() => primarySlot.current);
 
   return (
     <article
@@ -152,15 +168,22 @@ export function EditorCard({
             </li>
           )}
 
-          {hasAiFiles && (
-            <li className="editor-row editor-row--files">
-              <span className="editor-row__text">AI files</span>
-              <span className="editor-row__pills">
-                <Pill label="skills" status={status.aiFiles.skills} />
-                <Pill label="rules" status={status.aiFiles.rules} />
-                <Pill label="workflows" status={status.aiFiles.workflows} />
-                {includeAgents && <Pill label="agents" status={status.aiFiles.agents} />}
-              </span>
+          {hasAiSkill && (
+            <li className="editor-row editor-row--skill">
+              <span className="editor-row__text">AI skill</span>
+              <Pill label={skillVersion} status={skill.status} />
+              {skillAction && (
+                <ActionButton
+                  ref={skillFallback}
+                  pending={skillPending}
+                  onClick={() => {
+                    skillOutcome.clearOutcome();
+                    setSkillRun({ id: onInstallSkill(), update: skill.status === 'outdated' });
+                  }}
+                >
+                  {skillAction}
+                </ActionButton>
+              )}
             </li>
           )}
         </ul>
@@ -201,6 +224,11 @@ export function EditorCard({
         outcome={outcome}
         successMessage={done[action.kind]}
         failureMessage={`The ${label} configuration did not change.`}
+      />
+      <OutcomeFeedback
+        outcome={skillOutcome.outcome}
+        successMessage={skillRun.update ? 'AI skill updated.' : 'AI skill installed.'}
+        failureMessage="The AI skill did not change."
       />
     </article>
   );

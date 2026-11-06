@@ -14,7 +14,7 @@ export type HostBrowserChoice =
 
 export interface Settings {
   mcp: { autoConfigureOnInstall: boolean; serverPathOverride: string; notifyOnUpdates: boolean; serverSource: 'bundled' | 'npx'; useDaemon: boolean; daemonPort: number; authMode: 'browser' | 'byo' | 'direct-login'; httpClient: 'fetch' | 'impit'; browserIdleParkMinutes: number };
-  ai:  { autoInstallFiles: boolean; includeAgents: boolean };
+  ai:  { autoInstallFiles: boolean; installScope: import('@airtable-formula/shared').SkillScope };
   formula: { formatterVersion: 'v1' | 'v2'; defaultBeautifyStyle: string };
   script: { beautifyStyle: string; minifyLevel: string };
   auth: { autoRefresh: boolean; refreshIntervalHours: number; loginMode: 'manual' | 'auto'; browserChoice?: HostBrowserChoice };
@@ -37,7 +37,8 @@ export function getSettings(): Settings {
     },
     ai: {
       autoInstallFiles: cfg.get('ai.autoInstallFiles', true),
-      includeAgents:    cfg.get('ai.includeAgents', false),
+      // A hand-edited unknown value falls back to global: only an explicit 'project' may write into a repository.
+      installScope:     cfg.get<string>('ai.installScope', 'global') === 'project' ? 'project' : 'global',
     },
     formula: {
       formatterVersion:      cfg.get('formula.formatterVersion', 'v2') as 'v1' | 'v2',

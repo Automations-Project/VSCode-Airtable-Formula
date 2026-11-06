@@ -67,6 +67,9 @@ interface Store extends DashboardState {
   pendingTunnelActions: Set<string>;
   /** Official Airtable MCP work (PAT save/copy, per-editor configure/remove) in flight. */
   pendingOfficialActions: Set<string>;
+  /** An AI skill install or remove in flight, wherever it was started. One flag for
+   *  both: they rewrite the same skill folders, so a second is refused. */
+  pendingSkill: boolean;
   /** True while the Prompts editor holds edits that differ from what is saved.
    *  Lives in the store so every way of leaving the tab can consult it. */
   promptEditorDirty: boolean;
@@ -85,6 +88,9 @@ interface Store extends DashboardState {
    *  setup-all against any per-editor action (in both directions), is already in flight. */
   setupIde: (ideId: IdeId) => string | null;
   setupAll: () => string | null;
+  /** Scope-wide skill actions; null when a skill action is already in flight. */
+  installSkill: () => string | null;
+  removeSkill: () => string | null;
   refresh: () => string;
   /** Scoped actions return their action id, or null when refused because a
    *  conflicting action is already in flight. */
@@ -161,7 +167,7 @@ const defaultSettings: SettingsSnapshot = {
     useDaemon:    true,
     browserIdleParkMinutes: 30,
   },
-  ai:      { autoInstallFiles: true, includeAgents: false },
+  ai:      { autoInstallFiles: true, installScope: 'global' },
   formula: { formatterVersion: 'v2' },
   script:  { beautifyStyle: 'default', minifyLevel: 'standard' },
   auth:    { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' as const, browserChoice: undefined },
@@ -279,10 +285,23 @@ export const useStore = create<Store>((set, get) => {
   const runPromptAction = (scope: string, message: (id: string) => WebviewMessage): string | null =>
     get().promptDiscardPending ? null : runScoped(scope, ['prompt'], undefined, message);
 
+  /** The id behind `pendingSkill`, so markActionDone clears the flag on that action's result only. */
+  let skillActionId: string | null = null;
+  const runSkillAction = (message: (id: string) => WebviewMessage): string | null => {
+    if (get().pendingSkill) return null;
+    const id = randomId();
+    skillActionId = id;
+    beginAction(id);
+    set({ pendingSkill: true });
+    sendToExtension(message(id));
+    return id;
+  };
+
   return ({
   ideStatuses: [],
   versions: { extension: '—', mcpServerBundled: '—' },
-  aiFilesCount: 0,
+  aiSkillCount: 0,
+  aiSkillClients: [],
   loading: true,
   settings: defaultSettings,
   auth: defaultAuth,
@@ -295,6 +314,7 @@ export const useStore = create<Store>((set, get) => {
   pendingSetupAll: new Set(),
   pendingTunnelActions: new Set(),
   pendingOfficialActions: new Set(),
+  pendingSkill: false,
   promptEditorDirty: false,
   promptDiscardPending: false,
 
@@ -369,6 +389,10 @@ export const useStore = create<Store>((set, get) => {
     sendToExtension({ type: 'action:setupAll', id });
     return id;
   },
+
+  installSkill: () => runSkillAction(id => ({ type: 'action:installSkill', id })),
+
+  removeSkill: () => runSkillAction(id => ({ type: 'action:removeSkill', id })),
 
   refresh: () => {
     const id = randomId();
@@ -541,6 +565,8 @@ export const useStore = create<Store>((set, get) => {
       if (oldest === undefined) break;
       actionResults.delete(oldest);
     }
+    const skillSettled = id === skillActionId;
+    if (skillSettled) skillActionId = null;
     set(s => {
       const next = new Set(s.pendingActions);
       next.delete(id);
@@ -566,6 +592,7 @@ export const useStore = create<Store>((set, get) => {
         pendingSetupAll: nextSetupAll,
         pendingTunnelActions: nextTunnel,
         pendingOfficialActions: nextOfficial,
+        pendingSkill: skillSettled ? false : s.pendingSkill,
       };
     });
   },

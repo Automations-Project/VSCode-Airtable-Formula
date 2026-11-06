@@ -554,11 +554,19 @@ const docCountProblems = [
       label: 'tool-profile counts "`read-only` (N tools) / `safe-write` (N tools) / `full` (N tools)"',
     },
   ])),
-  ...(await checkCanonicalCounts('packages/extension/src/skills/templates/skillTemplates.ts', [
+  ...(await checkCanonicalCounts('packages/extension/src/skills/airtable-formula/references/mcp-tools.md', [
     {
       re: /\*\*Tools\*\*:\s*(\d+) tools across (\d+) categories/,
       want: [totalTools, totalCats],
-      label: '"**Tools**: N tools across M categories" header (SKILL guide + always-on rules)',
+      label: '"**Tools**: N tools across M categories" header (MCP tools guide)',
+      allOccurrences: true,
+    },
+  ])),
+  ...(await checkCanonicalCounts('packages/extension/src/skills/airtable-formula/references/rules.md', [
+    {
+      re: /\*\*Tools\*\*:\s*(\d+) tools across (\d+) categories/,
+      want: [totalTools, totalCats],
+      label: '"**Tools**: N tools across M categories" header (MCP usage rules)',
       allOccurrences: true,
     },
   ])),
@@ -610,7 +618,8 @@ if (docCountProblems.length) {
   console.error(
     '\nFix: update the counts in README.md, packages/mcp-server/README.md,\n' +
     'packages/mcp-server/src/index.js (serverInfo.description), and\n' +
-    'packages/extension/src/skills/templates/skillTemplates.ts. Where a sentence describes\n' +
+    'packages/extension/src/skills/airtable-formula/references/mcp-tools.md and\n' +
+    'packages/extension/src/skills/airtable-formula/references/rules.md. Where a sentence describes\n' +
     'what an MCP client actually lists (tools/list), 72 is correct (71 + manage_tools) — see\n' +
     'CLAUDE.md "Keeping tool categories in sync" for the convention.'
   );
@@ -620,4 +629,4 @@ if (docCountProblems.length) {
 // The index.js counts are named explicitly so the green line is evidence the
 // cross-check actually ran on a non-empty extraction — "in sync" printed over zero
 // parsed tools is the exact failure mode step 1b exists to prevent.
-ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; index.js surface (${definedTools.size} definitions / ${handlerTools.size - META_TOOLS.size} handlers) fully categorized; server.json registry manifest (${registryTools.size} tools @ v${mcpPkgVersion}) matches; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''} + published READMEs + skill templates + banner/architecture SVGs.`);
+ok(`${Object.keys(mcpCategories).length} tools / ${Object.keys(mcpProfiles).length} profiles / ${mcpLabelKeys.size} labels in sync; index.js surface (${definedTools.size} definitions / ${handlerTools.size - META_TOOLS.size} handlers) fully categorized; server.json registry manifest (${registryTools.size} tools @ v${mcpPkgVersion}) matches; profile counts (${expected['read-only']}/${expected['safe-write']}/${expected.full}) match package.json${storeSrc ? ' + webview defaults' : ''}${claudeMd ? ' + CLAUDE.md' : ''} + published READMEs + skill references + banner/architecture SVGs.`);

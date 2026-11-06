@@ -31,7 +31,7 @@ describe('App header status', () => {
     ['an unhealthy service', { daemon: { running: true, healthy: false } }, 'Service needs attention'],
     ['no clients', { ideStatuses: [] }, 'Client setup needed'],
     ['an unusable client', { ideStatuses: [{ ...cursor!, mcpConfigured: false }] }, 'Client setup needed'],
-    ['a repairable client', { ideStatuses: [{ ...cursor!, aiFiles: { skills: 'partial', rules: 'ok', workflows: 'ok', agents: 'ok' } }] }, 'Needs repair'],
+    ['a repairable client', { ideStatuses: [{ ...cursor!, aiSkill: { status: 'outdated', version: '2.0.0' } }] }, 'Needs repair'],
     ['an auto-disabled tunnel', { tunnel: { status: 'auto-disabled' } }, 'Ready'],
     ['a ready workbench', {}, 'Ready'],
   ] as [string, DashboardStateOverrides, string][])('announces the pinned text for %s', (_name, overrides, text) => {

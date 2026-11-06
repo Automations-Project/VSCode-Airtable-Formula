@@ -15,12 +15,7 @@ const completeDashboardState = {
       mcpServerHealthy: true,
       lspConfigured: true,
       lspManualStep: 'Restart Cursor',
-      aiFiles: {
-        skills: 'ok',
-        rules: 'missing',
-        workflows: 'partial',
-        agents: 'ok',
-      },
+      aiSkill: { status: 'installed', version: '2.3.0' },
     },
   ],
   versions: {
@@ -29,7 +24,8 @@ const completeDashboardState = {
     mcpServerPublished: '1.0.1',
     bundledFromGitSha: '0123456789abcdef',
   },
-  aiFilesCount: 4,
+  aiSkillCount: 1,
+  aiSkillClients: [],
   loading: false,
   settings: {
     mcp: {
@@ -68,7 +64,7 @@ const completeDashboardState = {
     },
     ai: {
       autoInstallFiles: true,
-      includeAgents: false,
+      installScope: 'global',
     },
     formula: {
       formatterVersion: 'v2',
@@ -285,6 +281,8 @@ describe('parseWebviewMessage', () => {
       { type: 'ready' },
       { type: 'action:setupIde', id: 'abc123', ideId: 'cursor' },
       { type: 'action:setupAll', id: 'abc123' },
+      { type: 'action:installSkill', id: 'abc123' },
+      { type: 'action:removeSkill', id: 'abc123' },
       { type: 'action:refresh', id: 'abc123' },
       { type: 'action:login', id: 'abc123' },
       { type: 'action:logout', id: 'abc123' },
@@ -407,7 +405,7 @@ describe('parseWebviewMessage', () => {
       { key: 'script.beautifyStyle', value: 'semicolonFree' },
       { key: 'script.minifyLevel', value: 'extreme' },
       { key: 'ai.autoInstallFiles', value: true },
-      { key: 'ai.includeAgents', value: false },
+      { key: 'ai.installScope', value: 'project' },
       { key: 'debug.enabled', value: true },
       { key: 'debug.verboseHttp', value: false },
       { key: 'debug.bufferSize', value: 10000 },
@@ -515,12 +513,7 @@ describe('parseExtensionMessage', () => {
             label: 'Helix',
             detected: false,
             mcpConfigured: false,
-            aiFiles: {
-              skills: 'missing',
-              rules: 'missing',
-              workflows: 'missing',
-              agents: 'missing',
-            },
+            aiSkill: { status: 'unsupported' },
           },
         ],
       },
@@ -749,6 +742,93 @@ describe('parseExtensionMessage', () => {
         { hasCredentials: true },
       ),
     }).ok).toBe(false);
+  });
+
+  it('rejects the old aiFiles shape and a bad installScope', () => {
+    const ide = completeDashboardState.ideStatuses[0];
+    const { aiSkill: _aiSkill, ...ideWithoutSkill } = ide;
+    const ideMessage = (payload: unknown) => parseExtensionMessage({
+      type: 'ide:status',
+      payload: [payload],
+    }).ok;
+    expect(ideMessage(ide)).toBe(true);
+    expect(ideMessage({
+      ...ideWithoutSkill,
+      aiFiles: { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' },
+    })).toBe(false);
+    expect(ideMessage({ ...ide, aiSkill: { status: 'ready' } })).toBe(false);
+    expect(ideMessage({ ...ide, aiSkill: { status: 'installed', extra: 1 } })).toBe(false);
+    expect(ideMessage({ ...ide, aiSkill: { status: 'installed', version: 3 } })).toBe(false);
+    expect(ideMessage({ ...ide, aiFiles: ide.aiSkill })).toBe(false);
+    for (const change of [
+      { key: 'ai.installScope', value: 'home' },
+      { key: 'ai.includeAgents', value: true },
+    ]) {
+      expect(parseWebviewMessage({
+        type: 'setting:change',
+        id: 'a1',
+        change,
+      }).ok, change.key).toBe(false);
+    }
+  });
+
+  it('rejects a settings.ai block with the old shape or a bad scope', () => {
+    const withAi = (ai: unknown) => parseExtensionMessage({
+      type: 'state:update',
+      payload: {
+        ...completeDashboardState,
+        settings: { ...completeDashboardState.settings, ai },
+      },
+    }).ok;
+    expect(withAi({ autoInstallFiles: true, installScope: 'project' })).toBe(true);
+    expect(withAi({ autoInstallFiles: true, includeAgents: false })).toBe(false);
+    expect(withAi({ autoInstallFiles: true, installScope: 'home' })).toBe(false);
+    expect(withAi({ autoInstallFiles: true })).toBe(false);
+  });
+
+  it('rejects action:installSkill and action:removeSkill with extra fields', () => {
+    for (const type of ['action:installSkill', 'action:removeSkill']) {
+      expect(parseWebviewMessage({ type, id: 'abc123', scope: 'global' }).ok).toBe(false);
+      expect(parseWebviewMessage({ type }).ok).toBe(false);
+    }
+  });
+
+  it('validates aiSkillCount and aiSkillClients rows exactly', () => {
+    const row = {
+      id: 'cursor',
+      name: 'Cursor',
+      ideId: 'cursor',
+      dir: '~/.cursor/skills',
+      status: 'installed',
+      canonical: true,
+    };
+    const { ideId: _ideId, ...rowWithoutIde } = row;
+    const state = (patch: Record<string, unknown>) => parseExtensionMessage({
+      type: 'state:update',
+      payload: { ...completeDashboardState, ...patch },
+    }).ok;
+    expect(state({
+      aiSkillClients: [
+        row,
+        { ...rowWithoutIde, id: 'devin', status: 'absent', canonical: false },
+      ],
+    })).toBe(true);
+    expect(state({ aiSkillClients: [{ ...row, status: 'ready' }] })).toBe(false);
+    expect(state({ aiSkillClients: [{ ...row, status: 'unsupported' }] })).toBe(false);
+    expect(state({ aiSkillClients: [{ ...row, ideId: 'vim' }] })).toBe(false);
+    expect(state({ aiSkillClients: [{ ...row, ideId: undefined }] })).toBe(false);
+    expect(state({ aiSkillClients: [{ ...row, canonical: 'yes' }] })).toBe(false);
+    expect(state({ aiSkillClients: [{ ...row, extra: 1 }] })).toBe(false);
+    expect(state({
+      aiSkillClients: [{ id: 'x', name: 'X', dir: 'd', status: 'absent' }],
+    })).toBe(false);
+    expect(state({ aiSkillClients: 'none' })).toBe(false);
+    const { aiSkillClients: _clients, ...withoutClients } = completeDashboardState;
+    expect(parseExtensionMessage({ type: 'state:update', payload: withoutClients }).ok).toBe(false);
+    expect(state({ aiSkillCount: -1 })).toBe(false);
+    expect(state({ aiSkillCount: 1.5 })).toBe(false);
+    const { aiSkillCount: _count, ...withoutCount } = completeDashboardState;
+    expect(parseExtensionMessage({ type: 'state:update', payload: withoutCount }).ok).toBe(false);
   });
 
   it('rejects unexpected nested DashboardState fields', () => {

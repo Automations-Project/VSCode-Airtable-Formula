@@ -207,14 +207,29 @@ describe('Tool safety', () => {
 });
 
 describe('Formula and scripting', () => {
-  it('keeps the AI file switches', async () => {
+  it('keeps the AI skill controls', async () => {
     const user = userEvent.setup();
     render(<Settings navigate={vi.fn()} />);
 
-    await user.click(within(formulaScripting()).getByRole('switch', { name: 'Auto-install AI files' }));
+    const group = within(formulaScripting()).getByRole('group', { name: 'AI skill' });
+    expect(within(group).getByRole('heading', { level: 3, name: 'AI skill' })).toHaveAttribute('id', 'ai-skill-title');
+    expect(within(group).getByText('One skill folder, installed where your AI clients read skills.')).toBeVisible();
+    expect(within(group).queryByRole('switch', { name: 'Include agent files' })).not.toBeInTheDocument();
+
+    await user.click(within(group).getByRole('switch', { name: 'Auto-install AI skill' }));
     expect(lastChange()).toEqual({ key: 'ai.autoInstallFiles', value: false });
-    await user.click(within(formulaScripting()).getByRole('switch', { name: 'Include agent files' }));
-    expect(lastChange()).toEqual({ key: 'ai.includeAgents', value: true });
+
+    const scope = within(group).getByRole('combobox', { name: 'Install scope' });
+    expect(within(scope).getAllByRole('option').map(o => [(o as HTMLOptionElement).value, o.textContent]))
+      .toEqual([['global', 'This machine'], ['project', 'Open workspace']]);
+    await user.selectOptions(scope, 'project');
+    expect(lastChange()).toEqual({ key: 'ai.installScope', value: 'project' });
+
+    await user.click(within(group).getByRole('button', { name: 'Remove skill' }));
+    const removal = posted('action:removeSkill');
+    expect(removal).toEqual([{ type: 'action:removeSkill', id: expect.any(String) }]);
+    settle(removal[0]?.id, { ok: true });
+    expect(await within(group).findByText('Skill removed.')).toBeVisible();
   });
 
   it('offers formatter v1 and v2', async () => {

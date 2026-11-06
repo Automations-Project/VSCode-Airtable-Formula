@@ -454,12 +454,20 @@
         "airtableFormula.ai.autoInstallFiles": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically install AI skills/rules/workflows on first launch."
+          "description": "Automatically install or update the AI skill on launch whenever a detected client is missing it. Turn this off before using Remove skill, or the skill returns on the next launch."
         },
-        "airtableFormula.ai.includeAgents": {
-          "type": "boolean",
-          "default": false,
-          "description": "Install agent config files where the IDE supports them."
+        "airtableFormula.ai.installScope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "project"
+          ],
+          "default": "global",
+          "enumDescriptions": [
+            "Install once per machine into every detected AI client's skills directory (nothing is written into your repositories).",
+            "Install into the open workspace (.agents/skills and the detected clients' project skill folders); switching scope does not clean up the other scope."
+          ],
+          "description": "Where the Airtable Formula AI skill is installed."
         },
         "airtableFormula.formula.formatterVersion": {
           "type": "string",
@@ -735,7 +743,7 @@
     ]
   },
   "scripts": {
-    "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\" && node scripts/patch-esm-meta.mjs",
+    "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"const f=require('fs');f.cpSync('src/vendor','dist/vendor',{recursive:true});f.cpSync('src/skills/airtable-formula','dist/skills/airtable-formula',{recursive:true})\" && node scripts/patch-esm-meta.mjs",
     "build:mcp": "node ../../scripts/bundle-mcp.mjs",
     "prepare:deps": "node ../../scripts/prepare-package-deps.mjs",
     "package": "node ../../scripts/package-targets.mjs --targets=host",

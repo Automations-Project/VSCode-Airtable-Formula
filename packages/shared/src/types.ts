@@ -12,7 +12,8 @@ export type IdeId =
   | 'helix'
   | 'neovim';
 
-export type AiFileStatus = 'ok' | 'missing' | 'partial';
+export type AiSkillStatus = 'installed' | 'outdated' | 'missing' | 'unsupported';
+export type SkillScope = 'global' | 'project';
 
 export type AuthStatus =
   | 'unknown'
@@ -85,11 +86,18 @@ export interface AuthState {
   browserChoice?:     BrowserChoiceSummary;
 }
 
-export interface AiFiles {
-  skills:    AiFileStatus;
-  rules:     AiFileStatus;
-  workflows: AiFileStatus;
-  agents:    AiFileStatus;
+export interface AiSkill {
+  status:   AiSkillStatus;
+  version?: string;
+}
+
+export interface AiSkillClient {
+  id:        string;
+  name:      string;
+  ideId?:    IdeId;
+  dir:       string;
+  status:    'installed' | 'outdated' | 'missing' | 'absent';
+  canonical: boolean;
 }
 
 export interface IdeStatus {
@@ -101,7 +109,7 @@ export interface IdeStatus {
   mcpServerHealthy?: boolean;
   lspConfigured?:    boolean;
   lspManualStep?:    string;
-  aiFiles:           AiFiles;
+  aiSkill:           AiSkill;
 }
 
 export type ToolProfileName = 'read-only' | 'safe-write' | 'full' | 'custom';
@@ -149,7 +157,7 @@ export interface SettingsSnapshot {
     useDaemon:              boolean;
     browserIdleParkMinutes: number;
   };
-  ai:      { autoInstallFiles: boolean; includeAgents: boolean };
+  ai:      { autoInstallFiles: boolean; installScope: SkillScope };
   formula: { formatterVersion: 'v1' | 'v2' };
   script:  {
     beautifyStyle: 'default' | 'compact' | 'singleQuote' | 'tabIndent' | 'semicolonFree';
@@ -242,7 +250,8 @@ export interface OfficialAirtableMcpState {
 export interface DashboardState {
   ideStatuses:      IdeStatus[];
   versions:         VersionInfo;
-  aiFilesCount:     number;
+  aiSkillCount:     number;
+  aiSkillClients:   AiSkillClient[];
   loading:          boolean;
   settings:         SettingsSnapshot;
   auth:             AuthState;

@@ -2,12 +2,12 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-// Skill install/uninstall is now driven exclusively through `installAiFiles`
+// Skill install/uninstall is now driven exclusively through `installSkill`
 // from `./skills/installer.js` (invoked by the dashboard and by the
 // `airtable-formula.installAISkills` command below). The legacy detectIDE()
 // path in `./skills/skillInstaller.ts` has been removed — it was running in
 // parallel with the dashboard path with divergent template content.
-import { DashboardProvider } from './webview/DashboardProvider.js';
+import { DashboardProvider, warnSkillProblems } from './webview/DashboardProvider.js';
 import { registerLanguageProviders } from './language/registration.js';
 import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
@@ -34,7 +34,8 @@ type LocalToolCategoryKey =
 import { getSettings } from './settings.js';
 import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
-import { installAiFiles } from './skills/installer.js';
+import { installSkill, checkSkill } from './skills/installer.js';
+import { skillEnv } from './skills/host-env.js';
 import { getBundledServerPath, getServerEntry } from './mcp/server-path.js';
 import { DebugCollector, exportDebugLog, traceConfigChanges } from './debug/index.js';
 
@@ -186,13 +187,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (getSettings().ai.autoInstallFiles) {
         void (async () => {
             try {
-                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-                const statuses = await getAllIdeStatuses();
-                await Promise.all(
-                    statuses
-                        .filter(s => s.detected)
-                        .map(s => installAiFiles(s.ideId, workspaceRoot, false, getSettings().ai.includeAgents)),
-                );
+                const scope = getSettings().ai.installScope;
+                const env = await skillEnv(context);
+                const skills = await checkSkill(scope, env);
+                if (env.detectedIdes.some(ide => skills[ide].status === 'missing' || skills[ide].status === 'outdated')) {
+                    await installSkill(scope, env);
+                }
             } catch (err) {
                 console.warn('[AirtableFormula] Skill auto-install failed:', err);
             }
@@ -442,26 +442,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('airtable-formula.setupAll', async () => {
             const settings = getSettings();
             const serverPath = getBundledServerPath(context);
-            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
             const statuses = await getAllIdeStatuses();
-            await Promise.all(
-                statuses.filter(s => s.detected).map(s =>
-                    configureMcpForIde(s.ideId, serverPath)
-                        .then(() => installAiFiles(s.ideId, workspaceRoot, false, settings.ai.includeAgents))
-                )
-            );
+            await Promise.all(statuses.filter(s => s.detected).map(s => configureMcpForIde(s.ideId, serverPath)));
+            // Once, not per IDE: every client reads the same skill folders.
+            await installSkill(settings.ai.installScope, await skillEnv(context));
             dashboardProvider.refresh();
             vscode.window.showInformationMessage('Airtable Formula: All IDEs configured.');
         }),
         vscode.commands.registerCommand('airtable-formula.installAISkills', async () => {
-            const s = getSettings();
-            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-            const statuses = await getAllIdeStatuses();
-            await Promise.all(statuses.filter(st => st.detected).map(st =>
-                installAiFiles(st.ideId, workspaceRoot, true, s.ai.includeAgents)
-            ));
+            const { written, failed, noWorkspace } = await installSkill(getSettings().ai.installScope, await skillEnv(context));
             dashboardProvider.refresh();
-            vscode.window.showInformationMessage('Airtable Formula: AI files installed.');
+            if (written.length) {
+                vscode.window.showInformationMessage(`Airtable Formula: AI skill installed. ${written.length === 1 ? '1 folder' : `${written.length} folders`} written.`);
+            }
+            warnSkillProblems(failed, noWorkspace);
         })
     );
 
@@ -777,9 +771,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }
         if (settings.ai.autoInstallFiles) {
-            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
-            const statuses = await getAllIdeStatuses();
-            await Promise.all(statuses.filter(s => s.detected).map(s => installAiFiles(s.ideId, workspaceRoot)));
+            await installSkill(settings.ai.installScope, await skillEnv(context));
         }
     }
 }

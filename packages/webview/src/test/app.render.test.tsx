@@ -196,16 +196,16 @@ describe('App rendered shell', () => {
     expect(useStore.getState().pendingActions.has(message.id)).toBe(true);
   });
 
-  it('routes a Settings toggle through a tracked setting change', () => {
+  it('routes a Settings select through a tracked setting change', () => {
     useStore.setState({ activeTab: 'settings', loading: false });
     render(<App />);
 
-    fireEvent.click(screen.getByRole('switch', { name: 'Include agent files' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Install scope' }), { target: { value: 'project' } });
 
     const message = vscodeApiMock.postMessage.mock.calls.at(-1)?.[0];
     expect(message).toMatchObject({
       type: 'setting:change',
-      change: { key: 'ai.includeAgents', value: true },
+      change: { key: 'ai.installScope', value: 'project' },
     });
     expect(message.id).toMatch(/^[0-9a-f]{24}$/);
     expect(useStore.getState().pendingActions.has(message.id)).toBe(true);

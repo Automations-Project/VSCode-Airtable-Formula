@@ -4,7 +4,6 @@ import { ActionButton } from '../../components/ActionButton.js';
 import type { NavigateFn } from '../../components/NextAction.js';
 import { Section } from '../../components/Section.js';
 import { summarizeClients, type ClientSummary } from '../../selectors/readiness.js';
-import { useStore } from '../../store.js';
 
 const STATE_LABELS: Record<ClientSummary['state'], string> = {
   ready: 'Ready',
@@ -18,8 +17,7 @@ interface OverviewClientsProps {
 }
 
 export function OverviewClients({ statuses, navigate }: OverviewClientsProps) {
-  const includeAgents = useStore(s => s.settings.ai.includeAgents);
-  const clients = summarizeClients(statuses, includeAgents);
+  const clients = summarizeClients(statuses);
   const usable = clients.filter(client => client.usable).length;
   const noun = clients.length === 1 ? 'editor' : 'editors';
 

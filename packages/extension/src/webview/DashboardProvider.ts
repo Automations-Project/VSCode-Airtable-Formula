@@ -18,7 +18,8 @@ import {
 import { getWebviewHtml } from './html.js';
 import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
-import { installAiFiles, checkAiFiles } from '../skills/installer.js';
+import { installSkill, checkSkill, removeSkill, listSkillClients } from '../skills/installer.js';
+import { skillEnv } from '../skills/host-env.js';
 import { getSettings, updateWebviewSetting, type HostBrowserChoice } from '../settings.js';
 import { getBundledServerPath, getServerEntry } from '../mcp/server-path.js';
 import { detectAllBrowsers } from '../mcp/browser-detect.js';
@@ -168,6 +169,24 @@ function resolveCustomBrowserExecutable(
 
 function withoutUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+const NO_WORKSPACE_SKILL_WARNING = 'Open a folder to install the AI skill into a project, or switch airtableFormula.ai.installScope to global.';
+
+/** `2 folders: <a>, <b>` */
+function folderList(dirs: readonly string[]): string {
+  return `${dirs.length} ${dirs.length === 1 ? 'folder' : 'folders'}: ${dirs.join(', ')}`;
+}
+
+/** Shows one warning when a skill action did not fully succeed and returns its text; undefined when it did. */
+export function warnSkillProblems(failed: readonly { dir: string; message: string }[], noWorkspace?: true): string | undefined {
+  const text = noWorkspace
+    ? NO_WORKSPACE_SKILL_WARNING
+    : failed.length
+      ? `Airtable Formula: the AI skill failed in ${failed.length === 1 ? '1 folder' : `${failed.length} folders`}: ${failed.map(f => `${f.dir}: ${f.message}`).join('; ')}`
+      : undefined;
+  if (text) void vscode.window.showWarningMessage(text);
+  return text;
 }
 
 interface HostStorageEntry extends StorageEntry {
@@ -518,12 +537,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       try {
         const serverPath = getBundledServerPath(this.context);
         const serverEntry = getServerEntry(this.context);
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
         const settings = getSettings();
         const caps = IDE_CONFIGS[msg.ideId].capabilities;
         if (caps.includes('mcp')) await configureMcpForIde(msg.ideId, serverPath, serverEntry);
         if (caps.includes('lsp')) await configureLspForIde(msg.ideId);
-        if (caps.includes('mcp')) await installAiFiles(msg.ideId, workspaceRoot, false, settings.ai.includeAgents);
+        await installSkill(settings.ai.installScope, await skillEnv(this.context));
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
@@ -536,7 +554,6 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       try {
         const serverPath = getBundledServerPath(this.context);
         const serverEntry = getServerEntry(this.context);
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
         const settings = getSettings();
         const statuses = await getAllIdeStatuses();
         await Promise.all(
@@ -544,12 +561,43 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             const caps = IDE_CONFIGS[s.ideId].capabilities;
             if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
             if (caps.includes('lsp')) await configureLspForIde(s.ideId);
-            if (caps.includes('mcp')) await installAiFiles(s.ideId, workspaceRoot, false, settings.ai.includeAgents);
           })
         );
+        // Once, not per IDE: every client reads the same skill folders.
+        await installSkill(settings.ai.installScope, await skillEnv(this.context));
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) {
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:installSkill') {
+      try {
+        const { written, failed, noWorkspace } = await installSkill(getSettings().ai.installScope, await skillEnv(this.context));
+        if (written.length) void vscode.window.showInformationMessage(`Airtable Formula: AI skill installed in ${folderList(written)}`);
+        const warning = warnSkillProblems(failed, noWorkspace);
+        await this.pushState();
+        this.postResult(msg.id, warning === undefined, warning);
+      } catch (err) {
+        vscode.window.showErrorMessage(`AI skill install failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.postResult(msg.id, false, String(err));
+      }
+      return;
+    }
+    if (msg.type === 'action:removeSkill') {
+      try {
+        const scope = getSettings().ai.installScope;
+        const env = await skillEnv(this.context);
+        // Project scope with no folder open has nothing to remove; answering "removed" would be a lie.
+        const noWorkspace = scope === 'project' && env.workspaceRoot === null;
+        const { removed, failed } = noWorkspace ? { removed: [], failed: [] } : await removeSkill(scope, env);
+        if (removed.length) void vscode.window.showInformationMessage(`Airtable Formula: AI skill removed from ${folderList(removed)}`);
+        const warning = warnSkillProblems(failed, noWorkspace || undefined);
+        await this.pushState();
+        this.postResult(msg.id, warning === undefined, warning);
+      } catch (err) {
+        vscode.window.showErrorMessage(`AI skill removal failed: ${err instanceof Error ? err.message : String(err)}`);
         this.postResult(msg.id, false, String(err));
       }
       return;
@@ -1393,16 +1441,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     this._debugCollector?.trace('ext', 'webview', 'webview:message_out', {
       type: 'state:update',
     });
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
     const settings = getSettings();
-    const ideStatuses = await getAllIdeStatuses();
-
-    const enriched: IdeStatus[] = await Promise.all(
-      ideStatuses.map(async s => ({
-        ...s,
-        aiFiles: s.detected ? await checkAiFiles(s.ideId, workspaceRoot) : s.aiFiles,
-      }))
-    );
+    const scope = settings.ai.installScope;
+    const env = await skillEnv(this.context);
+    const [ideStatuses, skills, aiSkillClients] = await Promise.all([
+      getAllIdeStatuses(),
+      checkSkill(scope, env),
+      listSkillClients(scope, env),
+    ]);
+    const enriched: IdeStatus[] = ideStatuses.map(s => ({ ...s, aiSkill: skills[s.ideId] }));
 
     // Always query SecretStorage fresh for hasCredentials — the AuthManager's
     // cached _state starts as { hasCredentials: false } and is only updated
@@ -1453,7 +1500,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         mcpServerBundled,
         mcpServerPublished,
       },
-      aiFilesCount: enriched.reduce((n, s) => n + Object.values(s.aiFiles).filter(v => v === 'ok').length, 0),
+      aiSkillCount: enriched.filter(s => s.aiSkill.status === 'installed').length,
+      aiSkillClients,
       loading: false,
       settings: {
         mcp:     {
@@ -1467,7 +1515,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           useDaemon:              settings.mcp.useDaemon,
           browserIdleParkMinutes: settings.mcp.browserIdleParkMinutes,
         },
-        ai:      { autoInstallFiles: settings.ai.autoInstallFiles, includeAgents: settings.ai.includeAgents },
+        ai:      { autoInstallFiles: settings.ai.autoInstallFiles, installScope: settings.ai.installScope },
         formula: { formatterVersion: settings.formula.formatterVersion },
         script:  { beautifyStyle: settings.script.beautifyStyle, minifyLevel: settings.script.minifyLevel },
         auth:    {

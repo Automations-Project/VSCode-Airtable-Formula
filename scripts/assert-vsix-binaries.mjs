@@ -413,6 +413,13 @@ export function assertVsix(file, target) {
     }
   }
 
+  // 7. The AI skill folder must ship. `pnpm build` copies src/skills/airtable-formula
+  //    into dist/skills/; the installer reads it from there at runtime, so a VSIX
+  //    without it activates fine and then installs nothing.
+  if (!entries.has('extension/dist/skills/airtable-formula/SKILL.md')) {
+    problems.push('extension/dist/skills/airtable-formula/SKILL.md missing — the AI skill is not in the VSIX');
+  }
+
   return { file, target, problems, verified };
 }
 

@@ -78,12 +78,7 @@ describe('selectReadiness', () => {
           label: 'Claude Code',
           detected: true,
           mcpConfigured: false,
-          aiFiles: {
-            skills: 'partial',
-            rules: 'missing',
-            workflows: 'missing',
-            agents: 'missing',
-          },
+          aiSkill: { status: 'missing' },
         },
       ],
     });
@@ -271,44 +266,37 @@ describe('selectReadiness priority and branches', () => {
     expect(unusable.usableClientCount).toBe(0);
   });
 
-  it('keeps a usable client usable while reporting incomplete AI files as a repair', () => {
+  it('keeps a usable client usable while reporting a missing AI skill as a repair', () => {
     const model = selectReadiness(makeDashboardState({
-      ideStatuses: [client({
-        aiFiles: { skills: 'ok', rules: 'partial', workflows: 'missing', agents: 'missing' },
-      })],
+      ideStatuses: [client({ aiSkill: { status: 'missing' } })],
     }));
 
     expect(model.usableClientCount).toBe(1);
     expect(model.state).toBe('degraded');
-    expect(model.issues.map(issue => issue.id)).toEqual(['client-ai-files:cursor']);
+    expect(model.issues.map(issue => issue.id)).toEqual(['client-ai-skill:cursor']);
+    expect(model.issues[0]?.detail).toBe('The AI skill is missing or outdated.');
     expect(model.nextAction).toMatchObject({ dispatchType: 'action:setupIde', ideId: 'cursor' });
   });
 
-  it('only expects agent files when agents are enabled', () => {
-    const missingAgents = { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'missing' } as const;
-    const off = selectReadiness(makeDashboardState({
-      settings: { ai: { includeAgents: false } },
-      ideStatuses: [client({ aiFiles: missingAgents })],
-    }));
-    const on = selectReadiness(makeDashboardState({
-      settings: { ai: { includeAgents: true } },
-      ideStatuses: [client({ aiFiles: missingAgents })],
+  it('reports outdated or missing skill as a partial client and ignores unsupported', () => {
+    const [outdated] = summarizeClients([client({ aiSkill: { status: 'outdated', version: '2.0.0' } })]);
+    const [missing] = summarizeClients([client({ aiSkill: { status: 'missing' } })]);
+    const unsupported = selectReadiness(makeDashboardState({
+      ideStatuses: [client({ ideId: 'claude-desktop', label: 'Claude Desktop', aiSkill: { status: 'unsupported' } })],
     }));
 
-    expect(off.state).toBe('ready');
-    expect(on.state).toBe('degraded');
+    expect(outdated).toMatchObject({ ideId: 'cursor', usable: true, state: 'partial', problem: 'ai-skill' });
+    expect(missing).toMatchObject({ ideId: 'cursor', usable: true, state: 'partial', problem: 'ai-skill' });
+    expect(unsupported.state).toBe('ready');
+    expect(unsupported.issues).toEqual([]);
   });
 
-  it('does not expect AI files from editors that never install them', () => {
-    const model = selectReadiness(makeDashboardState({
-      ideStatuses: [client({
-        ideId: 'claude-desktop',
-        label: 'Claude Desktop',
-        aiFiles: { skills: 'missing', rules: 'missing', workflows: 'missing', agents: 'missing' },
-      })],
-    }));
+  it('holds an LSP-only editor to the same skill check once its LSP is configured', () => {
+    const [helix] = summarizeClients([client({
+      ideId: 'helix', label: 'Helix', mcpConfigured: false, lspConfigured: true, aiSkill: { status: 'missing' },
+    })]);
 
-    expect(model.state).toBe('ready');
+    expect(helix).toMatchObject({ usable: true, state: 'partial', problem: 'ai-skill' });
   });
 
   it('repairs several editors with one action only when more than one needs work', () => {
@@ -414,10 +402,10 @@ describe('summarizeClients', () => {
       client({
         ideId: 'claude-code',
         label: 'Claude Code',
-        aiFiles: { skills: 'partial', rules: 'ok', workflows: 'ok', agents: 'ok' },
+        aiSkill: { status: 'outdated', version: '2.0.0' },
       }),
       client({ ideId: 'amp', label: 'Amp', detected: false }),
-    ], true);
+    ]);
 
     expect(summaries.map(item => [item.ideId, item.state])).toEqual([
       ['cursor', 'ready'],

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { IdeStatus } from '@shared/types.js';
@@ -16,12 +16,11 @@ import { vscodeApiMock } from './test-setup.js';
 // control that legitimately disappears hands focus to the next logical control
 // or the section heading.
 
-const ALL_OK = { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' } as const;
 const CHROME = { id: 'chrome', found: true, channel: 'chrome', label: 'Google Chrome' } as const;
 const BUNDLED = { id: 'bundled-chromium', found: true, channel: 'chromium', label: 'Bundled Chromium', downloaded: true } as const;
 
 function ide(overrides: Partial<IdeStatus> & Pick<IdeStatus, 'ideId' | 'label'>): IdeStatus {
-  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiFiles: { ...ALL_OK }, ...overrides };
+  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiSkill: { status: 'installed', version: '2.3.0' }, ...overrides };
 }
 
 function seed(overrides: DashboardStateOverrides = {}, activeTab: 'overview' | 'setup' | 'settings' = 'setup'): void {
@@ -51,7 +50,7 @@ describe('Local service lifecycle', () => {
   it('keeps focus on the lifecycle slot when Start becomes Restart', async () => {
     const user = userEvent.setup();
     seed({ daemon: { running: false, healthy: false, port: null, port_lsp: null, uptime: null } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const start = button('Start service');
     await user.click(start);
@@ -64,7 +63,7 @@ describe('Local service lifecycle', () => {
   it('moves focus to Start when the Stop button goes away', async () => {
     const user = userEvent.setup();
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await user.click(button('Stop service'));
     hostAnswers('daemon:stop', { ok: true }, { daemon: { running: false, healthy: false, port: null, port_lsp: null, tunnelUrl: null, uptime: null } });
@@ -77,7 +76,7 @@ describe('Editor card', () => {
   it('keeps focus on the primary slot when Set up becomes Update', async () => {
     const user = userEvent.setup();
     seed({ ideStatuses: [ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false })] });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     const setUp = button('Set up Windsurf');
     await user.click(setUp);
@@ -90,12 +89,24 @@ describe('Editor card', () => {
   it('moves focus to Set up when Remove goes away', async () => {
     const user = userEvent.setup();
     seed({ ideStatuses: [ide({ ideId: 'windsurf', label: 'Windsurf' })] });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await user.click(button('Remove Windsurf configuration'));
     hostAnswers('action:unconfigureIde', { ok: true }, { ideStatuses: [ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false })] });
 
     await waitFor(() => expect(button('Set up Windsurf')).toHaveFocus());
+  });
+
+  it('moves focus to the primary slot when Install skill goes away', async () => {
+    const user = userEvent.setup();
+    seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'missing' } })] });
+    render(<Setup navigate={vi.fn()} />);
+
+    // The card's own button: the AI skill section offers one of the same name.
+    await user.click(within(screen.getByRole('article', { name: 'Cursor' })).getByRole('button', { name: 'Install skill' }));
+    hostAnswers('action:installSkill', { ok: true }, { ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor' })] });
+
+    await waitFor(() => expect(button('Update Cursor')).toHaveFocus());
   });
 });
 
@@ -107,7 +118,7 @@ describe('Setup all', () => {
       ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false }),
     ];
     seed({ ideStatuses: needWork });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
 
     await user.click(button('Setup all detected editors'));
     hostAnswers('action:setupAll', { ok: true }, { ideStatuses: needWork.map(s => ({ ...s, mcpConfigured: true })) });
@@ -124,7 +135,7 @@ describe('Remote access', () => {
   it('keeps focus on the one remote-access slot when Enable becomes Disable', async () => {
     const user = userEvent.setup();
     seed();
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await openRemote(user);
 
     const enable = button('Enable remote access');
@@ -138,7 +149,7 @@ describe('Remote access', () => {
   it('moves focus into the token field on Replace, and back to Replace on Save and on Cancel', async () => {
     const user = userEvent.setup();
     seed({ tunnel: { provider: 'ngrok', ngrokAuthtokenSet: true } });
-    render(<Setup />);
+    render(<Setup navigate={vi.fn()} />);
     await openRemote(user);
 
     await user.click(button('Replace token'));

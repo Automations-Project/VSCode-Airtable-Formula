@@ -13,11 +13,11 @@ export function EditorsSection() {
   const ideStatuses = useStore(s => s.ideStatuses);
   const pendingIdeActions = useStore(s => s.pendingIdeActions);
   const setupAllPending = useStore(s => s.pendingSetupAll.size > 0);
-  const includeAgents = useStore(s => s.settings.ai.includeAgents);
   const setupIde = useStore(s => s.setupIde);
   const setupAll = useStore(s => s.setupAll);
   const unconfigureIde = useStore(s => s.unconfigureIde);
   const openIdeDocs = useStore(s => s.openIdeDocs);
+  const installSkill = useStore(s => s.installSkill);
   const [setupAllId, setSetupAllId] = React.useState<string | null>(null);
   const setupAllOutcome = useActionOutcome(setupAllId);
   // A successful setup-all usually leaves at most one editor needing work, which removes the button.
@@ -25,7 +25,7 @@ export function EditorsSection() {
 
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
-  const needWork = summarizeClients(detected, includeAgents).filter(client => client.state !== 'ready').length;
+  const needWork = summarizeClients(detected).filter(client => client.state !== 'ready').length;
 
   const description = ideStatuses.length === 0
     ? undefined
@@ -37,7 +37,6 @@ export function EditorsSection() {
     <li key={status.ideId}>
       <EditorCard
         status={status}
-        includeAgents={includeAgents}
         // Only this editor's own action, or a setup-all rewriting every editor,
         // holds its card; unrelated work never does.
         loading={pendingIdeActions.has(status.ideId)}
@@ -45,6 +44,7 @@ export function EditorsSection() {
         onSetup={() => setupIde(status.ideId)}
         onUnconfigure={() => unconfigureIde(status.ideId)}
         onDocs={() => openIdeDocs(status.ideId)}
+        onInstallSkill={installSkill}
       />
     </li>
   );

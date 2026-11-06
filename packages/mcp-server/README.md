@@ -725,7 +725,7 @@ client, and rotate via `manage_daemon action=token_rotate` if it leaks.
 ## Related
 
 - [**Official Airtable MCP**](https://support.airtable.com/docs/using-the-airtable-mcp-server) — Airtable's first-party remote server for records over HTTP; this add-on runs alongside it
-- [**Airtable Formula** VS Code Extension](https://github.com/Automations-Project/VSCode-Airtable-Formula) — Dashboard, formula editor, MCP installer, and AI skills
+- [**Airtable Formula** VS Code Extension](https://github.com/Automations-Project/VSCode-Airtable-Formula) — Dashboard, formula editor, MCP installer, and the AI skill (one folder for every AI client)
 - [Model Context Protocol](https://modelcontextprotocol.io) — The open standard for AI tool integration
 
 ## Support This Project

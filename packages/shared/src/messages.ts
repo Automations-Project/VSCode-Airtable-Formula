@@ -5,6 +5,7 @@ import type {
   IdeStatus,
   AuthState,
   PromptDef,
+  SkillScope,
   StorageEntryId,
   ToolCategories,
   ToolProfileName,
@@ -38,7 +39,7 @@ export type WebviewSettingChange =
       value: 'safe' | 'standard' | 'aggressive' | 'extreme';
     }
   | { key: 'ai.autoInstallFiles'; value: boolean }
-  | { key: 'ai.includeAgents'; value: boolean }
+  | { key: 'ai.installScope'; value: SkillScope }
   | { key: 'debug.enabled'; value: boolean }
   | { key: 'debug.verboseHttp'; value: boolean }
   | { key: 'debug.bufferSize'; value: number };
@@ -70,6 +71,8 @@ export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'action:setupIde'; id: ActionId; ideId: IdeId }
   | { type: 'action:setupAll'; id: ActionId }
+  | { type: 'action:installSkill'; id: ActionId }
+  | { type: 'action:removeSkill'; id: ActionId }
   | { type: 'action:refresh'; id: ActionId }
   | { type: 'action:login'; id: ActionId }
   | { type: 'action:logout'; id: ActionId }

@@ -215,12 +215,6 @@
   color: var(--text-secondary);
 }
 
-.editor-row__pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
 .lsp-badge {
   padding: 0 var(--space-1);
   border: 1px solid currentColor;
@@ -240,4 +234,103 @@
 
 .editor-card__actions:empty {
   display: none;
+}
+
+/* AI skill. */
+/* Only what differs from the base button (resets and focus ring live in base.css). */
+.link-button {
+  min-height: 0;
+  padding: 0;
+  color: var(--text-link);
+}
+
+.link-button:hover,
+.link-button:focus-visible {
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: var(--text-link-active);
+}
+
+.skill-clients {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-client {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-default);
+}
+
+.skill-client__name {
+  font-weight: 600;
+}
+
+/* The real path, wrapped and never truncated. */
+.skill-client__dir {
+  min-width: 0;
+  flex: 1 1 12em;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: max(11px, 0.9em);
+  overflow-wrap: anywhere;
+}
+
+.skill-client__status {
+  font-weight: 600;
+}
+
+.skill-client[data-status='installed'] .skill-client__status { color: var(--status-success); }
+.skill-client[data-status='outdated'] .skill-client__status { color: var(--status-warning); }
+.skill-client[data-status='missing'] .skill-client__status { color: var(--text-danger); }
+
+/* A neutral mark for clients we ship no logo for. */
+.monogram {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.skill-group__title {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: max(11px, 0.92em);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.skill-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10em, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-chip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
 }

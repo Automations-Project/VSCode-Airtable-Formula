@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import type { IdeId, IdeStatus, AiFiles } from '@airtable-formula/shared';
+import type { AiSkill, IdeId, IdeStatus } from '@airtable-formula/shared';
 import { getSettings, minutesToIdleParkMs } from '../settings.js';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
@@ -199,8 +199,8 @@ export async function getMcpHealth(ideId: IdeId): Promise<{ configured: boolean;
   } catch { return { configured: false, healthy: false }; }
 }
 
-function emptyAiFiles(): AiFiles {
-  return { skills: 'missing', rules: 'missing', workflows: 'missing', agents: 'missing' };
+function missingAiSkill(): AiSkill {
+  return { status: 'missing' };
 }
 
 export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
@@ -222,7 +222,7 @@ export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
     mcpServerHealthy: health.configured ? health.healthy : undefined,
     lspConfigured:   hasLsp ? lspConfigured : undefined,
     lspManualStep:   cfg.lspManualStep,
-    aiFiles: emptyAiFiles(),
+    aiSkill: missingAiSkill(),
   };
 }
 
