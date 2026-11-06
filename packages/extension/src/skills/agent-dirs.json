@@ -1,0 +1,631 @@
+{
+  "source": "vercel-labs/skills@d3701c11b1101251af14c9d148f026e1a47ebe17 src/agents.ts",
+  "agents": [
+    {
+      "id": "adal",
+      "name": "AdaL",
+      "project": ".adal/skills",
+      "global": "~/.adal/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "aider-desk",
+      "name": "AiderDesk",
+      "project": ".aider-desk/skills",
+      "global": "~/.aider-desk/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "amp",
+      "name": "Amp",
+      "project": ".agents/skills",
+      "global": "~/.config/agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "project": ".agents/skills",
+      "global": "~/.gemini/config/skills",
+      "universal": true,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "antigravity-cli",
+      "name": "Antigravity CLI",
+      "project": ".agents/skills",
+      "global": "~/.gemini/config/skills",
+      "universal": true,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "astrbot",
+      "name": "AstrBot",
+      "project": "data/skills",
+      "global": "~/.astrbot/data/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "augment",
+      "name": "Augment",
+      "project": ".augment/skills",
+      "global": "~/.augment/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "autohand-code",
+      "name": "Autohand Code CLI",
+      "project": ".autohand/skills",
+      "global": "~/.autohand/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "bob",
+      "name": "IBM Bob",
+      "project": ".bob/skills",
+      "global": "~/.bob/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "project": ".claude/skills",
+      "global": "~/.claude/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "cline",
+      "name": "Cline",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "codearts-agent",
+      "name": "CodeArts Agent",
+      "project": ".codeartsdoer/skills",
+      "global": "~/.codeartsdoer/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "codebuddy",
+      "name": "CodeBuddy",
+      "project": ".codebuddy/skills",
+      "global": "~/.codebuddy/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "codemaker",
+      "name": "Codemaker",
+      "project": ".codemaker/skills",
+      "global": "~/.codemaker/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "codestudio",
+      "name": "Code Studio",
+      "project": ".codestudio/skills",
+      "global": "~/.codestudio/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "command-code",
+      "name": "Command Code",
+      "project": ".commandcode/skills",
+      "global": "~/.commandcode/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "continue",
+      "name": "Continue",
+      "project": ".continue/skills",
+      "global": "~/.continue/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "cortex",
+      "name": "Cortex Code",
+      "project": ".cortex/skills",
+      "global": "~/.snowflake/cortex/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "crush",
+      "name": "Crush",
+      "project": ".crush/skills",
+      "global": "~/.config/crush/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "project": ".agents/skills",
+      "global": "~/.cursor/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "deepagents",
+      "name": "Deep Agents",
+      "project": ".agents/skills",
+      "global": "~/.deepagents/agent/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "devin",
+      "name": "Devin for Terminal",
+      "project": ".devin/skills",
+      "global": "~/.config/devin/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "dexto",
+      "name": "Dexto",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "droid",
+      "name": "Droid",
+      "project": ".agents/skills",
+      "global": "~/.factory/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "eve",
+      "name": "Eve",
+      "project": "agent/skills",
+      "global": null,
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "firebender",
+      "name": "Firebender",
+      "project": ".agents/skills",
+      "global": "~/.firebender/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "forgecode",
+      "name": "ForgeCode",
+      "project": ".forge/skills",
+      "global": "~/.forge/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "fx",
+      "name": "fx",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "gemini-cli",
+      "name": "Gemini CLI",
+      "project": ".agents/skills",
+      "global": "~/.gemini/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot",
+      "project": ".agents/skills",
+      "global": "~/.copilot/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "goose",
+      "name": "Goose",
+      "project": ".goose/skills",
+      "global": "~/.config/goose/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "grok",
+      "name": "Grok Build",
+      "project": ".grok/skills",
+      "global": "~/.grok/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "hermes-agent",
+      "name": "Hermes Agent",
+      "project": ".hermes/skills",
+      "global": "~/.hermes/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "iflow-cli",
+      "name": "iFlow CLI",
+      "project": ".iflow/skills",
+      "global": "~/.iflow/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "inference-sh",
+      "name": "inference.sh",
+      "project": ".inferencesh/skills",
+      "global": "~/.inferencesh/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "jazz",
+      "name": "Jazz",
+      "project": ".jazz/skills",
+      "global": "~/.jazz/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "junie",
+      "name": "Junie",
+      "project": ".junie/skills",
+      "global": "~/.junie/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Code",
+      "project": ".agents/skills",
+      "global": "~/.kilo/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "kimchi",
+      "name": "Kimchi",
+      "project": ".kimchi/skills",
+      "global": "~/.config/kimchi/harness/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "kimi-code-cli",
+      "name": "Kimi Code CLI",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "kiro-cli",
+      "name": "Kiro CLI",
+      "project": ".kiro/skills",
+      "global": "~/.kiro/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "kode",
+      "name": "Kode",
+      "project": ".kode/skills",
+      "global": "~/.kode/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "lingma",
+      "name": "Lingma",
+      "project": ".lingma/skills",
+      "global": "~/.lingma/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "loaf",
+      "name": "Loaf",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "mcpjam",
+      "name": "MCPJam",
+      "project": ".mcpjam/skills",
+      "global": "~/.mcpjam/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "minimax-code",
+      "name": "MiniMax Code",
+      "project": ".minimax/skills",
+      "global": "~/.minimax/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "mistral-vibe",
+      "name": "Mistral Vibe",
+      "project": ".vibe/skills",
+      "global": "~/.vibe/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "moxby",
+      "name": "Moxby",
+      "project": ".moxby/skills",
+      "global": "~/.moxby/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "mux",
+      "name": "Mux",
+      "project": ".mux/skills",
+      "global": "~/.mux/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "neovate",
+      "name": "Neovate",
+      "project": ".neovate/skills",
+      "global": "~/.neovate/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "ona",
+      "name": "Ona",
+      "project": ".ona/skills",
+      "global": "~/.ona/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "project": ".agents/skills",
+      "global": "~/.config/opencode/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "openhands",
+      "name": "OpenHands",
+      "project": ".openhands/skills",
+      "global": "~/.openhands/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "pi",
+      "name": "Pi",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "pochi",
+      "name": "Pochi",
+      "project": ".pochi/skills",
+      "global": "~/.pochi/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "posit-assistant",
+      "name": "Posit Assistant",
+      "project": ".posit/assistant/skills",
+      "global": "~/.posit/assistant/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "promptscript",
+      "name": "PromptScript",
+      "project": ".agents/skills",
+      "global": null,
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "qoder",
+      "name": "Qoder",
+      "project": ".qoder/skills",
+      "global": "~/.qoder/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "qoder-cn",
+      "name": "Qoder CN",
+      "project": ".qoder/skills",
+      "global": "~/.qoder-cn/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "qwen-code",
+      "name": "Qwen Code",
+      "project": ".qwen/skills",
+      "global": "~/.qwen/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "replit",
+      "name": "Replit",
+      "project": ".agents/skills",
+      "global": "~/.config/agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "roo",
+      "name": "Roo Code",
+      "project": ".roo/skills",
+      "global": "~/.roo/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "rovodev",
+      "name": "Rovo Dev",
+      "project": ".rovodev/skills",
+      "global": "~/.rovodev/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "sarvam-code",
+      "name": "Sarvam Code",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "tabnine-cli",
+      "name": "Tabnine CLI",
+      "project": ".tabnine/agent/skills",
+      "global": "~/.tabnine/agent/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "terramind",
+      "name": "Terramind",
+      "project": ".terramind/skills",
+      "global": "~/.terramind/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "tinycloud",
+      "name": "Tinycloud",
+      "project": ".tinycloud/skills",
+      "global": "~/.tinycloud/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "trae",
+      "name": "Trae",
+      "project": ".trae/skills",
+      "global": "~/.trae/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "trae-cn",
+      "name": "Trae CN",
+      "project": ".trae/skills",
+      "global": "~/.trae-cn/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "universal",
+      "name": "Universal",
+      "project": ".agents/skills",
+      "global": "~/.config/agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "warp",
+      "name": "Warp",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "project": ".windsurf/skills",
+      "global": "~/.codeium/windsurf/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "project": ".zcode/skills",
+      "global": "~/.zcode/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "zed",
+      "name": "Zed",
+      "project": ".agents/skills",
+      "global": "~/.agents/skills",
+      "universal": true,
+      "readsCanonicalGlobally": true
+    },
+    {
+      "id": "zencoder",
+      "name": "Zencoder",
+      "project": ".zencoder/skills",
+      "global": "~/.zencoder/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    },
+    {
+      "id": "zenflow",
+      "name": "Zenflow",
+      "project": ".zencoder/skills",
+      "global": "~/.zencoder/skills",
+      "universal": false,
+      "readsCanonicalGlobally": false
+    }
+  ],
+  "skipped": [
+    {
+      "id": "openclaw",
+      "reason": "unparsed globalSkillsDir: getOpenClawGlobalSkillsDir()"
+    },
+    {
+      "id": "reasonix",
+      "reason": "unparsed globalSkillsDir: join(reasonixHome, 'skills')"
+    }
+  ]
+}

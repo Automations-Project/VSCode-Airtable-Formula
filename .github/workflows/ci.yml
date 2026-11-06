@@ -24,6 +24,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      # Needs the network (fetches the pinned upstream agents.ts), so it is not inside `pnpm test`.
+      - run: pnpm check:agent-dirs
       - name: Verify npm tarball contents
         shell: bash
         run: |
