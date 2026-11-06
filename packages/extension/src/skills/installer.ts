@@ -1,168 +1,353 @@
+// One Agent-Skills folder (`airtable-formula/`) copied into every AI client's
+// skills directory. The directory table is generated at build time from
+// vercel-labs/skills (`agent-dirs.json`, `pnpm generate:agent-dirs`); the only
+// hand-kept rows are EXTRA_AGENTS. Every function takes a SkillEnv (home,
+// workspace, version, detected IDEs) instead of reading os/vscode state, so
+// tests run on a temp dir.
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
-import type { IdeId, AiFiles, AiFileStatus } from '@airtable-formula/shared';
-import { SKILL_CONTENT, RULE_CONTENT, WORKFLOWS, FUNCTIONS_REFERENCE, AGENTS_CONTENT } from './content.js';
+import type { IdeId } from '@airtable-formula/shared';
+import agentDirs from './agent-dirs.json';
 
-interface AiInstallConfig {
-  baseDir:   'home' | 'workspace';
-  skillPath:    string | null;
-  rulesPath:    string | null;
-  workflowPath: string | null;
-  agentsPath:   string | null;
-  wrapCursor:   boolean;
-  /**
-   * Deprecated-but-still-honored paths written alongside the primary ones and
-   * recognized on check. Used when a client rebrands its config directory but
-   * keeps reading the old one — e.g. Windsurf → Devin Desktop (2026-06-02):
-   * primary `.devin/…`, legacy `.windsurf/…` (read by Devin's on-by-default
-   * Windsurf import + by users still on pre-rebrand Windsurf).
-   */
-  legacy?: {
-    skillPath?:    string;
-    rulesPath?:    string;
-    workflowPath?: string;
-  };
+// TODO(task4): import from @airtable-formula/shared
+export type AiSkillStatus = 'installed' | 'outdated' | 'missing' | 'unsupported';
+export interface AiSkill { status: AiSkillStatus; version?: string }
+export type SkillScope = 'global' | 'project';
+export interface AiSkillClient {
+  id: string;
+  name: string;
+  ideId?: IdeId;
+  dir: string;
+  status: 'installed' | 'outdated' | 'missing' | 'absent';
+  canonical: boolean;
 }
 
-const home = os.homedir();
+export interface AgentDirEntry {
+  id: string;
+  name: string;
+  project: string;                  // workspace-relative skills dir, forward slashes
+  global: string | null;            // symbolic ('~/…'), null = the client has no global skills dir
+  universal: boolean;               // project dir is the standard .agents/skills
+  readsCanonicalGlobally: boolean;  // also reads ~/.agents/skills
+}
 
-const AI_CONFIGS: Record<IdeId, AiInstallConfig> = {
-  'cursor': {
-    baseDir: 'workspace',
-    skillPath:    '.cursor/rules/airtable-formula-skill.mdc',
-    rulesPath:    '.cursor/rules/airtable-formula-rules.mdc',
-    workflowPath: '.cursor/rules/airtable-formula-workflow.mdc',
-    agentsPath:   null,
-    wrapCursor: true,
-  },
-  'windsurf': {
-    baseDir: 'workspace',
-    // Windsurf was rebranded to "Devin Desktop" (2026-06-02). Devin-native
-    // workspace assets live under .devin/; .windsurf/ is still read as legacy.
-    skillPath:    '.devin/skills/airtable-formula.md',
-    rulesPath:    '.devin/rules/airtable-formula.md',
-    workflowPath: '.devin/workflows/airtable-formula.md',
-    agentsPath:   null,
-    wrapCursor: false,
-    legacy: {
-      skillPath:    '.windsurf/skills/airtable-formula.md',
-      rulesPath:    '.windsurf/rules/airtable-formula.md',
-      workflowPath: '.windsurf/workflows/airtable-formula.md',
-    },
-  },
-  'windsurf-next': {
-    baseDir: 'workspace',
-    skillPath:    '.devin/skills/airtable-formula.md',
-    rulesPath:    '.devin/rules/airtable-formula.md',
-    workflowPath: '.devin/workflows/airtable-formula.md',
-    agentsPath:   null,
-    wrapCursor: false,
-    legacy: {
-      skillPath:    '.windsurf/skills/airtable-formula.md',
-      rulesPath:    '.windsurf/rules/airtable-formula.md',
-      workflowPath: '.windsurf/workflows/airtable-formula.md',
-    },
-  },
-  'claude-code': {
-    baseDir: 'home',
-    skillPath:    path.join(home, '.claude', 'skills', 'airtable-formula', 'SKILL.md'),
-    rulesPath:    path.join(home, '.claude', 'skills', 'airtable-formula', 'RULES.md'),
-    workflowPath: path.join(home, '.claude', 'skills', 'airtable-formula', 'WORKFLOWS.md'),
-    agentsPath:   path.join(home, '.claude', 'skills', 'airtable-formula', 'AGENT.md'),
-    wrapCursor: false,
-  },
-  'claude-desktop': { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
-  'cline': {
-    baseDir: 'workspace',
-    skillPath:    '.clinerules/airtable-formula-skill.md',
-    rulesPath:    '.clinerules/airtable-formula-rules.md',
-    workflowPath: null,
-    agentsPath:   null,
-    wrapCursor: false,
-  },
-  'amp': {
-    baseDir: 'workspace',
-    skillPath:    null,
-    rulesPath:    null,
-    workflowPath: null,
-    agentsPath:   null,
-    wrapCursor: false,
-  },
-  // CLI tools and LSP-only editors — no AI files concept
-  'opencode':  { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
-  'codex-cli': { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
-  'zed':       { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
-  'helix':     { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
-  'neovim':    { baseDir: 'home', skillPath: null, rulesPath: null, workflowPath: null, agentsPath: null, wrapCursor: false },
+export const SKILL_DIR_NAME = 'airtable-formula';
+
+export interface SkillEnv {
+  home: string;                       // os.homedir() at runtime
+  workspaceRoot: string | null;       // first workspace folder, or null
+  version: string;                    // extension version
+  skillSourceDir: string;             // <extensionPath>/dist/skills/airtable-formula
+  detectedIdes: readonly IdeId[];
+  xdgConfigHome?: string;             // process.env.XDG_CONFIG_HOME
+}
+
+/** Clients Vercel's table lacks. Same shape as agent-dirs.json; a row here overrides a JSON row with the same id. */
+export const EXTRA_AGENTS: AgentDirEntry[] = [
+  { id: 'windsurf-next', name: 'Windsurf Next', project: '.windsurf/skills', global: '~/.codeium/windsurf-next/skills', universal: false, readsCanonicalGlobally: false },
+];
+
+/** Our IDE detection → the table's agent ids. IDEs not listed have no skills directory (`unsupported`). */
+export const IDE_TO_AGENTS: Partial<Record<IdeId, string[]>> = {
+  'cursor':        ['cursor'],
+  'windsurf':      ['windsurf'],
+  'windsurf-next': ['windsurf-next'],
+  'cline':         ['cline'],
+  'claude-code':   ['claude-code'],
+  'amp':           ['amp'],
+  'opencode':      ['opencode'],
+  'codex-cli':     ['codex'],
+  'zed':           ['zed'],
 };
 
-export function cursorWrap(content: string, description: string): string {
-  return `---\ndescription: "${description}"\nglobs: ["**/*.formula"]\nalwaysApply: false\n---\n\n${content}`;
+/** Workspace files the old per-IDE writer created. Deleted by a `project`-scope install/remove only. */
+export const LEGACY_WORKSPACE_FILES: readonly string[] = [
+  '.cursor/rules/airtable-formula-skill.mdc',
+  '.cursor/rules/airtable-formula-rules.mdc',
+  '.cursor/rules/airtable-formula-workflow.mdc',
+  '.windsurf/skills/airtable-formula.md',
+  '.windsurf/rules/airtable-formula.md',
+  '.windsurf/workflows/airtable-formula.md',
+  '.devin/skills/airtable-formula.md',
+  '.devin/rules/airtable-formula.md',
+  '.devin/workflows/airtable-formula.md',
+  '.clinerules/airtable-formula-skill.md',
+  '.clinerules/airtable-formula-rules.md',
+];
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+const CANONICAL_GLOBAL = '~/.agents/skills';
+const CANONICAL_PROJECT = '.agents/skills';
+const VERSION_PLACEHOLDER = 'version: 0.0.0-dev';
+const CURSOR_POINTER_RULE = '.cursor/rules/airtable-formula.mdc';
+
+// Every IdeId, so checkSkill answers for all of them (the Record type makes a missing id a compile error).
+const ALL_IDES = Object.keys({
+  'cursor': 0, 'windsurf': 0, 'windsurf-next': 0, 'claude-code': 0, 'claude-desktop': 0, 'cline': 0,
+  'amp': 0, 'opencode': 0, 'codex-cli': 0, 'zed': 0, 'helix': 0, 'neovim': 0,
+} satisfies Record<IdeId, 0>) as IdeId[];
+
+const TABLE: AgentDirEntry[] = [...new Map(
+  [...(agentDirs.agents as AgentDirEntry[]), ...EXTRA_AGENTS].map(a => [a.id, a]),
+).values()];
+const AGENT_BY_ID = new Map(TABLE.map(a => [a.id, a]));
+const IDE_BY_AGENT = new Map(
+  Object.entries(IDE_TO_AGENTS).flatMap(([ide, ids]) => ids.map(id => [id, ide as IdeId] as const)),
+);
+
+type DirStatus = { status: 'installed' | 'outdated' | 'missing'; version?: string };
+const SEVERITY = { installed: 0, outdated: 1, missing: 2 } as const;
+
+function canonicalDir(scope: SkillScope, env: SkillEnv, ws: string): string {
+  return scope === 'global' ? expandHome(CANONICAL_GLOBAL, env) : path.join(ws, CANONICAL_PROJECT);
 }
 
-export async function writeIfMissing(filePath: string, content: string, force: boolean): Promise<boolean> {
-  try { if (!force) { await fs.promises.access(filePath); return false; } } catch { /* missing, write it */ }
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, content, 'utf8');
-  return true;
+/** The native skills dir an agent reads in this scope, or null when it has none. */
+function agentDir(agent: AgentDirEntry, scope: SkillScope, env: SkillEnv, ws: string): string | null {
+  if (scope === 'project') return path.join(ws, agent.project);
+  return agent.global ? expandHome(agent.global, env) : null;
 }
 
-function resolveBase(cfg: AiInstallConfig, workspaceRoot: string): string {
-  return cfg.baseDir === 'home' ? home : workspaceRoot;
+/** Agents mapped from the IDEs we detected (rule 2), in detection order. */
+function detectedAgents(env: SkillEnv): AgentDirEntry[] {
+  const ids = new Set(env.detectedIdes.flatMap(ide => IDE_TO_AGENTS[ide] ?? []));
+  return [...ids].flatMap(id => AGENT_BY_ID.get(id) ?? []);
 }
 
-export async function installAiFiles(ideId: IdeId, workspaceRoot: string, force = false, includeAgents = false): Promise<AiFiles> {
-  const cfg = AI_CONFIGS[ideId];
-  const base = resolveBase(cfg, workspaceRoot);
+/**
+ * Rule 3 (global scope only): the parent of the agent's skills dir exists. Skipped
+ * for the standard folder itself (it exists after the first install) and when the
+ * parent is ~ or ~/.config (always present).
+ */
+function parentExists(dir: string, canonical: string, env: SkillEnv): boolean {
+  if (dir === canonical) return false;
+  const parent = path.dirname(dir);
+  const skip = [path.join(env.home), path.join(env.home, '.config'), env.xdgConfigHome && path.join(env.xdgConfigHome)];
+  return !skip.includes(parent) && fs.existsSync(parent);
+}
 
-  // Write the primary path and any legacy paths (e.g. .devin/ + .windsurf/).
-  // 'ok' if at least one location ends up present.
-  const written = async (rel: string | null, legacyRel: string | undefined, content: string): Promise<AiFileStatus> => {
-    if (!rel) return 'missing';
-    let present = false;
-    for (const r of [rel, legacyRel]) {
-      if (!r) continue;
-      const abs = cfg.baseDir === 'home' ? r : path.join(base, r);
+/** Every agent found in this scope that has a dir in it: rule 2 in detection order, then rule 3 in table order. */
+function foundAgents(scope: SkillScope, env: SkillEnv, ws: string): AgentDirEntry[] {
+  const found = detectedAgents(env).filter(a => agentDir(a, scope, env, ws));
+  if (scope === 'global') {
+    const canonical = canonicalDir(scope, env, ws);
+    for (const agent of TABLE) {
+      const dir = agentDir(agent, scope, env, ws);
+      if (dir && !found.includes(agent) && parentExists(dir, canonical, env)) found.push(agent);
+    }
+  }
+  return found;
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Reads `<dir>/airtable-formula/SKILL.md` once per dir; the version comes from the frontmatter only. */
+function statusReader(version: string): (dir: string) => DirStatus {
+  const cache = new Map<string, DirStatus>();
+  return dir => {
+    let hit = cache.get(dir);
+    if (!hit) {
+      hit = readStatus(dir, version);
+      cache.set(dir, hit);
+    }
+    return hit;
+  };
+}
+
+function readStatus(dir: string, version: string): DirStatus {
+  let text: string;
+  try { text = fs.readFileSync(path.join(dir, SKILL_DIR_NAME, 'SKILL.md'), 'utf8'); } catch { return { status: 'missing' }; }
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? '';
+  const found = /^\s+version:\s*["']?([^"'\s]+)/m.exec(frontmatter)?.[1];
+  if (!found) return { status: 'outdated' };
+  return { status: found === version ? 'installed' : 'outdated', version: found };
+}
+
+/** Copy the skill into `<target>/.airtable-formula.tmp-<pid>`, stamp the version, then swap it in. */
+function installInto(target: string, env: SkillEnv): void {
+  const final = path.join(target, SKILL_DIR_NAME);
+  const tmp = path.join(target, `.${SKILL_DIR_NAME}.tmp-${process.pid}`);
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.mkdirSync(target, { recursive: true });
+    fs.cpSync(env.skillSourceDir, tmp, { recursive: true });
+    const skillMd = path.join(tmp, 'SKILL.md');
+    fs.writeFileSync(skillMd, fs.readFileSync(skillMd, 'utf8').replace(VERSION_PLACEHOLDER, `version: ${env.version}`));
+    fs.rmSync(final, { recursive: true, force: true });
+    fs.renameSync(tmp, final);
+  } catch (err) {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort; the next install clears it */ }
+    throw err;
+  }
+}
+
+function cursorPointerRule(version: string): string {
+  return [
+    '---',
+    'description: "Airtable formulas: use the airtable-formula skill"',
+    'globs: ["**/*.formula"]',
+    'alwaysApply: false',
+    '---',
+    '',
+    'When working on Airtable formulas (`.formula`, `.min.formula`, `.ultra-min.formula` files), read',
+    '`.agents/skills/airtable-formula/SKILL.md` and follow it, opening the files in its `references/` folder as it directs.',
+    `Written by the Airtable Formula extension ${version}; every skill install rewrites this file.`,
+    '',
+  ].join('\n');
+}
+
+/** Deletes `files` that exist; records what went and what could not. */
+function removeFiles(files: string[], removed: string[], failed: { dir: string; message: string }[]): void {
+  for (const file of files) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      fs.rmSync(file, { recursive: true, force: true });
+      removed.push(file);
+    } catch (err) {
+      failed.push({ dir: file, message: messageOf(err) });
+    }
+  }
+}
+
+function legacyFiles(ws: string): string[] {
+  return LEGACY_WORKSPACE_FILES.map(rel => path.join(ws, rel));
+}
+
+// ── exports ──────────────────────────────────────────────────────────────────
+
+/** `~` → home; a leading `~/.config` → XDG_CONFIG_HOME when set (mirrors xdg-basedir). Native separators. */
+export function expandHome(p: string, env: Pick<SkillEnv, 'home' | 'xdgConfigHome'>): string {
+  if (env.xdgConfigHome && /^~\/\.config(\/|$)/.test(p)) return path.join(env.xdgConfigHome, p.slice('~/.config'.length));
+  if (p === '~' || p.startsWith('~/')) return path.join(env.home, p.slice(1));
+  return path.join(p);
+}
+
+/**
+ * `targets`: the skills dirs install writes (canonical first). `byIde`: for every
+ * mapped IDE, detected or not, the dirs its agents read in this scope.
+ */
+export function resolveTargets(scope: SkillScope, env: SkillEnv): { targets: string[]; byIde: Partial<Record<IdeId, string[]>> } {
+  const ws = env.workspaceRoot;
+  if (scope === 'project' && !ws) return { targets: [], byIde: {} };
+  const base = ws ?? '';
+  const dirs = foundAgents(scope, env, base).flatMap(a => agentDir(a, scope, env, base) ?? []);
+  const targets = [...new Set([canonicalDir(scope, env, base), ...dirs])];
+  const byIde: Partial<Record<IdeId, string[]>> = {};
+  for (const [ide, ids] of Object.entries(IDE_TO_AGENTS) as [IdeId, string[]][]) {
+    const read = ids.flatMap(id => {
+      const agent = AGENT_BY_ID.get(id);
+      return (agent && agentDir(agent, scope, env, base)) ?? [];
+    });
+    if (read.length) byIde[ide] = [...new Set(read)];
+  }
+  return { targets, byIde };
+}
+
+type InstallResult = { written: string[]; failed: { dir: string; message: string }[]; noWorkspace?: true };
+let inflight: Promise<InstallResult> | null = null;
+
+/**
+ * Installs into every target, continuing past failures. One run at a time per
+ * process: a call made while one is running gets that run's result.
+ */
+export async function installSkill(scope: SkillScope, env: SkillEnv): Promise<InstallResult> {
+  if (!inflight) inflight = runInstall(scope, env).finally(() => { inflight = null; });
+  return inflight;
+}
+
+async function runInstall(scope: SkillScope, env: SkillEnv): Promise<InstallResult> {
+  const ws = env.workspaceRoot;
+  if (scope === 'project' && !ws) return { written: [], failed: [], noWorkspace: true };
+  const written: string[] = [];
+  const failed: { dir: string; message: string }[] = [];
+  for (const target of resolveTargets(scope, env).targets) {
+    try {
+      installInto(target, env);
+      written.push(path.join(target, SKILL_DIR_NAME));
+    } catch (err) {
+      failed.push({ dir: target, message: messageOf(err) });
+    }
+  }
+  if (scope === 'project' && ws) {
+    if (env.detectedIdes.includes('cursor')) {
+      const rule = path.join(ws, CURSOR_POINTER_RULE);
       try {
-        await writeIfMissing(abs, content, force);
-        present = true;
-      } catch { /* skip this location */ }
+        fs.mkdirSync(path.dirname(rule), { recursive: true });
+        fs.writeFileSync(rule, cursorPointerRule(env.version), 'utf8');
+      } catch (err) {
+        failed.push({ dir: path.dirname(rule), message: messageOf(err) });
+      }
     }
-    return present ? 'ok' : 'missing';
-  };
-
-  const skillContent   = cfg.wrapCursor ? cursorWrap(SKILL_CONTENT, 'Airtable Formula skill') : SKILL_CONTENT;
-  const rulesContent   = cfg.wrapCursor ? cursorWrap(RULE_CONTENT, 'Airtable Formula rules') : RULE_CONTENT;
-  const wfContent      = cfg.wrapCursor ? cursorWrap(Object.values(WORKFLOWS).join('\n\n---\n\n'), 'Airtable Formula workflows') : Object.values(WORKFLOWS).join('\n\n---\n\n');
-  const agentContent   = AGENTS_CONTENT;
-
-  return {
-    skills:    await written(cfg.skillPath, cfg.legacy?.skillPath, skillContent),
-    rules:     await written(cfg.rulesPath, cfg.legacy?.rulesPath, rulesContent),
-    workflows: await written(cfg.workflowPath, cfg.legacy?.workflowPath, wfContent),
-    agents:    includeAgents ? await written(cfg.agentsPath, undefined, agentContent) : 'missing',
-  };
+    removeFiles(legacyFiles(ws), [], failed);
+  }
+  return { written, failed };
 }
 
-export async function checkAiFiles(ideId: IdeId, workspaceRoot: string): Promise<AiFiles> {
-  const cfg = AI_CONFIGS[ideId];
-  const base = resolveBase(cfg, workspaceRoot);
+/** Per-IDE status: worst of its agents' dirs; IDEs with no mapping are `unsupported`. Never writes. */
+export async function checkSkill(scope: SkillScope, env: SkillEnv): Promise<Record<IdeId, AiSkill>> {
+  const noWorkspace = scope === 'project' && !env.workspaceRoot;
+  const { byIde } = resolveTargets(scope, env);
+  const read = statusReader(env.version);
+  const result = {} as Record<IdeId, AiSkill>;
+  for (const ide of ALL_IDES) {
+    const dirs = byIde[ide];
+    if (noWorkspace && IDE_TO_AGENTS[ide]) { result[ide] = { status: 'missing' }; continue; }
+    if (!dirs) { result[ide] = { status: 'unsupported' }; continue; }
+    const worst = dirs.map(read).reduce((a, b) => (SEVERITY[b.status] > SEVERITY[a.status] ? b : a));
+    result[ide] = worst.version ? { status: worst.status, version: worst.version } : { status: worst.status };
+  }
+  return result;
+}
 
-  // 'ok' if the primary OR any legacy path exists.
-  const check = async (rel: string | null, legacyRel?: string): Promise<AiFileStatus> => {
-    for (const r of [rel, legacyRel]) {
-      if (!r) continue;
-      const abs = cfg.baseDir === 'home' ? r : path.join(base, r);
-      try { await fs.promises.access(abs); return 'ok'; } catch { /* keep checking */ }
-    }
-    return 'missing';
-  };
+/** Deletes `<target>/airtable-formula` (and, in project scope, the pointer rule and legacy files). Never the parents. */
+export async function removeSkill(scope: SkillScope, env: SkillEnv): Promise<{ removed: string[]; failed: { dir: string; message: string }[] }> {
+  const removed: string[] = [];
+  const failed: { dir: string; message: string }[] = [];
+  const ws = env.workspaceRoot;
+  if (scope === 'project' && !ws) return { removed, failed };
+  removeFiles(resolveTargets(scope, env).targets.map(t => path.join(t, SKILL_DIR_NAME)), removed, failed);
+  if (scope === 'project' && ws) removeFiles([path.join(ws, CURSOR_POINTER_RULE), ...legacyFiles(ws)], removed, failed);
+  return { removed, failed };
+}
 
-  return {
-    skills:    await check(cfg.skillPath, cfg.legacy?.skillPath),
-    rules:     await check(cfg.rulesPath, cfg.legacy?.rulesPath),
-    workflows: await check(cfg.workflowPath, cfg.legacy?.workflowPath),
-    agents:    await check(cfg.agentsPath),
+/**
+ * The whole-machine view (spec §8): the standard folder, then one row per client
+ * that has a skills dir in this scope. Found clients carry their folder's status,
+ * the rest are `absent`. `dir` is the table's symbolic form, never a native path.
+ */
+export async function listSkillClients(scope: SkillScope, env: SkillEnv): Promise<AiSkillClient[]> {
+  const ws = env.workspaceRoot;
+  if (scope === 'project' && !ws) return [];
+  const base = ws ?? '';
+  const read = statusReader(env.version);
+  const found = foundAgents(scope, env, base);
+  const detected = new Set(detectedAgents(env));
+
+  const standard: AiSkillClient = {
+    id: 'agents', name: 'Standard skills folder',
+    dir: scope === 'global' ? CANONICAL_GLOBAL : CANONICAL_PROJECT,
+    status: read(canonicalDir(scope, env, base)).status, canonical: true,
   };
+  const row = (agent: AgentDirEntry, present: boolean): AiSkillClient => {
+    const ideId = IDE_BY_AGENT.get(agent.id);
+    return {
+      id: agent.id, name: agent.name,
+      ...(ideId ? { ideId } : {}),
+      dir: scope === 'global' ? agent.global! : agent.project,
+      status: present ? read(agentDir(agent, scope, env, base)!).status : 'absent',
+      canonical: scope === 'global' ? agent.readsCanonicalGlobally : agent.universal,
+    };
+  };
+  const byName = (a: AgentDirEntry, b: AgentDirEntry) => a.name.localeCompare(b.name, 'en');
+  // A client with no skills dir in this scope (a null `global`) can never receive the skill here, so it gets no row.
+  const absent = TABLE.filter(a => !found.includes(a) && agentDir(a, scope, env, base));
+  return [
+    standard,
+    ...found.filter(a => detected.has(a)).map(a => row(a, true)),
+    ...found.filter(a => !detected.has(a)).sort(byName).map(a => row(a, true)),
+    ...absent.sort(byName).map(a => row(a, false)),
+  ];
 }

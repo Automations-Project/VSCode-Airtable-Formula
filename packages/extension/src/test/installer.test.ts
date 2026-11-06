@@ -3,86 +3,157 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { writeIfMissing, cursorWrap, checkAiFiles, installAiFiles } from '../skills/installer.js';
+import {
+  expandHome, resolveTargets, installSkill, checkSkill, removeSkill, listSkillClients,
+  type SkillEnv,
+} from '../skills/installer.js';
 
-const tmpDir = path.join(os.tmpdir(), 'airtable-test-' + Date.now());
+let root: string;
+let home: string;
+let ws: string;
+let src: string;
+let env: SkillEnv;
 
-beforeEach(() => fs.mkdirSync(tmpDir, { recursive: true }));
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-
-describe('writeIfMissing', () => {
-  it('writes a new file and returns true', async () => {
-    const file = path.join(tmpDir, 'skill.md');
-    const wrote = await writeIfMissing(file, 'content', false);
-    expect(wrote).toBe(true);
-    expect(fs.readFileSync(file, 'utf8')).toBe('content');
-  });
-
-  it('does not overwrite existing file when force=false, returns false', async () => {
-    const file = path.join(tmpDir, 'skill.md');
-    fs.writeFileSync(file, 'original');
-    const wrote = await writeIfMissing(file, 'new content', false);
-    expect(wrote).toBe(false);
-    expect(fs.readFileSync(file, 'utf8')).toBe('original');
-  });
-
-  it('overwrites existing file when force=true, returns true', async () => {
-    const file = path.join(tmpDir, 'skill.md');
-    fs.writeFileSync(file, 'original');
-    const wrote = await writeIfMissing(file, 'new content', true);
-    expect(wrote).toBe(true);
-    expect(fs.readFileSync(file, 'utf8')).toBe('new content');
-  });
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'airtable-skill-'));
+  home = path.join(root, 'home');
+  ws = path.join(root, 'ws');
+  src = path.join(root, 'src', 'airtable-formula');
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(ws, { recursive: true });
+  fs.mkdirSync(path.join(src, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'SKILL.md'),
+    '---\nname: airtable-formula\ndescription: test skill\nmetadata:\n  version: 0.0.0-dev\n  source: test\n---\n\n# Airtable Formula\n');
+  fs.writeFileSync(path.join(src, 'references', 'rules.md'), '# Rules\n');
+  env = { home, workspaceRoot: ws, version: '2.3.0', skillSourceDir: src, detectedIdes: ['cursor', 'claude-code'] };
 });
 
-describe('cursorWrap', () => {
-  it('wraps content with YAML frontmatter and glob', () => {
-    const result = cursorWrap('body text', 'My description');
-    expect(result).toMatch(/^---\n/);
-    expect(result).toContain('description: "My description"');
-    expect(result).toContain('globs: ["**/*.formula"]');
-    expect(result).toContain('body text');
-  });
-});
+afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
-describe('checkAiFiles', () => {
-  it('returns "missing" for all when no files exist', async () => {
-    const result = await checkAiFiles('windsurf', tmpDir);
-    expect(result.skills).toBe('missing');
-    expect(result.rules).toBe('missing');
-  });
-
-  it('returns "ok" for present files (legacy .windsurf path)', async () => {
-    const skillPath = path.join(tmpDir, '.windsurf', 'skills', 'airtable-formula.md');
-    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
-    fs.writeFileSync(skillPath, 'skill');
-    const result = await checkAiFiles('windsurf', tmpDir);
-    expect(result.skills).toBe('ok');
+describe('skill installer', () => {
+  it('global targets: canonical dir + detected IDE dirs + agents whose parent dir exists', () => {
+    fs.mkdirSync(path.join(home, '.gemini'), { recursive: true });     // present, not an IDE we detect
+    fs.mkdirSync(path.join(home, '.config'), { recursive: true });     // parent of configHome agents: must NOT count
+    const { targets, byIde } = resolveTargets('global', env);
+    expect(targets).toEqual(expect.arrayContaining([
+      path.join(home, '.agents', 'skills'), path.join(home, '.cursor', 'skills'),
+      path.join(home, '.claude', 'skills'), path.join(home, '.gemini', 'skills')]));
+    expect(targets).not.toContain(path.join(home, '.config', 'opencode', 'skills'));
+    expect(targets).not.toContain(path.join(home, '.codeium', 'windsurf', 'skills'));
+    expect(new Set(targets).size).toBe(targets.length);
+    expect(byIde.cursor).toEqual([path.join(home, '.cursor', 'skills')]);
   });
 
-  it('returns "ok" for the .devin primary path', async () => {
-    const skillPath = path.join(tmpDir, '.devin', 'skills', 'airtable-formula.md');
-    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
-    fs.writeFileSync(skillPath, 'skill');
-    const result = await checkAiFiles('windsurf', tmpDir);
-    expect(result.skills).toBe('ok');
-  });
-});
-
-// Windsurf → Devin Desktop (2026-06-02): primary .devin/, legacy .windsurf/.
-describe('Devin Desktop dual-write', () => {
-  it('installs both .devin (primary) and .windsurf (legacy) for skills/rules/workflows', async () => {
-    await installAiFiles('windsurf', tmpDir, false, false);
-    for (const dir of ['.devin', '.windsurf']) {
-      expect(fs.existsSync(path.join(tmpDir, dir, 'skills', 'airtable-formula.md'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, dir, 'rules', 'airtable-formula.md'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, dir, 'workflows', 'airtable-formula.md'))).toBe(true);
-    }
+  it('project targets: canonical dir + non-universal project dirs of detected IDEs only', () => {
+    const { targets } = resolveTargets('project', env);
+    expect(targets).toEqual([path.join(ws, '.agents', 'skills'), path.join(ws, '.claude', 'skills')]);
   });
 
-  it('windsurf-next installs the same dual paths', async () => {
-    await installAiFiles('windsurf-next', tmpDir, false, false);
-    expect(fs.existsSync(path.join(tmpDir, '.devin', 'rules', 'airtable-formula.md'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, '.windsurf', 'rules', 'airtable-formula.md'))).toBe(true);
+  it('expandHome honours XDG_CONFIG_HOME', () => {
+    expect(expandHome('~/.config/opencode/skills', { home, xdgConfigHome: '/x' })).toBe(path.join('/x', 'opencode', 'skills'));
+  });
+
+  it('install writes the versioned skill into every target and reports the dirs', async () => {
+    const r = await installSkill('global', env);
+    expect(r.failed).toEqual([]);
+    const skill = fs.readFileSync(path.join(home, '.cursor', 'skills', 'airtable-formula', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('version: 2.3.0');
+    expect(skill).not.toContain('0.0.0-dev');
+    expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'airtable-formula', 'references', 'rules.md'))).toBe(true);
+    expect(r.written).toContain(path.join(home, '.cursor', 'skills', 'airtable-formula'));
+  });
+
+  it('install is atomic: replaces an old folder wholesale and clears a stale tmp dir', async () => {
+    const target = path.join(home, '.cursor', 'skills');
+    fs.mkdirSync(path.join(target, 'airtable-formula'), { recursive: true });
+    fs.writeFileSync(path.join(target, 'airtable-formula', 'AGENT.md'), 'old');
+    fs.mkdirSync(path.join(target, `.airtable-formula.tmp-${process.pid}`), { recursive: true });
+    await installSkill('global', env);
+    expect(fs.existsSync(path.join(target, 'airtable-formula', 'AGENT.md'))).toBe(false);
+    expect(fs.readdirSync(target)).toEqual(['airtable-formula']);
+  });
+
+  it('install continues past an unwritable target and reports it', async () => {
+    fs.writeFileSync(path.join(home, '.agents'), 'not a dir');       // makes ~/.agents/skills impossible
+    const r = await installSkill('global', env);
+    expect(r.failed.map(f => f.dir)).toEqual([path.join(home, '.agents', 'skills')]);
+    expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'airtable-formula', 'SKILL.md'))).toBe(true);
+  });
+
+  it('project scope with no workspace is a no-op', async () => {
+    const r = await installSkill('project', { ...env, workspaceRoot: null });
+    expect(r).toEqual({ written: [], failed: [], noWorkspace: true });
+    expect(fs.existsSync(path.join(home, '.agents'))).toBe(false);
+  });
+
+  it('project install writes the Cursor pointer rule and deletes legacy files; global does neither', async () => {
+    const legacy = path.join(ws, '.clinerules', 'airtable-formula-rules.md');
+    fs.mkdirSync(path.dirname(legacy), { recursive: true }); fs.writeFileSync(legacy, 'x');
+    await installSkill('global', env);
+    expect(fs.existsSync(legacy)).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.cursor', 'rules', 'airtable-formula.mdc'))).toBe(false);
+    await installSkill('project', env);
+    expect(fs.existsSync(legacy)).toBe(false);
+    const mdc = fs.readFileSync(path.join(ws, '.cursor', 'rules', 'airtable-formula.mdc'), 'utf8');
+    expect(mdc).toMatch(/^---\n[\s\S]*globs: \["\*\*\/\*\.formula"\][\s\S]*alwaysApply: false\n---\n/);
+    expect(mdc).toContain('.agents/skills/airtable-formula/SKILL.md');
+    expect(mdc).toContain('2.3.0');
+  });
+
+  it('check reports installed / outdated / missing / unsupported per IDE', async () => {
+    await installSkill('global', env);
+    const target = path.join(home, '.claude', 'skills', 'airtable-formula', 'SKILL.md');
+    fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replace('version: 2.3.0', 'version: 2.2.0'));
+    const s = await checkSkill('global', env);
+    expect(s.cursor).toEqual({ status: 'installed', version: '2.3.0' });
+    expect(s['claude-code']).toEqual({ status: 'outdated', version: '2.2.0' });
+    expect(s.cline.status).toBe('installed');                       // reads ~/.agents/skills
+    expect(s['claude-desktop']).toEqual({ status: 'unsupported' });
+    fs.rmSync(path.join(home, '.cursor', 'skills', 'airtable-formula'), { recursive: true });
+    expect((await checkSkill('global', env)).cursor).toEqual({ status: 'missing' });
+  });
+
+  it('check treats a SKILL.md without a version line as outdated', async () => {
+    await installSkill('global', env);
+    fs.writeFileSync(path.join(home, '.cursor', 'skills', 'airtable-formula', 'SKILL.md'), '# edited');
+    expect((await checkSkill('global', env)).cursor).toEqual({ status: 'outdated' });
+  });
+
+  it('remove deletes only our folder (and the pointer rule in project scope)', async () => {
+    await installSkill('global', env);
+    fs.writeFileSync(path.join(home, '.cursor', 'skills', 'other.md'), 'keep');
+    const r = await removeSkill('global', env);
+    expect(r.removed).toContain(path.join(home, '.cursor', 'skills', 'airtable-formula'));
+    expect(fs.readdirSync(path.join(home, '.cursor', 'skills'))).toEqual(['other.md']);
+  });
+
+  it('listSkillClients: standard folder first, found clients with status, the rest absent and grouped by canonical', async () => {
+    fs.mkdirSync(path.join(home, '.gemini'), { recursive: true });
+    await installSkill('global', env);
+    const clients = await listSkillClients('global', env);
+    expect(clients[0]).toEqual({ id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'installed', canonical: true });
+    expect(clients.slice(1, 3).map(c => c.id)).toEqual(['cursor', 'claude-code']);     // detection order
+    const byId = Object.fromEntries(clients.map(c => [c.id, c]));
+    expect(byId.cursor).toMatchObject({ ideId: 'cursor', dir: '~/.cursor/skills', status: 'installed', canonical: true });
+    expect(byId['gemini-cli']).toMatchObject({ dir: '~/.gemini/skills', status: 'installed' });
+    expect(byId['gemini-cli'].ideId).toBeUndefined();
+    expect(byId.codex).toMatchObject({ status: 'absent', canonical: true });            // ~/.agents/skills exists now, but codex-cli is not detected
+    expect(byId.devin).toMatchObject({ status: 'absent', canonical: false });
+    expect(byId.antigravity).toMatchObject({ status: 'absent', canonical: false });     // universal but does not read ~/.agents/skills
+    expect((await listSkillClients('global', { ...env, detectedIdes: ['codex-cli'] })).find(c => c.id === 'codex'))
+      .toMatchObject({ ideId: 'codex-cli', dir: '~/.agents/skills', status: 'installed' });
+  });
+
+  it('listSkillClients: project scope uses workspace-relative dirs and is empty without a workspace', async () => {
+    await installSkill('project', env);
+    const clients = await listSkillClients('project', env);
+    expect(clients.filter(c => c.status !== 'absent').map(c => [c.id, c.dir, c.status])).toEqual([
+      ['agents', '.agents/skills', 'installed'], ['cursor', '.agents/skills', 'installed'], ['claude-code', '.claude/skills', 'installed']]);
+    expect(await listSkillClients('project', { ...env, workspaceRoot: null })).toEqual([]);
+  });
+
+  it('concurrent installs share one in-flight run', async () => {
+    const [a, b] = await Promise.all([installSkill('global', env), installSkill('global', env)]);
+    expect(a).toBe(b);
   });
 });
