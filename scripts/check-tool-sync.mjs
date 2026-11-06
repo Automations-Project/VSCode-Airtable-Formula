@@ -554,11 +554,11 @@ const docCountProblems = [
       label: 'tool-profile counts "`read-only` (N tools) / `safe-write` (N tools) / `full` (N tools)"',
     },
   ])),
-  ...(await checkCanonicalCounts('packages/extension/src/skills/templates/skillTemplates.ts', [
+  ...(await checkCanonicalCounts('packages/extension/src/skills/airtable-formula/references/mcp-tools.md', [
     {
       re: /\*\*Tools\*\*:\s*(\d+) tools across (\d+) categories/,
       want: [totalTools, totalCats],
-      label: '"**Tools**: N tools across M categories" header (SKILL guide + always-on rules)',
+      label: '"**Tools**: N tools across M categories" header (MCP tools guide)',
       allOccurrences: true,
     },
   ])),
@@ -610,7 +610,7 @@ if (docCountProblems.length) {
   console.error(
     '\nFix: update the counts in README.md, packages/mcp-server/README.md,\n' +
     'packages/mcp-server/src/index.js (serverInfo.description), and\n' +
-    'packages/extension/src/skills/templates/skillTemplates.ts. Where a sentence describes\n' +
+    'packages/extension/src/skills/airtable-formula/references/mcp-tools.md. Where a sentence describes\n' +
     'what an MCP client actually lists (tools/list), 72 is correct (71 + manage_tools) — see\n' +
     'CLAUDE.md "Keeping tool categories in sync" for the convention.'
   );

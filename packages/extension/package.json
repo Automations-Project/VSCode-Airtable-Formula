@@ -735,7 +735,7 @@
     ]
   },
   "scripts": {
-    "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"require('fs').cpSync('src/vendor','dist/vendor',{recursive:true})\" && node scripts/patch-esm-meta.mjs",
+    "build": "tsup src/extension.ts --format cjs --dts --external vscode --out-dir dist && node -e \"const f=require('fs');f.cpSync('src/vendor','dist/vendor',{recursive:true});f.cpSync('src/skills/airtable-formula','dist/skills/airtable-formula',{recursive:true})\" && node scripts/patch-esm-meta.mjs",
     "build:mcp": "node ../../scripts/bundle-mcp.mjs",
     "prepare:deps": "node ../../scripts/prepare-package-deps.mjs",
     "package": "node ../../scripts/package-targets.mjs --targets=host",
