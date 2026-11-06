@@ -21,6 +21,8 @@ pnpm package:targets      # package + verify ALL 8 platform-specific .vsix (rele
 pnpm assert:vsix          # verify the .node binaries inside artifacts/*.vsix (byte-exact vs pins)
 pnpm check:binary-digests # re-derive the native-binary pins from the registry and diff (network)
 pnpm record:binary-digests # rewrite scripts/native-binary-digests.json — only after an impit/ngrok bump
+pnpm generate:agent-dirs  # regenerate packages/extension/src/skills/agent-dirs.json from the pinned vercel-labs/skills
+pnpm check:agent-dirs     # diff agent-dirs.json against upstream (network; its own CI step)
 ```
 
 ### Per-package

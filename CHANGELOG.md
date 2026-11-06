@@ -50,7 +50,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **`airtableFormula.ai.includeAgents`** — the agent content now lives in `references/workflows.md`.
 - **The per-IDE rules and workflow files.** A `project`-scope install deletes the legacy workspace
   files it finds (`.cursor/rules/airtable-formula-*.mdc`, `.windsurf/{skills,rules,workflows}/airtable-formula.md`,
-  `.devin/…`, `.clinerules/airtable-formula-{skill,rules}.md`); under the default `global` scope they
+  `.devin/skills/airtable-formula.md`, `.devin/rules/airtable-formula.md`, `.devin/workflows/airtable-formula.md`,
+  `.clinerules/airtable-formula-{skill,rules}.md`); under the default `global` scope they
   are left alone, so delete them by hand. The old `~/.claude/skills/airtable-formula/{RULES,WORKFLOWS,AGENT}.md`
   disappear when the folder is replaced.
 
