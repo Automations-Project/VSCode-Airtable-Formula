@@ -68,3 +68,14 @@ test('assertExpectedShape fails closed on an unexpected skip set or too few agen
   assert.doesNotThrow(() => assertExpectedShape(padded));
   assert.throws(() => assertExpectedShape({ ...padded, agents: padded.agents.slice(0, 69) }), /69 agents parsed, expected at least 70/);
 });
+
+test('assertExpectedShape rejects a project dir outside the workspace or a global dir not under ~', () => {
+  const parsed = parseAgentsSource(FIXTURE);
+  const skipped = [{ id: 'openclaw', reason: 'x' }, { id: 'reasonix', reason: 'y' }];
+  const padded = patch => ({
+    agents: Array.from({ length: 70 }, (_, i) => ({ ...parsed.agents[0], id: `a${i}`, ...(i === 7 ? patch : {}) })),
+    skipped,
+  });
+  assert.throws(() => assertExpectedShape(padded({ project: '../x' })), /'a7'.*project/);
+  assert.throws(() => assertExpectedShape(padded({ global: '/abs' })), /'a7'.*global/);
+});

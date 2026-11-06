@@ -17,7 +17,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, posix, win32 } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -105,6 +105,15 @@ export function assertExpectedShape({ agents, skipped }) {
   if (agents.length < MIN_AGENTS) {
     throw new Error(`${agents.length} agents parsed, expected at least ${MIN_AGENTS}`);
   }
+  // The installer joins `project` onto the workspace and expands `global` from ~: anything else would write elsewhere.
+  for (const { id, project, global } of agents) {
+    if (!project || posix.isAbsolute(project) || win32.isAbsolute(project) || project.split(/[\/]/).includes('..')) {
+      throw new Error(`agent '${id}' project dir '${project}' must be a non-empty workspace-relative path without '..'`);
+    }
+    if (global !== null && !global.startsWith('~/')) {
+      throw new Error(`agent '${id}' global dir '${global}' must be null or start with '~/'`);
+    }
+  }
 }
 
 function die(msg) {
@@ -113,7 +122,7 @@ function die(msg) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const res = await fetch(SOURCE_URL);
+  const res = await fetch(SOURCE_URL, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) die(`GET ${SOURCE_URL} -> HTTP ${res.status}`);
   const parsed = parseAgentsSource(await res.text());
   try {
