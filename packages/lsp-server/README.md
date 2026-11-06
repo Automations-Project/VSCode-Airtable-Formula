@@ -1,7 +1,7 @@
 # airtable-user-lsp
 
 Airtable language server for formula, script, and automation files.
-Works with any LSP-capable editor — Neovim, Zed, OpenCode, Claude Code, and more.
+Works with editors that let you register a language server by command — Neovim, Helix, OpenCode, Claude Code, and more.
 
 ## Features
 
@@ -44,20 +44,11 @@ require('lspconfig').airtable_formula.setup({
 
 ### Zed
 
-In `.zed/settings.json` or `~/.config/zed/settings.json`:
-
-```json
-{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "npx",
-        "arguments": ["airtable-user-lsp", "--stdio"]
-      }
-    }
-  }
-}
-```
+Not supported. Zed starts only the language servers that a Zed extension or a built-in
+adapter registers, so an `lsp` entry in `settings.json` for this server is never started
+([zed-industries/zed#52653](https://github.com/zed-industries/zed/issues/52653)). Earlier
+versions of this README showed such an entry; it can be deleted. Supporting Zed would take
+a Zed extension, which does not exist yet.
 
 ### OpenCode (Claude Code)
 

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed (2026-11-07 — tunnel stayed "auto-disabled")
+
+- **Re-enabling or disabling a tunnel now clears its "auto-disabled" state.** The 401-burst tripwire sets
+  `autoDisabled` and a reason when it switches a tunnel off, but nothing ever cleared them, so the
+  dashboard kept reporting the tunnel as auto-disabled whenever it was off, even after you re-enabled it
+  and later disabled it normally. `enable-tunnel` and `disable-tunnel` now reset `autoDisabled` and
+  `autoDisabledReason`.
+
 ### Fixed (2026-11-04 — Airtable bot protection on the login page)
 
 - **Direct-login / BYO page fetches.** Airtable now fronts its HTML routes (`GET /login`, the authed

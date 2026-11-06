@@ -14,6 +14,8 @@ pnpm build                # full build: tool-sync check → shared → webview �
 pnpm dev                  # webview dev server (Vite, browser preview)
 pnpm test                 # tool-sync check + shared + mcp-server + webview + extension tests
 pnpm check:tool-sync      # verify mcp-server ↔ extension tool-category mirror is in sync
+pnpm check:bundle-size   # fail if the gzipped webview JS grew past packages/webview/bundle-baseline.json (+1 KiB); pnpm bundle:record accepts a deliberate increase
+pnpm typecheck            # tsc --noEmit for shared + language-services + webview (CI gate; run after build)
 pnpm package              # create .vsix (build must be run first)
 pnpm packx                # full build + version bump + package host-target .vsix
 pnpm packx:no-bump        # full build + package host-target .vsix without version bump
@@ -176,12 +178,17 @@ Key subsystems:
 ### Extension ↔ Webview data flow
 Extension computes `DashboardState` → sends `state:update` message → webview Zustand store updates → React re-renders. User actions in webview send typed `WebviewMessage` back → extension handles in `DashboardProvider`.
 
+## Typecheck
+
+`tsup` and `vite build` strip types without checking them, so `pnpm build` passing says nothing about type errors. `pnpm typecheck` runs `tsc --noEmit` and is a CI step. It covers `shared`, `language-services` and `webview`. **`extension` and `lsp-server` are not gated yet**: they carried pre-existing errors when the gate was added (2026-11-07). Extend the `typecheck` script in the root `package.json` when a package becomes clean; never remove a package from it to get CI green.
+
 ## Build Pipeline
 
 Build order matters (drift check first, then shared → webview → MCP → extension):
 1. `scripts/check-tool-sync.mjs` — verifies the extension's tool-category mirror matches `mcp-server/src/tool-config.js` and that profile counts in extension/package.json `enumDescriptions` are accurate. Build fails fast on drift.
 2. `tsup` builds shared types to ESM
 3. `vite build` compiles React webview into `packages/extension/dist/webview/`
+   - `scripts/check-bundle-size.mjs` runs right after it: sums the gzip size of every `.js` under that directory and fails the build if it exceeds `packages/webview/bundle-baseline.json` by more than 1 KiB. Accept a deliberate increase with `pnpm bundle:record` and commit the new baseline.
 4. `scripts/bundle-mcp.mjs` uses esbuild to bundle the MCP server (from `packages/mcp-server/src/`) into `packages/extension/dist/mcp/{index,login-runner,health-check,manual-login-runner}.mjs`. Patchright and otpauth are kept external and vendored separately. It also emits `dist/mcp/version.json` containing the bundled server version, package name, build timestamp, and git SHA — the extension dashboard reads this at runtime to display the active MCP server version.
 5. `scripts/prepare-package-deps.mjs` copies `patchright`, `patchright-core`, `otpauth`, `impit` and `@ngrok/ngrok` from the workspace's hoisted `node_modules/` into `packages/extension/dist/node_modules/` using `dereference: true` to follow pnpm symlinks (invoked during `package:vsix`). **It is per-target**: `--target=<vsce target>` (default = host) selects which `impit-*` / `@ngrok/ngrok-*` native package is vendored, so it must be re-run before each `vsce package --target`.
 6. `tsup` builds extension to CJS, then copies `src/vendor/` to `dist/vendor/`

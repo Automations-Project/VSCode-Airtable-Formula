@@ -13,7 +13,7 @@ import { OutcomeFeedback } from './SettingRow.js';
 const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
 
 // Pure LSP editors: no MCP — the LSP config is their setup.
-const LSP_EDITORS = new Set<IdeId>(['zed', 'helix', 'neovim']);
+const LSP_EDITORS = new Set<IdeId>(['helix', 'neovim']);
 
 // Editors the skill installer has a skills folder for (the host's IDE_TO_AGENTS keys).
 const AI_SKILL_IDES = new Set<IdeId>([

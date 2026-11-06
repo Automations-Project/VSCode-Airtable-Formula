@@ -183,6 +183,8 @@ const defaultAuth: AuthState = {
 // If the extension never answers (host crash, lost message, webview reload),
 // pending actions must not keep buttons disabled forever — auto-expire them.
 const PENDING_TIMEOUT_MS = 60_000;
+// First-time tunnel enable downloads cloudflared or runs the named-tunnel wizard.
+export const TUNNEL_ENABLE_TIMEOUT_MS = 360_000;
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Per-action outcomes recorded by markActionDone, consumed by components that
@@ -214,8 +216,8 @@ export const useStore = create<Store>((set, get) => {
   };
 
   /** beginAction + membership in the tunnel pending set. */
-  const beginTunnelAction = (id: string) => {
-    beginAction(id);
+  const beginTunnelAction = (id: string, timeoutMs?: number) => {
+    beginAction(id, timeoutMs);
     set(s => ({ pendingTunnelActions: new Set([...s.pendingTunnelActions, id]) }));
   };
 
@@ -270,8 +272,8 @@ export const useStore = create<Store>((set, get) => {
     return id;
   };
 
-  const runTunnelAction = (message: (id: string) => WebviewMessage) =>
-    runExclusive(() => get().pendingTunnelActions, beginTunnelAction, message);
+  const runTunnelAction = (message: (id: string) => WebviewMessage, timeoutMs?: number) =>
+    runExclusive(() => get().pendingTunnelActions, id => beginTunnelAction(id, timeoutMs), message);
 
   const runOfficialAction = (message: (id: string) => WebviewMessage) =>
     runExclusive(() => get().pendingOfficialActions, beginOfficialAction, message);
@@ -502,7 +504,7 @@ export const useStore = create<Store>((set, get) => {
   // Tunnel actions are mutually exclusive: a second one while one is in flight
   // is dropped, so a double click can never start two tunnels.
   enableTunnel: (provider, authtoken, domain) =>
-    runTunnelAction(id => ({ type: 'tunnel:enable', id, provider, authtoken, domain })),
+    runTunnelAction(id => ({ type: 'tunnel:enable', id, provider, authtoken, domain }), TUNNEL_ENABLE_TIMEOUT_MS),
 
   disableTunnel: () => runTunnelAction(id => ({ type: 'tunnel:disable', id })),
 

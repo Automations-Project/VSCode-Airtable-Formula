@@ -207,7 +207,7 @@ describe('Editors section', () => {
   it('lists detected editors before undetected editors', () => {
     seed({
       ideStatuses: [
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
         ide({ ideId: 'cursor', label: 'Cursor' }),
       ],
     });
@@ -215,15 +215,15 @@ describe('Editors section', () => {
     render(<Setup navigate={vi.fn()} />);
 
     const cursor = within(editors()).getByRole('heading', { name: 'Cursor' });
-    const zed = within(editors()).getByRole('heading', { name: 'Zed' });
-    expect(cursor.compareDocumentPosition(zed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const helix = within(editors()).getByRole('heading', { name: 'Helix' });
+    expect(cursor.compareDocumentPosition(helix) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('puts undetected editors behind a Show available editors disclosure', async () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor' }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
@@ -394,15 +394,15 @@ describe('Editors section', () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor' }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
     render(<Setup navigate={vi.fn()} />);
 
     await userEvent.click(within(editors()).getByText('Show available editors'));
-    await userEvent.click(screen.getByRole('button', { name: 'Docs for Zed' }));
-    expect(posted('action:openIdeDocs')).toEqual([expect.objectContaining({ ideId: 'zed' })]);
+    await userEvent.click(screen.getByRole('button', { name: 'Docs for Helix' }));
+    expect(posted('action:openIdeDocs')).toEqual([expect.objectContaining({ ideId: 'helix' })]);
     expect(document.querySelector('a[href]')).toBeNull();
   });
 
@@ -412,7 +412,7 @@ describe('Editors section', () => {
         ide({ ideId: 'cursor', label: 'Cursor', lspConfigured: true }),
         ide({ ideId: 'claude-code', label: 'Claude Code', mcpConfigured: false }),
         ide({ ideId: 'cline', label: 'Cline', lspConfigured: false }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
@@ -421,7 +421,7 @@ describe('Editors section', () => {
     expect(within(card('Cursor')).getByText('Ready')).toBeVisible();
     expect(within(card('Claude Code')).getByText('Needs setup')).toBeVisible();
     expect(within(card('Cline')).getByText('Partial')).toBeVisible();
-    expect(within(card('Zed')).getByText('Not detected')).toBeInTheDocument();
+    expect(within(card('Helix')).getByText('Not detected')).toBeInTheDocument();
   });
 
   it('spells out partial MCP and LSP states without relying on colour', () => {
@@ -443,7 +443,8 @@ describe('Editors section', () => {
         ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'missing' } }),
         ide({ ideId: 'windsurf', label: 'Windsurf', aiSkill: { status: 'outdated', version: '2.2.0' } }),
         ide({ ideId: 'claude-code', label: 'Claude Code', aiSkill: { status: 'installed', version: '2.3.0' } }),
-        ide({ ideId: 'zed', label: 'Zed', mcpConfigured: false, lspConfigured: true, aiSkill: { status: 'unsupported' } }),
+        // Amp is in the skill installer's client list but can report 'unsupported' (no skills folder for its scope).
+        ide({ ideId: 'amp', label: 'Amp', mcpConfigured: true, aiSkill: { status: 'unsupported' } }),
       ],
     });
 
@@ -465,11 +466,11 @@ describe('Editors section', () => {
     expect(claude.queryByRole('button', { name: /skill/ })).not.toBeInTheDocument();
     expect(claude.getByText('Ready')).toBeVisible();
 
-    const zed = within(card('Zed'));
-    expect(zed.getByText('not supported')).toBeVisible();
-    expect(zed.getByText('not supported')).toHaveAttribute('data-status', 'neutral');
-    expect(zed.queryByRole('button', { name: /skill/ })).not.toBeInTheDocument();
-    expect(zed.getByText('Ready')).toBeVisible();
+    const amp = within(card('Amp'));
+    expect(amp.getByText('not supported')).toBeVisible();
+    expect(amp.getByText('not supported')).toHaveAttribute('data-status', 'neutral');
+    expect(amp.queryByRole('button', { name: /skill/ })).not.toBeInTheDocument();
+    expect(amp.getByText('Ready')).toBeVisible();
   });
 
   it('shows no AI skill row for an editor the skill installer does not cover', () => {
@@ -556,7 +557,7 @@ describe('Setup service and editors markup', () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor', lspConfigured: true }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
@@ -571,7 +572,7 @@ describe('Setup service and editors markup', () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor', lspConfigured: true }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
     render(<Setup navigate={vi.fn()} />);

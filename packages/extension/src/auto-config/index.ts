@@ -227,7 +227,8 @@ export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
 }
 
 export async function getAllIdeStatuses(): Promise<IdeStatus[]> {
-  const ids = Object.keys(IDE_CONFIGS) as IdeId[];
+  // An editor with no capabilities has nothing Setup could configure, so it gets no card.
+  const ids = (Object.keys(IDE_CONFIGS) as IdeId[]).filter(id => IDE_CONFIGS[id].capabilities.length > 0);
   return Promise.all(ids.map(getIdeStatus));
 }
 

@@ -254,7 +254,7 @@ describe('selectReadiness priority and branches', () => {
     expect(model.state).toBe('blocked');
   });
 
-  it.each(['zed', 'helix', 'neovim'] as const)('counts %s as usable through LSP only', ideId => {
+  it.each(['helix', 'neovim'] as const)('counts %s as usable through LSP only', ideId => {
     const usable = selectReadiness(makeDashboardState({
       ideStatuses: [client({ ideId, label: ideId, mcpConfigured: false, lspConfigured: true })],
     }));
@@ -292,11 +292,11 @@ describe('selectReadiness priority and branches', () => {
   });
 
   it('holds an LSP-only editor to the same skill check once its LSP is configured', () => {
-    const [zed] = summarizeClients([client({
-      ideId: 'zed', label: 'Zed', mcpConfigured: false, lspConfigured: true, aiSkill: { status: 'missing' },
+    const [helix] = summarizeClients([client({
+      ideId: 'helix', label: 'Helix', mcpConfigured: false, lspConfigured: true, aiSkill: { status: 'missing' },
     })]);
 
-    expect(zed).toMatchObject({ usable: true, state: 'partial', problem: 'ai-skill' });
+    expect(helix).toMatchObject({ usable: true, state: 'partial', problem: 'ai-skill' });
   });
 
   it('repairs several editors with one action only when more than one needs work', () => {

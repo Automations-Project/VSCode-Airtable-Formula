@@ -1,0 +1,6 @@
+{
+  "gzipJsBytes": 108659,
+  "toleranceBytes": 1024,
+  "recordedAt": "2026-11-06T23:01:36.895Z",
+  "note": "sum of gzip sizes of every .js under packages/extension/dist/webview; regenerate with pnpm bundle:record"
+}
