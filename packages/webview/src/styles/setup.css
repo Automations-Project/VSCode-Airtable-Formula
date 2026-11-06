@@ -237,13 +237,11 @@
 }
 
 /* AI skill. */
+/* Only what differs from the base button (resets and focus ring live in base.css). */
 .link-button {
+  min-height: 0;
   padding: 0;
-  border: 0;
-  background: none;
   color: var(--text-link);
-  cursor: pointer;
-  font: inherit;
 }
 
 .link-button:hover,
@@ -251,9 +249,8 @@
   text-decoration: underline;
 }
 
-.link-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+.link-button:hover {
+  color: var(--text-link-active);
 }
 
 .skill-clients {

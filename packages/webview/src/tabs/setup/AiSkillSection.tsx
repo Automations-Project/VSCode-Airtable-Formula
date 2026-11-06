@@ -31,6 +31,24 @@ function ClientGroup({ title, clients }: { title: string; clients: AiSkillClient
   );
 }
 
+const folderWord = (n: number) => (n === 1 ? 'folder' : 'folders');
+
+/** One line for the found clients, counted in folders, not rows: clients that read the same
+ * directory (Codex and the standard folder, every universal client in a project) share it and its status. */
+function summarise(present: AiSkillClient[], version: string): { dot: DotVariant; text: string } {
+  const folders = (status?: AiSkillClient['status']) =>
+    new Set(present.filter(c => status === undefined || c.status === status).map(c => c.dir)).size;
+  const total = folders();
+  const installed = folders('installed');
+  const outdated = folders('outdated');
+
+  if (installed === 0 && outdated === 0) return { dot: 'err', text: 'Not installed' };
+  if (installed === total) return { dot: 'ok', text: `Installed in ${installed} ${folderWord(installed)} at version ${version}` };
+  // Nothing missing: the only problem is age.
+  if (installed + outdated === total) return { dot: 'warn', text: `${outdated} ${folderWord(outdated)} outdated, update to version ${version}` };
+  return { dot: 'warn', text: `${installed} of ${total} folders up to date` };
+}
+
 /** The whole-machine view of the one skill folder: where it is installed, and which clients read it. */
 export function AiSkillSection({ navigate }: { navigate: NavigateFn }) {
   const clients = useStore(s => s.aiSkillClients);
@@ -45,21 +63,13 @@ export function AiSkillSection({ navigate }: { navigate: NavigateFn }) {
 
   const present = clients.filter(c => c.status !== 'absent');
   const rest = clients.filter(c => c.status === 'absent');
-  // Folders, not rows: clients that read the same directory (Codex and the standard
-  // folder, every universal client in a project) share one folder and its status.
-  const folders = new Set(present.map(c => c.dir)).size;
-  const installed = new Set(present.filter(c => c.status === 'installed').map(c => c.dir)).size;
   const missing = present.some(c => c.status === 'missing');
   const outdated = present.some(c => c.status === 'outdated');
   const noWorkspace = scope === 'project' && clients.length === 0;
 
-  const status: { dot: DotVariant; text: string } = noWorkspace
-    ? { dot: 'off', text: 'Open a folder to install into a project, or switch the scope to this machine.' }
-    : installed === 0
-      ? { dot: 'err', text: 'Not installed' }
-      : installed === folders
-        ? { dot: 'ok', text: `Installed in ${installed} ${installed === 1 ? 'folder' : 'folders'} at version ${version}` }
-        : { dot: 'warn', text: `Installed in ${installed} of ${folders} folders` };
+  const status = noWorkspace
+    ? { dot: 'off' as const, text: 'Open a folder to install into a project, or switch the scope to this machine.' }
+    : summarise(present, version);
 
   return (
     <Section

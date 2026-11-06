@@ -105,7 +105,7 @@ describe('AI skill section', () => {
   it('summarises the install in one line', () => {
     render(<Setup navigate={navigate} />);
 
-    expect(statusLine().textContent).toBe('Installed in 2 of 3 folders');
+    expect(statusLine().textContent).toBe('2 of 3 folders up to date');
     expect(statusLine().querySelector('.status-dot')).toHaveAttribute('data-variant', 'warn');
 
     act(() => useStore.setState({ aiSkillClients: withGemini('installed') }));
@@ -120,6 +120,26 @@ describe('AI skill section', () => {
 
     act(() => useStore.setState({ aiSkillClients: CLIENTS.filter(client => client.id === 'agents') }));
     expect(statusLine().textContent).toBe('Installed in 1 folder at version 2.3.0');
+  });
+
+  it('names outdated folders instead of reading not installed', () => {
+    seed({ aiSkillClients: CLIENTS.map(client => (client.status === 'absent' ? client : { ...client, status: 'outdated' })) });
+    render(<Setup navigate={navigate} />);
+
+    expect(statusLine().textContent).toBe('3 folders outdated, update to version 2.3.0');
+    expect(statusLine().querySelector('.status-dot')).toHaveAttribute('data-variant', 'warn');
+    expect(screen.getByRole('button', { name: 'Update skill' })).toBeInTheDocument();
+
+    act(() => useStore.setState({ aiSkillClients: withGemini('outdated') }));
+    expect(statusLine().textContent).toBe('1 folder outdated, update to version 2.3.0');
+    expect(statusLine().querySelector('.status-dot')).toHaveAttribute('data-variant', 'warn');
+
+    // A missing folder outranks age: the line counts what is current.
+    act(() => useStore.setState({
+      aiSkillClients: CLIENTS.map(client => (client.id === 'agents' ? { ...client, status: 'outdated' } : client)),
+    }));
+    expect(statusLine().textContent).toBe('1 of 3 folders up to date');
+    expect(screen.getByRole('button', { name: 'Install skill' })).toBeInTheDocument();
   });
 
   it('counts folders, not rows, when two clients read the same directory', () => {
