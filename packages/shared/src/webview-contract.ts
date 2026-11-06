@@ -44,7 +44,9 @@ const IDE_IDS = [
   'neovim',
 ] as const;
 
-const AI_FILE_STATUSES = ['ok', 'missing', 'partial'] as const;
+const AI_SKILL_STATUSES = ['installed', 'outdated', 'missing', 'unsupported'] as const;
+const AI_SKILL_CLIENT_STATUSES = ['installed', 'outdated', 'missing', 'absent'] as const;
+const SKILL_SCOPES = ['global', 'project'] as const;
 const AUTH_STATUSES = [
   'unknown',
   'checking',
@@ -283,20 +285,33 @@ function isBrowserDownloadState(input: unknown): boolean {
     && hasOptional(input, 'error', value => typeof value === 'string');
 }
 
-function isAiFiles(input: unknown): boolean {
+function isAiSkill(input: unknown): boolean {
   return isPlainRecord(input)
-    && hasExactKeys(input, ['skills', 'rules', 'workflows', 'agents'])
-    && isOneOf(input.skills, AI_FILE_STATUSES)
-    && isOneOf(input.rules, AI_FILE_STATUSES)
-    && isOneOf(input.workflows, AI_FILE_STATUSES)
-    && isOneOf(input.agents, AI_FILE_STATUSES);
+    && hasExactKeys(input, ['status'], ['version'])
+    && isOneOf(input.status, AI_SKILL_STATUSES)
+    && hasOptional(input, 'version', value => typeof value === 'string');
+}
+
+function isAiSkillClient(input: unknown): boolean {
+  return isPlainRecord(input)
+    && hasExactKeys(
+      input,
+      ['id', 'name', 'dir', 'status', 'canonical'],
+      ['ideId'],
+    )
+    && typeof input.id === 'string'
+    && typeof input.name === 'string'
+    && typeof input.dir === 'string'
+    && isOneOf(input.status, AI_SKILL_CLIENT_STATUSES)
+    && typeof input.canonical === 'boolean'
+    && hasOptional(input, 'ideId', value => isOneOf(value, IDE_IDS));
 }
 
 function isIdeStatus(input: unknown): input is IdeStatus {
   return isPlainRecord(input)
     && hasExactKeys(
       input,
-      ['ideId', 'label', 'detected', 'mcpConfigured', 'aiFiles'],
+      ['ideId', 'label', 'detected', 'mcpConfigured', 'aiSkill'],
       [
         'version',
         'mcpServerHealthy',
@@ -308,7 +323,7 @@ function isIdeStatus(input: unknown): input is IdeStatus {
     && typeof input.label === 'string'
     && typeof input.detected === 'boolean'
     && typeof input.mcpConfigured === 'boolean'
-    && isAiFiles(input.aiFiles)
+    && isAiSkill(input.aiSkill)
     && hasOptional(input, 'version', value => typeof value === 'string')
     && hasOptional(input, 'mcpServerHealthy', value => typeof value === 'boolean')
     && hasOptional(input, 'lspConfigured', value => typeof value === 'boolean')
@@ -364,9 +379,9 @@ function isSettingsSnapshot(input: unknown): input is SettingsSnapshot {
 
   if (
     !isPlainRecord(input.ai)
-    || !hasExactKeys(input.ai, ['autoInstallFiles', 'includeAgents'])
+    || !hasExactKeys(input.ai, ['autoInstallFiles', 'installScope'])
     || typeof input.ai.autoInstallFiles !== 'boolean'
-    || typeof input.ai.includeAgents !== 'boolean'
+    || !isOneOf(input.ai.installScope, SKILL_SCOPES)
     || !isPlainRecord(input.formula)
     || !hasExactKeys(input.formula, ['formatterVersion'])
     || !isOneOf(input.formula.formatterVersion, ['v1', 'v2'])
@@ -546,13 +561,23 @@ function isDashboardState(input: unknown): input is DashboardState {
   return isPlainRecord(input)
     && hasExactKeys(
       input,
-      ['ideStatuses', 'versions', 'aiFilesCount', 'loading', 'settings', 'auth'],
+      [
+        'ideStatuses',
+        'versions',
+        'aiSkillCount',
+        'aiSkillClients',
+        'loading',
+        'settings',
+        'auth',
+      ],
       ['debug', 'storage', 'tunnel', 'daemon', 'officialAirtable', 'prompts'],
     )
     && Array.isArray(input.ideStatuses)
     && input.ideStatuses.every(isIdeStatus)
     && isVersionInfo(input.versions)
-    && isIntegerInRange(input.aiFilesCount, 0, Number.MAX_SAFE_INTEGER)
+    && isIntegerInRange(input.aiSkillCount, 0, Number.MAX_SAFE_INTEGER)
+    && Array.isArray(input.aiSkillClients)
+    && input.aiSkillClients.every(isAiSkillClient)
     && typeof input.loading === 'boolean'
     && isSettingsSnapshot(input.settings)
     && isAuthState(input.auth)
@@ -593,11 +618,13 @@ function isWebviewSettingChange(input: unknown): input is WebviewSettingChange {
     case 'mcp.autoConfigureOnInstall':
     case 'mcp.notifyOnUpdates':
     case 'ai.autoInstallFiles':
-    case 'ai.includeAgents':
     case 'debug.enabled':
     case 'debug.verboseHttp':
       return hasExactKeys(input, ['key', 'value'])
         && typeof input.value === 'boolean';
+    case 'ai.installScope':
+      return hasExactKeys(input, ['key', 'value'])
+        && isOneOf(input.value, SKILL_SCOPES);
     case 'auth.refreshIntervalHours':
       return hasExactKeys(input, ['key', 'value'])
         && isIntegerInRange(input.value, 1, 168);
@@ -663,6 +690,8 @@ function parseWebviewMessageByType(
         ? success<WebviewMessage>(input)
         : invalid('ready has invalid fields');
     case 'action:setupAll':
+    case 'action:installSkill':
+    case 'action:removeSkill':
     case 'action:refresh':
     case 'action:login':
     case 'action:logout':
