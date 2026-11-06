@@ -562,6 +562,14 @@ const docCountProblems = [
       allOccurrences: true,
     },
   ])),
+  ...(await checkCanonicalCounts('packages/extension/src/skills/airtable-formula/references/rules.md', [
+    {
+      re: /\*\*Tools\*\*:\s*(\d+) tools across (\d+) categories/,
+      want: [totalTools, totalCats],
+      label: '"**Tools**: N tools across M categories" header (MCP usage rules)',
+      allOccurrences: true,
+    },
+  ])),
   // The MCP `serverInfo.description` string is rendered in every MCP client's
   // server-info panel and ships verbatim to npm — it is the single most-visible
   // surface this guard reaches. It previously drifted to "62 tools" and a false
@@ -610,7 +618,8 @@ if (docCountProblems.length) {
   console.error(
     '\nFix: update the counts in README.md, packages/mcp-server/README.md,\n' +
     'packages/mcp-server/src/index.js (serverInfo.description), and\n' +
-    'packages/extension/src/skills/airtable-formula/references/mcp-tools.md. Where a sentence describes\n' +
+    'packages/extension/src/skills/airtable-formula/references/mcp-tools.md and\n' +
+    'packages/extension/src/skills/airtable-formula/references/rules.md. Where a sentence describes\n' +
     'what an MCP client actually lists (tools/list), 72 is correct (71 + manage_tools) — see\n' +
     'CLAUDE.md "Keeping tool categories in sync" for the convention.'
   );
