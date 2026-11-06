@@ -45,7 +45,10 @@ export function AiSkillSection({ navigate }: { navigate: NavigateFn }) {
 
   const present = clients.filter(c => c.status !== 'absent');
   const rest = clients.filter(c => c.status === 'absent');
-  const installed = present.filter(c => c.status === 'installed').length;
+  // Folders, not rows: clients that read the same directory (Codex and the standard
+  // folder, every universal client in a project) share one folder and its status.
+  const folders = new Set(present.map(c => c.dir)).size;
+  const installed = new Set(present.filter(c => c.status === 'installed').map(c => c.dir)).size;
   const missing = present.some(c => c.status === 'missing');
   const outdated = present.some(c => c.status === 'outdated');
   const noWorkspace = scope === 'project' && clients.length === 0;
@@ -54,9 +57,9 @@ export function AiSkillSection({ navigate }: { navigate: NavigateFn }) {
     ? { dot: 'off', text: 'Open a folder to install into a project, or switch the scope to this machine.' }
     : installed === 0
       ? { dot: 'err', text: 'Not installed' }
-      : installed === present.length
+      : installed === folders
         ? { dot: 'ok', text: `Installed in ${installed} ${installed === 1 ? 'folder' : 'folders'} at version ${version}` }
-        : { dot: 'warn', text: `Installed in ${installed} of ${present.length} folders` };
+        : { dot: 'warn', text: `Installed in ${installed} of ${folders} folders` };
 
   return (
     <Section

@@ -122,6 +122,21 @@ describe('AI skill section', () => {
     expect(statusLine().textContent).toBe('Installed in 1 folder at version 2.3.0');
   });
 
+  it('counts folders, not rows, when two clients read the same directory', () => {
+    seed({
+      aiSkillClients: [
+        CLIENTS[0],
+        CLIENTS[1],
+        { id: 'codex', name: 'Codex', ideId: 'codex-cli', dir: '~/.agents/skills', status: 'installed', canonical: true },
+      ],
+    });
+    render(<Setup navigate={navigate} />);
+
+    expect(statusLine().textContent).toBe('Installed in 2 folders at version 2.3.0');
+    const rows = within(screen.getByRole('list', { name: 'AI clients' })).getAllByRole('listitem');
+    expect(rows.map(row => row.querySelector('.skill-client__name')?.textContent)).toEqual(['Standard skills folder', 'Cursor', 'Codex']);
+  });
+
   it('collapses the rest, grouped by whether the standard folder already covers them', async () => {
     render(<Setup navigate={navigate} />);
 
