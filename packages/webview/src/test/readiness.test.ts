@@ -259,7 +259,7 @@ describe('selectReadiness priority and branches', () => {
     expect(model.state).toBe('blocked');
   });
 
-  it.each(['zed', 'helix', 'neovim'] as const)('counts %s as usable through LSP only', ideId => {
+  it.each(['helix', 'neovim'] as const)('counts %s as usable through LSP only', ideId => {
     const usable = selectReadiness(makeDashboardState({
       ideStatuses: [client({ ideId, label: ideId, mcpConfigured: false, lspConfigured: true })],
     }));

@@ -14,6 +14,7 @@ pnpm build                # full build: tool-sync check → shared → webview �
 pnpm dev                  # webview dev server (Vite, browser preview)
 pnpm test                 # tool-sync check + shared + mcp-server + webview + extension tests
 pnpm check:tool-sync      # verify mcp-server ↔ extension tool-category mirror is in sync
+pnpm typecheck            # tsc --noEmit for shared + language-services + webview (CI gate; run after build)
 pnpm package              # create .vsix (build must be run first)
 pnpm packx                # full build + version bump + package host-target .vsix
 pnpm packx:no-bump        # full build + package host-target .vsix without version bump
@@ -167,6 +168,10 @@ Key subsystems:
 
 ### Extension ↔ Webview data flow
 Extension computes `DashboardState` → sends `state:update` message → webview Zustand store updates → React re-renders. User actions in webview send typed `WebviewMessage` back → extension handles in `DashboardProvider`.
+
+## Typecheck
+
+`tsup` and `vite build` strip types without checking them, so `pnpm build` passing says nothing about type errors. `pnpm typecheck` runs `tsc --noEmit` and is a CI step. It covers `shared`, `language-services` and `webview`. **`extension` and `lsp-server` are not gated yet**: they carried pre-existing errors when the gate was added (2026-11-07). Extend the `typecheck` script in the root `package.json` when a package becomes clean; never remove a package from it to get CI green.
 
 ## Build Pipeline
 

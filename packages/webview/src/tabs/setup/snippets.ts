@@ -83,32 +83,6 @@ vim.lsp.enable('airtable_formula')`;
 vim.lsp.enable('airtable_formula')`;
   }
 
-  // Zed — JSON binary format
-  if (ide === 'zed') {
-    if (variant === 'tcp') {
-      return `{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "airtable-user-lsp",
-        "arguments": ["--tcp-client", "127.0.0.1:${port}"]
-      }
-    }
-  }
-}`;
-    }
-    return `{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "airtable-user-lsp",
-        "arguments": ["--stdio"]
-      }
-    }
-  }
-}`;
-  }
-
   // OpenCode — opencode.json format
   if (ide === 'opencode') {
     if (variant === 'tcp') {

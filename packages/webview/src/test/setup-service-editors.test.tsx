@@ -209,7 +209,7 @@ describe('Editors section', () => {
   it('lists detected editors before undetected editors', () => {
     seed({
       ideStatuses: [
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
         ide({ ideId: 'cursor', label: 'Cursor' }),
       ],
     });
@@ -217,15 +217,15 @@ describe('Editors section', () => {
     render(<Setup />);
 
     const cursor = within(editors()).getByRole('heading', { name: 'Cursor' });
-    const zed = within(editors()).getByRole('heading', { name: 'Zed' });
-    expect(cursor.compareDocumentPosition(zed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const helix = within(editors()).getByRole('heading', { name: 'Helix' });
+    expect(cursor.compareDocumentPosition(helix) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('puts undetected editors behind a Show available editors disclosure', async () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor' }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
@@ -396,15 +396,15 @@ describe('Editors section', () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor' }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
     render(<Setup />);
 
     await userEvent.click(within(editors()).getByText('Show available editors'));
-    await userEvent.click(screen.getByRole('button', { name: 'Docs for Zed' }));
-    expect(posted('action:openIdeDocs')).toEqual([expect.objectContaining({ ideId: 'zed' })]);
+    await userEvent.click(screen.getByRole('button', { name: 'Docs for Helix' }));
+    expect(posted('action:openIdeDocs')).toEqual([expect.objectContaining({ ideId: 'helix' })]);
     expect(document.querySelector('a[href]')).toBeNull();
   });
 
@@ -414,7 +414,7 @@ describe('Editors section', () => {
         ide({ ideId: 'cursor', label: 'Cursor', lspConfigured: true }),
         ide({ ideId: 'claude-code', label: 'Claude Code', mcpConfigured: false }),
         ide({ ideId: 'cline', label: 'Cline', lspConfigured: false }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
@@ -423,7 +423,7 @@ describe('Editors section', () => {
     expect(within(card('Cursor')).getByText('Ready')).toBeVisible();
     expect(within(card('Claude Code')).getByText('Needs setup')).toBeVisible();
     expect(within(card('Cline')).getByText('Partial')).toBeVisible();
-    expect(within(card('Zed')).getByText('Not detected')).toBeInTheDocument();
+    expect(within(card('Helix')).getByText('Not detected')).toBeInTheDocument();
   });
 
   it('spells out partial MCP, LSP and AI file states without relying on colour', () => {
@@ -528,7 +528,7 @@ describe('Setup service and editors markup', () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor', lspConfigured: true }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
 
@@ -543,7 +543,7 @@ describe('Setup service and editors markup', () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor', lspConfigured: true }),
-        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
       ],
     });
     render(<Setup />);

@@ -112,16 +112,15 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
     detectionPaths: [path.join(home, '.codex')],
   },
 
-  // ── Code editors (LSP only) ─────────────────────────────────────────────
+  // ── Detected only (nothing to configure) ────────────────────────────────
+  // Zed has no LSP auto-config. Zed starts only the language servers that a Zed
+  // extension or a built-in adapter registers, so the `lsp.airtable-lsp` entry
+  // Setup used to merge into settings.json was never started
+  // (zed-industries/zed#52653, closed "not planned"). Real support needs a Zed
+  // extension. Editors with no capabilities are left out of the Setup list.
   'zed': {
     label: 'Zed',
-    capabilities: ['lsp'],
-    lspConfigPath: process.platform === 'win32'
-      ? path.join(appData, 'Zed', 'settings.json')
-      : process.platform === 'darwin'
-        ? path.join(home, 'Library', 'Application Support', 'Zed', 'settings.json')
-        : path.join(home, '.config', 'zed', 'settings.json'),
-    lspConfigFormat: 'json-merge',
+    capabilities: [],
     detectionPaths: [
       path.join(home, '.config', 'zed'),
       path.join(home, 'Library', 'Application Support', 'Zed'),
@@ -129,6 +128,8 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
       '/Applications/Zed.app',
     ],
   },
+
+  // ── Code editors (LSP only) ─────────────────────────────────────────────
   'helix': {
     label: 'Helix',
     capabilities: ['lsp'],

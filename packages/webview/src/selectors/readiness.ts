@@ -106,7 +106,7 @@ const FOCUS = {
 /** Every heading id the readiness model can send focus to (a test resolves each). */
 export const READINESS_FOCUS_TARGET_IDS: readonly string[] = Object.values(FOCUS);
 
-const LSP_ONLY_EDITORS = new Set<IdeId>(['zed', 'helix', 'neovim']);
+const LSP_ONLY_EDITORS = new Set<IdeId>(['helix', 'neovim']);
 // Editors that install skills/rules/workflow files (mirrors the Setup editor card).
 const AI_FILE_EDITORS = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline', 'claude-code']);
 

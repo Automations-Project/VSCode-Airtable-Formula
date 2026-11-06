@@ -24,10 +24,11 @@ const MCP_PROTOCOLS: ReadonlyArray<{ id: McpSnippetVariant; label: string }> = [
   { id: 'stdio', label: 'stdio (npx)' },
 ];
 
-const LSP_CLIENTS = [
+// No Zed entry: Zed starts only language servers that a Zed extension registers, so a
+// settings.json snippet would do nothing (zed-industries/zed#52653).
+export const LSP_CLIENTS = [
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'opencode', label: 'OpenCode' },
-  { id: 'zed', label: 'Zed' },
   { id: 'neovim', label: 'Neovim' },
 ] as const;
 
