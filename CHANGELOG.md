@@ -6,6 +6,51 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added — AI skill installer (2026-11-06)
+
+**Added**
+
+- **One skill folder, installed into every AI client.** The per-IDE rules / skills / workflows /
+  agents files are replaced by a single Agent-Skills-standard folder, `airtable-formula/`
+  (`SKILL.md` plus `references/{rules,functions,mcp-tools,workflows}.md`). It is copied atomically
+  into the shared `~/.agents/skills` directory, into the skills directory of every editor the
+  extension detects, and (global scope) into any other supported client whose config directory
+  already exists. `SKILL.md` carries `metadata.version`, so a stale copy reads `outdated` and the
+  button becomes `Update skill`.
+- **`airtableFormula.ai.installScope`** — `global` (default; installs once per machine and writes
+  nothing into your repositories) or `project` (installs into the open workspace; skipped when
+  VS Code's workspace trust is off, and refuses any path that contains a symbolic link).
+- **Setup → AI skill section.** Lists every supported client found on this machine with its logo
+  (the 12 we ship) or a monogram, its directory and its status, one `Install skill` / `Update
+  skill` button for the whole machine, a status line and a `Change` link to the scope setting. The
+  rest sit in a collapsed "N more supported clients" list, grouped by whether the standard folder
+  already covers them. The directory table is generated, not hand-written: 77 agents from Vercel's
+  `vercel-labs/skills` (pinned by commit) plus Windsurf Next, which the extension adds itself.
+  `pnpm generate:agent-dirs` rewrites it and `pnpm check:agent-dirs` diffs it against upstream in CI.
+- **Settings → AI skill** group with the scope select and a `Remove skill` button; the remove only
+  deletes our own folder.
+
+**Changed**
+
+- **The Editor card shows one "AI skill" row** (`installed` / `outdated` / `missing`, with
+  `Install skill` / `Update skill`) instead of four separate rules / skills / workflows / agents
+  pills. `ai.autoInstallFiles` is kept and now reads "Automatically install the AI skill on first
+  launch."
+- **Cursor** gets a small pointer rule, `.cursor/rules/airtable-formula.mdc`, rewritten on every
+  `project`-scope install.
+- **`scripts/assert-vsix-binaries.mjs` (check 7) asserts `SKILL.md` ships in every VSIX**, and
+  `scripts/check-tool-sync.mjs` reads the canonical tool count from the skill's
+  `references/mcp-tools.md` and `references/rules.md`.
+
+**Removed**
+
+- **`airtableFormula.ai.includeAgents`** — the agent content now lives in `references/workflows.md`.
+- **The per-IDE rules and workflow files.** A `project`-scope install deletes the legacy workspace
+  files it finds (`.cursor/rules/airtable-formula-*.mdc`, `.windsurf/{skills,rules,workflows}/airtable-formula.md`,
+  `.devin/…`, `.clinerules/airtable-formula-{skill,rules}.md`); under the default `global` scope they
+  are left alone, so delete them by hand. The old `~/.claude/skills/airtable-formula/{RULES,WORKFLOWS,AGENT}.md`
+  disappear when the folder is replaced.
+
 ### Fixed — PR #22 acceptance audit follow-ups (2026-08-01)
 
 - **Existing custom profiles stay closed when a category is added.** The MCP server already
