@@ -66,7 +66,7 @@
 | **Script Editor** | Completions, hover docs, diagnostics | `.ats`, `.script` |
 | **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
 | **MCP Server (72 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
-| **Language Server (LSP)** | Standalone multi-editor support — Neovim, Zed, Helix, OpenCode | All above |
+| **Language Server (LSP)** | Standalone multi-editor support — Neovim, Helix, OpenCode | All above |
 | **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
 | **AI Skills** | Pre-built Airtable-specific rules and workflows for AI coding assistants | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
@@ -241,7 +241,7 @@ Features: diagnostics, completions, hover documentation, and signature help for 
 
 When the daemon is running, it auto-spawns `airtable-user-lsp --tcp` so multiple editors share one language server instance. The TCP port is written to `~/.airtable-user-mcp/daemon.lock` as `port_lsp`.
 
-See [`packages/lsp-server/README.md`](packages/lsp-server/README.md) for per-editor configuration (Neovim, Zed, OpenCode, Helix).
+See [`packages/lsp-server/README.md`](packages/lsp-server/README.md) for per-editor configuration (Neovim, OpenCode, Helix). Zed is not supported: it starts only language servers that a Zed extension registers.
 
 ---
 

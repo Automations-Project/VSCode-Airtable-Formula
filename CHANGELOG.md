@@ -6,6 +6,20 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Fixed — Zed language-server setup never worked and is removed (2026-11-07)
+
+- **Setup no longer offers Zed, and the docs no longer claim Zed support for the language server.**
+  Zed starts only the language servers that a Zed extension or a built-in adapter registers
+  ([zed-industries/zed#52653](https://github.com/zed-industries/zed/issues/52653), closed as not
+  planned). The `lsp.airtable-lsp` entry that Setup merged into Zed's `settings.json` named a server
+  no extension registers, so Zed never started it — the card showed "LSP configured" for a setup that
+  did nothing. Removed: the Zed card and its Setup/Update/Remove actions, the Zed tab under
+  **Config Snippets → LSP Server**, and the Zed sections of `README.md` and the `airtable-user-lsp`
+  README. Helix, Neovim and OpenCode are unchanged.
+- **If you ran Setup for Zed before**, you can delete the `"airtable-lsp"` (or, from the manual
+  snippet, `"airtable-formula"`) key under `"lsp"` in Zed's `settings.json`. The extension does not
+  touch that file any more, including to clean up. Real Zed support needs a Zed extension.
+
 ### Fixed — PR #22 acceptance audit follow-ups (2026-08-01)
 
 - **Existing custom profiles stay closed when a category is added.** The MCP server already

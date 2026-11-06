@@ -7,7 +7,7 @@ import { IdeIcon } from './IdeIcon.js';
 const VSCODE_FAMILY = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline']);
 
 // Pure LSP editors: no MCP, no AI files — only LSP config matters.
-const LSP_EDITORS = new Set<IdeId>(['zed', 'helix', 'neovim']);
+const LSP_EDITORS = new Set<IdeId>(['helix', 'neovim']);
 
 // IDEs that actually install AI skill/rules/workflow files.
 const AI_FILES_IDES = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline', 'claude-code']);
@@ -130,7 +130,7 @@ export function IdeCard({ status, onSetup, onUnconfigure, loading }: IdeCardProp
             </div>
           )}
 
-          {/* LSP row — dedicated LSP editors (Zed, Helix, Neovim) */}
+          {/* LSP row — dedicated LSP editors (Helix, Neovim) */}
           {isLspEditor && (
             <div className="list-row">
               <LspBadge active={!!status.lspConfigured} />

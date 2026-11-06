@@ -83,32 +83,6 @@ vim.lsp.enable('airtable_formula')`;
 vim.lsp.enable('airtable_formula')`;
   }
 
-  // Zed — JSON binary format
-  if (ide === 'zed') {
-    if (variant === 'tcp') {
-      return `{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "airtable-user-lsp",
-        "arguments": ["--tcp-client", "127.0.0.1:${port}"]
-      }
-    }
-  }
-}`;
-    }
-    return `{
-  "lsp": {
-    "airtable-formula": {
-      "binary": {
-        "path": "airtable-user-lsp",
-        "arguments": ["--stdio"]
-      }
-    }
-  }
-}`;
-  }
-
   // OpenCode — opencode.json format
   if (ide === 'opencode') {
     if (variant === 'tcp') {
@@ -212,10 +186,11 @@ const MCP_VARIANT_TABS = [
   { id: 'stdio', label: 'stdio (npx)' },
 ] as const;
 
-const LSP_IDE_TABS = [
+// No Zed tab: Zed starts only language servers that a Zed extension registers, so a
+// settings.json snippet would do nothing (zed-industries/zed#52653).
+export const LSP_IDE_TABS = [
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'opencode',    label: 'OpenCode' },
-  { id: 'zed',         label: 'Zed' },
   { id: 'neovim',      label: 'Neovim' },
 ] as const;
 
@@ -227,7 +202,7 @@ const LSP_VARIANT_TABS = [
 export function Setup() {
   const { ideStatuses, pendingActions, pendingIdeActions, pendingDaemonActions, setupIde, setupAll, unconfigureIde, tunnel, enableTunnel, disableTunnel, setNgrokAuthtoken, daemon, startDaemon, stopDaemon, restartDaemon, copyBearerToken, rotateToken, officialAirtable, saveAirtablePat, copyAirtablePat, configureOfficialAirtable, unconfigureOfficialAirtable } = useStore();
 
-  const LSP_EDITOR_IDS = new Set(['zed', 'helix', 'neovim']);
+  const LSP_EDITOR_IDS = new Set(['helix', 'neovim']);
   const detected = ideStatuses.filter(ide => ide.detected);
   const undetected = ideStatuses.filter(ide => !ide.detected);
   const detectedMcp = detected.filter(ide => !LSP_EDITOR_IDS.has(ide.ideId));

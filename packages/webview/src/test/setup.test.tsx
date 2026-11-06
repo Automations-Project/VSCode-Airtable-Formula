@@ -6,7 +6,7 @@ vi.mock('../lib/vscode.js', () => ({
   onExtensionMessage: vi.fn(() => () => {}),
 }));
 
-import { formatUptime, getMcpSnippet, getLspSnippet } from '../tabs/Setup.js';
+import { formatUptime, getMcpSnippet, getLspSnippet, LSP_IDE_TABS } from '../tabs/Setup.js';
 
 // ---------------------------------------------------------------------------
 // formatUptime
@@ -120,10 +120,11 @@ describe('getLspSnippet lsp port snippet', () => {
     expect(text).toContain('vim.lsp.config');
   });
 
-  it('Zed TCP snippet uses binary.arguments with tcp-client', () => {
-    const text = getLspSnippet('zed', 'tcp', 2087);
-    expect(text).toContain('--tcp-client');
-    expect(text).toContain('2087');
+  // Zed starts only language servers that a Zed extension (or a built-in adapter)
+  // registers, so a settings.json `lsp` entry is never used: zed-industries/zed#52653.
+  it('offers no Zed snippet', () => {
+    expect(LSP_IDE_TABS.map(tab => tab.id)).not.toContain('zed');
+    expect(getLspSnippet('zed', 'stdio', 2087)).not.toContain('"binary"');
   });
 
   it('OpenCode TCP snippet does not include --stdio', () => {
