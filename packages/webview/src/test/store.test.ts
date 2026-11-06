@@ -7,7 +7,7 @@ vi.mock('../lib/vscode.js', () => ({
   setPersistedState: vi.fn(),
 }));
 
-import { scopePending, useStore } from '../store.js';
+import { scopePending, TUNNEL_ENABLE_TIMEOUT_MS, useStore } from '../store.js';
 import { getPersistedState, sendToExtension, setPersistedState } from '../lib/vscode.js';
 
 beforeEach(() => {
@@ -347,6 +347,42 @@ describe('tunnel and official pending guards', () => {
     useStore.getState().enableTunnel('ngrok', 'tok', 'me.ngrok-free.app');
 
     expect(sent('tunnel:enable')).toHaveLength(1);
+  });
+
+  describe('tunnel enable timeout', () => {
+    it('enableTunnel stays pending past 60 s and succeeds when the host answers at 3 minutes', () => {
+      vi.useFakeTimers();
+      try {
+        const id = useStore.getState().enableTunnel('cf-quick');
+        expect(id).not.toBeNull();
+        vi.advanceTimersByTime(60_001);
+        expect(useStore.getState().pendingActions.has(id!)).toBe(true);
+        vi.advanceTimersByTime(120_000);
+        useStore.getState().markActionDone(id!, { ok: true });
+        expect(useStore.getState().pendingActions.has(id!)).toBe(false);
+        expect(useStore.getState().consumeActionResult(id!)).toEqual({ ok: true });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('enableTunnel times out at TUNNEL_ENABLE_TIMEOUT_MS when the host never answers', () => {
+      vi.useFakeTimers();
+      try {
+        const id = useStore.getState().enableTunnel('cf-quick')!;
+        vi.advanceTimersByTime(TUNNEL_ENABLE_TIMEOUT_MS + 1);
+        expect(useStore.getState().pendingActions.has(id)).toBe(false);
+        expect(useStore.getState().pendingTunnelActions.has(id)).toBe(false);
+        expect(useStore.getState().consumeActionResult(id)).toEqual({ ok: false });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('disableTunnel keeps the default 60 s timeout', () => {
+      vi.useFakeTimers();
+      try {
+        const id = useStore.getState().disableTunnel()!;
+        vi.advanceTimersByTime(60_001);
+        expect(useStore.getState().pendingActions.has(id)).toBe(false);
+      } finally { vi.useRealTimers(); }
+    });
   });
 
   it('serialises official Airtable actions and releases them on completion', () => {
