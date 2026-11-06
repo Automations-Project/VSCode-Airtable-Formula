@@ -23,6 +23,11 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # tsup and vite do not typecheck, so a type error ships unless tsc runs here.
+      # Gated today: shared, language-services, webview. NOT yet gated: extension and
+      # lsp-server, which have pre-existing errors. Add each to the `typecheck` script in
+      # package.json as soon as `tsc --noEmit` passes in it.
+      - run: pnpm typecheck
       - run: pnpm test
       - name: Verify npm tarball contents
         shell: bash
