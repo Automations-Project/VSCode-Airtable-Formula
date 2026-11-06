@@ -278,7 +278,7 @@ All under `airtableFormula.*`:
 - `mcp.daemonPort` — fixed TCP port for the shared MCP daemon HTTP server (default 8723, kept stable across restarts; 0 = automatic/ephemeral; falls back to an automatic port if the chosen port is busy; takes effect on next daemon restart)
 - `mcp.authMode` — `browser` (default; headless Chrome mints the cookie, calls go direct-HTTP) / `byo` (cookie-only, no browser; cookie from `~/.airtable-user-mcp/credentials.json` or `AIRTABLE_COOKIE`) / `direct-login` (browser-free email+password+TOTP; `login.json` or `AIRTABLE_EMAIL/PASSWORD/TOTP_SECRET`). Injected as `AIRTABLE_AUTH_MODE` into the spawned server via `buildDaemonEnv`/`registration.ts` (non-default only). Takes effect on next daemon/server restart.
 - `mcp.httpClient` — `fetch` (default) / `impit` (Chrome-TLS impersonation fallback). Injected as `AIRTABLE_HTTP_CLIENT`. `impit` must be available to the server (optionalDependency; add to the vendored deps for the bundled path).
-- `ai.autoInstallFiles` — auto-install the AI skill on first launch
+- `ai.autoInstallFiles` — auto-install/update the AI skill on launch when a detected client is missing it (also reverses Remove skill on the next launch)
 - `ai.installScope` — `global` (default; once per machine, nothing written into repositories) / `project` (into the open workspace). `ai.includeAgents` was removed (agent content lives in `references/workflows.md`).
 - `formula.formatterVersion` — `v1` or `v2` beautifier/minifier engine
 

@@ -36,8 +36,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - **The Editor card shows one "AI skill" row** (`installed` / `outdated` / `missing`, with
   `Install skill` / `Update skill`) instead of four separate rules / skills / workflows / agents
-  pills. `ai.autoInstallFiles` is kept and now reads "Automatically install the AI skill on first
-  launch."
+  pills. `ai.autoInstallFiles` is kept and now reads "Automatically install or update the AI skill
+  on launch whenever a detected client is missing it. Turn this off before using Remove skill, or
+  the skill returns on the next launch."
 - **Cursor** gets a small pointer rule, `.cursor/rules/airtable-formula.mdc`, rewritten on every
   `project`-scope install.
 - **`scripts/assert-vsix-binaries.mjs` (check 7) asserts `SKILL.md` ships in every VSIX**, and

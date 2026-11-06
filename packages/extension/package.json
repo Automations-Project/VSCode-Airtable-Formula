@@ -454,7 +454,7 @@
         "airtableFormula.ai.autoInstallFiles": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically install the AI skill on first launch."
+          "description": "Automatically install or update the AI skill on launch whenever a detected client is missing it. Turn this off before using Remove skill, or the skill returns on the next launch."
         },
         "airtableFormula.ai.installScope": {
           "type": "string",

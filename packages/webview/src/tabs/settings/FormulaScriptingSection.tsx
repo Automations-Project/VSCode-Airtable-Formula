@@ -58,7 +58,7 @@ export function FormulaScriptingSection() {
           </p>
           <SettingSwitchRow
             label="Auto-install AI skill"
-            description="Install the skill on first launch"
+            description="Installs or updates on launch when a client is missing it. Turn off before Remove skill."
             checked={ai.autoInstallFiles}
             change={value => ({ key: 'ai.autoInstallFiles', value })}
           />
