@@ -78,6 +78,7 @@ const skill = vi.hoisted(() => {
   const env = { home: '/h', workspaceRoot: null, version: '0', skillSourceDir: '/s', detectedIdes: [] };
   return {
     env,
+    scope: 'global' as 'global' | 'project',   // ai.installScope the settings mock answers
     installSkill: vi.fn(async () => ({ written: [], failed: [] })),
     checkSkill: vi.fn(async () => ({})),
     removeSkill: vi.fn(async () => ({ removed: [], failed: [] })),
@@ -116,7 +117,7 @@ vi.mock('../settings.js', () => ({
       httpClient: 'fetch',
       browserIdleParkMinutes: 30,
     },
-    ai: { autoInstallFiles: true, installScope: 'global' },
+    ai: { autoInstallFiles: true, installScope: skill.scope },
     formula: { formatterVersion: 'v2' },
     script: { beautifyStyle: 'default', minifyLevel: 'standard' },
     auth: {
@@ -210,6 +211,7 @@ describe('DashboardProvider webview trust boundary', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    skill.scope = 'global';
     vscodeMock.configValues.clear();
     for (const key of Object.keys(dependencies.ideConfigs)) delete dependencies.ideConfigs[key];
     dependencies.stat.mockImplementation(async (itemPath: string) => ({
@@ -1017,6 +1019,21 @@ describe('DashboardProvider webview trust boundary', () => {
     expect(skill.removeSkill).toHaveBeenCalledWith('global', skill.env);
     expect(skill.installSkill).not.toHaveBeenCalled();
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'skill2', ok: true });
+  });
+
+  it('action:removeSkill in project scope with no folder open warns instead of answering removed', async () => {
+    skill.scope = 'project';
+    skill.skillEnv.mockResolvedValueOnce({ ...skill.env, workspaceRoot: null });
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:removeSkill', id: 'skill3' });
+
+    await waitForResult('skill3');
+    expect(skill.removeSkill).not.toHaveBeenCalled();
+    const warning = 'Open a folder to install the AI skill into a project, or switch airtableFormula.ai.installScope to global.';
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(warning);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'skill3', ok: false, error: warning });
   });
 
   it('action:setupAll installs the skill once, not once per IDE', async () => {

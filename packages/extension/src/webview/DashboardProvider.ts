@@ -587,9 +587,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'action:removeSkill') {
       try {
-        const { removed, failed } = await removeSkill(getSettings().ai.installScope, await skillEnv(this.context));
+        const scope = getSettings().ai.installScope;
+        const env = await skillEnv(this.context);
+        // Project scope with no folder open has nothing to remove; answering "removed" would be a lie.
+        const noWorkspace = scope === 'project' && env.workspaceRoot === null;
+        const { removed, failed } = noWorkspace ? { removed: [], failed: [] } : await removeSkill(scope, env);
         if (removed.length) void vscode.window.showInformationMessage(`Airtable Formula: AI skill removed from ${folderList(removed)}`);
-        const warning = warnSkillProblems(failed);
+        const warning = warnSkillProblems(failed, noWorkspace || undefined);
         await this.pushState();
         this.postResult(msg.id, warning === undefined, warning);
       } catch (err) {
