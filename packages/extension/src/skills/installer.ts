@@ -178,10 +178,16 @@ function clearTmpDirs(target: string): void {
   }
 }
 
-/** Copy the skill into `<target>/.airtable-formula.tmp-<pid>`, stamp the version, then swap it in. */
+/**
+ * Copy the skill into `<target>/.airtable-formula.tmp-<pid>`, stamp the version, then swap it in
+ * by rename only: old folder aside, new folder in, old folder back if that fails. Each rename is
+ * all-or-nothing, so the target holds the old folder or the new one, never a half-deleted one
+ * (deleting first lost the working install when the rename then failed, e.g. on a Windows EPERM).
+ */
 function installInto(target: string, env: SkillEnv): void {
   const final = path.join(target, SKILL_DIR_NAME);
   const tmp = path.join(target, `${TMP_PREFIX}${process.pid}`);
+  const old = path.join(target, `${TMP_PREFIX}old-${process.pid}`);   // the prefix sweep collects a leftover
   try {
     clearTmpDirs(target);
     fs.rmSync(tmp, { recursive: true, force: true });   // strict for our own: never copy into a leftover
@@ -189,8 +195,19 @@ function installInto(target: string, env: SkillEnv): void {
     fs.cpSync(env.skillSourceDir, tmp, { recursive: true });
     const skillMd = path.join(tmp, 'SKILL.md');
     fs.writeFileSync(skillMd, fs.readFileSync(skillMd, 'utf8').replace(VERSION_PLACEHOLDER, `version: ${env.version}`));
-    fs.rmSync(final, { recursive: true, force: true });
-    fs.renameSync(tmp, final);
+    const hadOld = fs.lstatSync(final, { throwIfNoEntry: false }) !== undefined;
+    if (hadOld) fs.renameSync(final, old);
+    try {
+      fs.renameSync(tmp, final);
+    } catch (err) {
+      if (hadOld) {
+        try { fs.renameSync(old, final); } catch { /* the old copy stays aside under the tmp prefix */ }
+      }
+      throw err;
+    }
+    if (hadOld) {
+      try { fs.rmSync(old, { recursive: true, force: true, maxRetries: 3 }); } catch { /* the next install sweeps it */ }
+    }
   } catch (err) {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort; the next install clears it */ }
     throw err;

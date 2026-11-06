@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+// Real fs throughout; renameSync is wrapped so one test can make a single rename fail.
+vi.mock('fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, renameSync: vi.fn(actual.renameSync) };
+});
 
 import {
   expandHome, resolveTargets, installSkill, checkSkill, removeSkill, listSkillClients,
@@ -74,6 +80,28 @@ describe('skill installer', () => {
     expect(fs.readdirSync(target)).toEqual(['airtable-formula']);
   });
 
+  it('install keeps the previous folder when swapping in the new one fails', async () => {
+    await installSkill('global', env);
+    const target = path.join(home, '.cursor', 'skills');
+    const rename = vi.mocked(fs.renameSync);
+    const real = rename.getMockImplementation()!;
+    rename.mockImplementation((from, to) => {
+      if (String(to) === path.join(target, 'airtable-formula') && path.basename(String(from)) === `.airtable-formula.tmp-${process.pid}`) {
+        throw Object.assign(new Error('EPERM: simulated'), { code: 'EPERM' });
+      }
+      return real(from, to);
+    });
+    try {
+      const r = await installSkill('global', { ...env, version: '2.4.0' });
+      expect(r.failed.map(f => f.dir)).toEqual([target]);
+    } finally {
+      rename.mockImplementation(real);
+    }
+    expect(fs.readFileSync(path.join(target, 'airtable-formula', 'SKILL.md'), 'utf8')).toContain('version: 2.3.0');
+    expect(fs.existsSync(path.join(target, 'airtable-formula', 'references', 'rules.md'))).toBe(true);
+    expect(fs.readdirSync(target)).toEqual(['airtable-formula']);
+  });
+
   it('install continues past an unwritable target and reports it', async () => {
     fs.writeFileSync(path.join(home, '.agents'), 'not a dir');       // makes ~/.agents/skills impossible
     const r = await installSkill('global', env);
@@ -116,6 +144,29 @@ describe('skill installer', () => {
     expect(fs.existsSync(path.join(outsideLegacy, 'airtable-formula-rules.md'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.agents', 'skills', 'airtable-formula', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(ws, '.claude', 'skills', 'airtable-formula', 'SKILL.md'))).toBe(true);
+  });
+
+  it('project install and remove refuse a symlinked skills dir and still handle the real ones', async () => {
+    const outside = path.join(root, 'outside');
+    const precious = path.join(outside, 'airtable-formula', 'precious.txt');
+    fs.mkdirSync(path.dirname(precious), { recursive: true });
+    fs.writeFileSync(precious, 'keep');
+    fs.mkdirSync(path.join(ws, '.agents'), { recursive: true });
+    fs.symlinkSync(outside, path.join(ws, '.agents', 'skills'), 'junction');
+    const claude = path.join(ws, '.claude', 'skills', 'airtable-formula');
+    const pointer = path.join(ws, '.cursor', 'rules', 'airtable-formula.mdc');
+
+    const r = await installSkill('project', env);
+    expect(r.failed).toContainEqual({ dir: path.join(ws, '.agents', 'skills'), message: expect.stringMatching(/^refused:/) });
+    expect(fs.existsSync(precious)).toBe(true);
+    expect(fs.existsSync(path.join(claude, 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(pointer)).toBe(true);
+
+    const rm = await removeSkill('project', env);
+    expect(fs.existsSync(precious)).toBe(true);
+    expect(fs.existsSync(claude)).toBe(false);
+    expect(fs.existsSync(pointer)).toBe(false);
+    expect(rm.removed).toContain(claude);
   });
 
   it('check reports installed / outdated / missing / unsupported per IDE', async () => {
