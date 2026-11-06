@@ -41,7 +41,7 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
       serverSource: 'bundled', daemonPort: 8723, authMode: 'browser', httpClient: 'fetch',
       useDaemon: true, browserIdleParkMinutes: 30,
     },
-    ai: { autoInstallFiles: true, includeAgents: false },
+    ai: { autoInstallFiles: true, installScope: 'global' },
     formula: { formatterVersion: 'v2' },
     script: { beautifyStyle: 'default', minifyLevel: 'standard' },
     auth: { autoRefresh: true, refreshIntervalHours: 12, loginMode: 'manual' },
@@ -53,13 +53,14 @@ export function makeDashboardState(overrides: DashboardStateOverrides = {}): Das
   const ideStatuses: IdeStatus[] = [{
     ideId: 'cursor', label: 'Cursor', detected: true, version: '1.0.0',
     mcpConfigured: true, mcpServerHealthy: true,
-    aiFiles: { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' },
+    aiSkill: { status: 'installed', version: '2.1.32' },
   }];
 
   return {
     ideStatuses: overrides.ideStatuses ?? ideStatuses,
     versions: { extension: '2.1.32', mcpServerBundled: '2.4.15', ...overrides.versions },
-    aiFilesCount: overrides.aiFilesCount ?? 4,
+    aiSkillCount: overrides.aiSkillCount ?? 1,
+    aiSkillClients: overrides.aiSkillClients ?? [],
     loading: overrides.loading ?? false,
     settings: {
       ...settings,

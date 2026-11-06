@@ -13,10 +13,9 @@ import { vscodeApiMock } from './test-setup.js';
 // Every host action in Setup and Overview reports its own confirmed result in
 // place: role=status on success, role=alert with the host's error on failure.
 
-const ALL_OK = { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' } as const;
 
 function ide(overrides: Partial<IdeStatus> & Pick<IdeStatus, 'ideId' | 'label'>): IdeStatus {
-  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiFiles: { ...ALL_OK }, ...overrides };
+  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiSkill: { status: 'installed', version: '2.3.0' }, ...overrides };
 }
 
 function seed(overrides: DashboardStateOverrides = {}): void {
@@ -93,6 +92,24 @@ describe('Editors outcomes', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove Cursor configuration' }));
     settleLast('action:unconfigureIde', { ok: true });
     expect(statusText(cursor())).toContain('Cursor configuration removed.');
+  });
+
+  it('reports a skill install on the card that started it, and confirms an update after its button goes away', async () => {
+    seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'missing' } })] });
+    render(<Setup />);
+    const cursor = () => screen.getByRole('article', { name: 'Cursor' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Install skill' }));
+    settleLast('action:installSkill', { ok: false, error: 'EACCES: ~/.cursor/skills' });
+    expect(within(cursor()).getByRole('alert')).toHaveTextContent('EACCES: ~/.cursor/skills');
+
+    act(() => useStore.setState({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'outdated' } })] }));
+    await userEvent.click(screen.getByRole('button', { name: 'Update skill' }));
+    act(() => useStore.setState({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor' })] }));
+    settleLast('action:installSkill', { ok: true });
+    expect(screen.queryByRole('button', { name: 'Update skill' })).not.toBeInTheDocument();
+    expect(statusText(cursor())).toContain('AI skill updated.');
+    expect(within(cursor()).queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 

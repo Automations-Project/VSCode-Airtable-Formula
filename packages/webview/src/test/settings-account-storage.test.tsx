@@ -192,7 +192,7 @@ describe('Browser selection', () => {
     expect(screen.getByRole('button', { name: 'Check Airtable session' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Back up session data' })).toBeEnabled();
     expect(screen.getByRole('combobox', { name: 'Connection mode' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: 'Include agent files' })).toBeEnabled();
+    expect(screen.getByRole('switch', { name: 'Auto-install AI skill' })).toBeEnabled();
 
     const id = lastPostedMessage().id;
     first.unmount();
@@ -512,7 +512,7 @@ describe('Auto-refresh and per-row setting feedback', () => {
     expect(row()).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('combobox', { name: 'Check interval' })).toBeEnabled();
     expect(screen.getByRole('combobox', { name: 'Connection mode' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: 'Include agent files' })).toBeEnabled();
+    expect(screen.getByRole('switch', { name: 'Auto-install AI skill' })).toBeEnabled();
 
     settle(first, { ok: true });
     expect(row()).toBeEnabled();

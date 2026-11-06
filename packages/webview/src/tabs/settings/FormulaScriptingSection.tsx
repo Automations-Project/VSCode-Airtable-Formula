@@ -1,7 +1,15 @@
 import React from 'react';
-import { SettingSelectRow, SettingSwitchRow } from '../../components/SettingRow.js';
+import type { SkillScope } from '@shared/types.js';
+import { ActionButton } from '../../components/ActionButton.js';
+import { OutcomeFeedback, SettingSelectRow, SettingSwitchRow } from '../../components/SettingRow.js';
 import { Section } from '../../components/Section.js';
+import { useActionOutcome } from '../../lib/useActionOutcome.js';
 import { useStore } from '../../store.js';
+
+const INSTALL_SCOPES = [
+  { value: 'global', label: 'This machine' },
+  { value: 'project', label: 'Open workspace' },
+] as const satisfies ReadonlyArray<{ value: SkillScope; label: string }>;
 
 const FORMATTER_VERSIONS = [
   { value: 'v2', label: 'v2 (default)' },
@@ -31,28 +39,55 @@ export function FormulaScriptingSection() {
   const ai = useStore(s => s.settings.ai);
   const formula = useStore(s => s.settings.formula);
   const script = useStore(s => s.settings.script);
+  const removeSkill = useStore(s => s.removeSkill);
+  const skillPending = useStore(s => s.pendingSkill);
+  const [removeId, setRemoveId] = React.useState<string | null>(null);
+  const removal = useActionOutcome(removeId);
 
   return (
     <Section
       id="formula-scripting"
       title="Formula and scripting"
-      description="AI instruction files and the formatters behind the beautify and minify commands."
+      description="The AI skill and the formatters behind the beautify and minify commands."
     >
       <div className="settings-stack">
-        <div className="settings-group" role="group" aria-labelledby="ai-files-title">
-          <h3 id="ai-files-title" className="settings-group__title">AI files</h3>
+        <div className="settings-group" role="group" aria-labelledby="ai-skill-title" aria-describedby="ai-skill-description">
+          <h3 id="ai-skill-title" className="settings-group__title">AI skill</h3>
+          <p id="ai-skill-description" className="setting-row__description">
+            One skill folder, installed where your AI clients read skills.
+          </p>
           <SettingSwitchRow
-            label="Auto-install AI files"
-            description="Install skills, rules, workflows on first launch"
+            label="Auto-install AI skill"
+            description="Install the skill on first launch"
             checked={ai.autoInstallFiles}
             change={value => ({ key: 'ai.autoInstallFiles', value })}
           />
-          <SettingSwitchRow
-            label="Include agent files"
-            description="Install agent configs where supported"
-            checked={ai.includeAgents}
-            change={value => ({ key: 'ai.includeAgents', value })}
+          <SettingSelectRow
+            label="Install scope"
+            description="Once for this machine, or into the open workspace. Switching does not clean up the other scope."
+            value={ai.installScope}
+            options={INSTALL_SCOPES}
+            change={value => ({ key: 'ai.installScope', value: value as SkillScope })}
           />
+          <div className="settings-subpanel">
+            <div className="settings-actions">
+              <ActionButton
+                variant="danger"
+                pending={skillPending}
+                onClick={() => {
+                  removal.clearOutcome();
+                  setRemoveId(removeSkill());
+                }}
+              >
+                Remove skill
+              </ActionButton>
+            </div>
+            <OutcomeFeedback
+              outcome={removal.outcome}
+              successMessage="Skill removed."
+              failureMessage="The skill could not be removed."
+            />
+          </div>
         </div>
         <div className="settings-group" role="group" aria-labelledby="formula-engine-title">
           <h3 id="formula-engine-title" className="settings-group__title">Formula engine</h3>

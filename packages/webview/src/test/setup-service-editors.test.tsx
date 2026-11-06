@@ -10,10 +10,8 @@ import { useStore } from '../store.js';
 import { makeDashboardState, type DashboardStateOverrides } from './dashboard-state.fixture.js';
 import { vscodeApiMock } from './test-setup.js';
 
-const ALL_OK = { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' } as const;
-
 function ide(overrides: Partial<IdeStatus> & Pick<IdeStatus, 'ideId' | 'label'>): IdeStatus {
-  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiFiles: { ...ALL_OK }, ...overrides };
+  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiSkill: { status: 'installed', version: '2.3.0' }, ...overrides };
 }
 
 function seed(overrides: DashboardStateOverrides = {}): void {
@@ -426,21 +424,9 @@ describe('Editors section', () => {
     expect(within(card('Zed')).getByText('Not detected')).toBeInTheDocument();
   });
 
-  it('spells out partial MCP, LSP and AI file states without relying on colour', () => {
+  it('spells out partial MCP and LSP states without relying on colour', () => {
     seed({
-      ideStatuses: [
-        ide({
-          ideId: 'opencode',
-          label: 'OpenCode',
-          mcpConfigured: true,
-          lspConfigured: false,
-        }),
-        ide({
-          ideId: 'claude-code',
-          label: 'Claude Code',
-          aiFiles: { skills: 'ok', rules: 'partial', workflows: 'missing', agents: 'ok' },
-        }),
-      ],
+      ideStatuses: [ide({ ideId: 'opencode', label: 'OpenCode', mcpConfigured: true, lspConfigured: false })],
     });
 
     render(<Setup />);
@@ -448,11 +434,53 @@ describe('Editors section', () => {
     const opencode = within(card('OpenCode'));
     expect(opencode.getByText('MCP configured')).toBeVisible();
     expect(opencode.getByText('LSP not configured')).toBeVisible();
+    expect(opencode.getByText('Partial')).toBeVisible();
+  });
+
+  it('shows one AI skill status per editor, with Install or Update only where the skill needs it', async () => {
+    seed({
+      ideStatuses: [
+        ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'missing' } }),
+        ide({ ideId: 'windsurf', label: 'Windsurf', aiSkill: { status: 'outdated', version: '2.2.0' } }),
+        ide({ ideId: 'claude-code', label: 'Claude Code', aiSkill: { status: 'installed', version: '2.3.0' } }),
+        ide({ ideId: 'zed', label: 'Zed', mcpConfigured: false, lspConfigured: true, aiSkill: { status: 'unsupported' } }),
+      ],
+    });
+
+    render(<Setup />);
+
+    const cursor = within(card('Cursor'));
+    expect(cursor.getByText('AI skill')).toBeVisible();
+    expect(cursor.getByText('not installed')).toBeVisible();
+    expect(cursor.getByText('Partial')).toBeVisible();
+    await userEvent.click(cursor.getByRole('button', { name: 'Install skill' }));
+    expect(posted('action:installSkill')).toEqual([{ type: 'action:installSkill', id: expect.any(String) }]);
+
+    const windsurf = within(card('Windsurf'));
+    expect(windsurf.getByText('outdated')).toBeVisible();
+    expect(windsurf.getByRole('button', { name: 'Update skill' })).toBeVisible();
+
     const claude = within(card('Claude Code'));
-    expect(claude.getByText('Partial')).toBeVisible();
-    expect(claude.getByText('skills: ready')).toBeVisible();
-    expect(claude.getByText('rules: partial')).toBeVisible();
-    expect(claude.getByText('workflows: missing')).toBeVisible();
+    expect(claude.getByText('installed v2.3.0')).toBeVisible();
+    expect(claude.queryByRole('button', { name: /skill/ })).not.toBeInTheDocument();
+    expect(claude.getByText('Ready')).toBeVisible();
+
+    const zed = within(card('Zed'));
+    expect(zed.getByText('not supported')).toBeVisible();
+    expect(zed.getByText('not supported')).toHaveAttribute('data-status', 'neutral');
+    expect(zed.queryByRole('button', { name: /skill/ })).not.toBeInTheDocument();
+    expect(zed.getByText('Ready')).toBeVisible();
+  });
+
+  it('shows no AI skill row for an editor the skill installer does not cover', () => {
+    seed({
+      ideStatuses: [ide({ ideId: 'claude-desktop', label: 'Claude Desktop', aiSkill: { status: 'unsupported' } })],
+    });
+
+    render(<Setup />);
+
+    expect(within(card('Claude Desktop')).queryByText('AI skill')).not.toBeInTheDocument();
+    expect(within(card('Claude Desktop')).getByText('Ready')).toBeVisible();
   });
 
   it('exposes Server path missing when the MCP server path is stale', () => {

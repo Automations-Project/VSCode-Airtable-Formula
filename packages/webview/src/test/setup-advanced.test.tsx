@@ -653,11 +653,11 @@ describe('Official Airtable MCP', () => {
     seed({
       ideStatuses: [
         { ideId: 'cursor', label: 'Cursor', detected: true, mcpConfigured: true, mcpServerHealthy: true,
-          aiFiles: { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' } },
+          aiSkill: { status: 'installed', version: '2.3.0' } },
         { ideId: 'cline', label: 'Cline', detected: true, mcpConfigured: true, mcpServerHealthy: true,
-          aiFiles: { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' } },
+          aiSkill: { status: 'installed', version: '2.3.0' } },
         { ideId: 'amp', label: 'Amp', detected: false, mcpConfigured: false, mcpServerHealthy: false,
-          aiFiles: { skills: 'missing', rules: 'missing', workflows: 'missing', agents: 'missing' } },
+          aiSkill: { status: 'missing' } },
       ],
       officialAirtable: { patSet: true, ideConfigured: { cursor: true, cline: false } },
     });

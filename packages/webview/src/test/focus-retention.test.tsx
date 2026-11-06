@@ -16,12 +16,11 @@ import { vscodeApiMock } from './test-setup.js';
 // control that legitimately disappears hands focus to the next logical control
 // or the section heading.
 
-const ALL_OK = { skills: 'ok', rules: 'ok', workflows: 'ok', agents: 'ok' } as const;
 const CHROME = { id: 'chrome', found: true, channel: 'chrome', label: 'Google Chrome' } as const;
 const BUNDLED = { id: 'bundled-chromium', found: true, channel: 'chromium', label: 'Bundled Chromium', downloaded: true } as const;
 
 function ide(overrides: Partial<IdeStatus> & Pick<IdeStatus, 'ideId' | 'label'>): IdeStatus {
-  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiFiles: { ...ALL_OK }, ...overrides };
+  return { detected: true, mcpConfigured: true, mcpServerHealthy: true, aiSkill: { status: 'installed', version: '2.3.0' }, ...overrides };
 }
 
 function seed(overrides: DashboardStateOverrides = {}, activeTab: 'overview' | 'setup' | 'settings' = 'setup'): void {
@@ -96,6 +95,17 @@ describe('Editor card', () => {
     hostAnswers('action:unconfigureIde', { ok: true }, { ideStatuses: [ide({ ideId: 'windsurf', label: 'Windsurf', mcpConfigured: false })] });
 
     await waitFor(() => expect(button('Set up Windsurf')).toHaveFocus());
+  });
+
+  it('moves focus to the primary slot when Install skill goes away', async () => {
+    const user = userEvent.setup();
+    seed({ ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor', aiSkill: { status: 'missing' } })] });
+    render(<Setup />);
+
+    await user.click(button('Install skill'));
+    hostAnswers('action:installSkill', { ok: true }, { ideStatuses: [ide({ ideId: 'cursor', label: 'Cursor' })] });
+
+    await waitFor(() => expect(button('Update Cursor')).toHaveFocus());
   });
 });
 

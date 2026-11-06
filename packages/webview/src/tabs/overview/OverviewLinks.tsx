@@ -19,7 +19,7 @@ export function OverviewLinks({ navigate }: OverviewLinksProps) {
         <li>
           <button type="button" className="overview-link" onClick={() => navigate('setup', 'local-service-heading')}>
             <span className="overview-link__title">Editors and local service</span>
-            <span className="overview-link__detail">Connect editors, install AI files, manage remote access</span>
+            <span className="overview-link__detail">Connect editors, install the AI skill, manage remote access</span>
           </button>
         </li>
         <li>

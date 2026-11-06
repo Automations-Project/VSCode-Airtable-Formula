@@ -215,12 +215,6 @@
   color: var(--text-secondary);
 }
 
-.editor-row__pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
 .lsp-badge {
   padding: 0 var(--space-1);
   border: 1px solid currentColor;

@@ -87,7 +87,6 @@ export interface ReadinessInput {
   auth: AuthState;
   settings: {
     mcp: Pick<SettingsSnapshot['mcp'], 'useDaemon' | 'authMode'>;
-    ai: Pick<SettingsSnapshot['ai'], 'includeAgents'>;
   };
   daemon?: DaemonStatusInfo;
   tunnel?: TunnelState;
@@ -107,10 +106,8 @@ const FOCUS = {
 export const READINESS_FOCUS_TARGET_IDS: readonly string[] = Object.values(FOCUS);
 
 const LSP_ONLY_EDITORS = new Set<IdeId>(['zed', 'helix', 'neovim']);
-// Editors that install skills/rules/workflow files (mirrors the Setup editor card).
-const AI_FILE_EDITORS = new Set<IdeId>(['cursor', 'windsurf', 'windsurf-next', 'cline', 'claude-code']);
 
-export type ClientProblem = 'mcp-missing' | 'server-path' | 'lsp-missing' | 'ai-files';
+export type ClientProblem = 'mcp-missing' | 'server-path' | 'lsp-missing' | 'ai-skill';
 
 export interface ClientSummary {
   ideId: IdeId;
@@ -121,45 +118,39 @@ export interface ClientSummary {
   problem?: ClientProblem;
 }
 
-function summarizeClient(ide: IdeStatus, includeAgents: boolean): ClientSummary {
+function summarizeClient(ide: IdeStatus): ClientSummary {
   const base = { ideId: ide.ideId, label: ide.label, version: ide.version };
 
   if (LSP_ONLY_EDITORS.has(ide.ideId)) {
-    return ide.lspConfigured === true
-      ? { ...base, usable: true, state: 'ready' }
-      : { ...base, usable: false, state: 'needs-setup', problem: 'lsp-missing' };
-  }
-  if (!ide.mcpConfigured) {
+    if (ide.lspConfigured !== true) {
+      return { ...base, usable: false, state: 'needs-setup', problem: 'lsp-missing' };
+    }
+  } else if (!ide.mcpConfigured) {
     return { ...base, usable: false, state: 'needs-setup', problem: 'mcp-missing' };
-  }
-  if (ide.mcpServerHealthy === false) {
+  } else if (ide.mcpServerHealthy === false) {
     return { ...base, usable: false, state: 'needs-setup', problem: 'server-path' };
-  }
-  if (ide.lspConfigured === false) {
+  } else if (ide.lspConfigured === false) {
     return { ...base, usable: true, state: 'partial', problem: 'lsp-missing' };
   }
-  if (AI_FILE_EDITORS.has(ide.ideId)) {
-    const files = [ide.aiFiles.skills, ide.aiFiles.rules, ide.aiFiles.workflows];
-    if (includeAgents) files.push(ide.aiFiles.agents);
-    if (files.some(status => status !== 'ok')) {
-      return { ...base, usable: true, state: 'partial', problem: 'ai-files' };
-    }
+  // A working editor without a current skill is Partial, never Needs setup; `unsupported` has no skill to check.
+  if (ide.aiSkill.status === 'missing' || ide.aiSkill.status === 'outdated') {
+    return { ...base, usable: true, state: 'partial', problem: 'ai-skill' };
   }
   return { ...base, usable: true, state: 'ready' };
 }
 
 /** Detected editors only, in the order the host reported them. */
-export function summarizeClients(statuses: readonly IdeStatus[], includeAgents: boolean): ClientSummary[] {
+export function summarizeClients(statuses: readonly IdeStatus[]): ClientSummary[] {
   return statuses
     .filter(ide => ide.detected)
-    .map(ide => summarizeClient(ide, includeAgents));
+    .map(summarizeClient);
 }
 
 const PROBLEM_DETAIL: Record<ClientProblem, string> = {
   'mcp-missing': 'The Airtable MCP server is not configured for this editor.',
   'server-path': 'The configured server path is missing. Update the configuration.',
   'lsp-missing': 'The Airtable language server is not configured for this editor.',
-  'ai-files': 'Some skills, rules, or workflow files are missing or incomplete.',
+  'ai-skill': 'The AI skill is missing or outdated.',
 };
 
 function sessionTerm(
@@ -320,10 +311,10 @@ function collectIssues(
     if (item.state === 'ready' || !item.problem) continue;
     const repair = item.problem === 'server-path';
     issues.push({
-      id: item.problem === 'ai-files' ? `client-ai-files:${item.ideId}` : `client-setup:${item.ideId}`,
+      id: item.problem === 'ai-skill' ? `client-ai-skill:${item.ideId}` : `client-setup:${item.ideId}`,
       severity: item.state === 'needs-setup' ? 'warning' : 'info',
-      title: item.problem === 'ai-files'
-        ? `${item.label} AI files incomplete`
+      title: item.problem === 'ai-skill'
+        ? `${item.label} AI skill missing or outdated`
         : `${item.label} ${repair ? 'needs repair' : 'needs setup'}`,
       detail: PROBLEM_DETAIL[item.problem],
       tab: 'setup',
@@ -362,7 +353,7 @@ function collectIssues(
 export function selectReadiness(input: ReadinessInput): ReadinessModel {
   const { auth, daemon } = input;
   const useDaemon = input.settings.mcp.useDaemon;
-  const summaries = summarizeClients(input.ideStatuses, input.settings.ai.includeAgents);
+  const summaries = summarizeClients(input.ideStatuses);
   const usable = summaries.filter(item => item.usable).length;
   const repairs = summaries.filter(item => item.state !== 'ready');
 

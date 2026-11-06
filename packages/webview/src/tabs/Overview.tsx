@@ -20,7 +20,6 @@ export function Overview({ navigate }: OverviewProps) {
   const ideStatuses = useStore(s => s.ideStatuses);
   const useDaemon = useStore(s => s.settings.mcp.useDaemon);
   const authMode = useStore(s => s.settings.mcp.authMode);
-  const includeAgents = useStore(s => s.settings.ai.includeAgents);
 
   const readiness = useMemo(() => selectReadiness({
     loading,
@@ -28,8 +27,8 @@ export function Overview({ navigate }: OverviewProps) {
     daemon,
     tunnel,
     ideStatuses,
-    settings: { mcp: { useDaemon, authMode }, ai: { includeAgents } },
-  }), [loading, auth, daemon, tunnel, ideStatuses, useDaemon, authMode, includeAgents]);
+    settings: { mcp: { useDaemon, authMode } },
+  }), [loading, auth, daemon, tunnel, ideStatuses, useDaemon, authMode]);
 
   return (
     <section className="tab-stack" aria-labelledby="overview-heading">
