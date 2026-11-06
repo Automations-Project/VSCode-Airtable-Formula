@@ -6,21 +6,8 @@
 // tests run on a temp dir.
 import * as fs from 'fs';
 import * as path from 'path';
-import type { IdeId } from '@airtable-formula/shared';
+import type { AiSkill, AiSkillClient, IdeId, SkillScope } from '@airtable-formula/shared';
 import agentDirs from './agent-dirs.json';
-
-// TODO(task4): import from @airtable-formula/shared
-export type AiSkillStatus = 'installed' | 'outdated' | 'missing' | 'unsupported';
-export interface AiSkill { status: AiSkillStatus; version?: string }
-export type SkillScope = 'global' | 'project';
-export interface AiSkillClient {
-  id: string;
-  name: string;
-  ideId?: IdeId;
-  dir: string;
-  status: 'installed' | 'outdated' | 'missing' | 'absent';
-  canonical: boolean;
-}
 
 export interface AgentDirEntry {
   id: string;

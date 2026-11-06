@@ -454,12 +454,20 @@
         "airtableFormula.ai.autoInstallFiles": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically install AI skills/rules/workflows on first launch."
+          "description": "Automatically install the AI skill on first launch."
         },
-        "airtableFormula.ai.includeAgents": {
-          "type": "boolean",
-          "default": false,
-          "description": "Install agent config files where the IDE supports them."
+        "airtableFormula.ai.installScope": {
+          "type": "string",
+          "enum": [
+            "global",
+            "project"
+          ],
+          "default": "global",
+          "enumDescriptions": [
+            "Install once per machine into every detected AI client's skills directory (nothing is written into your repositories).",
+            "Install into the open workspace (.agents/skills and the detected clients' project skill folders); switching scope does not clean up the other scope."
+          ],
+          "description": "Where the Airtable Formula AI skill is installed."
         },
         "airtableFormula.formula.formatterVersion": {
           "type": "string",
