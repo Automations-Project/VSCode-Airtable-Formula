@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const dir = path.resolve(__dirname, '../skills/airtable-formula');
-const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
 
 describe('airtable-formula skill folder', () => {
@@ -24,7 +24,7 @@ describe('airtable-formula skill folder', () => {
   });
 
   it('keeps the canonical tool-count line in mcp-tools.md', () => {
-    const guide = fs.readFileSync(path.join(dir, 'references/mcp-tools.md'), 'utf8');
+    const guide = fs.readFileSync(path.join(dir, 'references/mcp-tools.md'), 'utf8').replace(/\r\n/g, '\n');
     expect(guide).toMatch(/\*\*Tools\*\*:\s*\d+ tools across \d+ categories/);
   });
 });
