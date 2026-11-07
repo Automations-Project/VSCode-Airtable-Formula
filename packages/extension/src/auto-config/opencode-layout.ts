@@ -14,11 +14,12 @@
 export interface OpenCodeLocation {
   /** The servers container; the caller appends the server name. */
   path: readonly string[];
-  native: boolean;
+  readonly native: boolean;
 }
 
-const V1_LOCATION: OpenCodeLocation = { path: ['mcp'], native: false };
-const NATIVE_LOCATION: OpenCodeLocation = { path: ['mcp', 'servers'], native: true };
+// Shared, frozen: every caller gets the same object, so it must stay immutable.
+const V1_LOCATION: OpenCodeLocation = Object.freeze({ path: Object.freeze(['mcp']), native: false });
+const NATIVE_LOCATION: OpenCodeLocation = Object.freeze({ path: Object.freeze(['mcp', 'servers']), native: true });
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

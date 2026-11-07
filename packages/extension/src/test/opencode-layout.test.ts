@@ -66,3 +66,16 @@ describe('isOpenCodeServerEntry', () => {
     }
   });
 });
+
+describe('locations are immutable and a server named timeout is a server', () => {
+  it('returns frozen location objects', () => {
+    const loc = openCodeWritePath({ mcp: { servers: { a: { command: ['x'] } } } }, 'airtable-user-mcp', 'f');
+    expect(Object.isFrozen(loc)).toBe(true);
+    expect(Object.isFrozen(loc.path)).toBe(true);
+  });
+
+  it('treats mcp.timeout holding a real server entry as a V1 server, so the file is mixed', () => {
+    const file = { mcp: { servers: { a: { command: ['x'] } }, timeout: { command: ['t'] } } };
+    expect(openCodeWritePath(file, 'airtable-user-mcp', 'f').native).toBe(false);
+  });
+});
