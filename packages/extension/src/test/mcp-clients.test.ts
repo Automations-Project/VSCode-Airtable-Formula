@@ -13,7 +13,7 @@ const M: PathContext = { platform: 'darwin', home: '/Users/u', env: {} };
 const L: PathContext = { platform: 'linux', home: '/home/u', env: {} };
 const none = () => false;
 const at = (rel: string): [string, string, string] => [`C:\\Users\\u\\${rel.replace(/\//g, '\\')}`, `/Users/u/${rel}`, `/home/u/${rel}`];
-const IDS: McpClientId[] = ['cursor', 'windsurf', 'windsurf-next', 'claude-code', 'claude-desktop', 'cline', 'amp', 'opencode', 'codex-cli', 'zed', 'antigravity', 'cline-cli', 'factory-droid', 'fx', 'gemini-cli', 'github-copilot-cli', 'grok-build', 'junie', 'kilo-code', 'kimi-code', 'kiro-cli', 'mastracode', 'mcporter', 'pi'];
+const IDS: McpClientId[] = ['cursor', 'windsurf', 'windsurf-next', 'claude-code', 'claude-desktop', 'cline', 'amp', 'opencode', 'codex-cli', 'zed', 'antigravity', 'factory-droid', 'fx', 'gemini-cli', 'github-copilot-cli', 'grok-build', 'junie', 'kilo-code', 'kimi-code', 'kiro-cli', 'mastracode', 'mcporter', 'pi'];
 
 const PATHS: Record<McpClientId, [string, string, string]> = {
   'cursor': at('.cursor/mcp.json'),
@@ -21,15 +21,14 @@ const PATHS: Record<McpClientId, [string, string, string]> = {
   'windsurf-next': at('.codeium/windsurf-next/mcp_config.json'),
   'claude-code': at('.claude.json'),
   'claude-desktop': ['C:\\Users\\u\\AppData\\Roaming\\Claude\\claude_desktop_config.json', '/Users/u/Library/Application Support/Claude/claude_desktop_config.json', '/home/u/.config/Claude/claude_desktop_config.json'],
-  // Cline's own source (cline/cline v4.x): the VS Code extension reads the file
-  // it shares with the CLI, not upstream's globalStorage path. See mcp-clients.ts.
+  // Cline's own source (cline/cline v4.x): the extension, the CLI and JetBrains
+  // read one shared file, not upstream's globalStorage path. See mcp-clients.ts.
   'cline': at('.cline/data/settings/cline_mcp_settings.json'),
   'amp': at('.config/amp/settings.json'),
   'opencode': at('.config/opencode/opencode.jsonc'),
   'codex-cli': at('.codex/config.toml'),
   'zed': ['C:\\Users\\u\\AppData\\Roaming\\Zed\\settings.json', '/Users/u/.config/zed/settings.json', '/home/u/.config/zed/settings.json'],
   'antigravity': at('.gemini/config/mcp_config.json'),
-  'cline-cli': at('.cline/data/settings/cline_mcp_settings.json'),
   'factory-droid': at('.factory/mcp.json'),
   'fx': at('.fx/mcp.json'),
   'gemini-cli': at('.gemini/settings.json'),
@@ -57,7 +56,6 @@ const META: Record<McpClientId, ReturnType<typeof m>> = {
   'codex-cli': m('codex', 'mcp_servers', 'toml', 'codex'),
   'zed': m('zed', 'context_servers', 'jsonc', 'zed'),
   'antigravity': m('antigravity', 'mcpServers', 'json', 'standard'),
-  'cline-cli': m('cline-cli', 'mcpServers', 'json', 'cline'),
   'factory-droid': m('factory-droid', 'mcpServers', 'json', 'typed-stdio'),
   'fx': m('fx', 'mcp', 'json', 'fx'),
   'gemini-cli': m('gemini-cli', 'mcpServers', 'json', 'standard'),
@@ -73,7 +71,7 @@ const META: Record<McpClientId, ReturnType<typeof m>> = {
 };
 
 describe('MCP client table', () => {
-  it('has the 24 version-1 rows in order', () => {
+  it('has the 23 version-1 rows in order', () => {
     expect(MCP_CLIENTS.map(r => r.id)).toEqual(IDS);
     expect(Object.keys(MCP_CLIENT_BY_ID).sort()).toEqual([...IDS].sort());
     for (const r of MCP_CLIENTS) expect(MCP_CLIENT_BY_ID[r.id]).toBe(r);
@@ -105,7 +103,7 @@ describe('MCP client table', () => {
     expect(MCP_CLIENT_BY_ID['claude-code'].detect(L)).toEqual(['/home/u/.claude', '/home/u/.claude.json']);
     expect(MCP_CLIENT_BY_ID.zed.detect(M)).toEqual(['/Users/u/.config/zed', '/Users/u/Library/Application Support/Zed', '/Applications/Zed.app']);
     expect(MCP_CLIENT_BY_ID['kilo-code'].detect(L)).toEqual(['/home/u/.config/kilo', '/home/u/.config/Code/User/globalStorage/kilocode.kilo-code']);
-    expect(MCP_CLIENT_BY_ID.cline.detect(L)).toEqual(['/home/u/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings']);
+    expect(MCP_CLIENT_BY_ID.cline.detect(L)).toEqual(['/home/u/.cline', '/home/u/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings']);
   });
 
   it('detection paths of the upstream-only rows, on linux', () => {
@@ -118,7 +116,6 @@ describe('MCP client table', () => {
     expect(d('codex-cli')).toEqual(['/home/u/.codex']);
     expect(d('zed')).toEqual(['/home/u/.config/zed']);
     expect(d('antigravity')).toEqual(['/home/u/.gemini/config']);
-    expect(d('cline-cli')).toEqual(['/home/u/.cline/data/settings']);
     expect(d('factory-droid')).toEqual(['/home/u/.factory']);
     expect(d('fx')).toEqual(['/home/u/.fx']);
     expect(d('gemini-cli')).toEqual(['/home/u/.gemini']);
@@ -161,10 +158,17 @@ describe('MCP client table', () => {
     expect(MCP_CLIENTS.filter(r => r.preferExisting).map(r => r.id)).toEqual(['opencode', 'kilo-code', 'mcporter']);
   });
 
+  it.each([W, M, L])('no two rows share a config file on $platform', ctx => {
+    const paths = MCP_CLIENTS.map(r => [r.id, resolveConfigPath(r, ctx, none)] as const);
+    for (const [i, [a, pa]] of paths.entries()) {
+      for (const [b, pb] of paths.slice(i + 1)) expect(samePath(ctx, pa, pb), `${a} and ${b}: ${pa}`).toBe(false);
+    }
+  });
+
   it('labels are the ones the UI shows today, plus the new rows', () => {
     expect(MCP_CLIENTS.map(r => r.label)).toEqual([
       'Cursor', 'Devin Desktop (Windsurf)', 'Devin Desktop Next (Windsurf Next)', 'Claude Code', 'Claude Desktop', 'Cline', 'Amp', 'OpenCode', 'Codex CLI', 'Zed',
-      'Antigravity', 'Cline CLI', 'Factory Droid', 'fx', 'Gemini CLI', 'GitHub Copilot CLI', 'Grok Build', 'Junie', 'Kilo Code', 'Kimi Code', 'Kiro CLI', 'Mastra Code', 'MCPorter', 'Pi',
+      'Antigravity', 'Factory Droid', 'fx', 'Gemini CLI', 'GitHub Copilot CLI', 'Grok Build', 'Junie', 'Kilo Code', 'Kimi Code', 'Kiro CLI', 'Mastra Code', 'MCPorter', 'Pi',
     ]);
   });
 
@@ -195,7 +199,6 @@ describe('environment overrides, read the way upstream reads them', () => {
     ['kimi-code', { KIMI_CODE_HOME: '/x/kimi' }, '/x/kimi/mcp.json'],
     ['junie', { JUNIE_HOME: '/x/junie' }, '/x/junie/mcp/mcp.json'],
     ['pi', { PI_CODING_AGENT_DIR: '/x/pi' }, '/x/pi/mcp.json'],
-    ['cline-cli', { CLINE_DIR: '/x/cline' }, '/x/cline/data/settings/cline_mcp_settings.json'],
     ['cline', { CLINE_DIR: '/x/cline' }, '/x/cline/data/settings/cline_mcp_settings.json'],
     ['claude-desktop', { XDG_CONFIG_HOME: '/x/xdg' }, '/x/xdg/Claude/claude_desktop_config.json'],
     ['cline', { XDG_CONFIG_HOME: '/x/xdg' }, '/home/u/.cline/data/settings/cline_mcp_settings.json'],
@@ -221,9 +224,8 @@ describe('environment overrides, read the way upstream reads them', () => {
     expect(d('kimi-code', { KIMI_CODE_HOME: '/x/kimi' })).toEqual(['/x/kimi']);
     expect(d('junie', { JUNIE_HOME: '/x/junie' })).toEqual(['/x/junie']);
     expect(d('pi', { PI_CODING_AGENT_DIR: '/x/pi' })).toEqual(['/x/pi']);
-    expect(d('cline-cli', { CLINE_DIR: '/x/cline' })).toEqual(['/x/cline/data/settings']);
     expect(d('kilo-code', { XDG_CONFIG_HOME: '/x/xdg' })).toEqual(['/x/xdg/kilo', '/x/xdg/Code/User/globalStorage/kilocode.kilo-code']);
-    expect(d('cline', { XDG_CONFIG_HOME: '/x/xdg' })).toEqual(['/x/xdg/Code/User/globalStorage/saoudrizwan.claude-dev/settings']);
+    expect(d('cline', { XDG_CONFIG_HOME: '/x/xdg' })).toEqual(['/home/u/.cline', '/x/xdg/Code/User/globalStorage/saoudrizwan.claude-dev/settings']);
     expect(d('claude-desktop', { XDG_CONFIG_HOME: '/x/xdg' })).toEqual(['/x/xdg/Claude']);
     expect(d('zed', { XDG_CONFIG_HOME: '/x/xdg' })).toEqual(['/x/xdg/zed']);
   });
@@ -255,7 +257,7 @@ describe('environment overrides, read the way upstream reads them', () => {
     const wa: PathContext = { ...W, env: { APPDATA: 'D:\\Roam' } };
     expect(resolveConfigPath(MCP_CLIENT_BY_ID['claude-desktop'], wa, none)).toBe('D:\\Roam\\Claude\\claude_desktop_config.json');
     expect(resolveConfigPath(MCP_CLIENT_BY_ID.zed, wa, none)).toBe('D:\\Roam\\Zed\\settings.json');
-    expect(MCP_CLIENT_BY_ID.cline.detect(wa)).toEqual(['D:\\Roam\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings']);
+    expect(MCP_CLIENT_BY_ID.cline.detect(wa)).toEqual(['C:\\Users\\u\\.cline', 'D:\\Roam\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings']);
     expect(MCP_CLIENT_BY_ID['kilo-code'].detect(wa)[1]).toBe('D:\\Roam\\Code\\User\\globalStorage\\kilocode.kilo-code');
   });
 

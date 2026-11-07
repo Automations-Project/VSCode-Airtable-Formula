@@ -3,7 +3,8 @@
 // Copyright 2025 Andre Landgraf. Licensed under the Apache License, Version 2.0;
 // see packages/extension/THIRD_PARTY_NOTICES.md. Changes: hand port to TypeScript, global
 // config paths only, paths are pure functions of { platform, home, env }; VS Code, Goose and
-// Hermes are not ported; Amp and Windsurf Next are ours; Zed's macOS path follows Zed's docs.
+// Hermes are not ported; Amp and Windsurf Next are ours; Cline's extension and CLI agents are
+// one row on the file Cline ≥ 4 shares; Zed's macOS path follows Zed's docs.
 // Drift against upstream: scripts/check-mcp-clients.mjs (pnpm check:mcp-clients:upstream).
 
 import * as os from 'os';
@@ -34,7 +35,6 @@ export type McpClientId =
   | 'codex-cli'
   | 'zed'
   | 'antigravity'
-  | 'cline-cli'
   | 'factory-droid'
   | 'fx'
   | 'gemini-cli'
@@ -193,26 +193,32 @@ export const MCP_CLIENTS: readonly McpClientRow[] = [
     detect: (c) => [j(c, appSupport(c), 'Claude')],
   },
 
-  // Cline, the VS Code extension. Upstream `cline` writes the extension's
-  // globalStorage file (clineExtensionConfigPath); we write the file the
-  // extension reads today, which is cline-cli's.
-  // docs.cline.bot/mcp/configuring-mcp-servers, read 2026-11-07: gives
-  // ~/.cline/data/settings/cline_mcp_settings.json for the CLI and no path for
-  // the extension, which opens its file from Configure > "Configure MCP Servers".
+  // Cline. Upstream's `cline` (the VS Code extension's globalStorage file,
+  // clineExtensionConfigPath) and `cline-cli` (the shared file,
+  // clineCliConfigPath) are one row here, because Cline ≥ 4 reads the shared
+  // file from the extension, the CLI and JetBrains. The globalStorage folder
+  // stays a detection path, next to ~/.cline, which a fresh Cline 4.x creates
+  // (it no longer creates the globalStorage folder).
+  // docs.cline.bot/mcp/configuring-mcp-servers, read 2026-11-07: the CLI file is
+  // ~/.cline/data/settings/cline_mcp_settings.json, servers under mcpServers;
+  // no path is given for the extension, which opens its file from Configure >
+  // "Configure MCP Servers".
   // cline/cline source, read 2026-11-07 (main at 94eecbb and release v4.1.26;
   // present since v4.0.0): apps/vscode/src/sdk/SdkController.ts keeps MCP
   // settings in ~/.cline/data/settings/cline_mcp_settings.json, "shared across
   // VSCode, CLI, and JetBrains clients", and says not to use the globalStorage
   // settings dir; hosts/vscode/mcp-settings-legacy-migration.ts (PR #11818)
-  // moves the servers of the old globalStorage file into the shared file once.
-  // A server written to globalStorage after that is never read. Detection keeps
-  // upstream's globalStorage dir. No legacy location: the shared file is where
-  // we wrote before the port.
+  // moves the servers of the old globalStorage file into the shared file once,
+  // and a server written to globalStorage after that is never read. Cline finds
+  // the file through CLINE_MCP_SETTINGS_PATH, then CLINE_DATA_DIR/settings/…,
+  // then CLINE_DIR (default ~/.cline)/data/settings/…; neither upstream nor we
+  // read the first two. No legacy location: the shared file is where we wrote
+  // before the port.
   { id: 'cline', upstream: 'cline',
     label: 'Cline', docsUrl: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
     format: 'json', serversPath: ['mcpServers'], shape: 'cline', official: 'url',
     globalPath: (c) => clineCliConfigPath(c),
-    detect: (c) => [dirname(c, clineExtensionConfigPath(c))],
+    detect: (c) => [h(c, '.cline'), dirname(c, clineExtensionConfigPath(c))],
   },
 
   // ours (not in add-mcp). ampcode.com/docs/customize/mcp, read 2026-11-07:
@@ -272,17 +278,6 @@ export const MCP_CLIENTS: readonly McpClientRow[] = [
     format: 'json', serversPath: ['mcpServers'], shape: 'standard',
     globalPath: (c) => h(c, '.gemini', 'config', 'mcp_config.json'),
     detect: (c) => [h(c, '.gemini', 'config')],
-  },
-
-  // docs.cline.bot/mcp/configuring-mcp-servers, read 2026-11-07:
-  // ~/.cline/data/settings/cline_mcp_settings.json, servers under mcpServers,
-  // overridable with CLINE_MCP_SETTINGS_PATH, which upstream does not read and
-  // neither do we. The Cline extension reads this file too (see `cline`).
-  { id: 'cline-cli', upstream: 'cline-cli',
-    label: 'Cline CLI', docsUrl: 'https://docs.cline.bot/mcp/configuring-mcp-servers',
-    format: 'json', serversPath: ['mcpServers'], shape: 'cline',
-    globalPath: (c) => clineCliConfigPath(c),
-    detect: (c) => [dirname(c, clineCliConfigPath(c))],
   },
 
   { id: 'factory-droid', upstream: 'factory-droid',
