@@ -79,3 +79,26 @@ describe('scriptDiagnostics — SCRIPT-05 unknown global', () => {
     expect(scriptDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
   });
 });
+
+// Before the arrow-param and missing-await scans were bounded, each of these
+// took 20-40 s on one thread (a lint call could pin the shared MCP daemon).
+describe('scriptDiagnostics — adversarial input stays fast', () => {
+  function timed(text: string) {
+    const start = performance.now();
+    const diags = scriptDiagnostics(text);
+    return { diags, elapsed: performance.now() - start };
+  }
+
+  it("finishes '('.repeat(200_000) in under 2 s", () => {
+    const { diags, elapsed } = timed('('.repeat(200_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it("finishes 'xAsync('.repeat(28_000) in under 2 s, still flagging every call", () => {
+    const { diags, elapsed } = timed('xAsync('.repeat(28_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(diags.filter(d => d.code === 'missing-await')).toHaveLength(28_000);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+});

@@ -1397,21 +1397,27 @@ ${globalInfo.description}` },
 }
 
 // src/engines/script/diagnostics.ts
-function offsetToPosition4(text, offset) {
-  let line = 0;
-  let lastNewline = -1;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text[i] === "\n") {
-      line++;
-      lastNewline = i;
-    }
-  }
-  return { line, character: offset - lastNewline - 1 };
+function newlineOffsets(text) {
+  const offsets = [];
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) offsets.push(i);
+  return offsets;
 }
-function makeRange2(text, start, end) {
+function offsetToPosition4(text, newlines, offset) {
+  const limit = Math.min(offset, text.length);
+  let lo = 0;
+  let hi = newlines.length;
+  while (lo < hi) {
+    const mid = lo + hi >>> 1;
+    if (newlines[mid] < limit) lo = mid + 1;
+    else hi = mid;
+  }
+  const lastNewline = lo === 0 ? -1 : newlines[lo - 1];
+  return { line: lo, character: offset - lastNewline - 1 };
+}
+function makeRange2(text, newlines, start, end) {
   return {
-    start: offsetToPosition4(text, start),
-    end: offsetToPosition4(text, end)
+    start: offsetToPosition4(text, newlines, start),
+    end: offsetToPosition4(text, newlines, end)
   };
 }
 function getExclusionRanges2(text) {
@@ -1492,7 +1498,14 @@ function getExclusionRanges2(text) {
   return ranges;
 }
 function isInsideExclusionRange2(position, ranges) {
-  return ranges.some((range) => position >= range.start && position < range.end);
+  let lo = 0;
+  let hi = ranges.length;
+  while (lo < hi) {
+    const mid = lo + hi >>> 1;
+    if (ranges[mid].start <= position) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo > 0 && position < ranges[lo - 1].end;
 }
 var KNOWN_SAFE = /* @__PURE__ */ new Set([
   // Airtable scripting globals
@@ -1634,49 +1647,66 @@ var JS_KEYWORDS = /* @__PURE__ */ new Set([
   // Class method name — appears as `constructor(` in class bodies but is not a global
   "constructor"
 ]);
-function findStatementStart(text, pos) {
-  for (let i = pos - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === ";" || ch === "{" || ch === "}" || ch === "\n") {
-      return i + 1;
-    }
-  }
-  return 0;
+function isStatementBoundary(ch) {
+  return ch === ";" || ch === "{" || ch === "}" || ch === "\n";
 }
-function findLineStart(text, pos) {
-  for (let i = pos - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === ";" || ch === "\n") {
-      return i + 1;
-    }
-  }
-  return 0;
+function isLineBoundary(ch) {
+  return ch === ";" || ch === "\n";
 }
-function checkMissingAwait(text, exclusionRanges) {
+function segmentScanner(text, isBoundary, patterns) {
+  let scanned = 0;
+  let start = 0;
+  let segmentStart = -1;
+  let firstEnds = [];
+  return (pos) => {
+    for (; scanned < pos; scanned++) if (isBoundary(text[scanned])) start = scanned + 1;
+    if (start !== segmentStart) {
+      segmentStart = start;
+      let end = pos;
+      while (end < text.length && !isBoundary(text[end])) end++;
+      const segment = text.slice(start, end);
+      firstEnds = patterns.map((pattern) => {
+        const m = pattern.exec(segment);
+        return m ? start + m.index + m[0].length : Infinity;
+      });
+    }
+    return firstEnds;
+  };
+}
+function lastMatchIndex(text, pattern) {
+  let last = -1;
+  for (const m of text.matchAll(pattern)) last = m.index;
+  return last;
+}
+function checkMissingAwait(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const asyncPattern = /\b(\w+Async)\s*\(/g;
   let match;
+  const lastThen = lastMatchIndex(text, /\)\s*\.then\s*\(/g);
+  const statement = segmentScanner(text, isStatementBoundary, [
+    /\bawait\b/,
+    /\breturn\b/,
+    /\b(?:const|let|var)\s+\w/
+  ]);
+  const line = segmentScanner(text, isLineBoundary, [
+    /\bPromise\s*\.\s*(?:all|allSettled|race|any)\s*\(/
+  ]);
   while ((match = asyncPattern.exec(text)) !== null) {
     if (isInsideExclusionRange2(match.index, exclusionRanges)) continue;
     const fnName = match[1];
-    const stmtStart = findStatementStart(text, match.index);
-    const stmtContext = text.slice(stmtStart, match.index);
+    const [awaitEnd, returnEnd, declarationEnd] = statement(match.index);
+    const [promiseEnd] = line(match.index);
     const isAccepted = (
       // Has await anywhere in the statement context
-      /\bawait\b/.test(stmtContext) || // Is a return expression
-      /\breturn\b/.test(stmtContext) || // Is assigned to a variable (const/let/var x = ...)
-      /\b(?:const|let|var)\s+\w/.test(stmtContext) || // Followed by .then( chain -- check text after the match
-      /\)\s*\.then\s*\(/.test(text.slice(match.index)) || // Inside a Promise combinator call (Promise.all/allSettled/race/any).
-      // Uses findLineStart (semicolon/newline only, not braces) so that inner async
-      // calls inside Promise.all([a.xAsync(), b.yAsync()]) can see the outer Promise
-      // context even when findStatementStart stops at a brace inside an arg literal.
-      /\bPromise\s*\.\s*(?:all|allSettled|race|any)\s*\(/.test(
-        text.slice(findLineStart(text, match.index), match.index)
-      )
+      awaitEnd <= match.index || // Is a return expression
+      returnEnd <= match.index || // Is assigned to a variable (const/let/var x = ...)
+      declarationEnd <= match.index || // Followed by .then( chain -- one starts at or after the match
+      lastThen >= match.index || // Inside a Promise combinator call (Promise.all/allSettled/race/any)
+      promiseEnd <= match.index
     );
     if (!isAccepted) {
       diagnostics.push({
-        range: makeRange2(text, match.index, match.index + fnName.length),
+        range: makeRange2(text, newlines, match.index, match.index + fnName.length),
         message: `'${fnName}' is an async function. Add 'await' before calling it.`,
         severity: 1 /* Warning */,
         code: "missing-await",
@@ -1731,12 +1761,12 @@ function buildLocalSymbols(text) {
   for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
     if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
   }
-  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^)]*)\)\s*=>/g)) {
+  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
     for (const id of extractBindings(m[1])) symbols.add(id);
   }
   return symbols;
 }
-function checkUnknownGlobals(text, exclusionRanges) {
+function checkUnknownGlobals(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const localSymbols = buildLocalSymbols(text);
   const identBeforeDotOrParenRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g;
@@ -1752,7 +1782,7 @@ function checkUnknownGlobals(text, exclusionRanges) {
     }
     if (precIdx >= 0 && text[precIdx] === ".") continue;
     diagnostics.push({
-      range: makeRange2(text, match.index, match.index + ident.length),
+      range: makeRange2(text, newlines, match.index, match.index + ident.length),
       message: `'${ident}' is not a known global. Declare it locally or check the spelling.`,
       severity: 1 /* Warning */,
       code: "unknown-global",
@@ -1763,9 +1793,10 @@ function checkUnknownGlobals(text, exclusionRanges) {
 }
 function scriptDiagnostics(text, _uri) {
   const exclusionRanges = getExclusionRanges2(text);
+  const newlines = newlineOffsets(text);
   return [
-    ...checkMissingAwait(text, exclusionRanges),
-    ...checkUnknownGlobals(text, exclusionRanges)
+    ...checkMissingAwait(text, exclusionRanges, newlines),
+    ...checkUnknownGlobals(text, exclusionRanges, newlines)
   ];
 }
 
@@ -1985,21 +2016,27 @@ ${globalInfo.description}` },
 }
 
 // src/engines/automation/diagnostics.ts
-function offsetToPosition6(text, offset) {
-  let line = 0;
-  let lastNewline = -1;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text[i] === "\n") {
-      line++;
-      lastNewline = i;
-    }
-  }
-  return { line, character: offset - lastNewline - 1 };
+function newlineOffsets2(text) {
+  const offsets = [];
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) offsets.push(i);
+  return offsets;
 }
-function makeRange3(text, start, end) {
+function offsetToPosition6(text, newlines, offset) {
+  const limit = Math.min(offset, text.length);
+  let lo = 0;
+  let hi = newlines.length;
+  while (lo < hi) {
+    const mid = lo + hi >>> 1;
+    if (newlines[mid] < limit) lo = mid + 1;
+    else hi = mid;
+  }
+  const lastNewline = lo === 0 ? -1 : newlines[lo - 1];
+  return { line: lo, character: offset - lastNewline - 1 };
+}
+function makeRange3(text, newlines, start, end) {
   return {
-    start: offsetToPosition6(text, start),
-    end: offsetToPosition6(text, end)
+    start: offsetToPosition6(text, newlines, start),
+    end: offsetToPosition6(text, newlines, end)
   };
 }
 function getExclusionRanges3(text) {
@@ -2080,7 +2117,14 @@ function getExclusionRanges3(text) {
   return ranges;
 }
 function isInsideExclusionRange3(position, ranges) {
-  return ranges.some((range) => position >= range.start && position < range.end);
+  let lo = 0;
+  let hi = ranges.length;
+  while (lo < hi) {
+    const mid = lo + hi >>> 1;
+    if (ranges[mid].start <= position) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo > 0 && position < ranges[lo - 1].end;
 }
 var JS_KEYWORDS2 = /* @__PURE__ */ new Set([
   "if",
@@ -2260,38 +2304,63 @@ function buildLocalSymbols2(text) {
   for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
     if (!JS_KEYWORDS2.has(m[1])) symbols.add(m[1]);
   }
-  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^)]*)\)\s*=>/g)) {
+  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
     for (const id of extractBindings2(m[1])) symbols.add(id);
   }
   return symbols;
 }
-function findStatementStart2(text, pos) {
-  for (let i = pos - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === ";" || ch === "{" || ch === "}" || ch === "\n") return i + 1;
-  }
-  return 0;
+function isStatementBoundary2(ch) {
+  return ch === ";" || ch === "{" || ch === "}" || ch === "\n";
 }
-function findLineStart2(text, pos) {
-  for (let i = pos - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === ";" || ch === "\n") return i + 1;
-  }
-  return 0;
+function isLineBoundary2(ch) {
+  return ch === ";" || ch === "\n";
 }
-function checkMissingAwait2(text, exclusionRanges) {
+function segmentScanner2(text, isBoundary, patterns) {
+  let scanned = 0;
+  let start = 0;
+  let segmentStart = -1;
+  let firstEnds = [];
+  return (pos) => {
+    for (; scanned < pos; scanned++) if (isBoundary(text[scanned])) start = scanned + 1;
+    if (start !== segmentStart) {
+      segmentStart = start;
+      let end = pos;
+      while (end < text.length && !isBoundary(text[end])) end++;
+      const segment = text.slice(start, end);
+      firstEnds = patterns.map((pattern) => {
+        const m = pattern.exec(segment);
+        return m ? start + m.index + m[0].length : Infinity;
+      });
+    }
+    return firstEnds;
+  };
+}
+function lastMatchIndex2(text, pattern) {
+  let last = -1;
+  for (const m of text.matchAll(pattern)) last = m.index;
+  return last;
+}
+function checkMissingAwait2(text, exclusionRanges, newlines) {
   const diagnostics = [];
+  const lastThen = lastMatchIndex2(text, /\)\s*\.then\s*\(/g);
+  const statement = segmentScanner2(text, isStatementBoundary2, [
+    /\bawait\b/,
+    /\breturn\b/,
+    /\b(?:const|let|var)\s+\w/
+  ]);
+  const line = segmentScanner2(text, isLineBoundary2, [
+    /\bPromise\s*\.\s*(?:all|allSettled|race|any)\s*\(/
+  ]);
   for (const match of text.matchAll(/\b(\w+Async)\s*\(/g)) {
     if (isInsideExclusionRange3(match.index, exclusionRanges)) continue;
     const fnName = match[1];
-    const stmtStart = findStatementStart2(text, match.index);
-    const stmtContext = text.slice(stmtStart, match.index);
-    const isAccepted = /\bawait\b/.test(stmtContext) || /\breturn\b/.test(stmtContext) || /\b(?:const|let|var)\s+\w/.test(stmtContext) || /\)\s*\.then\s*\(/.test(text.slice(match.index)) || /\bPromise\s*\.\s*(?:all|allSettled|race|any)\s*\(/.test(
-      text.slice(findLineStart2(text, match.index), match.index)
-    );
+    const at = match.index;
+    const [awaitEnd, returnEnd, declarationEnd] = statement(at);
+    const [promiseEnd] = line(at);
+    const isAccepted = awaitEnd <= at || returnEnd <= at || declarationEnd <= at || lastThen >= at || promiseEnd <= at;
     if (!isAccepted) {
       diagnostics.push({
-        range: makeRange3(text, match.index, match.index + fnName.length),
+        range: makeRange3(text, newlines, at, at + fnName.length),
         message: `'${fnName}' is an async function. Add 'await' before calling it.`,
         severity: 1 /* Warning */,
         code: "missing-await",
@@ -2301,7 +2370,7 @@ function checkMissingAwait2(text, exclusionRanges) {
   }
   return diagnostics;
 }
-function checkUnknownGlobals2(text, exclusionRanges) {
+function checkUnknownGlobals2(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const localSymbols = buildLocalSymbols2(text);
   for (const match of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g)) {
@@ -2313,7 +2382,7 @@ function checkUnknownGlobals2(text, exclusionRanges) {
     while (precIdx >= 0 && (text[precIdx] === " " || text[precIdx] === "	")) precIdx--;
     if (precIdx >= 0 && text[precIdx] === ".") continue;
     diagnostics.push({
-      range: makeRange3(text, match.index, match.index + ident.length),
+      range: makeRange3(text, newlines, match.index, match.index + ident.length),
       message: `'${ident}' is not a known global. Declare it locally or check the spelling.`,
       severity: 1 /* Warning */,
       code: "unknown-global",
@@ -2384,7 +2453,7 @@ var FORBIDDEN_PATTERNS = [
     message: "output.inspect() is only available in Airtable Scripting Extension, not Automation Scripts."
   }
 ];
-function checkWrongContext(text, exclusionRanges) {
+function checkWrongContext(text, exclusionRanges, newlines) {
   const diagnostics = [];
   for (const entry of FORBIDDEN_PATTERNS) {
     entry.pattern.lastIndex = 0;
@@ -2392,7 +2461,7 @@ function checkWrongContext(text, exclusionRanges) {
     while ((match = entry.pattern.exec(text)) !== null) {
       if (isInsideExclusionRange3(match.index, exclusionRanges)) continue;
       diagnostics.push({
-        range: makeRange3(text, match.index, match.index + match[0].length),
+        range: makeRange3(text, newlines, match.index, match.index + match[0].length),
         message: entry.message,
         severity: 1 /* Warning */,
         code: "wrong-context",
@@ -2404,10 +2473,11 @@ function checkWrongContext(text, exclusionRanges) {
 }
 function automationDiagnostics(text, _uri) {
   const exclusionRanges = getExclusionRanges3(text);
+  const newlines = newlineOffsets2(text);
   return [
-    ...checkMissingAwait2(text, exclusionRanges),
-    ...checkUnknownGlobals2(text, exclusionRanges),
-    ...checkWrongContext(text, exclusionRanges)
+    ...checkMissingAwait2(text, exclusionRanges, newlines),
+    ...checkUnknownGlobals2(text, exclusionRanges, newlines),
+    ...checkWrongContext(text, exclusionRanges, newlines)
   ];
 }
 export {

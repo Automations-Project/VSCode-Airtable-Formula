@@ -72,6 +72,14 @@ describe('lintAirtableCode', () => {
     const text = 'a'.repeat(MAX_TEXT_LENGTH + 1);
     assert.throws(() => lintAirtableCode({ language: 'formula', text }), /too long/);
   });
+
+  it('a run of unmatched parens near the limit lints fast (it used to pin the thread for ~25 s)', () => {
+    const start = performance.now();
+    const r = lintAirtableCode({ language: 'script', text: '('.repeat(199_000) });
+    const elapsed = performance.now() - start;
+    assert.equal(r.language, 'script');
+    assert.ok(elapsed < 3_000, `took ${elapsed.toFixed(0)} ms`);
+  });
 });
 
 describe('lint_airtable_code wiring', () => {
