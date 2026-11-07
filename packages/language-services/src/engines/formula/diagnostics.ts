@@ -219,6 +219,8 @@ function findClosestFunction(input: string): string | null {
   let closest: string | null = null;
 
   for (const func of ALL_CALLABLE) {
+    // A distance is at least the length difference: these can never be within 3.
+    if (Math.abs(inputUpper.length - func.length) > 3) continue;
     const distance = levenshteinDistance(inputUpper, func);
     if (distance < minDistance && distance <= 3) {
       minDistance = distance;
@@ -227,6 +229,27 @@ function findClosestFunction(input: string): string | null {
   }
 
   return closest;
+}
+
+/**
+ * findClosestFunction, memoised for one document. Each lookup is a Levenshtein
+ * distance against every callable, and an unknown name is usually repeated
+ * ('xAsync('.repeat(28000) made 28k identical lookups, ~2.3 s). Names longer
+ * than 40 characters skip the search: the longest callable has 20, and a
+ * suggestion needs a distance of at most 3, so they can never get one.
+ */
+type Suggester = (name: string) => string | null;
+
+function makeSuggester(): Suggester {
+  const memo = new Map<string, string | null>();
+  return (name) => {
+    let suggestion = memo.get(name);
+    if (suggestion === undefined) {
+      suggestion = name.length > 40 ? null : findClosestFunction(name);
+      memo.set(name, suggestion);
+    }
+    return suggestion;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +512,7 @@ function checkQuotes(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
-function checkFunctions(text: string): LsDiagnostic[] {
+function checkFunctions(text: string, suggest: Suggester): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const exclusionRanges = getExclusionRanges(text);
 
@@ -531,7 +554,7 @@ function checkFunctions(text: string): LsDiagnostic[] {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
 
     if (!ALL_CALLABLE.includes(functionName)) {
-      const suggestion = findClosestFunction(functionName);
+      const suggestion = suggest(functionName);
       const message = suggestion
         ? `Unknown function '${functionName}'. Did you mean '${suggestion}'?`
         : `Unknown function '${functionName}'`;
@@ -752,8 +775,59 @@ function comparisonLhs(c: string): string | null {
   return c.slice(0, k);
 }
 
+/**
+ * For every position q, where a condition walk started at q (outside a string,
+ * at depth 0) ends: the index of the first ',' at depth 0, or -1 when the walk
+ * meets a ')' at depth 0 first or runs off the end (an unclosed '(' or string).
+ *
+ * isDispatchTablePattern used to run that walk from every IF( -- O(IFs x n),
+ * 14.7 s for 'IF('.repeat(66666). A walk's future depends only on where it is
+ * and its state, so this fills the answers right to left in one pass:
+ * `closeAt[q]` is where a walk from q meets a ')' at depth 0 when commas are
+ * ignored, which is how the walk skips a nested (...) group. Strings follow the
+ * walk's rules (a quote opens; the same quote closes; no escapes). Each walk
+ * starts outside a string even when q is inside a literal, as the old walk did,
+ * so this is not a single left-to-right paren match of the document.
+ */
+function conditionCommas(text: string): Int32Array {
+  const len = text.length;
+  const nextDouble = new Int32Array(len + 1);
+  const nextSingle = new Int32Array(len + 1);
+  const closeAt = new Int32Array(len + 1);
+  const commaAt = new Int32Array(len + 1);
+  nextDouble[len] = nextSingle[len] = closeAt[len] = commaAt[len] = -1;
+  for (let q = len - 1; q >= 0; q--) {
+    nextDouble[q] = text[q] === '"' ? q : nextDouble[q + 1];
+    nextSingle[q] = text[q] === "'" ? q : nextSingle[q + 1];
+  }
+  for (let q = len - 1; q >= 0; q--) {
+    const ch = text[q];
+    // Where the walk resumes at depth 0 outside a string, or -1 if it never does.
+    let resume = q + 1;
+    if (ch === ')') {
+      closeAt[q] = q;
+      commaAt[q] = -1;
+      continue;
+    } else if (ch === ',') {
+      closeAt[q] = closeAt[q + 1];
+      commaAt[q] = q;
+      continue;
+    } else if (ch === '(') {
+      const inner = closeAt[q + 1];
+      resume = inner === -1 ? -1 : inner + 1;
+    } else if (ch === '"' || ch === "'") {
+      const end = (ch === '"' ? nextDouble : nextSingle)[q + 1];
+      resume = end === -1 ? -1 : end + 1;
+    }
+    closeAt[q] = resume === -1 ? -1 : closeAt[resume];
+    commaAt[q] = resume === -1 ? -1 : commaAt[resume];
+  }
+  return commaAt;
+}
+
 function isDispatchTablePattern(text: string): boolean {
   const conditions: string[] = [];
+  let commaAt: Int32Array | null = null; // built at the first IF(
 
   for (let i = 0; i < text.length - 2; i++) {
     const upper = text.slice(i, i + 4).toUpperCase();
@@ -762,26 +836,10 @@ function isDispatchTablePattern(text: string): boolean {
     else if (upper === 'IF (') condStart = i + 4;
     if (condStart < 0) continue;
 
-    let depth = 0;
-    let inStr = false;
-    let strChar = '';
-    for (let j = condStart; j < text.length; j++) {
-      const ch = text[j];
-      if (inStr) {
-        if (ch === strChar) inStr = false;
-      } else if (ch === '"' || ch === "'") {
-        inStr = true;
-        strChar = ch;
-      } else if (ch === '(') {
-        depth++;
-      } else if (ch === ')') {
-        if (depth === 0) break;
-        depth--;
-      } else if (ch === ',' && depth === 0) {
-        conditions.push(text.slice(condStart, j).trim());
-        break;
-      }
-    }
+    // The condition runs to the first ',' at depth 0 (see conditionCommas).
+    commaAt ??= conditionCommas(text);
+    const comma = commaAt[condStart];
+    if (comma !== -1) conditions.push(text.slice(condStart, comma).trim());
   }
 
   if (conditions.length < 4) return false;
@@ -798,7 +856,10 @@ function isDispatchTablePattern(text: string): boolean {
   const counts = new Map<string, number>();
   for (const lhs of lhsList) counts.set(lhs, (counts.get(lhs) ?? 0) + 1);
 
-  const maxCount = Math.max(0, ...counts.values());
+  // A loop, not Math.max(0, ...values): spreading tens of thousands of values
+  // into one call can exceed V8's argument limit.
+  let maxCount = 0;
+  for (const count of counts.values()) if (count > maxCount) maxCount = count;
   return maxCount / lhsList.length >= 0.6;
 }
 
@@ -855,7 +916,7 @@ function checkTrailingOperators(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
-function checkUnknownTokens(text: string): LsDiagnostic[] {
+function checkUnknownTokens(text: string, suggest: Suggester): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const exclusionRanges = getExclusionRanges(text);
   const knownUpper = new Set(ALL_CALLABLE.map(n => n.toUpperCase()));
@@ -876,7 +937,7 @@ function checkUnknownTokens(text: string): LsDiagnostic[] {
 
     if (isCall) {
       // Lowercase function call — always invalid; Airtable functions must be UPPERCASE
-      const suggestion = findClosestFunction(ident);
+      const suggestion = suggest(ident);
       const message = suggestion
         ? `Unknown function '${ident}'. Airtable functions are UPPERCASE — did you mean '${suggestion}'?`
         : `Unknown function '${ident}'. Airtable function names must be UPPERCASE.`;
@@ -939,17 +1000,24 @@ function checkUnknownTokens(text: string): LsDiagnostic[] {
  */
 export function formulaDiagnostics(text: string, uri?: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
-  diagnostics.push(...checkComments(text));
-  diagnostics.push(...checkParentheses(text, uri));
-  diagnostics.push(...checkBrackets(text, uri));
-  diagnostics.push(...checkQuotes(text));
-  diagnostics.push(...checkFunctions(text));
+  // A loop, not diagnostics.push(...more): spreading more than ~125k diagnostics
+  // into one call overflows V8's argument limit ("Maximum call stack size
+  // exceeded"), which ')'.repeat(200000) did.
+  const add = (more: LsDiagnostic[]) => {
+    for (const d of more) diagnostics.push(d);
+  };
+  const suggest = makeSuggester();
+  add(checkComments(text));
+  add(checkParentheses(text, uri));
+  add(checkBrackets(text, uri));
+  add(checkQuotes(text));
+  add(checkFunctions(text, suggest));
   // checkFieldReferences intentionally disabled -- {} valid in JSON formula output
-  diagnostics.push(...checkSmartQuotes(text));
-  diagnostics.push(...checkCommonTypos(text));
-  diagnostics.push(...checkDivisionByZero(text));
-  diagnostics.push(...checkNestedIfs(text));
-  diagnostics.push(...checkTrailingOperators(text));
-  diagnostics.push(...checkUnknownTokens(text));
+  add(checkSmartQuotes(text));
+  add(checkCommonTypos(text));
+  add(checkDivisionByZero(text));
+  add(checkNestedIfs(text));
+  add(checkTrailingOperators(text));
+  add(checkUnknownTokens(text, suggest));
   return diagnostics;
 }

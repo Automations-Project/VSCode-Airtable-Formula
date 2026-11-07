@@ -345,6 +345,7 @@ function findClosestFunction(input) {
   let minDistance = Infinity;
   let closest = null;
   for (const func of ALL_CALLABLE) {
+    if (Math.abs(inputUpper.length - func.length) > 3) continue;
     const distance = levenshteinDistance(inputUpper, func);
     if (distance < minDistance && distance <= 3) {
       minDistance = distance;
@@ -352,6 +353,17 @@ function findClosestFunction(input) {
     }
   }
   return closest;
+}
+function makeSuggester() {
+  const memo = /* @__PURE__ */ new Map();
+  return (name) => {
+    let suggestion = memo.get(name);
+    if (suggestion === void 0) {
+      suggestion = name.length > 40 ? null : findClosestFunction(name);
+      memo.set(name, suggestion);
+    }
+    return suggestion;
+  };
 }
 function checkComments(text) {
   const diagnostics = [];
@@ -553,7 +565,7 @@ function checkQuotes(text) {
   }
   return diagnostics;
 }
-function checkFunctions(text) {
+function checkFunctions(text, suggest) {
   const diagnostics = [];
   const exclusionRanges = getExclusionRanges(text);
   const callableConstantsSet = new Set(CALLABLE_CONSTANTS);
@@ -581,7 +593,7 @@ function checkFunctions(text) {
     const functionName = match[1];
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
     if (!ALL_CALLABLE.includes(functionName)) {
-      const suggestion = findClosestFunction(functionName);
+      const suggestion = suggest(functionName);
       const message = suggestion ? `Unknown function '${functionName}'. Did you mean '${suggestion}'?` : `Unknown function '${functionName}'`;
       diagnostics.push({
         range: makeRange(text, match.index, match.index + functionName.length),
@@ -736,34 +748,52 @@ function comparisonLhs(c) {
   }
   return c.slice(0, k);
 }
+function conditionCommas(text) {
+  const len = text.length;
+  const nextDouble = new Int32Array(len + 1);
+  const nextSingle = new Int32Array(len + 1);
+  const closeAt = new Int32Array(len + 1);
+  const commaAt = new Int32Array(len + 1);
+  nextDouble[len] = nextSingle[len] = closeAt[len] = commaAt[len] = -1;
+  for (let q = len - 1; q >= 0; q--) {
+    nextDouble[q] = text[q] === '"' ? q : nextDouble[q + 1];
+    nextSingle[q] = text[q] === "'" ? q : nextSingle[q + 1];
+  }
+  for (let q = len - 1; q >= 0; q--) {
+    const ch = text[q];
+    let resume = q + 1;
+    if (ch === ")") {
+      closeAt[q] = q;
+      commaAt[q] = -1;
+      continue;
+    } else if (ch === ",") {
+      closeAt[q] = closeAt[q + 1];
+      commaAt[q] = q;
+      continue;
+    } else if (ch === "(") {
+      const inner = closeAt[q + 1];
+      resume = inner === -1 ? -1 : inner + 1;
+    } else if (ch === '"' || ch === "'") {
+      const end = (ch === '"' ? nextDouble : nextSingle)[q + 1];
+      resume = end === -1 ? -1 : end + 1;
+    }
+    closeAt[q] = resume === -1 ? -1 : closeAt[resume];
+    commaAt[q] = resume === -1 ? -1 : commaAt[resume];
+  }
+  return commaAt;
+}
 function isDispatchTablePattern(text) {
   const conditions = [];
+  let commaAt = null;
   for (let i = 0; i < text.length - 2; i++) {
     const upper = text.slice(i, i + 4).toUpperCase();
     let condStart = -1;
     if (upper.startsWith("IF(")) condStart = i + 3;
     else if (upper === "IF (") condStart = i + 4;
     if (condStart < 0) continue;
-    let depth = 0;
-    let inStr = false;
-    let strChar = "";
-    for (let j = condStart; j < text.length; j++) {
-      const ch = text[j];
-      if (inStr) {
-        if (ch === strChar) inStr = false;
-      } else if (ch === '"' || ch === "'") {
-        inStr = true;
-        strChar = ch;
-      } else if (ch === "(") {
-        depth++;
-      } else if (ch === ")") {
-        if (depth === 0) break;
-        depth--;
-      } else if (ch === "," && depth === 0) {
-        conditions.push(text.slice(condStart, j).trim());
-        break;
-      }
-    }
+    commaAt ??= conditionCommas(text);
+    const comma = commaAt[condStart];
+    if (comma !== -1) conditions.push(text.slice(condStart, comma).trim());
   }
   if (conditions.length < 4) return false;
   const lhsList = conditions.map((c) => {
@@ -773,7 +803,8 @@ function isDispatchTablePattern(text) {
   if (lhsList.length < 3) return false;
   const counts = /* @__PURE__ */ new Map();
   for (const lhs of lhsList) counts.set(lhs, (counts.get(lhs) ?? 0) + 1);
-  const maxCount = Math.max(0, ...counts.values());
+  let maxCount = 0;
+  for (const count of counts.values()) if (count > maxCount) maxCount = count;
   return maxCount / lhsList.length >= 0.6;
 }
 function checkNestedIfs(text) {
@@ -820,7 +851,7 @@ function checkTrailingOperators(text) {
   }
   return diagnostics;
 }
-function checkUnknownTokens(text) {
+function checkUnknownTokens(text, suggest) {
   const diagnostics = [];
   const exclusionRanges = getExclusionRanges(text);
   const knownUpper = new Set(ALL_CALLABLE.map((n) => n.toUpperCase()));
@@ -832,7 +863,7 @@ function checkUnknownTokens(text) {
     if (knownUpper.has(ident.toUpperCase())) continue;
     const isCall = /^\s*\(/.test(text.slice(afterIdent));
     if (isCall) {
-      const suggestion = findClosestFunction(ident);
+      const suggestion = suggest(ident);
       const message = suggestion ? `Unknown function '${ident}'. Airtable functions are UPPERCASE \u2014 did you mean '${suggestion}'?` : `Unknown function '${ident}'. Airtable function names must be UPPERCASE.`;
       diagnostics.push({
         range: makeRange(text, m.index, afterIdent),
@@ -864,17 +895,21 @@ function checkUnknownTokens(text) {
 }
 function formulaDiagnostics(text, uri) {
   const diagnostics = [];
-  diagnostics.push(...checkComments(text));
-  diagnostics.push(...checkParentheses(text, uri));
-  diagnostics.push(...checkBrackets(text, uri));
-  diagnostics.push(...checkQuotes(text));
-  diagnostics.push(...checkFunctions(text));
-  diagnostics.push(...checkSmartQuotes(text));
-  diagnostics.push(...checkCommonTypos(text));
-  diagnostics.push(...checkDivisionByZero(text));
-  diagnostics.push(...checkNestedIfs(text));
-  diagnostics.push(...checkTrailingOperators(text));
-  diagnostics.push(...checkUnknownTokens(text));
+  const add = (more) => {
+    for (const d of more) diagnostics.push(d);
+  };
+  const suggest = makeSuggester();
+  add(checkComments(text));
+  add(checkParentheses(text, uri));
+  add(checkBrackets(text, uri));
+  add(checkQuotes(text));
+  add(checkFunctions(text, suggest));
+  add(checkSmartQuotes(text));
+  add(checkCommonTypos(text));
+  add(checkDivisionByZero(text));
+  add(checkNestedIfs(text));
+  add(checkTrailingOperators(text));
+  add(checkUnknownTokens(text, suggest));
   return diagnostics;
 }
 

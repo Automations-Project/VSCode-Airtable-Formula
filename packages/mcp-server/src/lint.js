@@ -57,10 +57,14 @@ function analyse(language, body) {
   try {
     return ENGINES[language](body);
   } catch (e) {
-    // The formula parser recurses once per nesting level, so ~125k unbalanced
-    // '(' overflow the stack. Say what is wrong instead of leaking V8's message.
+    // Defensive net only. The engines build their results with loops and none
+    // recurses per nesting level, so no input under the cap reaches this today
+    // (the RangeError that 150k '(' used to raise came from a push(...spread) of
+    // its diagnostics, since fixed). It can still fire if an engine ever recurses
+    // per level of nesting and overflows the stack for real. Say what is wrong
+    // instead of leaking V8's message.
     if (e instanceof RangeError && e.message.includes('call stack')) {
-      throw new Error('input is too deeply nested to analyse');
+      throw new Error('input is too large or too deeply nested to analyse');
     }
     throw e;
   }

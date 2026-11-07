@@ -152,12 +152,35 @@ describe('formulaDiagnostics — adversarial input stays fast', () => {
     ["'1/{'.repeat(66_000)", () => '1/{'.repeat(66_000)],
     // block comments: every unclosed /* rescanned to the end
     ["'/* '.repeat(66_000)", () => '/* '.repeat(66_000)],
+    // dispatch table: a condition walk from every IF( (14.7 s / 5.6 s at the cap)
+    ["'IF('.repeat(50_000)", () => 'IF('.repeat(50_000)],
+    ["'IF(1/{a}'.repeat(25_000)", () => 'IF(1/{a}'.repeat(25_000)],
+    // suggestions: a Levenshtein search per lowercase call (2.3 s at the cap)
+    ["'xAsync('.repeat(28_000)", () => 'xAsync('.repeat(28_000)],
     // dispatch-table LHS: \s* retried from every position of a whitespace run
     ["4 nested IFs with 50k-space conditions", () => ('IF(a' + ' '.repeat(49_990) + 'b,').repeat(4)],
   ])('finishes %s in under 2 s', (_label, make) => {
     const { diags, elapsed } = timed(make());
     expect(Array.isArray(diags)).toBe(true);
     expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it('200k unmatched parens return their diagnostics instead of throwing', () => {
+    // formulaDiagnostics used to push(...spread) each check's results: >~125k overflowed.
+    const diags = formulaDiagnostics(')'.repeat(200_000));
+    expect(diags.filter(d => d.message === 'Unmatched closing parenthesis')).toHaveLength(200_000);
+  });
+
+  it('a dispatch table of 4+ IFs on one field is still not reported as nested', () => {
+    const table = "IF({G}='a',1,IF({G}='b',2,IF({G}='c',3,IF({G}='d',4,IF({G}='e',5,0)))))";
+    expect(formulaDiagnostics(table).filter(d => d.code === 'nested-if')).toHaveLength(0);
+    const nested = 'IF({A}=1,1,IF({B}=2,2,IF({C}=3,3,IF({D}=4,4,0))))';
+    expect(formulaDiagnostics(nested).filter(d => d.code === 'nested-if')).toHaveLength(1);
+  });
+
+  it('still suggests the closest function for an unknown one', () => {
+    const d = formulaDiagnostics('SUMM(1)').find(x => x.code === 'unknown-function');
+    expect(d?.message).toContain("Did you mean 'SUM'?");
   });
 
   it('still reports the same division and comment diagnostics', () => {

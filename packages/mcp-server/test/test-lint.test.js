@@ -81,11 +81,14 @@ describe('lintAirtableCode', () => {
     assert.ok(elapsed < 3_000, `took ${elapsed.toFixed(0)} ms`);
   });
 
-  it('input deep enough to overflow the stack gets a clear error, and the next call still works', () => {
-    assert.throws(
-      () => lintAirtableCode({ language: 'formula', text: '('.repeat(150_000) }),
-      (e) => e.message === 'input is too deeply nested to analyse',
-    );
+  it('150k unbalanced parens lint fast and are truncated, not an error, and the next call still works', () => {
+    // This used to throw RangeError: its 150k diagnostics overflowed a push(...spread).
+    const start = performance.now();
+    const r = lintAirtableCode({ language: 'formula', text: '('.repeat(150_000) });
+    const elapsed = performance.now() - start;
+    assert.ok(elapsed < 3_000, `took ${elapsed.toFixed(0)} ms`);
+    assert.equal(r.clean, false);
+    assert.equal(typeof r.truncated, 'number');
     assert.equal(lintAirtableCode({ language: 'formula', text: 'IF(1,2,3)' }).clean, true);
   });
 });
