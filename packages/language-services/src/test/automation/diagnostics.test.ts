@@ -187,6 +187,28 @@ describe('automationDiagnostics — adversarial input stays fast', () => {
     expect(elapsed).toBeLessThan(500);
   });
 
+  // function NAME( heads reaching the same ')' each re-split their whole parameter
+  // slice on ',': O(heads x commas), 17 s to over 60 s at the cap.
+  it.each([
+    ["'function f(a,'.repeat(15_384) + ')'", () => 'function f(a,'.repeat(15_384) + ')'],
+    ["'function f('.repeat(9_090) + ','.repeat(100_000) + ')'", () => 'function f('.repeat(9_090) + ','.repeat(100_000) + ')'],
+    ["'function f('.repeat(9_090) + 'a=1,'.repeat(25_000) + ')'", () => 'function f('.repeat(9_090) + 'a=1,'.repeat(25_000) + ')'],
+  ])('finishes %s in under 2 s', (_label, make) => {
+    const { diags, elapsed } = timed(make());
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it('a paren-arrow default value does not hide the earlier parameters', () => {
+    const code = 'const process = (records, log = (m) => console.log(m)) => records.map(r => log(r.id));';
+    expect(automationDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
+  });
+
+  it('every parameter of functions sharing one closing paren is still declared', () => {
+    const code = 'function f(a, function g(b, c) { return a.x + b.y + c.z }';
+    expect(automationDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
+  });
+
   // \s*[=:].*$ in extractBindings retried \s* from every position of a whitespace run.
   it('finishes a 200k-character whitespace run inside arrow params in under 2 s', () => {
     const { diags, elapsed } = timed('(a' + ' '.repeat(199_990) + 'b) =>');

@@ -439,6 +439,39 @@ function declarationBindings(text: string, head: RegExp, tail: RegExp | null): s
 }
 
 /**
+ * Group 1 (the parameter text) of every match of
+ * /(?<![a-zA-Z0-9_$])\(([^)]*)\)\s*=>/g, in order -- in linear time.
+ *
+ * As a regex, [^)]* scanned from every '(' to the next ')', so a run of
+ * unmatched '(' was O(n^2). Every '(' since the previous ')' reaches the same
+ * ')' and the same \s*=> test, so the test runs once per ')', and the match
+ * starts at the leftmost eligible '(' in that stretch, which is where the
+ * regex's left-to-right scan succeeds first. Each '(' and ')' is visited once.
+ */
+function arrowParamLists(text: string): string[] {
+  const lists: string[] = [];
+  const arrow = /\s*=>/y;
+  let resumeAt = 0; // the regex's lastIndex
+  let segmentStart = 0; // just past the previous ')'
+  let open = text.indexOf('(');
+  for (let close = text.indexOf(')'); close !== -1; close = text.indexOf(')', close + 1)) {
+    const from = Math.max(segmentStart, resumeAt);
+    segmentStart = close + 1;
+    while (open !== -1 && open < from) open = text.indexOf('(', open + 1);
+    // Leftmost '(' before this ')' not preceded by an identifier character.
+    while (open !== -1 && open < close && isIdentCode(text.charCodeAt(open - 1))) {
+      open = text.indexOf('(', open + 1);
+    }
+    if (open === -1 || open > close) continue;
+    arrow.lastIndex = close + 1;
+    if (!arrow.test(text)) continue;
+    lists.push(text.slice(open + 1, close));
+    resumeAt = arrow.lastIndex;
+  }
+  return lists;
+}
+
+/**
  * Same index and identifier, in the same order, as
  * text.matchAll(new RegExp(String.raw`\b([a-zA-Z_$][a-zA-Z0-9_$]*)` + suffix.source, 'g')).
  * `suffix` must be sticky (y) and of the form \s*<non-identifier, non-space char>.
@@ -532,12 +565,28 @@ function buildLocalSymbols(text: string): Set<string> {
   }
 
   // function foo( -- collect function name and parameters
+  // Parameters run from the '(' to the next ')'. Heads that reach the same ')'
+  // have nested parameter slices (each a suffix of the one before), and every
+  // piece after a later head's first ',' is a piece the earlier head already
+  // added -- so a later head adds only its first piece. Before, each slice went
+  // through split(',') again: O(heads x commas). The next ')' and ',' are found
+  // with forward-only cursors, so neither is rescanned per head.
+  let close = -2; // -2: not looked up yet; -1: no ')' at or after the last lookup
+  let comma = -2;
+  let listedClose = -1; // the ')' whose whole parameter list has been added
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index + m[0].length - 1;
-    const parenEnd = text.indexOf(')', parenStart);
+    if (close !== -1 && close < parenStart) close = text.indexOf(')', parenStart);
+    const parenEnd = close;
     if (parenEnd !== -1) {
-      for (const id of extractBindings(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
+      let end = parenEnd;
+      if (parenEnd === listedClose) {
+        if (comma !== -1 && comma <= parenStart) comma = text.indexOf(',', parenStart + 1);
+        if (comma !== -1 && comma < parenEnd) end = comma;
+      }
+      for (const id of extractBindings(text.slice(parenStart + 1, end))) symbols.add(id);
+      listedClose = parenEnd;
     }
   }
 
@@ -570,10 +619,9 @@ function buildLocalSymbols(text: string): Set<string> {
   // Arrow function params — multi-param: (param1, param2) =>
   // Negative lookbehind excludes the outer call-paren in map((x) => ...) so the
   // regex anchors on the arrow-param ( not the preceding map( or filter( etc.
-  // [^()]* (not [^)]*): a candidate stops at the next paren of either kind, so a
-  // run of unmatched '(' cannot make each of them scan to the end of the text.
-  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
-    for (const id of extractBindings(m[1])) symbols.add(id);
+  // (was /(?<![a-zA-Z0-9_$])\(([^)]*)\)\s*=>/g; see arrowParamLists)
+  for (const params of arrowParamLists(text)) {
+    for (const id of extractBindings(params)) symbols.add(id);
   }
 
   return symbols;

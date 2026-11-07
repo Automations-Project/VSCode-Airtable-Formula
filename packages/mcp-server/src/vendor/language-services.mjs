@@ -1877,6 +1877,27 @@ function declarationBindings(text, head, tail) {
   }
   return bindings;
 }
+function arrowParamLists(text) {
+  const lists = [];
+  const arrow = /\s*=>/y;
+  let resumeAt = 0;
+  let segmentStart = 0;
+  let open = text.indexOf("(");
+  for (let close = text.indexOf(")"); close !== -1; close = text.indexOf(")", close + 1)) {
+    const from = Math.max(segmentStart, resumeAt);
+    segmentStart = close + 1;
+    while (open !== -1 && open < from) open = text.indexOf("(", open + 1);
+    while (open !== -1 && open < close && isIdentCode(text.charCodeAt(open - 1))) {
+      open = text.indexOf("(", open + 1);
+    }
+    if (open === -1 || open > close) continue;
+    arrow.lastIndex = close + 1;
+    if (!arrow.test(text)) continue;
+    lists.push(text.slice(open + 1, close));
+    resumeAt = arrow.lastIndex;
+  }
+  return lists;
+}
 function identifierMatches(text, suffix) {
   const found = [];
   let resumeAt = 0;
@@ -1931,12 +1952,22 @@ function buildLocalSymbols(text) {
   for (const m of text.matchAll(/,\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=(?![>=])/g)) {
     if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
   }
+  let close = -2;
+  let comma = -2;
+  let listedClose = -1;
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index + m[0].length - 1;
-    const parenEnd = text.indexOf(")", parenStart);
+    if (close !== -1 && close < parenStart) close = text.indexOf(")", parenStart);
+    const parenEnd = close;
     if (parenEnd !== -1) {
-      for (const id of extractBindings(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
+      let end = parenEnd;
+      if (parenEnd === listedClose) {
+        if (comma !== -1 && comma <= parenStart) comma = text.indexOf(",", parenStart + 1);
+        if (comma !== -1 && comma < parenEnd) end = comma;
+      }
+      for (const id of extractBindings(text.slice(parenStart + 1, end))) symbols.add(id);
+      listedClose = parenEnd;
     }
   }
   for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
@@ -1955,8 +1986,8 @@ function buildLocalSymbols(text) {
   for (const { ident } of identifierMatches(text, /\s*=>/y)) {
     if (!JS_KEYWORDS.has(ident)) symbols.add(ident);
   }
-  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
-    for (const id of extractBindings(m[1])) symbols.add(id);
+  for (const params of arrowParamLists(text)) {
+    for (const id of extractBindings(params)) symbols.add(id);
   }
   return symbols;
 }
@@ -2517,6 +2548,27 @@ function declarationBindings2(text, head, tail) {
   }
   return bindings;
 }
+function arrowParamLists2(text) {
+  const lists = [];
+  const arrow = /\s*=>/y;
+  let resumeAt = 0;
+  let segmentStart = 0;
+  let open = text.indexOf("(");
+  for (let close = text.indexOf(")"); close !== -1; close = text.indexOf(")", close + 1)) {
+    const from = Math.max(segmentStart, resumeAt);
+    segmentStart = close + 1;
+    while (open !== -1 && open < from) open = text.indexOf("(", open + 1);
+    while (open !== -1 && open < close && isIdentCode2(text.charCodeAt(open - 1))) {
+      open = text.indexOf("(", open + 1);
+    }
+    if (open === -1 || open > close) continue;
+    arrow.lastIndex = close + 1;
+    if (!arrow.test(text)) continue;
+    lists.push(text.slice(open + 1, close));
+    resumeAt = arrow.lastIndex;
+  }
+  return lists;
+}
 function identifierMatches2(text, suffix) {
   const found = [];
   let resumeAt = 0;
@@ -2550,12 +2602,22 @@ function buildLocalSymbols2(text) {
   for (const m of text.matchAll(/,\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=(?![>=])/g)) {
     if (!JS_KEYWORDS2.has(m[1])) symbols.add(m[1]);
   }
+  let close = -2;
+  let comma = -2;
+  let listedClose = -1;
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index + m[0].length - 1;
-    const parenEnd = text.indexOf(")", parenStart);
+    if (close !== -1 && close < parenStart) close = text.indexOf(")", parenStart);
+    const parenEnd = close;
     if (parenEnd !== -1) {
-      for (const id of extractBindings2(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
+      let end = parenEnd;
+      if (parenEnd === listedClose) {
+        if (comma !== -1 && comma <= parenStart) comma = text.indexOf(",", parenStart + 1);
+        if (comma !== -1 && comma < parenEnd) end = comma;
+      }
+      for (const id of extractBindings2(text.slice(parenStart + 1, end))) symbols.add(id);
+      listedClose = parenEnd;
     }
   }
   for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
@@ -2574,8 +2636,8 @@ function buildLocalSymbols2(text) {
   for (const { ident } of identifierMatches2(text, /\s*=>/y)) {
     if (!JS_KEYWORDS2.has(ident)) symbols.add(ident);
   }
-  for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
-    for (const id of extractBindings2(m[1])) symbols.add(id);
+  for (const params of arrowParamLists2(text)) {
+    for (const id of extractBindings2(params)) symbols.add(id);
   }
   return symbols;
 }
