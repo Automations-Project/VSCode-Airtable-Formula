@@ -1,7 +1,7 @@
 # Airtable MCP — Tools Guide
 
 > **Server**: airtable-user-mcp v2.4.x  |  **Protocol**: MCP (JSON-RPC 2.0)
-> **Tools**: 72 tools across 17 categories + `manage_tools`
+> **Tools**: 73 tools across 17 categories + `manage_tools`
 
 ---
 
@@ -47,7 +47,7 @@ Most schema tools require `appId` (e.g. `"appXXX"`) as their first parameter.
 
 ---
 
-### Category 1: Read / Inspect (9 tools)
+### Category 1: Read / Inspect (10 tools)
 
 Read-only. Safe to call at any time. Always call a read tool before mutating.
 
@@ -59,6 +59,7 @@ Read-only. Safe to call at any time. Always call a read tool before mutating.
 | `list_fields` | All fields with id, name, type (lightweight). Pass `includeOptions: true` for full typeOptions, or use `get_table_schema`. Call before creating formulas or mutations. |
 | `list_views` | All views with IDs, names, types. Call before modifying views. |
 | `get_view` | Live view state: filters, sorts, groups, column order, frozen cols, color config. |
+| `lint_airtable_code` | Offline static check of a formula, Scripting-extension script or automation script (`language`: `formula` / `script` / `automation`). Needs no base, login or browser, so it always answers. Run it first, fix every error, then call `validate_formula` when a base is available. |
 | `validate_formula` | **Always call before** `create_formula_field` or `update_formula_field`. Returns validity + result type. |
 | `list_view_sections` | List sidebar view sections (groups) in a table. |
 | `list_record_templates` | List record templates defined in a table. |

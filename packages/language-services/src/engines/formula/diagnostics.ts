@@ -219,6 +219,8 @@ function findClosestFunction(input: string): string | null {
   let closest: string | null = null;
 
   for (const func of ALL_CALLABLE) {
+    // A distance is at least the length difference: these can never be within 3.
+    if (Math.abs(inputUpper.length - func.length) > 3) continue;
     const distance = levenshteinDistance(inputUpper, func);
     if (distance < minDistance && distance <= 3) {
       minDistance = distance;
@@ -227,6 +229,27 @@ function findClosestFunction(input: string): string | null {
   }
 
   return closest;
+}
+
+/**
+ * findClosestFunction, memoised for one document. Each lookup is a Levenshtein
+ * distance against every callable, and an unknown name is usually repeated
+ * ('xAsync('.repeat(28000) made 28k identical lookups, ~2.3 s). Names longer
+ * than 40 characters skip the search: the longest callable has 20, and a
+ * suggestion needs a distance of at most 3, so they can never get one.
+ */
+type Suggester = (name: string) => string | null;
+
+function makeSuggester(): Suggester {
+  const memo = new Map<string, string | null>();
+  return (name) => {
+    let suggestion = memo.get(name);
+    if (suggestion === undefined) {
+      suggestion = name.length > 40 ? null : findClosestFunction(name);
+      memo.set(name, suggestion);
+    }
+    return suggestion;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -250,17 +273,22 @@ function checkComments(text: string): LsDiagnostic[] {
     });
   }
 
-  const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
-
-  while ((match = blockCommentRegex.exec(text)) !== null) {
+  // The matches of /\/\*[\s\S]*?\*\//g, in linear time. As a regex, every `/*`
+  // with no `*/` after it rescanned to the end of the text ('/* '.repeat(n) was
+  // O(n^2)); but if the first such `/*` finds no `*/`, no later one can.
+  for (let start = text.indexOf('/*'); start !== -1; ) {
+    const close = text.indexOf('*/', start + 2);
+    if (close === -1) break;
+    const end = close + 2;
     diagnostics.push({
-      range: makeRange(text, match.index, match.index + match[0].length),
+      range: makeRange(text, start, end),
       message:
         'Comments are not allowed in Airtable formulas. This will cause an error when used in Airtable.',
       severity: LsSeverity.Warning,
       code: 'no-comments',
       source: 'airtable-formula',
     });
+    start = text.indexOf('/*', end);
   }
 
   return diagnostics;
@@ -484,7 +512,7 @@ function checkQuotes(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
-function checkFunctions(text: string): LsDiagnostic[] {
+function checkFunctions(text: string, suggest: Suggester): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const exclusionRanges = getExclusionRanges(text);
 
@@ -526,7 +554,7 @@ function checkFunctions(text: string): LsDiagnostic[] {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
 
     if (!ALL_CALLABLE.includes(functionName)) {
-      const suggestion = findClosestFunction(functionName);
+      const suggestion = suggest(functionName);
       const message = suggestion
         ? `Unknown function '${functionName}'. Did you mean '${suggestion}'?`
         : `Unknown function '${functionName}'`;
@@ -595,15 +623,99 @@ function checkCommonTypos(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
+/**
+ * The matches of /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g, in order, in
+ * linear time: index, the whole match and the divisor (group 2).
+ *
+ * As a regex it was O(n^2) twice over: \{[^}]+ rescanned to the same `}` from
+ * every `{` before it ('{'.repeat(n)), and \d+ was retried from every digit of a
+ * run ('1'.repeat(n)). Every `{` before the same `}` gives the same field-ref
+ * end, and every digit of a run the same number end, and what follows depends
+ * only on that end -- so it is computed once per end, while positions are still
+ * tried in the regex's order. Neither alternative can backtrack to a different
+ * end: a shorter [^}]+ or \d+ is followed by a character that \} or \s*\/
+ * cannot match.
+ */
+function divisionMatches(text: string): Array<{ index: number; match: string; divisor: string }> {
+  const found: Array<{ index: number; match: string; divisor: string }> = [];
+  const len = text.length;
+  const nextClose = new Int32Array(len + 1); // first '}' at or after i, or -1
+  nextClose[len] = -1;
+  for (let i = len - 1; i >= 0; i--) nextClose[i] = text[i] === '}' ? i : nextClose[i + 1];
+
+  const isDigit = (i: number) => {
+    const c = text.charCodeAt(i);
+    return c >= 48 && c <= 57;
+  };
+  // End of \{[^}]+\} at a '{', or -1.
+  const fieldRefEnd = (i: number) => {
+    const close = nextClose[i + 1];
+    return close > i + 1 ? close + 1 : -1;
+  };
+  const space = /\s*/y;
+  const skipSpace = (i: number) => {
+    space.lastIndex = i;
+    space.exec(text);
+    return space.lastIndex;
+  };
+  // \s*\/\s*(\{[^}]+\}) at i.
+  const divisorAt = (i: number): { start: number; end: number } | null => {
+    let j = skipSpace(i);
+    if (text[j] !== '/') return null;
+    j = skipSpace(j + 1);
+    if (text[j] !== '{') return null;
+    const end = fieldRefEnd(j);
+    return end === -1 ? null : { start: j, end };
+  };
+
+  const divisorByDividendEnd = new Map<number, { start: number; end: number } | null>();
+  let runEnd = -1; // end of the digit run holding the last digit position seen
+  let numberEnd = -1; // \d+(?:\.\d+)? end for that run
+  let i = 0;
+  while (i < len) {
+    let dividendEnd = -1;
+    if (text[i] === '{') {
+      dividendEnd = fieldRefEnd(i);
+    } else if (isDigit(i)) {
+      if (i >= runEnd) {
+        runEnd = i + 1;
+        while (isDigit(runEnd)) runEnd++;
+        numberEnd = runEnd;
+        if (text[runEnd] === '.' && isDigit(runEnd + 1)) {
+          numberEnd = runEnd + 2;
+          while (isDigit(numberEnd)) numberEnd++;
+        }
+      }
+      dividendEnd = numberEnd;
+    }
+    if (dividendEnd !== -1) {
+      let divisor = divisorByDividendEnd.get(dividendEnd);
+      if (divisor === undefined) {
+        divisor = divisorAt(dividendEnd);
+        divisorByDividendEnd.set(dividendEnd, divisor);
+      }
+      if (divisor) {
+        found.push({
+          index: i,
+          match: text.slice(i, divisor.end),
+          divisor: text.slice(divisor.start, divisor.end),
+        });
+        i = divisor.end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return found;
+}
+
 function checkDivisionByZero(text: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const exclusionRanges = getExclusionRanges(text);
 
-  // Pattern: field or number divided by a field reference (potential zero)
-  const divisionPattern = /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = divisionPattern.exec(text)) !== null) {
+  // Field or number divided by a field reference (potential zero):
+  // /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g, found in linear time.
+  for (const match of divisionMatches(text)) {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
 
     // Look backwards for an IF( guard that checks for zero
@@ -612,10 +724,10 @@ function checkDivisionByZero(text: string): LsDiagnostic[] {
     const hasGuard = /IF\s*\([^)]*(?:=\s*0|!=\s*0|ISERROR)/i.test(context);
 
     if (!hasGuard) {
-      const divisor = match[2];
+      const divisor = match.divisor;
       diagnostics.push({
-        range: makeRange(text, match.index, match.index + match[0].length),
-        message: `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match[0]})`,
+        range: makeRange(text, match.index, match.index + match.match.length),
+        message: `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match.match})`,
         severity: LsSeverity.Warning,
         code: 'division-by-zero',
         source: 'airtable-formula',
@@ -640,8 +752,82 @@ function checkDivisionByZero(text: string): LsDiagnostic[] {
  * dominates (≥ 60%). The 60% threshold tolerates a handful of sub-IFs inside
  * then-branches that test unrelated conditions.
  */
+/**
+ * c.match(/^(.*?)(?:\s*(?:!=|<=|>=|=|<|>))/)?.[1] ?? null, in linear time. As a
+ * regex, every position of a long whitespace run retried \s* to the end of that
+ * run. The lazy .*? stops at the first k where whitespace and then an operator
+ * follow: the start of the whitespace run before the first operator -- provided
+ * .*? did not have to cross a line terminator to get there.
+ */
+function comparisonLhs(c: string): string | null {
+  let op = 0;
+  while (
+    op < c.length &&
+    !(c[op] === '=' || c[op] === '<' || c[op] === '>' || (c[op] === '!' && c[op + 1] === '='))
+  ) op++;
+  if (op === c.length) return null;
+  let k = op;
+  while (k > 0 && /\s/.test(c[k - 1])) k--;
+  for (let i = 0; i < k; i++) {
+    const ch = c[i];
+    if (ch === '\n' || ch === '\r' || ch === '\u2028' || ch === '\u2029') return null;
+  }
+  return c.slice(0, k);
+}
+
+/**
+ * For every position q, where a condition walk started at q (outside a string,
+ * at depth 0) ends: the index of the first ',' at depth 0, or -1 when the walk
+ * meets a ')' at depth 0 first or runs off the end (an unclosed '(' or string).
+ *
+ * isDispatchTablePattern used to run that walk from every IF( -- O(IFs x n),
+ * 14.7 s for 'IF('.repeat(66666). A walk's future depends only on where it is
+ * and its state, so this fills the answers right to left in one pass:
+ * `closeAt[q]` is where a walk from q meets a ')' at depth 0 when commas are
+ * ignored, which is how the walk skips a nested (...) group. Strings follow the
+ * walk's rules (a quote opens; the same quote closes; no escapes). Each walk
+ * starts outside a string even when q is inside a literal, as the old walk did,
+ * so this is not a single left-to-right paren match of the document.
+ */
+function conditionCommas(text: string): Int32Array {
+  const len = text.length;
+  const nextDouble = new Int32Array(len + 1);
+  const nextSingle = new Int32Array(len + 1);
+  const closeAt = new Int32Array(len + 1);
+  const commaAt = new Int32Array(len + 1);
+  nextDouble[len] = nextSingle[len] = closeAt[len] = commaAt[len] = -1;
+  for (let q = len - 1; q >= 0; q--) {
+    nextDouble[q] = text[q] === '"' ? q : nextDouble[q + 1];
+    nextSingle[q] = text[q] === "'" ? q : nextSingle[q + 1];
+  }
+  for (let q = len - 1; q >= 0; q--) {
+    const ch = text[q];
+    // Where the walk resumes at depth 0 outside a string, or -1 if it never does.
+    let resume = q + 1;
+    if (ch === ')') {
+      closeAt[q] = q;
+      commaAt[q] = -1;
+      continue;
+    } else if (ch === ',') {
+      closeAt[q] = closeAt[q + 1];
+      commaAt[q] = q;
+      continue;
+    } else if (ch === '(') {
+      const inner = closeAt[q + 1];
+      resume = inner === -1 ? -1 : inner + 1;
+    } else if (ch === '"' || ch === "'") {
+      const end = (ch === '"' ? nextDouble : nextSingle)[q + 1];
+      resume = end === -1 ? -1 : end + 1;
+    }
+    closeAt[q] = resume === -1 ? -1 : closeAt[resume];
+    commaAt[q] = resume === -1 ? -1 : commaAt[resume];
+  }
+  return commaAt;
+}
+
 function isDispatchTablePattern(text: string): boolean {
   const conditions: string[] = [];
+  let commaAt: Int32Array | null = null; // built at the first IF(
 
   for (let i = 0; i < text.length - 2; i++) {
     const upper = text.slice(i, i + 4).toUpperCase();
@@ -650,34 +836,18 @@ function isDispatchTablePattern(text: string): boolean {
     else if (upper === 'IF (') condStart = i + 4;
     if (condStart < 0) continue;
 
-    let depth = 0;
-    let inStr = false;
-    let strChar = '';
-    for (let j = condStart; j < text.length; j++) {
-      const ch = text[j];
-      if (inStr) {
-        if (ch === strChar) inStr = false;
-      } else if (ch === '"' || ch === "'") {
-        inStr = true;
-        strChar = ch;
-      } else if (ch === '(') {
-        depth++;
-      } else if (ch === ')') {
-        if (depth === 0) break;
-        depth--;
-      } else if (ch === ',' && depth === 0) {
-        conditions.push(text.slice(condStart, j).trim());
-        break;
-      }
-    }
+    // The condition runs to the first ',' at depth 0 (see conditionCommas).
+    commaAt ??= conditionCommas(text);
+    const comma = commaAt[condStart];
+    if (comma !== -1) conditions.push(text.slice(condStart, comma).trim());
   }
 
   if (conditions.length < 4) return false;
 
   const lhsList = conditions
     .map(c => {
-      const m = c.match(/^(.*?)(?:\s*(?:!=|<=|>=|=|<|>))/);
-      return m ? m[1].trim() : '';
+      const lhs = comparisonLhs(c);
+      return lhs !== null ? lhs.trim() : '';
     })
     .filter(Boolean);
 
@@ -686,7 +856,10 @@ function isDispatchTablePattern(text: string): boolean {
   const counts = new Map<string, number>();
   for (const lhs of lhsList) counts.set(lhs, (counts.get(lhs) ?? 0) + 1);
 
-  const maxCount = Math.max(0, ...counts.values());
+  // A loop, not Math.max(0, ...values): spreading tens of thousands of values
+  // into one call can exceed V8's argument limit.
+  let maxCount = 0;
+  for (const count of counts.values()) if (count > maxCount) maxCount = count;
   return maxCount / lhsList.length >= 0.6;
 }
 
@@ -743,7 +916,7 @@ function checkTrailingOperators(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
-function checkUnknownTokens(text: string): LsDiagnostic[] {
+function checkUnknownTokens(text: string, suggest: Suggester): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const exclusionRanges = getExclusionRanges(text);
   const knownUpper = new Set(ALL_CALLABLE.map(n => n.toUpperCase()));
@@ -764,7 +937,7 @@ function checkUnknownTokens(text: string): LsDiagnostic[] {
 
     if (isCall) {
       // Lowercase function call — always invalid; Airtable functions must be UPPERCASE
-      const suggestion = findClosestFunction(ident);
+      const suggestion = suggest(ident);
       const message = suggestion
         ? `Unknown function '${ident}'. Airtable functions are UPPERCASE — did you mean '${suggestion}'?`
         : `Unknown function '${ident}'. Airtable function names must be UPPERCASE.`;
@@ -827,17 +1000,24 @@ function checkUnknownTokens(text: string): LsDiagnostic[] {
  */
 export function formulaDiagnostics(text: string, uri?: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
-  diagnostics.push(...checkComments(text));
-  diagnostics.push(...checkParentheses(text, uri));
-  diagnostics.push(...checkBrackets(text, uri));
-  diagnostics.push(...checkQuotes(text));
-  diagnostics.push(...checkFunctions(text));
+  // A loop, not diagnostics.push(...more): spreading more than ~125k diagnostics
+  // into one call overflows V8's argument limit ("Maximum call stack size
+  // exceeded"), which ')'.repeat(200000) did.
+  const add = (more: LsDiagnostic[]) => {
+    for (const d of more) diagnostics.push(d);
+  };
+  const suggest = makeSuggester();
+  add(checkComments(text));
+  add(checkParentheses(text, uri));
+  add(checkBrackets(text, uri));
+  add(checkQuotes(text));
+  add(checkFunctions(text, suggest));
   // checkFieldReferences intentionally disabled -- {} valid in JSON formula output
-  diagnostics.push(...checkSmartQuotes(text));
-  diagnostics.push(...checkCommonTypos(text));
-  diagnostics.push(...checkDivisionByZero(text));
-  diagnostics.push(...checkNestedIfs(text));
-  diagnostics.push(...checkTrailingOperators(text));
-  diagnostics.push(...checkUnknownTokens(text));
+  add(checkSmartQuotes(text));
+  add(checkCommonTypos(text));
+  add(checkDivisionByZero(text));
+  add(checkNestedIfs(text));
+  add(checkTrailingOperators(text));
+  add(checkUnknownTokens(text, suggest));
   return diagnostics;
 }

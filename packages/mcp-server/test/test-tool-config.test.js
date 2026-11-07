@@ -33,7 +33,7 @@ after(async () => {
 describe('TOOL_CATEGORIES', () => {
   it('maps all tools to valid categories', () => {
     const tools = Object.keys(TOOL_CATEGORIES);
-    assert.equal(tools.length, 72, `Expected 72 tools, got ${tools.length}`);
+    assert.equal(tools.length, 73, `Expected 73 tools, got ${tools.length}`);
     for (const [tool, cat] of Object.entries(TOOL_CATEGORIES)) {
       assert.ok(CATEGORY_LABELS[cat], `Tool "${tool}" has unknown category "${cat}"`);
     }
@@ -44,7 +44,7 @@ describe('TOOL_CATEGORIES', () => {
       .filter(([, cat]) => cat === 'read')
       .map(([name]) => name);
     assert.deepEqual(readTools.sort(), [
-      'get_base_schema', 'get_table_schema', 'get_view', 'list_fields', 'list_record_templates', 'list_tables', 'list_view_sections', 'list_views', 'validate_formula',
+      'get_base_schema', 'get_table_schema', 'get_view', 'lint_airtable_code', 'list_fields', 'list_record_templates', 'list_tables', 'list_view_sections', 'list_views', 'validate_formula',
     ]);
   });
 
@@ -112,9 +112,9 @@ describe('ToolConfigManager', () => {
       assert.equal(mgr.activeProfile, 'full');
     });
 
-    it('enables all 72 tools on full profile', () => {
+    it('enables all 73 tools on full profile', () => {
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 72);
+      assert.equal(enabled.size, 73);
     });
 
     it('manage_tools is always enabled', () => {
@@ -123,10 +123,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('enabledToolNames() for each profile', () => {
-    it('read-only enables only 10 read tools (no file-writing tools)', async () => {
+    it('read-only enables only 11 read tools (no file-writing tools)', async () => {
       await mgr.switchProfile('read-only');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 10);
+      assert.equal(enabled.size, 11);
       // The reason the count dropped: a profile advertised as "reading only" must not
       // contain a tool that creates/overwrites files at a caller-supplied path.
       assert.ok(!enabled.has('download_formula_field'), 'read-only must not write files');
@@ -158,10 +158,10 @@ describe('ToolConfigManager', () => {
       assert.ok(!enabled.has('sync_base'), 'sync must not be in safe-write — its mode=apply can delete records/schema');
     });
 
-    it('full enables all 72 tools', async () => {
+    it('full enables all 73 tools', async () => {
       await mgr.switchProfile('full');
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 72);
+      assert.equal(enabled.size, 73);
     });
 
     it('unknown profile fails closed to read-only', async () => {
@@ -169,7 +169,7 @@ describe('ToolConfigManager', () => {
       // tampered tools-config.json by mutating loaded state directly.
       mgr._config.activeProfile = 'totally-bogus';
       const enabled = mgr.enabledToolNames();
-      assert.equal(enabled.size, 10, 'must match the read-only tool count');
+      assert.equal(enabled.size, 11, 'must match the read-only tool count');
       assert.ok(enabled.has('get_base_schema'));
       assert.ok(!enabled.has('delete_table'));
       assert.ok(!enabled.has('delete_field'));
@@ -244,10 +244,10 @@ describe('ToolConfigManager', () => {
   });
 
   describe('getToolStatus()', () => {
-    it('returns status for all 72 tools', async () => {
+    it('returns status for all 73 tools', async () => {
       await mgr.switchProfile('full');
       const status = mgr.getToolStatus();
-      assert.equal(status.length, 72);
+      assert.equal(status.length, 73);
       assert.ok(status.every(s => s.enabled === true));
     });
 

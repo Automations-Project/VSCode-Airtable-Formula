@@ -16,6 +16,22 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   prompt re-renders it everywhere the skill is already installed or outdated; it never installs the
   skill, and a failed refresh shows a warning without failing the prompt action.
 
+### Added — `lint_airtable_code`, offline checks for formulas and scripts (2026-11-07)
+
+**Added**
+
+- **`lint_airtable_code` MCP tool.** Checks a formula, a Scripting-extension script or an automation
+  script (`language`: `formula`, `script` or `automation`) and returns line/column diagnostics. It needs
+  no base, no login and no browser, so it always answers, and it sits in the `read` category: it is
+  available in every tool profile, including `read-only`. Tool counts are now 73 overall, 11 in
+  `read-only` and 55 in `safe-write`. The AI skill tells assistants to lint first, then call
+  `validate_formula` when a base is available.
+- **The diagnostics engines no longer stall on pathological input.** Several scans in the formula,
+  script and automation engines were quadratic: a crafted 200,000-character input could keep the
+  editor, the language server or the shared MCP daemon busy for tens of seconds. Every scan is now
+  linear, with identical results on real code, and regression tests pin the worst shapes under two
+  seconds.
+
 ### Added — AI skill installer (2026-11-06)
 
 **Added**

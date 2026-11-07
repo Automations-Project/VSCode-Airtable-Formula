@@ -38,6 +38,7 @@ export const TOOL_CATEGORIES: Record<string, keyof ToolCategories | ExtraCategor
   list_fields:               'read',
   list_views:                'read',
   get_view:                  'read',
+  lint_airtable_code:        'read',
   validate_formula:          'read',
   list_view_sections:        'read',
   list_record_templates:     'read',

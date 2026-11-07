@@ -132,6 +132,10 @@
       "description": "Validate a formula expression before creating or updating"
     },
     {
+      "name": "lint_airtable_code",
+      "description": "Offline static check of a formula, Scripting-extension script or automation script: no base, login or browser needed."
+    },
+    {
       "name": "download_formula_field",
       "description": "Download the formula text of a formula field to a local file."
     },

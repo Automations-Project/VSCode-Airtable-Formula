@@ -3,12 +3,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 72 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 73 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
 </picture>
 
 # Airtable Formulas, Scripts, Automation, MCP & LSP
 
-**Formula, script & automation editor · MCP server (72 tools + `manage_tools`) · Language server · AI skill**
+**Formula, script & automation editor · MCP server (73 tools + `manage_tools`) · Language server · AI skill**
 
 <table align="center">
 <tr>
@@ -65,12 +65,12 @@
 | **Formula Editor** | Syntax highlighting, IntelliSense, beautify / minify | `.formula`, `.min.formula` |
 | **Script Editor** | Completions, hover docs, diagnostics | `.ats`, `.script` |
 | **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
-| **MCP Server (72 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
+| **MCP Server (73 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
 | **Language Server (LSP)** | Standalone multi-editor support — Neovim, Helix, OpenCode | All above |
 | **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
 | **AI Skill** | One Airtable skill folder (rules, function reference, MCP tool guide, workflows, prompt recipes) installed into 70+ AI coding clients; it carries the MCP prompts as recipes, with your own edits under global scope | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
-| **Tool Profiles** | `read-only` (10 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` permission scopes | — |
+| **Tool Profiles** | `read-only` (11 tools) / `safe-write` (55 tools) / `full` (73 tools) / `custom` permission scopes | — |
 | **OS Keychain Auth** | Browser-based Airtable login with SSO/2FA — credentials in your OS keychain | — |
 
 ---
@@ -97,7 +97,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| **Total tools** | ~17 | **73** (72 + `manage_tools`) |
+| **Total tools** | ~17 | **74** (73 + `manage_tools`) |
 | **Auth model** | Personal Access Token or OAuth, per-scope setup | **Log in once with your normal Airtable account** (SSO/2FA supported) |
 | **Transport** | HTTP (remote) | stdio (local, private) |
 | **Data never leaves your machine** | ❌ Requests go through `mcp.airtable.com` | ✅ Runs locally against Airtable's API |
@@ -127,7 +127,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Extension / block management (install, enable, rename, duplicate, remove)** | ❌ | ✅ |
 | **Create dashboard pages** | ❌ | ✅ |
 | **Daemon self-diagnosis (session dead? browser busy? daemon gone?)** | ❌ | ✅ `manage_daemon` `action=status`, plus start / restart / stop / tunnel / token rotation |
-| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (10) / safe-write (54) / full (72) / custom |
+| **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (11) / safe-write (55) / full (73) / custom |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
 | **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
@@ -192,13 +192,13 @@ This monorepo ships **three products** from one source tree:
 
 ## Features
 
-### MCP Server (72 Tools + `manage_tools`)
+### MCP Server (73 Tools + `manage_tools`)
 
 Manage Airtable bases with capabilities **not available through the official REST API**:
 
 | Category | Tools | Highlights |
 |:---------|:-----:|:-----------|
-| **Schema Read** | 9 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates |
+| **Schema Read** | 10 | Full schema inspection — bases, tables, fields, views, sidebar sections, record templates — plus offline code linting |
 | **Local File Write** | 2 | Download one formula field or every formula in a base to caller-chosen `.formula` files; excluded from `read-only` |
 | **Record Read** | 1 | `query_records` — up to 1 000 records/call with resolved field values; `search` param works on lookup/rollup fields (REST API `filterByFormula` doesn't) |
 | **Record Write** | 4 | `create_records` / `update_records` / `duplicate_records` / `upload_attachment` (the only way to write `multipleAttachments` cells by URL) |
