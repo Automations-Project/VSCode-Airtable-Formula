@@ -218,11 +218,51 @@ export async function unconfigureMcpToml(configPath: string, serversKey: string,
   await writeTextAtomic(configPath, bom + next);
 }
 
+const TOML_KEY_VALUE_RE = /^[ \t]*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=[ \t]*(.*?)[ \t]*$/;
+const TOML_INLINE_PAIR_RE = /("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=[ \t]*("(?:[^"\\]|\\.)*"|true|false|-?\d+)[ \t]*(?:,[ \t]*|$)/y;
+
+const unquoteKey = (k: string): string => (k.startsWith('"') ? (JSON.parse(k) as string) : k);
+
 /**
- * The keys of our table, one property per `key = value` line: the value is
- * JSON.parse'd when that works (strings, string arrays, booleans) and `true`
- * when it does not (inline tables, literal strings, multi-line values). A
- * sub-table `[k.name.sub]` adds `sub: true`. `null` when we are not there.
+ * A value we can read back: JSON-compatible ones (strings, string arrays, booleans, integers)
+ * as JSON, an inline table of those (`env = { A = "1" }`, what we write) as an object, and
+ * anything else (literal strings, multi-line values, a comment after the value) as `true`.
+ */
+function readTomlValue(raw: string): unknown {
+  try { return JSON.parse(raw); } catch { /* not JSON */ }
+  if (!raw.startsWith('{') || !raw.endsWith('}')) return true;
+  const body = raw.slice(1, -1).trim();
+  const out: Record<string, unknown> = {};
+  try {
+    for (let i = 0; i < body.length; i = TOML_INLINE_PAIR_RE.lastIndex) {
+      TOML_INLINE_PAIR_RE.lastIndex = i;
+      const m = TOML_INLINE_PAIR_RE.exec(body);
+      if (!m) return true;
+      out[unquoteKey(m[1])] = JSON.parse(m[2]);
+    }
+  } catch { return true; }
+  return out;
+}
+
+/** One `key = value` line of a table; null for blank lines, comments, dotted keys and continuations. */
+export function tomlKeyValue(line: string): { key: string; value: unknown } | null {
+  const m = TOML_KEY_VALUE_RE.exec(line);
+  return m ? { key: unquoteKey(m[1]), value: readTomlValue(m[2]) } : null;
+}
+
+function tableValues(sectionText: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const line of sectionText.split('\n').slice(1)) {
+    const kv = tomlKeyValue(line);
+    if (kv) out[kv.key] = kv.value;
+  }
+  return out;
+}
+
+/**
+ * The keys of our table, one property per `key = value` line (values as readTomlValue reads
+ * them). A sub-table `[k.name.sub]` adds `sub` with its own keys (an `env` sub-table reads like
+ * the inline `env`); a deeper one adds `true`. `null` when we are not there.
  */
 export async function readMcpTomlEntry(
   configPath: string, serversKey: string, name: string,
@@ -232,26 +272,15 @@ export async function readMcpTomlEntry(
   const main = `[${serversKey}.${name}]`;
   const prefix = `[${serversKey}.${name}.`;
   let entry: Record<string, unknown> | null = null;
-  const subs: string[] = [];
+  const subs: Array<[string, Record<string, unknown>]> = [];
   for (const s of splitTomlSections(splitBom(raw).body.replace(/\r\n/g, '\n'))) {
     if (s.header === null) continue;
     const h = bareHeader(s.header);
-    if (h === main) {
-      entry = {};
-      for (const line of s.text.split('\n').slice(1)) {
-        const m = /^[ \t]*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=[ \t]*(.*?)[ \t]*$/.exec(line);
-        if (!m) continue;
-        const key = m[1].startsWith('"') ? (JSON.parse(m[1]) as string) : m[1];
-        let value: unknown = true;
-        try { value = JSON.parse(m[2]); } catch { /* keep true */ }
-        entry[key] = value;
-      }
-    } else if (h.startsWith(prefix) && h.endsWith(']')) {
-      subs.push(h.slice(prefix.length, -1));
-    }
+    if (h === main) entry = tableValues(s.text);
+    else if (h.startsWith(prefix) && h.endsWith(']')) subs.push([h.slice(prefix.length, -1), tableValues(s.text)]);
   }
   if (entry === null) return null;
-  for (const sub of subs) entry[sub] = true;
+  for (const [sub, values] of subs) entry[sub] = sub.includes('.') ? true : values;
   return entry;
 }
 

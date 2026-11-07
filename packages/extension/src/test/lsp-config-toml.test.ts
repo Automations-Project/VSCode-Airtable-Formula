@@ -137,8 +137,11 @@ describe('configureMcpToml replaces our table', () => {
 
   it('reads back the keys of our table, parsing the values we write', async () => {
     await configureMcpToml(cfg, K, N, { command: 'node', args: ['/s.mjs'], env: { A: '1' } });
-    expect(await readMcpTomlEntry(cfg, K, N)).toEqual({ command: 'node', args: ['/s.mjs'], env: true });
+    expect(await readMcpTomlEntry(cfg, K, N)).toEqual({ command: 'node', args: ['/s.mjs'], env: { A: '1' } });
     expect(await readMcpTomlEntry(cfg, K, 'other')).toBeNull();
+    // An env sub-table reads like the inline env; a value we cannot read is true.
+    fs.writeFileSync(cfg, '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nx = { n = 1.5 }\n\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_HEADLESS_ONLY = "1"\n');
+    expect(await readMcpTomlEntry(cfg, K, N)).toEqual({ command: 'npx', x: true, env: { AIRTABLE_HEADLESS_ONLY: '1' } });
     expect(await readMcpTomlEntry(path.join(dir, 'missing.toml'), K, N)).toBeNull();
   });
 });

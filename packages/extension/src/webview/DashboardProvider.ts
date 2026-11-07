@@ -16,7 +16,7 @@ import {
   type WebviewMessage,
 } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
-import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, reapplyMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
 import { MCP_CLIENTS } from '../auto-config/mcp-clients.js';
 import { settleByClient, type ClientFailure } from '../auto-config/settle-by-client.js';
@@ -1926,10 +1926,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const serverPath = getBundledServerPath(this.context);
     const serverEntry = getServerEntry(this.context);
     const statuses = await getAllIdeStatuses();
-    // One client's bad config file is reported and skipped; the others are still rewritten.
+    // Only entries we wrote are re-written; a hand-written one keeps its own env. One client's
+    // bad config file is reported and skipped; the others are still rewritten.
     const { failed } = await settleByClient(
       statuses.filter(s => s.mcpConfigured),
-      s => configureMcpForIde(s.ideId, serverPath, serverEntry),
+      s => reapplyMcpForIde(s.ideId, serverPath, serverEntry),
     );
     this.traceClientFailures('rewrite', failed);
     warnClientFailures(failed);

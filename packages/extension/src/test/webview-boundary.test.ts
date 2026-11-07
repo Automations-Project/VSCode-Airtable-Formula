@@ -67,6 +67,7 @@ vi.mock('vscode', () => ({
 const dependencies = vi.hoisted(() => ({
   getAllIdeStatuses: vi.fn(async () => []),
   configureMcpForIde: vi.fn(async () => undefined),
+  reapplyMcpForIde: vi.fn(async () => true),
   updateWebviewSetting: vi.fn(async () => undefined),
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
@@ -92,6 +93,7 @@ const skill = vi.hoisted(() => {
 vi.mock('../auto-config/index.js', () => ({
   getAllIdeStatuses: dependencies.getAllIdeStatuses,
   configureMcpForIde: dependencies.configureMcpForIde,
+  reapplyMcpForIde: dependencies.reapplyMcpForIde,
   unconfigureMcpForIde: vi.fn(),
   configureLspForIde: vi.fn(),
   unconfigureLspForIde: vi.fn(),
@@ -755,7 +757,9 @@ describe('DashboardProvider webview trust boundary', () => {
       provider.applyConfigurationSideEffect('mcp.serverSource'),
     ]);
 
-    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(1);
+    // The rewrite re-applies (only entries we wrote); it never calls the explicit Setup path.
+    expect(dependencies.reapplyMcpForIde).toHaveBeenCalledTimes(1);
+    expect(dependencies.configureMcpForIde).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1098,13 +1102,13 @@ describe('DashboardProvider webview trust boundary', () => {
       { ideId: 'cursor', label: 'Cursor', mcpConfigured: true },
       { ideId: 'zed', label: 'Zed', mcpConfigured: true },
     ] as never);
-    dependencies.configureMcpForIde.mockRejectedValueOnce(new Error('bad file')).mockResolvedValueOnce(undefined);
+    dependencies.reapplyMcpForIde.mockRejectedValueOnce(new Error('bad file')).mockResolvedValueOnce(true);
     const { provider } = mountProvider();
 
     await expect(provider.applyConfigurationSideEffect('mcp.serverSource')).resolves.toBeUndefined();
 
-    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(2);
-    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(dependencies.reapplyMcpForIde).toHaveBeenCalledTimes(2);
+    expect(dependencies.reapplyMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
     expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Airtable Formula: could not configure Cursor: bad file');
   });
 

@@ -32,7 +32,7 @@ type LocalToolCategoryKey =
     | 'recordWrite' | 'recordDestructive'
     | 'sync' | 'daemon';
 import { getSettings } from './settings.js';
-import { getAllIdeStatuses, configureMcpForIde, ensureLauncher, settleByClient, type ClientFailure } from './auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, reapplyMcpForIde, ensureLauncher, settleByClient, type ClientFailure } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
 import { installSkill, checkSkill } from './skills/installer.js';
 import { skillEnv } from './skills/host-env.js';
@@ -761,7 +761,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (staleIdes.length > 0) {
             const entry = getServerEntry(context);
             const serverPath = getBundledServerPath(context);
-            const { failed } = await settleByClient(staleIdes, s => configureMcpForIde(s.ideId, serverPath, entry));
+            // Unhealthy implies the entry is ours (health never judges a hand-written one); reapply re-checks.
+            const { failed } = await settleByClient(staleIdes, s => reapplyMcpForIde(s.ideId, serverPath, entry));
             logClientFailures('auto_heal', failed);
             dashboardProvider.refresh();
         }

@@ -9,11 +9,11 @@ import { isLspConfigured } from './lsp-config.js';
 import { hostPathContext, type McpClientRow } from './mcp-clients.js';
 import { readLaunch } from './mcp-entry-shapes.js';
 import {
-  configureMcpClient, hasForeignEntry, readMcpClientHealth, readServerEntry, setServerEntry, unconfigureMcpClient,
-  type FoundEntry, type WriterDeps,
+  MCP_SERVER_NAME, configureMcpClient, hasForeignEntry, isOurEntry, readMcpClientHealth, readServerEntry, setServerEntry,
+  unconfigureMcpClient, type FoundEntry, type WriterDeps,
 } from './mcp-writer.js';
 
-// Our local entry is mcp-writer.ts's MCP_SERVER_NAME ('airtable-user-mcp'); the official remote one:
+// Our local entry is MCP_SERVER_NAME ('airtable-user-mcp'); the official remote one:
 const OFFICIAL_AIRTABLE_NAME = 'airtable';
 const OFFICIAL_AIRTABLE_URL = 'https://mcp.airtable.com/mcp';
 
@@ -137,6 +137,25 @@ export async function configureMcpForIde(
   const launch = readLaunch(serverEntry ?? buildServerEntry(serverPath));
   if (!launch) throw new Error('the MCP server entry has no command');
   await configureMcpClient(row, launch, deps);
+}
+
+/**
+ * The activation auto-heal and the settings rewrite: re-writes the entry with the current settings
+ * only when the client has one we wrote (isOurEntry). A hand-written entry, or none, is left
+ * alone. Returns whether it re-wrote.
+ */
+export async function reapplyMcpForIde(
+  ideId: IdeId,
+  serverPath: string,
+  serverEntry?: Record<string, unknown>,
+  deps: WriterDeps = hostWriterDeps(),
+): Promise<boolean> {
+  const row = mcpRowFor(ideId);
+  if (!row) return false;
+  const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
+  if (!found || !isOurEntry(found.entry, deps)) return false;
+  await configureMcpForIde(ideId, serverPath, serverEntry, deps);
+  return true;
 }
 
 export async function unconfigureMcpForIde(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {

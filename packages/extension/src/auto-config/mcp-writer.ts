@@ -252,8 +252,31 @@ async function assertLegacyParses(row: McpClientRow, locs: readonly LegacyLocati
   }
 }
 
+/** The block main's Codex writer emitted, which carries no other mark of ours: matched exactly (no env). */
+function isMainEraCodexBlock(entry: Record<string, unknown>): boolean {
+  const args = entry.args;
+  return entry.type === 'stdio' && entry.command === 'npx'
+    && Array.isArray(args) && args.length === 2 && args[0] === '-y' && args[1] === 'airtable-user-mcp'
+    && entry.env === undefined && entry.environment === undefined;
+}
+
+/**
+ * Whether an entry under our name is one the extension wrote. Every entry we write sets
+ * AIRTABLE_HEADLESS_ONLY=1 or launches the stable launcher, and main's Codex block is matched
+ * exactly. Anything else is the user's own (a standalone npx entry with its own env, an
+ * add-mcp entry): health does not judge it, and nothing rewrites or moves it unasked.
+ */
+export function isOurEntry(entry: Record<string, unknown>, deps: WriterDeps): boolean {
+  const env = isPlainObject(entry.env) ? entry.env : isPlainObject(entry.environment) ? entry.environment : {};
+  if (env.AIRTABLE_HEADLESS_ONLY === '1') return true;
+  const target = readLaunch(entry)?.args[0];
+  if (target !== undefined && samePath(deps.ctx, target, deps.launcher.script)) return true;
+  return isMainEraCodexBlock(entry);
+}
+
+/** Setup writes our entry in the row's shape. Legacy cleanup moves only copies we wrote. */
 export async function configureMcpClient(row: McpClientRow, launch: LocalLaunch, deps: WriterDeps): Promise<void> {
-  await setServerEntry(row, MCP_SERVER_NAME, (loc) => ENTRY_SHAPES[row.shape](launch, loc), deps);
+  await setServerEntry(row, MCP_SERVER_NAME, (loc) => ENTRY_SHAPES[row.shape](launch, loc), deps, (e) => isOurEntry(e, deps));
 }
 
 export async function unconfigureMcpClient(row: McpClientRow, deps: WriterDeps): Promise<void> {
@@ -261,17 +284,19 @@ export async function unconfigureMcpClient(row: McpClientRow, deps: WriterDeps):
 }
 
 /**
- * configured: our entry exists somewhere we look. healthy: it is where and how this row reads it,
- * and what it launches is there. Any error (a file that does not parse) is not-configured, so an
- * unparsable file is never auto-healed.
+ * configured: an entry under our name exists somewhere we look. healthy: it is where and how this
+ * row reads it, and what it launches is there. Only an entry we wrote (isOurEntry) is judged; any
+ * other is healthy ("not ours to judge"), so the activation auto-heal never rewrites it. Any error
+ * (a file that does not parse) is not-configured, so an unparsable file is never auto-healed.
  */
 export async function readMcpClientHealth(row: McpClientRow, deps: WriterDeps): Promise<{ configured: boolean; healthy: boolean }> {
   try {
     const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
     if (!found) return { configured: false, healthy: false };
+    if (!isOurEntry(found.entry, deps)) return { configured: true, healthy: true };
     if (found.legacy) return { configured: true, healthy: false };
     const launch = readLaunch(found.entry);
-    if (!launch) return { configured: true, healthy: true }; // not a local launch: not ours to judge
+    if (!launch) return { configured: true, healthy: true };
     if (!isShapeCurrent(row.shape, found.entry, { native: found.native })) return { configured: true, healthy: false };
     if (launch.command === 'npx') return { configured: true, healthy: true };
     const target = launch.args[0];

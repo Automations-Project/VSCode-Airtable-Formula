@@ -7,7 +7,7 @@ import { MCP_CLIENTS, MCP_CLIENT_BY_ID, resolveConfigPath, type McpClientRow } f
 import { ENTRY_SHAPES, type LocalLaunch } from '../auto-config/mcp-entry-shapes.js';
 import { readMcpTomlEntry } from '../auto-config/lsp-config.js';
 import {
-  MCP_SERVER_NAME, configureMcpClient, isClientDetected, legacyLocations, readMcpClientHealth, readServerEntry,
+  MCP_SERVER_NAME, configureMcpClient, isClientDetected, isOurEntry, legacyLocations, readMcpClientHealth, readServerEntry,
   setServerEntry, unconfigureMcpClient, type WriterDeps,
 } from '../auto-config/mcp-writer.js';
 
@@ -230,7 +230,7 @@ describe('entries in old places', () => {
     const row = MCP_CLIENT_BY_ID.opencode;
     detect(row);
     const dir = path.join(home, '.config', 'opencode');
-    write(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { [MCP_SERVER_NAME]: { type: 'local', command: ['node'] } }, theme: 'x' }));
+    write(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { [MCP_SERVER_NAME]: { type: 'local', command: ['node', deps.launcher.script] } }, theme: 'x' }));
     write(path.join(dir, 'opencode.jsonc'), '{\n  // mine\n}\n');
     await configureMcpClient(row, launch, deps);
     expect(json(path.join(dir, 'opencode.json'))).toEqual({ theme: 'x' });
@@ -264,7 +264,8 @@ describe('entries in old places', () => {
     const row = MCP_CLIENT_BY_ID.opencode;
     detect(row);
     const file = path.join(home, '.config', 'opencode', 'opencode.jsonc');
-    write(file, JSON.stringify({ mcp: { [MCP_SERVER_NAME]: { type: 'local', command: ['old'] }, servers: { [MCP_SERVER_NAME]: { type: 'local', command: ['old'] } } } }));
+    const old = { type: 'local', command: ['old'], environment: { AIRTABLE_HEADLESS_ONLY: '1' } };
+    write(file, JSON.stringify({ mcp: { [MCP_SERVER_NAME]: old, servers: { [MCP_SERVER_NAME]: old } } }));
     await configureMcpClient(row, launch, deps);
     expect(json(file)).toEqual({ mcp: { servers: { [MCP_SERVER_NAME]: ENTRY_SHAPES.opencode(launch, { native: true }) } } });
   });
@@ -309,7 +310,7 @@ describe('entries in old places', () => {
     const row = MCP_CLIENT_BY_ID['codex-cli'];
     detect(row);
     const old = path.join(home, '.codex', 'config.toml');
-    write(old, '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\n\n[mcp_servers.airtable-user-mcp.env]\nA = "1"\n\n[model_providers.x]\nname = "x"\n');
+    write(old, '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\n\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_HEADLESS_ONLY = "1"\n\n[model_providers.x]\nname = "x"\n');
     const moved: WriterDeps = { ...deps, ctx: { ...deps.ctx, env: { ...deps.ctx.env, CODEX_HOME: path.join(home, 'elsewhere') } } };
     expect(await readMcpClientHealth(row, moved)).toEqual({ configured: true, healthy: false });
     await configureMcpClient(row, launch, moved);
@@ -353,7 +354,7 @@ describe('legacy cleanup boundaries', () => {
   // The legacy path and the current path can name one file (a case-insensitive APFS volume,
   // a symlink): when both exist, the same dev+ino is the same file, whatever samePath says.
   describe('one file under two names', () => {
-    const OURS = '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\n';
+    const OURS = '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nenv = { AIRTABLE_HEADLESS_ONLY = "1" }\n';
     const setup = () => {
       const row = MCP_CLIENT_BY_ID['codex-cli'];
       detect(row);
@@ -418,8 +419,8 @@ describe('health', () => {
     fs.rmSync(deps.launcher.config);
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: false });
   });
-  it('a missing absolute server path is unhealthy', async () => {
-    seed({ command: 'node', args: [path.join(home, 'gone', 'index.mjs')], env: { A: '1' } });
+  it('a missing absolute server path is unhealthy (an older extension wrote one)', async () => {
+    seed({ command: 'node', args: [path.join(home, 'gone', 'index.mjs')], env: { AIRTABLE_HEADLESS_ONLY: '1' } });
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: false });
   });
   it('a remote entry under our name is not ours to judge', async () => {
@@ -429,12 +430,31 @@ describe('health', () => {
 
   // Added beyond the brief.
   it('an existing absolute server path is healthy, and no args is healthy', async () => {
-    seed({ command: 'node', args: [deps.launcher.config] });
+    const env = { AIRTABLE_HEADLESS_ONLY: '1' };
+    seed({ command: 'node', args: [deps.launcher.config], env });
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: true });
-    seed({ command: 'my-airtable-wrapper', args: [] });
+    seed({ command: 'my-airtable-wrapper', args: [], env });
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: true });
-    seed({ command: 'my-airtable-wrapper' }); // the standard shape always writes args
+    seed({ command: 'my-airtable-wrapper', env }); // the standard shape always writes args
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: false });
+  });
+
+  it('an entry we did not write is not ours to judge: healthy, whatever its shape or target', async () => {
+    seed({ command: 'node', args: [path.join(home, 'gone', 'index.mjs')], env: { A: '1' } });
+    expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: true });
+    seed({ command: 'my-airtable-wrapper' });
+    expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: true });
+  });
+
+  it("isOurEntry: our env mark, the launcher, or main's exact Codex block; nothing else", () => {
+    expect(isOurEntry({ command: 'npx', env: { AIRTABLE_HEADLESS_ONLY: '1' } }, deps)).toBe(true);
+    expect(isOurEntry({ type: 'local', command: ['npx'], environment: { AIRTABLE_HEADLESS_ONLY: '1' } }, deps)).toBe(true);
+    expect(isOurEntry({ command: 'node', args: [deps.launcher.script] }, deps)).toBe(true);
+    expect(isOurEntry({ type: 'local', command: ['node', deps.launcher.script] }, deps)).toBe(true);
+    expect(isOurEntry({ type: 'stdio', command: 'npx', args: ['-y', 'airtable-user-mcp'] }, deps)).toBe(true);
+    expect(isOurEntry({ type: 'stdio', command: 'npx', args: ['-y', 'airtable-user-mcp'], env: { A: '1' } }, deps)).toBe(false);
+    expect(isOurEntry({ command: 'npx', args: ['-y', 'airtable-user-mcp'], env: { AIRTABLE_AUTH_MODE: 'byo' } }, deps)).toBe(false);
+    expect(isOurEntry({ command: 'npx', env: { AIRTABLE_HEADLESS_ONLY: 1 } }, deps)).toBe(false);
   });
   it('an entry in a stale shape is unhealthy (Kimi without its transport key)', async () => {
     const kimi = MCP_CLIENT_BY_ID['kimi-code'];

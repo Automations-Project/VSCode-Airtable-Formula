@@ -20,9 +20,10 @@ import { MCP_CLIENTS, MCP_CLIENT_BY_ID, resolveConfigPath, type McpClientId, typ
 import { readServerEntry, setServerEntry, type WriterDeps } from '../auto-config/mcp-writer.js';
 import {
   buildOfficialAirtableEntry, configureLspForIde, configureMcpForIde, configureOfficialAirtableMcp, getAllIdeStatuses,
-  getIdeStatus, getMcpHealth, isLspConfigured, isMcpConfigured, isOfficialAirtableConfigured, settleByClient,
-  unconfigureLspForIde, unconfigureMcpForIde, unconfigureOfficialAirtableMcp,
+  getIdeStatus, getMcpHealth, isLspConfigured, isMcpConfigured, isOfficialAirtableConfigured, reapplyMcpForIde,
+  settleByClient, unconfigureLspForIde, unconfigureMcpForIde, unconfigureOfficialAirtableMcp,
 } from '../auto-config/index.js';
+import { ENTRY_SHAPES } from '../auto-config/mcp-entry-shapes.js';
 
 let home: string;
 let deps: WriterDeps;
@@ -185,6 +186,68 @@ describe('settleByClient: one failing client never stops the others', () => {
     expect(failed).toEqual([{ ideId: 'cursor', label: 'Cursor', message: expect.stringMatching(/is not valid JSON/) }]);
     expect(await getMcpHealth('claude-code', deps)).toEqual({ configured: true, healthy: true });
     expect(fs.readFileSync(fileOf(MCP_CLIENT_BY_ID.cursor), 'utf8')).toBe('{ "mcpServers": ');
+  });
+});
+
+// What the activation auto-heal selects (detected, configured, unhealthy) and what it and the
+// settings rewrite run (reapplyMcpForIde): an entry we cannot prove is ours is never rewritten.
+describe('an entry the extension did not write is never rewritten unasked', () => {
+  const HAND = { command: 'npx', args: ['-y', 'airtable-user-mcp'], env: { AIRTABLE_AUTH_MODE: 'byo', AIRTABLE_COOKIE: 'cookie-value' } };
+  const ours = () => ({ command: 'node', args: [deps.launcher.script], env: { AIRTABLE_HEADLESS_ONLY: '1' } });
+  const healSelects = async (id: McpClientId) => {
+    const s = await getIdeStatus(id, deps);
+    return s.detected && s.mcpConfigured && s.mcpServerHealthy === false;
+  };
+
+  it.each(['zed', 'factory-droid', 'kimi-code'] as const)(
+    "%s: a hand-written npx entry with its own env stays byte for byte through auto-heal and a settings change",
+    async id => {
+      const row = MCP_CLIENT_BY_ID[id];
+      detect(row);
+      write(fileOf(row), JSON.stringify({ [row.serversPath[0]]: { 'airtable-user-mcp': HAND } }, null, 2) + '\n');
+      const before = fs.readFileSync(fileOf(row), 'utf8');
+      expect(await getMcpHealth(id, deps)).toEqual({ configured: true, healthy: true });
+      expect(await healSelects(id)).toBe(false);
+      expect(await reapplyMcpForIde(id, '/unused', ours(), deps)).toBe(false);
+      expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(before);
+    },
+  );
+
+  it.each(['zed', 'factory-droid', 'kimi-code'] as const)('%s: our own entry in an old shape and a stale path still heals', async id => {
+    const row = MCP_CLIENT_BY_ID[id];
+    detect(row);
+    const stale = ENTRY_SHAPES.standard({ command: 'node', args: [path.join(home, 'old-ext', 'dist', 'mcp', 'index.mjs')], env: { AIRTABLE_HEADLESS_ONLY: '1' } });
+    write(fileOf(row), JSON.stringify({ [row.serversPath[0]]: { 'airtable-user-mcp': stale } }, null, 2) + '\n');
+    expect(await healSelects(id)).toBe(true);
+    expect(await reapplyMcpForIde(id, '/unused', ours(), deps)).toBe(true);
+    expect(await getMcpHealth(id, deps)).toEqual({ configured: true, healthy: true });
+  });
+
+  it("Codex: main's exact npx block is ours and heals; the same block with an env of its own is not", async () => {
+    const row = MCP_CLIENT_BY_ID['codex-cli'];
+    detect(row);
+    const mainEra = '[mcp_servers.airtable-user-mcp]\ntype = "stdio"\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\n';
+    write(fileOf(row), mainEra);
+    expect(await healSelects('codex-cli')).toBe(true);
+    expect(await reapplyMcpForIde('codex-cli', '/unused', ours(), deps)).toBe(true);
+    expect(await getMcpHealth('codex-cli', deps)).toEqual({ configured: true, healthy: true });
+    const withEnv = mainEra + '\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_COOKIE = "c"\n';
+    write(fileOf(row), withEnv);
+    expect(await getMcpHealth('codex-cli', deps)).toEqual({ configured: true, healthy: true });
+    expect(await reapplyMcpForIde('codex-cli', '/unused', ours(), deps)).toBe(false);
+    expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(withEnv);
+  });
+
+  it('Kilo Code: a hand-written entry in kilo.json is not moved out when kilo.jsonc becomes current', async () => {
+    const row = MCP_CLIENT_BY_ID['kilo-code'];
+    detect(row);
+    const dir = row.detect(deps.ctx)[0];
+    const theirs = JSON.stringify({ mcp: { 'airtable-user-mcp': { type: 'local', command: ['npx', '-y', 'airtable-user-mcp'], enabled: true } } }, null, 2);
+    write(path.join(dir, 'kilo.json'), theirs);
+    write(path.join(dir, 'kilo.jsonc'), '{}\n');
+    await configureMcpForIde('kilo-code', '/unused', ours(), deps);
+    expect(fs.readFileSync(path.join(dir, 'kilo.json'), 'utf8')).toBe(theirs);
+    expect(await getMcpHealth('kilo-code', deps)).toEqual({ configured: true, healthy: true });
   });
 });
 
@@ -394,7 +457,7 @@ describe('a reconfigure clears the copies in old places too', () => {
     const amp = MCP_CLIENT_BY_ID.amp;
     detect(amp);
     const file = path.join(home, '.config', 'amp', 'settings.json');
-    write(file, JSON.stringify({ mcp: { servers: { 'airtable-user-mcp': { command: 'node', args: ['/old/index.mjs'] }, other: { command: 'x' } } } }, null, 2));
+    write(file, JSON.stringify({ mcp: { servers: { 'airtable-user-mcp': { command: 'node', args: ['/old/index.mjs'], env: { AIRTABLE_HEADLESS_ONLY: '1' } }, other: { command: 'x' } } } }, null, 2));
     await configureMcpForIde('amp', '/unused', { command: 'node', args: [deps.launcher.script], env: {} }, deps);
     expect(parse(fs.readFileSync(file, 'utf8'))).toEqual({
       mcp: { servers: { other: { command: 'x' } } },
