@@ -190,6 +190,32 @@ describe('configureMcpToml keeps everything that is not ours, byte for byte', ()
   });
 });
 
+// A second definition of one key makes Codex reject the whole file, so Setup refuses instead.
+describe('a definition of our server outside its own [mcp_servers.airtable-user-mcp] table', () => {
+  it.each([
+    ['an inline table under [mcp_servers]', 'model = "o3"\n\n[mcp_servers]\nairtable-user-mcp = { command = "npx", args = ["-y", "airtable-user-mcp"] }\n'],
+    ['a dotted key at the top', 'mcp_servers.airtable-user-mcp.command = "npx"\n'],
+    ['a dotted key under [mcp_servers]', '[mcp_servers]\nairtable-user-mcp.command = "npx"\n'],
+    ['a key of an inline mcp_servers table', 'mcp_servers = { airtable-user-mcp = { command = "npx" } }\n'],
+    ['an array of tables', '[[mcp_servers.airtable-user-mcp]]\ncommand = "npx"\n'],
+    ['a quoted key in a CRLF file', '[mcp_servers]\r\n"airtable-user-mcp" = { command = "npx" }\r\n'],
+  ])('%s: Setup refuses and writes nothing', async (_name, text) => {
+    fs.writeFileSync(cfg, text);
+    await expect(configureMcpToml(cfg, K, N, E))
+      .rejects.toThrow(/already defines mcp_servers\.airtable-user-mcp outside a \[mcp_servers\.airtable-user-mcp\] table.*Nothing was written\./);
+    expect(fs.readFileSync(cfg, 'utf8')).toBe(text);
+  });
+
+  it('our own table and its sub-tables, and our name inside another server, are not a second definition', async () => {
+    const text = '[mcp_servers.other]\ncommand = "x"\nargs = ["airtable-user-mcp"]\nenv = { airtable-user-mcp = "1" }\n\n[mcp_servers.airtable-user-mcp]\ncommand = "npx"\n\n[mcp_servers.airtable-user-mcp.env]\nA = "1"\n';
+    fs.writeFileSync(cfg, text);
+    await configureMcpToml(cfg, K, N, E);
+    const out = fs.readFileSync(cfg, 'utf8');
+    expect(out.match(/^\[mcp_servers\.airtable-user-mcp\]$/gm)).toHaveLength(1);
+    expect(out).toContain('env = { airtable-user-mcp = "1" }');
+  });
+});
+
 it('configureMcpToml rejects when the config path cannot be read, and writes nothing', async () => {
   fs.mkdirSync(cfg); // a directory at the config path: readFile fails with EISDIR
   await expect(configureMcpToml(cfg, K, N, E)).rejects.toThrow();

@@ -1,9 +1,9 @@
 import * as fs from 'fs';
-import { writeTextAtomic } from './atomic-write.js';
+import { withFileLock, writeTextAtomic } from './atomic-write.js';
 import { parseJsonc, pruneEmptyObjects, readTextIfExists, setJsoncValue } from './jsonc-config.js';
 import { configureMcpToml, readMcpTomlEntry, unconfigureMcpToml } from './lsp-config.js';
 import {
-  MCP_CLIENTS, resolveConfigPath, samePath, type LegacyLocation, type McpClientRow, type PathContext,
+  MCP_CLIENTS, pathKey, resolveConfigPath, samePath, type LegacyLocation, type McpClientRow, type PathContext,
 } from './mcp-clients.js';
 import { ENTRY_SHAPES, isShapeCurrent, readLaunch, type EntryShapeId, type LocalLaunch, type ShapeContext } from './mcp-entry-shapes.js';
 import { openCodeEntryPaths, openCodeWritePath } from './opencode-layout.js';
@@ -27,8 +27,11 @@ export interface WriterDeps {
 
 export interface FoundEntry { entry: Record<string, unknown>; legacy: boolean; native: boolean }
 
-/** What `build` gets: the container's layout and the entry already under the name there, if any. */
-export interface BuildContext { native: boolean; existing?: Record<string, unknown> }
+/**
+ * What `build` gets: the container's layout and whatever is already under the name there (in
+ * TOML, our table as readMcpTomlEntry reads it). `build` may throw to refuse; nothing is written.
+ */
+export interface BuildContext { native: boolean; existing?: unknown }
 
 /**
  * Which entries under a name are ours. Without one, everything under the name is (our local
@@ -150,25 +153,6 @@ export async function readServerEntry(row: McpClientRow, name: string, deps: Wri
 }
 
 /**
- * Whether the current location holds `name` in an entry `owns` does not claim, which a write
- * would replace. Throws when the file does not parse.
- */
-export async function hasForeignEntry(row: McpClientRow, name: string, deps: WriterDeps, owns: Owns): Promise<boolean> {
-  const file = resolveConfigPath(row, deps.ctx, deps.exists);
-  if (row.format === 'toml') {
-    const entry = await readMcpTomlEntry(file, row.serversPath[0], name);
-    return entry !== null && !owns(entry);
-  }
-  const text = await readTextIfExists(file);
-  if (text === null) return false;
-  const doc = parseJsonc(text, row.format, file);
-  return containersAt(row, row.serversPath, doc, name, file).some((c) => {
-    const v = valueAt(doc, [...c.path, name]);
-    return v !== undefined && !(isPlainObject(v) && owns(v));
-  });
-}
-
-/**
  * Writes `name` at the current location (`build` gets the container's layout), or with
  * `build === null` removes it from every current container. Either way it is then removed from
  * every legacy location, so a reconfigure moves a pre-port copy (Amp's mcp.servers.airtable,
@@ -176,6 +160,7 @@ export async function hasForeignEntry(row: McpClientRow, name: string, deps: Wri
  * creates a file, and prunes only at legacy locations, so a Remove leaves `mcpServers: {}` in
  * the current file. Every legacy file is parsed before the first write. With `owns`, only the
  * entries it claims are removed; the write itself still replaces whatever holds the name there.
+ * Calls on one current file run one at a time (withFileLock), the OpenCode LSP writes included.
  */
 export async function setServerEntry(
   row: McpClientRow,
@@ -185,10 +170,12 @@ export async function setServerEntry(
   owns?: Owns,
 ): Promise<void> {
   if (build) assertDetected(row, deps);
-  const legacy = legacyLocations(row, deps);
-  await assertLegacyParses(row, legacy, name);
-  await editCurrent(row, name, build, deps, owns);
-  for (const loc of legacy) await removeAtLegacy(row, loc, name, owns);
+  await withFileLock(pathKey(deps.ctx, resolveConfigPath(row, deps.ctx, deps.exists)), async () => {
+    const legacy = legacyLocations(row, deps);
+    await assertLegacyParses(row, legacy, name);
+    await editCurrent(row, name, build, deps, owns);
+    for (const loc of legacy) await removeAtLegacy(row, loc, name, owns);
+  });
 }
 
 async function editCurrent(
@@ -222,7 +209,7 @@ async function editCurrent(
     at = row.layout === 'opencode' ? openCodeWritePath(doc, name, file) : { path: row.serversPath, native: false };
     const target = [...at.path, name];
     const old = valueAt(doc, target);
-    const value = build({ native: at.native, existing: isPlainObject(old) ? old : undefined });
+    const value = build({ native: at.native, existing: old });
     // An unchanged entry is not re-set, so an Update never reformats it.
     if (JSON.stringify(old) !== JSON.stringify(value)) next = setJsoncValue(next, target, value, format, file);
   }
@@ -356,7 +343,7 @@ export function mergeOurEntry(shape: EntryShapeId, existing: Record<string, unkn
 export async function configureMcpClient(row: McpClientRow, launch: LocalLaunch, deps: WriterDeps): Promise<void> {
   const ours = (e: Record<string, unknown>) => isOurEntry(e, deps);
   await setServerEntry(row, MCP_SERVER_NAME, ({ native, existing }) => {
-    if (!existing || !ours(existing)) return ENTRY_SHAPES[row.shape](launch, { native });
+    if (!isPlainObject(existing) || !ours(existing)) return ENTRY_SHAPES[row.shape](launch, { native });
     if (row.format === 'toml') return ENTRY_SHAPES[row.shape]({ ...launch, env: mergeEnv(existing, launch.env) }, { native });
     return mergeOurEntry(row.shape, existing, launch, { native });
   }, deps, ours);

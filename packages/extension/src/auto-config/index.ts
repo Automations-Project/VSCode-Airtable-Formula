@@ -9,7 +9,7 @@ import { isLspConfigured } from './lsp-config.js';
 import { hostPathContext, type McpClientRow } from './mcp-clients.js';
 import { readLaunch } from './mcp-entry-shapes.js';
 import {
-  MCP_SERVER_NAME, configureMcpClient, hasForeignEntry, isOurEntry, readMcpClientHealth, readServerEntry, setServerEntry,
+  MCP_SERVER_NAME, configureMcpClient, isOurEntry, readMcpClientHealth, readServerEntry, setServerEntry,
   unconfigureMcpClient, type FoundEntry, type WriterDeps,
 } from './mcp-writer.js';
 
@@ -253,12 +253,17 @@ function isOfficialEntryCurrent(row: McpClientRow, found: FoundEntry): boolean {
 export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = officialRowFor(ideId);
   if (!row) throw new Error(`${IDE_CONFIGS[ideId].label} does not support the official Airtable server here.`);
-  // The write would replace whatever holds the name; a server of the user's own is not ours to replace.
-  if (await hasForeignEntry(row, OFFICIAL_AIRTABLE_NAME, deps, isOfficialEntry)) {
-    throw new Error(`${row.label} already has an "airtable" MCP server that is not Airtable's official one; rename it first`);
-  }
-  await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, (loc) => buildOfficialAirtableEntry(row, pat, loc), deps, isOfficialEntry);
+  await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, ({ native, existing }) => {
+    // The write would replace whatever holds the name there; a server of the user's own is not
+    // ours to replace. Checked inside the writer's file lock, so nothing can slip in between.
+    if (existing !== undefined && !(isRecord(existing) && isOfficialEntry(existing))) {
+      throw new Error(`${row.label} already has an "airtable" MCP server that is not Airtable's official one; rename it first`);
+    }
+    return buildOfficialAirtableEntry(row, pat, { native });
+  }, deps, isOfficialEntry);
 }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export async function unconfigureOfficialAirtableMcp(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = officialRowFor(ideId);

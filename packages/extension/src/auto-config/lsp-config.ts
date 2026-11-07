@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import type { IdeId } from '@airtable-formula/shared';
 import { IDE_CONFIGS } from './ide-configs.js';
-import { writeTextAtomic } from './atomic-write.js';
+import { withFileLock, writeTextAtomic } from './atomic-write.js';
 import { getJsoncValue, pruneEmptyObjects, readTextIfExists, setJsoncValue, splitBom } from './jsonc-config.js';
-import { MCP_CLIENT_BY_ID, hostPathContext, resolveConfigPath } from './mcp-clients.js';
+import { MCP_CLIENT_BY_ID, hostPathContext, pathKey, resolveConfigPath, samePath } from './mcp-clients.js';
 
 const LSP_SERVER_KEY = 'airtable-lsp';
 
@@ -107,20 +107,57 @@ function openCodeConfigPath(): string {
   return resolveConfigPath(MCP_CLIENT_BY_ID.opencode, hostPathContext(), fs.existsSync);
 }
 
-/** Comments and the rest of the file survive; a file that does not parse is never written. */
-async function configureOpenCode(configPath: string): Promise<void> {
-  const before = (await readTextIfExists(configPath)) ?? '';
-  const next = setJsoncValue(before, OPENCODE_LSP_PATH, OPENCODE_LSP_ENTRY, 'jsonc', configPath);
-  if (next !== before) await writeTextAtomic(configPath, next);
+/**
+ * The other OpenCode config files that exist: with both opencode.json and opencode.jsonc, the one
+ * that is not current, where a pre-port `lsp.airtable-formula` may sit (the MCP writer's legacy rule).
+ */
+function openCodeOtherFiles(current: string): string[] {
+  const row = MCP_CLIENT_BY_ID.opencode;
+  const ctx = hostPathContext();
+  const candidates = [...(row.preferExisting?.(ctx) ?? []), row.globalPath(ctx)];
+  return candidates.filter((p, i) =>
+    candidates.findIndex((q) => samePath(ctx, p, q)) === i && !samePath(ctx, p, current) && fs.existsSync(p));
 }
 
-/** Removes ours, then an `lsp` object our removal emptied. Creates no file. */
-async function unconfigureOpenCode(configPath: string): Promise<void> {
-  const text = await readTextIfExists(configPath);
+/** Parses every file first, so one that does not parse aborts with nothing written. */
+async function assertParses(files: readonly string[]): Promise<void> {
+  for (const f of files) {
+    const text = await readTextIfExists(f);
+    if (text !== null) getJsoncValue(text, [], 'jsonc', f);
+  }
+}
+
+/** Removes ours from one file, then an `lsp` object our removal emptied. Creates no file. */
+async function removeOpenCodeLsp(file: string): Promise<void> {
+  const text = await readTextIfExists(file);
   if (text === null) return;
-  const removed = setJsoncValue(text, OPENCODE_LSP_PATH, undefined, 'jsonc', configPath);
+  const removed = setJsoncValue(text, OPENCODE_LSP_PATH, undefined, 'jsonc', file);
   if (removed === text) return;
-  await writeTextAtomic(configPath, pruneEmptyObjects(removed, OPENCODE_LSP_PATH.slice(0, 1), 'jsonc', configPath));
+  await writeTextAtomic(file, pruneEmptyObjects(removed, OPENCODE_LSP_PATH.slice(0, 1), 'jsonc', file));
+}
+
+/** Locked with the MCP writer's calls on the same file, so an MCP and an LSP write never interleave. */
+const lockOpenCode = <T>(file: string, fn: () => Promise<T>): Promise<T> => withFileLock(pathKey(hostPathContext(), file), fn);
+
+/** Writes ours in the current file and removes the copy from the other one. Comments and the rest of each file survive. */
+async function configureOpenCode(configPath: string): Promise<void> {
+  await lockOpenCode(configPath, async () => {
+    const others = openCodeOtherFiles(configPath);
+    await assertParses([configPath, ...others]);
+    const before = (await readTextIfExists(configPath)) ?? '';
+    const next = setJsoncValue(before, OPENCODE_LSP_PATH, OPENCODE_LSP_ENTRY, 'jsonc', configPath);
+    if (next !== before) await writeTextAtomic(configPath, next);
+    for (const other of others) await removeOpenCodeLsp(other);
+  });
+}
+
+/** Removes ours from both files. */
+async function unconfigureOpenCode(configPath: string): Promise<void> {
+  await lockOpenCode(configPath, async () => {
+    const files = [configPath, ...openCodeOtherFiles(configPath)];
+    await assertParses(files);
+    for (const f of files) await removeOpenCodeLsp(f);
+  });
 }
 
 async function isOpenCodeLspConfigured(configPath: string): Promise<boolean> {
@@ -221,18 +258,21 @@ function scanValue(text: string, state: { depth: number; ml: string | null }): v
   }
 }
 
-/** The lines of a table body the entry does not manage: other statements (with their continuation lines) and comments. */
-function unmanagedLines(lines: readonly string[], managed: ReadonlySet<string>): string[] {
-  const out: string[] = [];
+const unquoteSegment = (raw: string): string =>
+  raw.startsWith('"') ? (JSON.parse(raw) as string) : raw.startsWith("'") ? raw.slice(1, -1) : raw;
+
+interface TomlStatement { key: string; lines: string[] }
+
+/** A table body as statements (a key line with its continuation lines) and other lines (`key: null`: comments, blanks). */
+function tomlStatements(lines: readonly string[]): TomlStatement[] {
+  const out: TomlStatement[] = [];
   for (let i = 0; i < lines.length;) {
     const m = TOML_STATEMENT_KEY_RE.exec(lines[i]);
     if (!m) {
-      if (lines[i].trim() !== '') out.push(lines[i]);
+      out.push({ key: '', lines: [lines[i]] });
       i++;
       continue;
     }
-    const raw = m[1];
-    const key = raw.startsWith('"') ? (JSON.parse(raw) as string) : raw.startsWith("'") ? raw.slice(1, -1) : raw;
     const statement = [lines[i]];
     const state = { depth: 0, ml: null as string | null };
     scanValue(lines[i].slice(m[0].length), state);
@@ -240,9 +280,62 @@ function unmanagedLines(lines: readonly string[], managed: ReadonlySet<string>):
       statement.push(lines[i]);
       scanValue(lines[i], state);
     }
-    if (!managed.has(key)) out.push(...statement);
+    out.push({ key: unquoteSegment(m[1]), lines: statement });
   }
   return out;
+}
+
+/** The lines of a table body the entry does not manage: other statements (with their continuation lines) and comments. */
+function unmanagedLines(lines: readonly string[], managed: ReadonlySet<string>): string[] {
+  return tomlStatements(lines).flatMap((s) =>
+    s.key === '' ? s.lines.filter((l) => l.trim() !== '') : managed.has(s.key) ? [] : s.lines);
+}
+
+const TOML_SEGMENT = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)`;
+const TOML_DOTTED_KEY_RE = new RegExp(String.raw`^[ \t]*(${TOML_SEGMENT}(?:[ \t]*\.[ \t]*${TOML_SEGMENT})*)[ \t]*=(.*)$`);
+const TOML_SEGMENT_RE = new RegExp(TOML_SEGMENT, 'g');
+
+const segmentsOf = (dotted: string): string[] => (dotted.match(TOML_SEGMENT_RE) ?? []).map(unquoteSegment);
+
+const startsWithPath = (full: readonly string[], prefix: readonly string[]): boolean =>
+  full.length >= prefix.length && prefix.every((p, i) => full[i] === p);
+
+/**
+ * Whether `serversKey.name` is defined anywhere but its own `[serversKey.name]` tables: a dotted
+ * key (`mcp_servers.name.command = …` at the top, `name.command = …` under `[mcp_servers]`), an
+ * inline table (`name = { … }` under `[mcp_servers]`, or inside `mcp_servers = { … }`), or an
+ * array of tables. Writing our table beside one is a duplicate key, and Codex rejects the file.
+ */
+export function tomlDefinesOutsideOurTables(text: string, serversKey: string, name: string): boolean {
+  const ours = [serversKey, name];
+  for (const s of splitTomlSections(text.replace(/\r\n/g, '\n'))) {
+    if (isOurTable(serversKey, name, s)) continue;
+    const header = s.header === null ? '' : bareHeader(s.header);
+    if (header.startsWith('[[')) {
+      if (startsWithPath(segmentsOf(header.slice(2, -2)), ours)) return true;
+      continue;
+    }
+    const base = header === '' ? [] : segmentsOf(header.slice(1, -1));
+    const body = s.header === null ? s.text.split('\n') : s.text.split('\n').slice(1);
+    for (const statement of tomlStatements(body)) {
+      if (statement.key === '') continue;
+      const m = TOML_DOTTED_KEY_RE.exec(statement.lines[0]);
+      if (!m) continue;
+      const full = [...base, ...segmentsOf(m[1])];
+      if (startsWithPath(full, ours)) return true;
+      // `mcp_servers = { name = { … } }`: our name as a key of the inline table.
+      if (full.length === 1 && full[0] === serversKey && statement.lines.some((l) => inlineTableHasKey(l, name))) return true;
+    }
+  }
+  return false;
+}
+
+/** Whether a line of an inline table names `key` as one of its keys (`{ key = …`, `, "key" = …`). */
+function inlineTableHasKey(line: string, key: string): boolean {
+  for (const m of line.matchAll(new RegExp(String.raw`[{,][ \t]*(${TOML_SEGMENT})[ \t]*[.=]`, 'g'))) {
+    if (unquoteSegment(m[1]) === key) return true;
+  }
+  return false;
 }
 
 /** From our table and its sub-tables (LF text): the unmanaged lines, then each unmanaged sub-table, verbatim. */
@@ -280,6 +373,12 @@ export async function configureMcpToml(
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   const { bom, body: existing } = splitBom(raw);
+  if (tomlDefinesOutsideOurTables(existing, serversKey, name)) {
+    throw new Error(
+      `${configPath} already defines ${serversKey}.${name} outside a [${serversKey}.${name}] table; `
+      + 'a second definition would make the file invalid. Remove or rename that one first. Nothing was written.',
+    );
+  }
   const eol = existing.includes('\r\n') ? '\r\n' : '\n';
   const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
   const carried = carry

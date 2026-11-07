@@ -2,7 +2,32 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { writeTextAtomic } from '../auto-config/atomic-write.js';
+import { withFileLock, writeTextAtomic } from '../auto-config/atomic-write.js';
+
+describe('withFileLock', () => {
+  const tick = () => new Promise(r => setTimeout(r, 5));
+
+  it('runs calls with one key one at a time, in order; a failure does not stop the next', async () => {
+    const log: string[] = [];
+    const step = (name: string, fail = false) => async () => {
+      log.push(`${name} start`);
+      await tick();
+      log.push(`${name} end`);
+      if (fail) throw new Error(name);
+      return name;
+    };
+    const results = await Promise.allSettled([withFileLock('k', step('a')), withFileLock('k', step('b', true)), withFileLock('k', step('c'))]);
+    expect(log).toEqual(['a start', 'a end', 'b start', 'b end', 'c start', 'c end']);
+    expect(results.map(r => r.status)).toEqual(['fulfilled', 'rejected', 'fulfilled']);
+  });
+
+  it('runs calls with different keys at once', async () => {
+    const log: string[] = [];
+    const step = (name: string) => async () => { log.push(`${name} start`); await tick(); log.push(`${name} end`); };
+    await Promise.all([withFileLock('x', step('x')), withFileLock('y', step('y'))]);
+    expect(log.slice(0, 2).sort()).toEqual(['x start', 'y start']);
+  });
+});
 
 // H10 — writeTextAtomic uses unique tmp paths
 describe('writeTextAtomic', () => {

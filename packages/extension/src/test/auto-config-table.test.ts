@@ -345,6 +345,51 @@ describe('Update merges into our entry; it never drops a user key', () => {
   });
 });
 
+// Writers on one file run one at a time: two at once used to lose one entry, and on Windows the
+// second rename could fail with EPERM.
+describe('writes to one config file are serialized', () => {
+  const ours = () => ({ command: 'node', args: [deps.launcher.script], env: { AIRTABLE_HEADLESS_ONLY: '1' } });
+  const tmpLeft = (dir: string) => fs.readdirSync(dir).filter(n => n.endsWith('.tmp'));
+
+  it('Cursor: our entry and the official entry configured at once both land, every time', async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    for (let i = 0; i < 10; i++) {
+      fs.rmSync(fileOf(row), { force: true });
+      const results = await Promise.allSettled([
+        configureMcpForIde('cursor', '/unused', ours(), deps),
+        configureOfficialAirtableMcp('cursor', 'patX', deps),
+      ]);
+      expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(Object.keys(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers).sort()).toEqual(['airtable', 'airtable-user-mcp']);
+    }
+    expect(tmpLeft(path.dirname(fileOf(row)))).toEqual([]);
+  });
+
+  it('Cursor: Setup twice at once leaves one entry and no temp file', async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    for (let i = 0; i < 10; i++) {
+      fs.rmSync(fileOf(row), { force: true });
+      const results = await Promise.allSettled([configureMcpForIde('cursor', '/unused', ours(), deps), configureMcpForIde('cursor', '/unused', ours(), deps)]);
+      expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(fs.readFileSync(fileOf(row), 'utf8').match(/"airtable-user-mcp"/g)).toHaveLength(1);
+    }
+    expect(tmpLeft(path.dirname(fileOf(row)))).toEqual([]);
+  });
+
+  it("OpenCode: the MCP entry and the LSP entry written at once share the file", async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    for (let i = 0; i < 10; i++) {
+      fs.rmSync(fileOf(row), { force: true });
+      await Promise.all([configureMcpForIde('opencode', '/unused', ours(), deps), configureLspForIde('opencode')]);
+      const doc = parse(fs.readFileSync(fileOf(row), 'utf8'));
+      expect([!!doc.mcp?.['airtable-user-mcp'], !!doc.lsp?.['airtable-formula']]).toEqual([true, true]);
+    }
+  });
+});
+
 // ── Carried from the Task 6 review ──────────────────────────────────────────
 
 describe('the official entry is written, read and removed on the eight official rows only', () => {
@@ -456,6 +501,33 @@ describe("OpenCode's LSP entry shares the MCP entry's file", () => {
     expect(fs.existsSync(path.join(home, '.config', 'opencode', 'opencode.jsonc'))).toBe(false);
     await unconfigureLspForIde('opencode');
     expect(parse(fs.readFileSync(file, 'utf8'))).toEqual({ lsp: { other: { command: ['x'] } } });
+  });
+
+  it('with both opencode.json and opencode.jsonc, the LSP entry lives only in the current one', async () => {
+    const dir = path.join(home, '.config', 'opencode');
+    const json = path.join(dir, 'opencode.json');
+    const jsonc = path.join(dir, 'opencode.jsonc');
+    const prePort = { lsp: { 'airtable-formula': LSP, other: { command: ['x'] } }, theme: 'x' };
+    write(json, JSON.stringify(prePort, null, 2) + '\n');
+    write(jsonc, '{\n  // mine\n}\n');
+    expect(await isLspConfigured('opencode')).toBe(false);
+    await configureLspForIde('opencode');
+    expect(parse(fs.readFileSync(json, 'utf8'))).toEqual({ lsp: { other: { command: ['x'] } }, theme: 'x' });
+    expect(parse(fs.readFileSync(jsonc, 'utf8')).lsp).toEqual({ 'airtable-formula': LSP });
+    expect(fs.readFileSync(jsonc, 'utf8')).toContain('// mine');
+    expect(await isLspConfigured('opencode')).toBe(true);
+    write(json, JSON.stringify(prePort, null, 2) + '\n');
+    await unconfigureLspForIde('opencode');
+    expect(parse(fs.readFileSync(json, 'utf8'))).toEqual({ lsp: { other: { command: ['x'] } }, theme: 'x' });
+    expect(parse(fs.readFileSync(jsonc, 'utf8')).lsp).toBeUndefined();
+  });
+
+  it('a broken opencode.json beside opencode.jsonc aborts the LSP Setup with both files untouched', async () => {
+    const dir = path.join(home, '.config', 'opencode');
+    write(path.join(dir, 'opencode.json'), '{ "lsp": ');
+    write(path.join(dir, 'opencode.jsonc'), '{}\n');
+    await expect(configureLspForIde('opencode')).rejects.toThrow(/opencode\.json is not valid JSON/);
+    expect(fs.readFileSync(path.join(dir, 'opencode.jsonc'), 'utf8')).toBe('{}\n');
   });
 
   it('a file that does not parse is left alone, and Remove creates no file', async () => {

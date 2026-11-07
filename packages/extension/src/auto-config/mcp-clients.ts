@@ -369,10 +369,12 @@ export function resolveConfigPath(row: McpClientRow, ctx: PathContext, exists: (
   return row.preferExisting?.(ctx).find(exists) ?? row.globalPath(ctx);
 }
 
+/** A path as the platform's file system compares it: normalized, and case-folded on win32. */
+export function pathKey(ctx: PathContext, p: string): string {
+  return ctx.platform === 'win32' ? path.win32.normalize(p).toLowerCase() : path.posix.normalize(p);
+}
+
 /** Path equality the way the platform's file system sees it: case-insensitive on win32. */
 export function samePath(ctx: PathContext, a: string, b: string): boolean {
-  if (ctx.platform === 'win32') {
-    return path.win32.normalize(a).toLowerCase() === path.win32.normalize(b).toLowerCase();
-  }
-  return path.posix.normalize(a) === path.posix.normalize(b);
+  return pathKey(ctx, a) === pathKey(ctx, b);
 }
