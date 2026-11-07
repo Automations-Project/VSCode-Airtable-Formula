@@ -388,6 +388,47 @@ function isIdentCode(c: number): boolean {
   return isWordCode(c) || c === 36;
 }
 
+const WHITESPACE_RUN = /\s*/y;
+
+/**
+ * Index just past the run of ECMAScript \s characters that starts at i. A bare
+ * sticky \s* has nothing after it to fail on, so it cannot backtrack. The
+ * literal that used to follow \s* in each tail regex is checked by hand below.
+ */
+function afterWhitespace(text: string, i: number): number {
+  if (i >= text.length) return i;
+  WHITESPACE_RUN.lastIndex = i;
+  WHITESPACE_RUN.exec(text);
+  return WHITESPACE_RUN.lastIndex;
+}
+
+/**
+ * A tail test: where the old sticky tail regex's match ended when tried at i,
+ * or -1 when it did not match. Each skips whitespace and then needs a literal
+ * that is neither whitespace nor an identifier character, so a shorter
+ * whitespace run (backtracking) could never have matched either.
+ */
+type Tail = (text: string, i: number) => number;
+
+/** /\s*=>/y */
+const arrowTail: Tail = (text, i) => {
+  const j = afterWhitespace(text, i);
+  return text.startsWith('=>', j) ? j + 2 : -1;
+};
+
+/** /\s*[.(]/y */
+const callTail: Tail = (text, i) => {
+  const j = afterWhitespace(text, i);
+  return text[j] === '.' || text[j] === '(' ? j + 1 : -1;
+};
+
+/** /\s+(?:of|in)\b/y: at least one whitespace, the keyword, then no word character. */
+const forOfTail: Tail = (text, i) => {
+  const j = afterWhitespace(text, i);
+  if (j === i || !(text.startsWith('of', j) || text.startsWith('in', j))) return -1;
+  return isWordCode(text.charCodeAt(j + 2)) ? -1 : j + 2;
+};
+
 /**
  * Group 1 of every match of HEAD([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])TAIL,
  * in order, as text.matchAll would give it -- in linear time.
@@ -396,12 +437,12 @@ function isIdentCode(c: number): boolean {
  * stop character, so 'const ['.repeat(n) was O(n^2). Here the next stop is
  * remembered (the queries only move forward). `head` is global and ends in \s+,
  * so no match can start inside a head match; after a match the head resumes
- * where it ended, as the regex's lastIndex would. `tail` is sticky or null.
+ * where it ended, as the regex's lastIndex would. `tail` is a Tail or null.
  * Its outcome depends only on the binding end, which many heads can share (many
  * `[` before one `]`), so it is tried once per end: otherwise a failing tail
  * after a long whitespace run was rescanned once per head.
  */
-function declarationBindings(text: string, head: RegExp, tail: RegExp | null): string[] {
+function declarationBindings(text: string, head: RegExp, tail: Tail | null): string[] {
   const bindings: string[] = [];
   let stop = -1; // first ] } or ; at or after the last query (text.length: none)
   const afterTail = new Map<number, number>(); // binding end -> match end, or -1 if the tail fails
@@ -425,8 +466,7 @@ function declarationBindings(text: string, head: RegExp, tail: RegExp | null): s
     if (tail) {
       let after = afterTail.get(end);
       if (after === undefined) {
-        tail.lastIndex = end;
-        after = tail.test(text) ? tail.lastIndex : -1;
+        after = tail(text, end);
         afterTail.set(end, after);
       }
       if (after === -1) continue;
@@ -450,7 +490,6 @@ function declarationBindings(text: string, head: RegExp, tail: RegExp | null): s
  */
 function arrowParamLists(text: string): string[] {
   const lists: string[] = [];
-  const arrow = /\s*=>/y;
   let resumeAt = 0; // the regex's lastIndex
   let segmentStart = 0; // just past the previous ')'
   let open = text.indexOf('(');
@@ -463,20 +502,20 @@ function arrowParamLists(text: string): string[] {
       open = text.indexOf('(', open + 1);
     }
     if (open === -1 || open > close) continue;
-    arrow.lastIndex = close + 1;
-    if (!arrow.test(text)) continue;
+    const after = arrowTail(text, close + 1);
+    if (after === -1) continue;
     lists.push(text.slice(open + 1, close));
-    resumeAt = arrow.lastIndex;
+    resumeAt = after;
   }
   return lists;
 }
 
 /**
  * Same index and identifier, in the same order, as
- * text.matchAll(new RegExp(String.raw`\b([a-zA-Z_$][a-zA-Z0-9_$]*)` + suffix.source, 'g')).
- * `suffix` must be sticky (y) and of the form \s*<non-identifier, non-space char>.
+ * text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)<suffix>/g), where `suffix` is the
+ * Tail for that suffix (arrowTail for \s*=>, callTail for \s*[.(]).
  */
-function identifierMatches(text: string, suffix: RegExp): Array<{ index: number; ident: string }> {
+function identifierMatches(text: string, suffix: Tail): Array<{ index: number; ident: string }> {
   const found: Array<{ index: number; ident: string }> = [];
   let resumeAt = 0; // the regex's lastIndex: a match never starts inside the previous one
   for (const run of text.matchAll(/[a-zA-Z0-9_$]+/g)) {
@@ -490,10 +529,10 @@ function identifierMatches(text: string, suffix: RegExp): Array<{ index: number;
       }
     }
     if (start === -1) continue;
-    suffix.lastIndex = runEnd;
-    if (!suffix.test(text)) continue;
+    const after = suffix(text, runEnd);
+    if (after === -1) continue;
     found.push({ index: start, ident: text.slice(start, runEnd) });
-    resumeAt = suffix.lastIndex;
+    resumeAt = after;
   }
   return found;
 }
@@ -676,7 +715,7 @@ function buildLocalSymbols(text: string): Set<string> {
 
   // for (const/let/var item of/in ...) or for (const/let/var [a, b] of ...)
   // (was /\bfor\s*\(\s*(?:const|let|var)\s+(<ident>|<destructure>)\s+(?:of|in)\b/g)
-  for (const binding of declarationBindings(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, /\s+(?:of|in)\b/y)) {
+  for (const binding of declarationBindings(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, forOfTail)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -691,7 +730,7 @@ function buildLocalSymbols(text: string): Set<string> {
 
   // Arrow function params — single param: identifier =>
   // (was /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g; see identifierMatches)
-  for (const { ident } of identifierMatches(text, /\s*=>/y)) {
+  for (const { ident } of identifierMatches(text, arrowTail)) {
     if (!JS_KEYWORDS.has(ident)) symbols.add(ident);
   }
 
@@ -723,7 +762,7 @@ function checkUnknownGlobals(
 
   // Identifier followed by . or ( -- the matches of
   // /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g, found in linear time (identifierMatches).
-  for (const match of identifierMatches(text, /\s*[.(]/y)) {
+  for (const match of identifierMatches(text, callTail)) {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
 
     const ident = match.ident;

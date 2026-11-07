@@ -1841,6 +1841,26 @@ function isIdentStartCode(c) {
 function isIdentCode(c) {
   return isWordCode(c) || c === 36;
 }
+var WHITESPACE_RUN = /\s*/y;
+function afterWhitespace(text, i) {
+  if (i >= text.length) return i;
+  WHITESPACE_RUN.lastIndex = i;
+  WHITESPACE_RUN.exec(text);
+  return WHITESPACE_RUN.lastIndex;
+}
+var arrowTail = (text, i) => {
+  const j = afterWhitespace(text, i);
+  return text.startsWith("=>", j) ? j + 2 : -1;
+};
+var callTail = (text, i) => {
+  const j = afterWhitespace(text, i);
+  return text[j] === "." || text[j] === "(" ? j + 1 : -1;
+};
+var forOfTail = (text, i) => {
+  const j = afterWhitespace(text, i);
+  if (j === i || !(text.startsWith("of", j) || text.startsWith("in", j))) return -1;
+  return isWordCode(text.charCodeAt(j + 2)) ? -1 : j + 2;
+};
 function declarationBindings(text, head, tail) {
   const bindings = [];
   let stop = -1;
@@ -1865,8 +1885,7 @@ function declarationBindings(text, head, tail) {
     if (tail) {
       let after = afterTail.get(end);
       if (after === void 0) {
-        tail.lastIndex = end;
-        after = tail.test(text) ? tail.lastIndex : -1;
+        after = tail(text, end);
         afterTail.set(end, after);
       }
       if (after === -1) continue;
@@ -1879,7 +1898,6 @@ function declarationBindings(text, head, tail) {
 }
 function arrowParamLists(text) {
   const lists = [];
-  const arrow = /\s*=>/y;
   let resumeAt = 0;
   let segmentStart = 0;
   let open = text.indexOf("(");
@@ -1891,10 +1909,10 @@ function arrowParamLists(text) {
       open = text.indexOf("(", open + 1);
     }
     if (open === -1 || open > close) continue;
-    arrow.lastIndex = close + 1;
-    if (!arrow.test(text)) continue;
+    const after = arrowTail(text, close + 1);
+    if (after === -1) continue;
     lists.push(text.slice(open + 1, close));
-    resumeAt = arrow.lastIndex;
+    resumeAt = after;
   }
   return lists;
 }
@@ -1912,10 +1930,10 @@ function identifierMatches(text, suffix) {
       }
     }
     if (start === -1) continue;
-    suffix.lastIndex = runEnd;
-    if (!suffix.test(text)) continue;
+    const after = suffix(text, runEnd);
+    if (after === -1) continue;
     found.push({ index: start, ident: text.slice(start, runEnd) });
-    resumeAt = suffix.lastIndex;
+    resumeAt = after;
   }
   return found;
 }
@@ -2032,7 +2050,7 @@ function buildLocalSymbols(text) {
   for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
     symbols.add(m[1]);
   }
-  for (const binding of declarationBindings(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, /\s+(?:of|in)\b/y)) {
+  for (const binding of declarationBindings(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, forOfTail)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -2042,7 +2060,7 @@ function buildLocalSymbols(text) {
   for (const m of text.matchAll(/\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g)) {
     symbols.add(m[1]);
   }
-  for (const { ident } of identifierMatches(text, /\s*=>/y)) {
+  for (const { ident } of identifierMatches(text, arrowTail)) {
     if (!JS_KEYWORDS.has(ident)) symbols.add(ident);
   }
   for (const params of arrowParamLists(text)) {
@@ -2053,7 +2071,7 @@ function buildLocalSymbols(text) {
 function checkUnknownGlobals(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const localSymbols = buildLocalSymbols(text);
-  for (const match of identifierMatches(text, /\s*[.(]/y)) {
+  for (const match of identifierMatches(text, callTail)) {
     if (isInsideExclusionRange2(match.index, exclusionRanges)) continue;
     const ident = match.ident;
     if (JS_KEYWORDS.has(ident)) continue;
@@ -2628,6 +2646,26 @@ function isIdentStartCode2(c) {
 function isIdentCode2(c) {
   return isWordCode2(c) || c === 36;
 }
+var WHITESPACE_RUN2 = /\s*/y;
+function afterWhitespace2(text, i) {
+  if (i >= text.length) return i;
+  WHITESPACE_RUN2.lastIndex = i;
+  WHITESPACE_RUN2.exec(text);
+  return WHITESPACE_RUN2.lastIndex;
+}
+var arrowTail2 = (text, i) => {
+  const j = afterWhitespace2(text, i);
+  return text.startsWith("=>", j) ? j + 2 : -1;
+};
+var callTail2 = (text, i) => {
+  const j = afterWhitespace2(text, i);
+  return text[j] === "." || text[j] === "(" ? j + 1 : -1;
+};
+var forOfTail2 = (text, i) => {
+  const j = afterWhitespace2(text, i);
+  if (j === i || !(text.startsWith("of", j) || text.startsWith("in", j))) return -1;
+  return isWordCode2(text.charCodeAt(j + 2)) ? -1 : j + 2;
+};
 function declarationBindings2(text, head, tail) {
   const bindings = [];
   let stop = -1;
@@ -2652,8 +2690,7 @@ function declarationBindings2(text, head, tail) {
     if (tail) {
       let after = afterTail.get(end);
       if (after === void 0) {
-        tail.lastIndex = end;
-        after = tail.test(text) ? tail.lastIndex : -1;
+        after = tail(text, end);
         afterTail.set(end, after);
       }
       if (after === -1) continue;
@@ -2666,7 +2703,6 @@ function declarationBindings2(text, head, tail) {
 }
 function arrowParamLists2(text) {
   const lists = [];
-  const arrow = /\s*=>/y;
   let resumeAt = 0;
   let segmentStart = 0;
   let open = text.indexOf("(");
@@ -2678,10 +2714,10 @@ function arrowParamLists2(text) {
       open = text.indexOf("(", open + 1);
     }
     if (open === -1 || open > close) continue;
-    arrow.lastIndex = close + 1;
-    if (!arrow.test(text)) continue;
+    const after = arrowTail2(text, close + 1);
+    if (after === -1) continue;
     lists.push(text.slice(open + 1, close));
-    resumeAt = arrow.lastIndex;
+    resumeAt = after;
   }
   return lists;
 }
@@ -2699,10 +2735,10 @@ function identifierMatches2(text, suffix) {
       }
     }
     if (start === -1) continue;
-    suffix.lastIndex = runEnd;
-    if (!suffix.test(text)) continue;
+    const after = suffix(text, runEnd);
+    if (after === -1) continue;
     found.push({ index: start, ident: text.slice(start, runEnd) });
-    resumeAt = suffix.lastIndex;
+    resumeAt = after;
   }
   return found;
 }
@@ -2741,7 +2777,7 @@ function buildLocalSymbols2(text) {
   for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
     symbols.add(m[1]);
   }
-  for (const binding of declarationBindings2(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, /\s+(?:of|in)\b/y)) {
+  for (const binding of declarationBindings2(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, forOfTail2)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -2751,7 +2787,7 @@ function buildLocalSymbols2(text) {
   for (const m of text.matchAll(/\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g)) {
     symbols.add(m[1]);
   }
-  for (const { ident } of identifierMatches2(text, /\s*=>/y)) {
+  for (const { ident } of identifierMatches2(text, arrowTail2)) {
     if (!JS_KEYWORDS2.has(ident)) symbols.add(ident);
   }
   for (const params of arrowParamLists2(text)) {
@@ -2823,7 +2859,7 @@ function checkMissingAwait2(text, exclusionRanges, newlines) {
 function checkUnknownGlobals2(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const localSymbols = buildLocalSymbols2(text);
-  for (const match of identifierMatches2(text, /\s*[.(]/y)) {
+  for (const match of identifierMatches2(text, callTail2)) {
     if (isInsideExclusionRange3(match.index, exclusionRanges)) continue;
     const ident = match.ident;
     if (JS_KEYWORDS2.has(ident)) continue;
