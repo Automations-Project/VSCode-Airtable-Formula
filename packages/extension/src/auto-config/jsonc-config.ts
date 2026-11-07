@@ -147,12 +147,17 @@ function deepestObject(tree: jsonc.Node, path: readonly string[]): { node: jsonc
   return undefined;
 }
 
+/** Exactly one block comment that runs to the end of the text: `/* ... */` and nothing after it. */
+function isOneBlockComment(rest: string): boolean {
+  return rest.startsWith('/*') && rest.endsWith('*/') && rest.length >= 4 && !rest.slice(2, -2).includes('*/');
+}
+
 /** `{ // my servers`: the opening brace's line goes on with a comment and nothing else. */
 function braceLineEndsInComment(text: string, obj: jsonc.Node): boolean {
   const nl = text.indexOf('\n', obj.offset);
   if (nl < 0) return false;
   const rest = text.slice(obj.offset + 1, nl).trim();
-  return rest.startsWith('//') || (rest.startsWith('/*') && rest.indexOf('*/') === rest.length - 2);
+  return rest.startsWith('//') || isOneBlockComment(rest);
 }
 
 /**
@@ -186,7 +191,7 @@ function lineEndOf(text: string, pos: number): number {
 function restOfLineIsTrailing(text: string, pos: number): boolean {
   const nl = text.indexOf('\n', pos);
   const rest = text.slice(pos, nl < 0 ? text.length : nl).trim();
-  return rest === '' || rest.startsWith('//') || (rest.startsWith('/*') && rest.indexOf('*/') === rest.length - 2);
+  return rest === '' || rest.startsWith('//') || isOneBlockComment(rest);
 }
 
 function skipBlanks(text: string, pos: number): number {
