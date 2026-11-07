@@ -33,7 +33,7 @@ When working with Airtable formulas:
 | Create / update / delete **records** (full CRUD) | **Official MCP** (`mcp.airtable.com`) |
 | List bases you have access to | **Official MCP** |
 | **Schema work** — tables, fields, formulas, views | **airtable-user-mcp** |
-| **Formula validation** before applying | **airtable-user-mcp** (`validate_formula`) |
+| **Formula validation** before applying | **airtable-user-mcp** (`lint_airtable_code`, then `validate_formula`) |
 | **View config** — filters, sorts, groups, column order | **airtable-user-mcp** |
 | **View sections**, form metadata, extensions | **airtable-user-mcp** |
 | **Record templates** | **airtable-user-mcp** |
@@ -45,20 +45,22 @@ and use airtable-user-mcp `query_records` to read/search data (especially when l
 
 - **Name**: airtable-user-mcp  |  **Version**: 2.4.x
 - **Protocol**: Model Context Protocol (JSON-RPC 2.0)
-- **Tools**: 72 tools across 17 categories + `manage_tools`
+- **Tools**: 73 tools across 17 categories + `manage_tools`
 - **Auth**: browser session (or PAT via Official MCP panel in the VS Code extension)
 
 ### Mandatory Workflows
 
 #### Before Creating a Formula Field
 1. `list_fields` — verify all referenced field names exist and check types
-2. `validate_formula` — confirm syntax and result type
-3. `create_formula_field` — only if validation passes
+2. `lint_airtable_code` — offline syntax check, no base needed
+3. `validate_formula` — confirm syntax and result type
+4. `create_formula_field` — only if validation passes
 
 #### Before Updating a Formula Field
 1. `list_fields` — get the `fieldId`
-2. `validate_formula` — validate new formula text
-3. `update_formula_field` — apply only if valid
+2. `lint_airtable_code` — offline syntax check, no base needed
+3. `validate_formula` — validate new formula text
+4. `update_formula_field` — apply only if valid
 
 #### Before Deleting Any Field / View / Table
 1. Read tool first — confirm it exists and get exact name/ID
@@ -95,8 +97,8 @@ and use airtable-user-mcp `query_records` to read/search data (especially when l
 | "Show me the tables" | `list_tables` |
 | "What fields does X have?" | `list_fields` or `get_table_schema` |
 | "What are the current filters on view Y?" | `get_view` |
-| "Create a formula that…" | `list_fields` → `validate_formula` → `create_formula_field` |
-| "Update the formula in…" | `list_fields` → `validate_formula` → `update_formula_field` |
+| "Create a formula that…" | `list_fields` → `lint_airtable_code` → `validate_formula` → `create_formula_field` |
+| "Update the formula in…" | `list_fields` → `lint_airtable_code` → `validate_formula` → `update_formula_field` |
 | "Delete the field…" | `list_fields` → confirm → `delete_field` |
 | "Add a text/number field" | `create_field` with appropriate `fieldType` |
 | "Create a view filtered by…" | `list_fields` → `create_view` → `update_view_filters` |

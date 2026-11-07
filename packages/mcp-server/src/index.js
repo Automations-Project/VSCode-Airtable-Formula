@@ -234,7 +234,7 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable bases with 72 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
+      'Manage Airtable bases with 73 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
       'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
       'select field choices with color support, formula validation and file-based bulk editing, ' +
       'record create/update/duplicate/delete plus URL-based attachment uploads, base-to-base schema and record sync, ' +

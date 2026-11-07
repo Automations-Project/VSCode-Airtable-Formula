@@ -430,7 +430,7 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 73 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 74 tools total under the default `full` profile.
 
-### Schema Read (9)
+### Schema Read (10)
 
 | Tool | Description |
 |:-----|:------------|

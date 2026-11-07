@@ -6,6 +6,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added — `lint_airtable_code`, offline checks for formulas and scripts (2026-11-07)
+
+**Added**
+
+- **`lint_airtable_code` MCP tool.** Checks a formula, a Scripting-extension script or an automation
+  script (`language`: `formula`, `script` or `automation`) and returns line/column diagnostics. It needs
+  no base, no login and no browser, so it always answers, and it sits in the `read` category: it is
+  available in every tool profile, including `read-only`. Tool counts are now 73 overall, 11 in
+  `read-only` and 55 in `safe-write`. The AI skill tells assistants to lint first, then call
+  `validate_formula` when a base is available.
+
 ### Added — AI skill installer (2026-11-06)
 
 **Added**
