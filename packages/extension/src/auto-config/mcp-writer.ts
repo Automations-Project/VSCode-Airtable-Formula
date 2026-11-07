@@ -147,6 +147,25 @@ export async function readServerEntry(row: McpClientRow, name: string, deps: Wri
 }
 
 /**
+ * Whether the current location holds `name` in an entry `owns` does not claim, which a write
+ * would replace. Throws when the file does not parse.
+ */
+export async function hasForeignEntry(row: McpClientRow, name: string, deps: WriterDeps, owns: Owns): Promise<boolean> {
+  const file = resolveConfigPath(row, deps.ctx, deps.exists);
+  if (row.format === 'toml') {
+    const entry = await readMcpTomlEntry(file, row.serversPath[0], name);
+    return entry !== null && !owns(entry);
+  }
+  const text = await readTextIfExists(file);
+  if (text === null) return false;
+  const doc = parseJsonc(text, row.format, file);
+  return containersAt(row, row.serversPath, doc, name, file).some((c) => {
+    const v = valueAt(doc, [...c.path, name]);
+    return v !== undefined && !(isPlainObject(v) && owns(v));
+  });
+}
+
+/**
  * Writes `name` at the current location (`build` gets the container's layout), or with
  * `build === null` removes it from every current container. Either way it is then removed from
  * every legacy location, so a reconfigure moves a pre-port copy (Amp's mcp.servers.airtable,

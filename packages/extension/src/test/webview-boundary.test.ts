@@ -1059,6 +1059,50 @@ describe('DashboardProvider webview trust boundary', () => {
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup1', ok: true });
   });
 
+  it('action:setupAll with one failing client configures the others, installs the skill, pushes state, and warns naming it', async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'] };
+    dependencies.ideConfigs['claude-code'] = { capabilities: ['mcp'] };
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', label: 'Cursor', detected: true },
+      { ideId: 'claude-code', label: 'Claude Code', detected: true },
+      { ideId: 'zed', label: 'Zed', detected: true },
+    ] as never);
+    // Calls start in status order: cursor, claude-code, zed.
+    dependencies.configureMcpForIde
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('~/.claude.json is not valid JSON (line 1, column 3). Nothing was written.'))
+      .mockResolvedValueOnce(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    const pushState = vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup2' });
+
+    await waitForResult('setup2');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(3);
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(skill.installSkill).toHaveBeenCalledOnce();
+    expect(pushState).toHaveBeenCalled();
+    const warning = 'Airtable Formula: could not configure Claude Code: ~/.claude.json is not valid JSON (line 1, column 3). Nothing was written.';
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(warning);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup2', ok: false, error: warning });
+  });
+
+  it('the settings rewrite still rewrites the other clients when one fails, and warns naming it', async () => {
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', label: 'Cursor', mcpConfigured: true },
+      { ideId: 'zed', label: 'Zed', mcpConfigured: true },
+    ] as never);
+    dependencies.configureMcpForIde.mockRejectedValueOnce(new Error('bad file')).mockResolvedValueOnce(undefined);
+    const { provider } = mountProvider();
+
+    await expect(provider.applyConfigurationSideEffect('mcp.serverSource')).resolves.toBeUndefined();
+
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(2);
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Airtable Formula: could not configure Cursor: bad file');
+  });
+
   it('state:update carries the client ledger from listSkillClients', async () => {
     const { provider } = mountProvider();
 

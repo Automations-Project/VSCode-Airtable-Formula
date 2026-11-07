@@ -244,6 +244,19 @@ describe('the official entry is written, read and removed on the eight official 
     expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(before);
   });
 
+  it("Cursor: Configure refuses to replace a user's own 'airtable' server and writes nothing; our stale copy is still replaced", async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { airtable: { type: 'http', url: 'https://example.test/mcp' }, other: { command: 'x' } } }, null, 2));
+    const before = fs.readFileSync(fileOf(row), 'utf8');
+    await expect(configureOfficialAirtableMcp('cursor', 'patX', deps))
+      .rejects.toThrow('Cursor already has an "airtable" MCP server that is not Airtable\'s official one; rename it first');
+    expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(before);
+    write(fileOf(row), JSON.stringify({ mcpServers: { airtable: { url: OFFICIAL_URL } } }));
+    await configureOfficialAirtableMcp('cursor', 'patX', deps);
+    expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers.airtable).toEqual(buildOfficialAirtableEntry(row, 'patX'));
+  });
+
   it('helix and neovim: no official entry to read or remove, and configuring it is refused', async () => {
     for (const id of ['helix', 'neovim'] as const) {
       expect(await isOfficialAirtableConfigured(id, deps)).toBe(false);

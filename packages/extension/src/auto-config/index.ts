@@ -9,7 +9,8 @@ import { isLspConfigured } from './lsp-config.js';
 import { hostPathContext, type McpClientRow } from './mcp-clients.js';
 import { readLaunch } from './mcp-entry-shapes.js';
 import {
-  configureMcpClient, readMcpClientHealth, readServerEntry, setServerEntry, unconfigureMcpClient, type FoundEntry, type WriterDeps,
+  configureMcpClient, hasForeignEntry, readMcpClientHealth, readServerEntry, setServerEntry, unconfigureMcpClient,
+  type FoundEntry, type WriterDeps,
 } from './mcp-writer.js';
 
 // Our local entry is mcp-writer.ts's MCP_SERVER_NAME ('airtable-user-mcp'); the official remote one:
@@ -179,28 +180,6 @@ export async function getIdeStatus(ideId: IdeId, deps: WriterDeps = hostWriterDe
   };
 }
 
-export interface ClientFailure { ideId: IdeId; label: string; message: string }
-
-/**
- * Runs `fn` for every client at once and waits for all of them. One client's failure (an
- * unparsable config file) fails that client only: the others still run, and the caller logs
- * `failed` and reports `ok`.
- */
-export async function settleByClient<T extends { ideId: IdeId; label: string }>(
-  statuses: readonly T[],
-  fn: (status: T) => Promise<unknown>,
-): Promise<{ ok: T[]; failed: ClientFailure[] }> {
-  const results = await Promise.allSettled(statuses.map(async s => fn(s)));
-  const ok: T[] = [];
-  const failed: ClientFailure[] = [];
-  results.forEach((r, i) => {
-    const { ideId, label } = statuses[i];
-    if (r.status === 'fulfilled') ok.push(statuses[i]);
-    else failed.push({ ideId, label, message: r.reason instanceof Error ? r.reason.message : String(r.reason) });
-  });
-  return { ok, failed };
-}
-
 /** One status per IdeId, in IDE_IDS order. Every id has MCP or LSP, so every one gets a card. */
 export async function getAllIdeStatuses(deps: WriterDeps = hostWriterDeps()): Promise<IdeStatus[]> {
   return Promise.all(IDE_IDS.map(id => getIdeStatus(id, deps)));
@@ -255,6 +234,10 @@ function isOfficialEntryCurrent(row: McpClientRow, found: FoundEntry): boolean {
 export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = officialRowFor(ideId);
   if (!row) throw new Error(`${IDE_CONFIGS[ideId].label} does not support the official Airtable server here.`);
+  // The write would replace whatever holds the name; a server of the user's own is not ours to replace.
+  if (await hasForeignEntry(row, OFFICIAL_AIRTABLE_NAME, deps, isOfficialEntry)) {
+    throw new Error(`${row.label} already has an "airtable" MCP server that is not Airtable's official one; rename it first`);
+  }
   await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, (loc) => buildOfficialAirtableEntry(row, pat, loc), deps, isOfficialEntry);
 }
 
@@ -272,6 +255,7 @@ export async function isOfficialAirtableConfigured(ideId: IdeId, deps: WriterDep
   } catch { return false; }
 }
 
+export { settleByClient, type ClientFailure } from './settle-by-client.js';
 export { detectInstalledIdes, isIdeInstalled } from './ide-detection.js';
 export { IDE_CONFIGS, detectionPathsFor } from './ide-configs.js';
 export type { IdeConfig } from './ide-configs.js';

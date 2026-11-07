@@ -19,6 +19,7 @@ import { getWebviewHtml } from './html.js';
 import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
 import { MCP_CLIENTS } from '../auto-config/mcp-clients.js';
+import { settleByClient, type ClientFailure } from '../auto-config/settle-by-client.js';
 import { installSkill, checkSkill, removeSkill, listSkillClients } from '../skills/installer.js';
 import { skillEnv } from '../skills/host-env.js';
 import { getSettings, updateWebviewSetting, type HostBrowserChoice } from '../settings.js';
@@ -172,6 +173,14 @@ export function warnSkillProblems(failed: readonly { dir: string; message: strin
       ? `Airtable Formula: the AI skill failed in ${failed.length === 1 ? '1 folder' : `${failed.length} folders`}: ${failed.map(f => `${f.dir}: ${f.message}`).join('; ')}`
       : undefined;
   if (text) void vscode.window.showWarningMessage(text);
+  return text;
+}
+
+/** Shows one warning naming the clients whose MCP config could not be written and returns its text; undefined when none failed. */
+export function warnClientFailures(failed: readonly ClientFailure[]): string | undefined {
+  if (failed.length === 0) return undefined;
+  const text = `Airtable Formula: could not configure ${failed.map(f => `${f.label}: ${f.message}`).join('; ')}`;
+  void vscode.window.showWarningMessage(text);
   return text;
 }
 
@@ -542,17 +551,18 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const serverEntry = getServerEntry(this.context);
         const settings = getSettings();
         const statuses = await getAllIdeStatuses();
-        await Promise.all(
-          statuses.filter(s => s.detected).map(async s => {
-            const caps = IDE_CONFIGS[s.ideId].capabilities;
-            if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
-            if (caps.includes('lsp')) await configureLspForIde(s.ideId);
-          })
-        );
+        // One client's bad config file fails that client only: the rest, the skill and the state push still run.
+        const { failed } = await settleByClient(statuses.filter(s => s.detected), async s => {
+          const caps = IDE_CONFIGS[s.ideId].capabilities;
+          if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
+          if (caps.includes('lsp')) await configureLspForIde(s.ideId);
+        });
+        this.traceClientFailures('setup_all', failed);
         // Once, not per IDE: every client reads the same skill folders.
         await installSkill(settings.ai.installScope, await skillEnv(this.context));
         await this.pushState();
-        this.postResult(msg.id, true);
+        const warning = warnClientFailures(failed);
+        this.postResult(msg.id, warning === undefined, warning);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
       }
@@ -1909,19 +1919,20 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const serverPath = getBundledServerPath(this.context);
     const serverEntry = getServerEntry(this.context);
     const statuses = await getAllIdeStatuses();
-    await Promise.all(
-      statuses
-        .filter(s => s.mcpConfigured)
-        .map(async s => {
-          try {
-            await configureMcpForIde(s.ideId, serverPath, serverEntry);
-          } catch (err) {
-            this._debugCollector?.trace('ext', 'error', 'mcp_config:rewrite_failed', { ideId: s.ideId }, String(err));
-            console.error(`[airtable-formula] Failed to re-apply MCP config for ${s.ideId}:`, err);
-            throw err;
-          }
-        }),
+    // One client's bad config file is reported and skipped; the others are still rewritten.
+    const { failed } = await settleByClient(
+      statuses.filter(s => s.mcpConfigured),
+      s => configureMcpForIde(s.ideId, serverPath, serverEntry),
     );
+    this.traceClientFailures('rewrite', failed);
+    warnClientFailures(failed);
+  }
+
+  private traceClientFailures(phase: string, failed: readonly ClientFailure[]): void {
+    for (const f of failed) {
+      this._debugCollector?.trace('ext', 'error', `mcp_config:${phase}_failed`, { ideId: f.ideId, label: f.label }, f.message);
+      console.error(`[airtable-formula] Failed to write the MCP config for ${f.label} (${phase}): ${f.message}`);
+    }
   }
 
   private postResult(

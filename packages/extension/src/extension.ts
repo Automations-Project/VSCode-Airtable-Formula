@@ -7,7 +7,7 @@ import * as os from 'os';
 // `airtable-formula.installAISkills` command below). The legacy detectIDE()
 // path in `./skills/skillInstaller.ts` has been removed — it was running in
 // parallel with the dashboard path with divergent template content.
-import { DashboardProvider, warnSkillProblems } from './webview/DashboardProvider.js';
+import { DashboardProvider, warnClientFailures, warnSkillProblems } from './webview/DashboardProvider.js';
 import { registerLanguageProviders } from './language/registration.js';
 import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
@@ -457,9 +457,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             // Once, not per IDE: every client reads the same skill folders.
             await installSkill(settings.ai.installScope, await skillEnv(context));
             dashboardProvider.refresh();
-            if (failed.length > 0) {
-                vscode.window.showWarningMessage(`Airtable Formula: could not configure ${failed.map(f => `${f.label} (${f.message})`).join('; ')}. The other detected IDEs are configured.`);
-            } else {
+            if (!warnClientFailures(failed)) {
                 vscode.window.showInformationMessage('Airtable Formula: All IDEs configured.');
             }
         }),
