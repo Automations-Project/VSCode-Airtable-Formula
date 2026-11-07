@@ -49,12 +49,13 @@ export function sha256(text) {
  */
 export function splitAgentsSource(text) {
   const src = text.replace(/\r\n/g, '\n');
-  const at = src.indexOf('\nexport const agents');
-  if (at < 0) throw new Error("no 'export const agents' in agents.ts");
-  const start = at + 1;
+  const found = /\nexport const agents(?![\w$])/.exec(src);
+  if (!found) throw new Error("no 'export const agents' in agents.ts");
+  const start = found.index + 1;
   const helper = src.slice(0, start).trimEnd();
   const endAt = src.indexOf('\n};', start);
-  const body = src.slice(start, endAt < 0 ? src.length : endAt);
+  if (endAt < 0) throw new Error("no closing '};' for the agents object in agents.ts: upstream reformatted? Parse by hand before re-pinning.");
+  const body = src.slice(start, endAt);
   const heads = [...body.matchAll(/^ {2}(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*)): \{$/gm)];
   const agents = heads.map((head, i) => ({
     id: head[1] ?? head[2] ?? head[3],
@@ -236,7 +237,12 @@ async function runOffline(io) {
 }
 
 async function get(io, url, headers) {
-  const res = await io.fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+  let res;
+  try {
+    res = await io.fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+  } catch (err) {
+    throw new Error(`GET ${url} -> ${err?.cause?.code ?? err?.message ?? err}`);
+  }
   if (!res.ok) throw new Error(`GET ${url} -> HTTP ${res.status}`);
   return res;
 }

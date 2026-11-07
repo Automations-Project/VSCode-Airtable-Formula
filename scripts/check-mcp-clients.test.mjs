@@ -37,6 +37,15 @@ test('dies on fewer than MIN_AGENTS agents or no agents object', () => {
   assert.throws(() => splitAgentsSource('const x = 1;\n'), /no 'export const agents'/);
 });
 
+test('dies when the agents object has no closing marker instead of reading to the end of the file', () => {
+  assert.throws(() => splitAgentsSource(source(22).replace('\n};', '\n)')), /no closing '};' for the agents object/);
+});
+
+test('the agents boundary must be exactly `export const agents`, not a longer identifier', () => {
+  assert.throws(() => splitAgentsSource(source(22).replace('export const agents', 'export const agentsFoo')), /no 'export const agents'/);
+  assert.equal(splitAgentsSource(source(22).replace('export const agents:', 'export const agents :')).agents.length, 22);
+});
+
 test('reports added, removed, changed and helper changes', () => {
   const snap = { ref: PIN, ...hashAgentsSource(source(22)) };
   const shaped = { ref: PIN, helperSha256: snap.helperSha256, agents: Object.fromEntries(Object.entries(snap.agents).map(([k, v]) => [k, { sha256: v, ported: false, reason: 'x' }])) };
@@ -137,6 +146,22 @@ test('--upstream: an HTTP failure returns 1 and names the URL', async () => {
   const f = fakeIo({ files: { 'scripts/mcp-clients-upstream.json': '{}' } });
   assert.equal(await main(['--upstream', `--ref=${LATEST}`], f.io), 1);
   assert.ok(f.error.join('\n').includes(RAW(LATEST)));
+});
+
+test('--upstream: a rejecting fetch returns 1 and names the URL and the cause code', async () => {
+  const f = fakeIo({ files: { 'scripts/mcp-clients-upstream.json': '{}' } });
+  f.io.fetch = async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }); };
+  assert.equal(await main(['--upstream', `--ref=${LATEST}`], f.io), 1);
+  const msg = f.error.join('\n');
+  assert.ok(msg.includes(RAW(LATEST)));
+  assert.match(msg, /-> ENOTFOUND/);
+});
+
+test('--upstream: a rejecting fetch without a cause code falls back to the error message', async () => {
+  const f = fakeIo({ files: { 'scripts/mcp-clients-upstream.json': '{}' } });
+  f.io.fetch = async () => { throw new Error('timed out'); };
+  assert.equal(await main(['--upstream', `--ref=${LATEST}`], f.io), 1);
+  assert.match(f.error.join('\n'), /GET https:\/\/raw\.githubusercontent\.com\/.* -> timed out/);
 });
 
 test('--upstream --record writes the snapshot at the resolved sha', async () => {
