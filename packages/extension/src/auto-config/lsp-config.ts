@@ -124,42 +124,116 @@ async function isOpenCodeLspConfigured(configPath: string): Promise<boolean> {
   } catch { return false; }
 }
 
-// ── Codex CLI: TOML append to config.toml ────────────────────────────────────
+// ── MCP servers in TOML (Codex CLI, Grok Build): [<serversKey>.<name>] ───────
 
-const CODEX_MARKER = '[mcp_servers.airtable-user-mcp]';
+const TOML_BARE_KEY_RE = /^[A-Za-z0-9_-]+$/;
 
-const CODEX_BLOCK = `
-[mcp_servers.airtable-user-mcp]
-type = "stdio"
-command = "npx"
-args = ["-y", "airtable-user-mcp"]
-`;
-
-export async function configureMcpToml(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
-  if (existing.includes(CODEX_MARKER)) return;
-  const content = existing.trimEnd() + '\n' + CODEX_BLOCK;
-  await writeTextAtomic(configPath, content);
+function tomlKey(key: string): string {
+  return TOML_BARE_KEY_RE.test(key) ? key : tomlString(key);
 }
 
-export async function unconfigureMcpToml(configPath: string): Promise<void> {
+/** JSON escapes are a subset of TOML basic-string escapes; DEL is the one JSON leaves raw. */
+function tomlString(s: string): string {
+  return JSON.stringify(s).replace(/\x7f/g, '\\u007f');
+}
+
+function tomlValue(key: string, value: unknown): string {
+  if (typeof value === 'string') return tomlString(value);
+  if (typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
+    return '[' + value.map((v) => tomlString(v as string)).join(', ') + ']';
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const pairs = Object.entries(value);
+    if (pairs.every(([, v]) => typeof v === 'string')) {
+      return pairs.length === 0
+        ? '{}'
+        : '{ ' + pairs.map(([k, v]) => `${tomlKey(k)} = ${tomlString(v as string)}`).join(', ') + ' }';
+    }
+  }
+  throw new Error(`unsupported TOML value for "${key}"`);
+}
+
+/** Render one MCP server as a `[serversKey.name]` table, with `\n` line endings. */
+export function renderTomlServer(serversKey: string, name: string, entry: Record<string, unknown>): string {
+  let out = `[${serversKey}.${name}]\n`;
+  for (const [key, value] of Object.entries(entry)) {
+    if (value === undefined) continue;
+    out += `${tomlKey(key)} = ${tomlValue(key, value)}\n`;
+  }
+  return out;
+}
+
+/** The header without its trailing comment, quotes and padding: `[ a."b" ] # c` -> `[a.b]`. */
+function bareHeader(header: string): string {
+  return header.replace(/#.*$/, '').replace(/["' \t]/g, '');
+}
+
+/** Our table (`[k.name]`) or one of its sub-tables (`[k.name.env]`). */
+function isOurTable(serversKey: string, name: string, s: TomlSection): boolean {
+  if (s.header === null) return false;
+  const h = bareHeader(s.header);
+  return h === `[${serversKey}.${name}]` || h.startsWith(`[${serversKey}.${name}.`);
+}
+
+export async function configureMcpToml(
+  configPath: string, serversKey: string, name: string, entry: Record<string, unknown>,
+): Promise<void> {
+  let existing = '';
+  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
+  const eol = existing.includes('\r\n') ? '\r\n' : '\n';
+  const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
+  const block = renderTomlServer(serversKey, name, entry).replace(/\n/g, eol);
+  await writeTextAtomic(configPath, (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block);
+}
+
+export async function unconfigureMcpToml(configPath: string, serversKey: string, name: string): Promise<void> {
   let existing = '';
   try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
-  if (!existing.includes(CODEX_MARKER)) return;
-  // Remove only our own table. This used to truncate the file from the marker to
-  // EOF — and since both `configureMcpToml` and `codex mcp add` append at EOF,
+  // Remove only our own tables. This used to truncate the file from the marker to
+  // end-of-file, and since both `configureMcpToml` and `codex mcp add` append there,
   // any MCP server or [model_providers.*] block the user added after Setup sat
   // below ours and was silently destroyed by clicking Unconfigure.
-  const next = removeTomlSections(existing, (s) => s.header === CODEX_MARKER);
+  const next = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
+  if (next === existing) return;
   await writeTextAtomic(configPath, next);
 }
 
-export async function isMcpTomlConfigured(configPath: string): Promise<boolean> {
-  try {
-    const raw = await fs.promises.readFile(configPath, 'utf8');
-    return raw.includes(CODEX_MARKER);
-  } catch { return false; }
+/**
+ * The keys of our table, one property per `key = value` line: the value is
+ * JSON.parse'd when that works (strings, string arrays, booleans) and `true`
+ * when it does not (inline tables, literal strings, multi-line values). A
+ * sub-table `[k.name.sub]` adds `sub: true`. `null` when we are not there.
+ */
+export async function readMcpTomlEntry(
+  configPath: string, serversKey: string, name: string,
+): Promise<Record<string, unknown> | null> {
+  let raw: string;
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return null; }
+  const main = `[${serversKey}.${name}]`;
+  const prefix = `[${serversKey}.${name}.`;
+  let entry: Record<string, unknown> | null = null;
+  const subs: string[] = [];
+  for (const s of splitTomlSections(raw.replace(/\r\n/g, '\n'))) {
+    if (s.header === null) continue;
+    const h = bareHeader(s.header);
+    if (h === main) {
+      entry = {};
+      for (const line of s.text.split('\n').slice(1)) {
+        const m = /^[ \t]*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=[ \t]*(.*?)[ \t]*$/.exec(line);
+        if (!m) continue;
+        const key = m[1].startsWith('"') ? (JSON.parse(m[1]) as string) : m[1];
+        let value: unknown = true;
+        try { value = JSON.parse(m[2]); } catch { /* keep true */ }
+        entry[key] = value;
+      }
+    } else if (h.startsWith(prefix) && h.endsWith(']')) {
+      subs.push(h.slice(prefix.length, -1));
+    }
+  }
+  if (entry === null) return null;
+  for (const sub of subs) entry[sub] = true;
+  return entry;
 }
 
 // ── Shared TOML section surgery ─────────────────────────────────────────────
@@ -176,7 +250,11 @@ const TOML_HEADER_RE = /^[ \t]*\[\[?[A-Za-z0-9_.\-"' ]+\]\]?[ \t]*(?:#.*)?$/;
 
 interface TomlSection { header: string | null; text: string }
 
-/** Split a TOML document into a preamble plus one entry per top-level header. */
+/**
+ * Split a TOML document into a preamble plus one entry per top-level header.
+ * Expects `\n` line endings: a CRLF file's headers end in `\r`, which
+ * TOML_HEADER_RE never matches, so callers normalise first.
+ */
 function splitTomlSections(text: string): TomlSection[] {
   const sections: TomlSection[] = [];
   let current: TomlSection = { header: null, text: '' };
@@ -193,7 +271,8 @@ function splitTomlSections(text: string): TomlSection[] {
 }
 
 /**
- * Drop only the sections we own, preserving everything else verbatim.
+ * Drop only the sections we own, preserving everything else verbatim (a CRLF
+ * file stays CRLF; a file with nothing of ours comes back untouched).
  *
  * The previous implementation did `existing.slice(0, indexOf(MARKER))` — i.e. it
  * truncated the user's file from our marker to EOF, destroying any config that
@@ -202,9 +281,13 @@ function splitTomlSections(text: string): TomlSection[] {
  * deleted by clicking Unconfigure.
  */
 function removeTomlSections(text: string, isOurs: (s: TomlSection) => boolean): string {
-  const kept = splitTomlSections(text).filter((s) => !isOurs(s));
-  const out = kept.map((s) => s.text).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
-  return out === '' ? '' : out + '\n';
+  const crlf = text.includes('\r\n');
+  const sections = splitTomlSections(text.replace(/\r\n/g, '\n'));
+  const kept = sections.filter((s) => !isOurs(s));
+  if (kept.length === sections.length) return text;
+  const out = kept.map((s) => s.text).join('').trimEnd();
+  const result = out === '' ? '' : out + '\n';
+  return crlf ? result.replace(/\n/g, '\r\n') : result;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

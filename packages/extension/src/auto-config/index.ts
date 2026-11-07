@@ -5,9 +5,11 @@ import type { AiSkill, IdeId, IdeStatus } from '@airtable-formula/shared';
 import { getSettings, minutesToIdleParkMs } from '../settings.js';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
-import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, isMcpTomlConfigured } from './lsp-config.js';
+import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, readMcpTomlEntry } from './lsp-config.js';
 
 const MCP_SERVER_NAME = 'airtable-user-mcp';
+// Until the client table drives the entry shape: exactly what the Codex block always held.
+const TODAY_CODEX_ENTRY = { type: 'stdio', command: 'npx', args: ['-y', 'airtable-user-mcp'] };
 const OFFICIAL_AIRTABLE_NAME = 'airtable';
 const OFFICIAL_AIRTABLE_URL = 'https://mcp.airtable.com/mcp';
 
@@ -116,7 +118,7 @@ export async function configureMcpForIde(ideId: IdeId, serverPath: string, serve
 
   // Codex CLI uses TOML — delegate to the TOML handler
   if (cfg.lspConfigFormat === undefined && ideId === 'codex-cli') {
-    return configureMcpToml(cfg.mcpConfigPath);
+    return configureMcpToml(cfg.mcpConfigPath, 'mcp_servers', MCP_SERVER_NAME, TODAY_CODEX_ENTRY);
   }
   // codex-cli special-case: mcpConfigPath present but no mcpServersKey for JSON path
   if (!cfg.mcpServersKey) return;
@@ -131,7 +133,7 @@ export async function configureMcpForIde(ideId: IdeId, serverPath: string, serve
 export async function unconfigureMcpForIde(ideId: IdeId): Promise<void> {
   const cfg = IDE_CONFIGS[ideId];
   if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return;
-  if (ideId === 'codex-cli') return unconfigureMcpToml(cfg.mcpConfigPath);
+  if (ideId === 'codex-cli') return unconfigureMcpToml(cfg.mcpConfigPath, 'mcp_servers', MCP_SERVER_NAME);
   if (!cfg.mcpServersKey) return;
   const existing = await readConfigFile(cfg.mcpConfigPath);
   const cleaned = removeServerEntry(existing, cfg.mcpServersKey, MCP_SERVER_NAME);
@@ -142,7 +144,7 @@ export async function isMcpConfigured(ideId: IdeId): Promise<boolean> {
   try {
     const cfg = IDE_CONFIGS[ideId];
     if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return false;
-    if (ideId === 'codex-cli') return isMcpTomlConfigured(cfg.mcpConfigPath);
+    if (ideId === 'codex-cli') return (await readMcpTomlEntry(cfg.mcpConfigPath, 'mcp_servers', MCP_SERVER_NAME)) !== null;
     if (!cfg.mcpServersKey) return false;
     const existing = await readConfigFile(cfg.mcpConfigPath);
     const parts = cfg.mcpServersKey.split('.');
@@ -160,7 +162,7 @@ export async function getMcpHealth(ideId: IdeId): Promise<{ configured: boolean;
     const cfg = IDE_CONFIGS[ideId];
     if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return { configured: false, healthy: false };
     if (ideId === 'codex-cli') {
-      const ok = await isMcpTomlConfigured(cfg.mcpConfigPath);
+      const ok = (await readMcpTomlEntry(cfg.mcpConfigPath, 'mcp_servers', MCP_SERVER_NAME)) !== null;
       return { configured: ok, healthy: ok };
     }
     if (!cfg.mcpServersKey) return { configured: false, healthy: false };
