@@ -19,6 +19,20 @@ function parse(result) {
   return JSON.parse(result.content[0].text);
 }
 
+// The developer's environment minus every AIRTABLE_* key, so a cookie, auth mode,
+// home or daemon setting exported in the shell cannot reach the child. Compared
+// upper-cased because Windows environment names are case-insensitive.
+function credentialFreeEnv(home) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase().startsWith('AIRTABLE_')) delete env[key];
+  }
+  env.AIRTABLE_NO_DAEMON = '1';
+  env.AIRTABLE_USER_MCP_HOME = home;
+  env.AIRTABLE_AUTH_MODE = 'byo';
+  return env;
+}
+
 describe('lint_airtable_code through a live MCP session', () => {
   let home;
   let client;
@@ -30,12 +44,7 @@ describe('lint_airtable_code through a live MCP session', () => {
     transport = new StdioClientTransport({
       command: process.execPath,
       args: [INDEX],
-      env: {
-        ...process.env,
-        AIRTABLE_NO_DAEMON: '1',
-        AIRTABLE_USER_MCP_HOME: home,
-        AIRTABLE_AUTH_MODE: 'byo',
-      },
+      env: credentialFreeEnv(home),
       stderr: 'pipe',
     });
     transport.stderr?.on('data', (c) => { stderr += c; });
@@ -59,10 +68,15 @@ describe('lint_airtable_code through a live MCP session', () => {
   });
 
   async function cleanup() {
-    const pid = transport?.pid;
+    // Hold the child before close(): the transport drops its reference there, and
+    // a kill must go through the ChildProcess, never a bare pid that Windows may
+    // already have handed to another process. (_process is the SDK's private
+    // field; if it is ever renamed, child is undefined and nothing is killed.)
+    const child = transport?._process;
     try { await client?.close(); } catch { /* already closed */ }
-    if (pid) {
-      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    // close() ends the child itself; kill only one that is somehow still running.
+    if (child && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
     }
     if (home) rmSync(home, { recursive: true, force: true });
   }
@@ -93,5 +107,13 @@ describe('lint_airtable_code through a live MCP session', () => {
   it('rejects an unknown language as a tool error', async () => {
     const r = await client.callTool({ name: 'lint_airtable_code', arguments: { language: 'nope', text: 'x' } });
     assert.equal(r.isError, true);
+  });
+
+  it('has no credentials: a tool that needs Airtable fails, and lint still answers', async () => {
+    const tables = await client.callTool({ name: 'list_tables', arguments: { appId: 'appXXXXXXXXXXXXXX' } });
+    assert.equal(tables.isError, true);
+    const r = await client.callTool({ name: 'lint_airtable_code', arguments: { language: 'formula', text: 'IF(1,2,3)' } });
+    assert.notEqual(r.isError, true);
+    assert.equal(parse(r).clean, true);
   });
 });
