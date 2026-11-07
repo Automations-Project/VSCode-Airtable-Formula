@@ -8,6 +8,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AiSkill, AiSkillClient, IdeId, SkillScope } from '@airtable-formula/shared';
 import agentDirs from './agent-dirs.json';
+import type { PromptRecipe } from '../mcp/prompts-state.js';
+import { renderPromptRecipes, RECIPES_FILE } from './prompt-recipes.js';
 
 export interface AgentDirEntry {
   id: string;
@@ -27,6 +29,8 @@ export interface SkillEnv {
   skillSourceDir: string;             // <extensionPath>/dist/skills/airtable-formula
   detectedIdes: readonly IdeId[];
   xdgConfigHome?: string;             // process.env.XDG_CONFIG_HOME
+  /** Written to references/prompts.md: `merged` (built-ins + the user's edits) for global scope, `builtins` for project scope. */
+  prompts: { merged: readonly PromptRecipe[]; builtins: readonly PromptRecipe[] };
 }
 
 /** Clients Vercel's table lacks. Same shape as agent-dirs.json; a row here overrides a JSON row with the same id. */
@@ -183,7 +187,7 @@ function clearTmpDirs(target: string): void {
  * all-or-nothing, so the target holds the old folder or the new one, never a half-deleted one
  * (deleting first lost the working install when the rename then failed, e.g. on a Windows EPERM).
  */
-function installInto(target: string, env: SkillEnv): void {
+function installInto(target: string, env: SkillEnv, scope: SkillScope): void {
   const final = path.join(target, SKILL_DIR_NAME);
   const tmp = path.join(target, `${TMP_PREFIX}${process.pid}`);
   const old = path.join(target, `${TMP_PREFIX}old-${process.pid}`);   // a leftover: our next sweep, or any once this pid is gone
@@ -194,6 +198,10 @@ function installInto(target: string, env: SkillEnv): void {
     fs.cpSync(env.skillSourceDir, tmp, { recursive: true });
     const skillMd = path.join(tmp, 'SKILL.md');
     fs.writeFileSync(skillMd, fs.readFileSync(skillMd, 'utf8').replace(VERSION_PLACEHOLDER, `version: ${env.version}`));
+    // Project scope lands in a repository others may read: the user's own prompt edits stay out of it.
+    const recipes = path.join(tmp, RECIPES_FILE);
+    fs.mkdirSync(path.dirname(recipes), { recursive: true });
+    fs.writeFileSync(recipes, renderPromptRecipes(scope === 'project' ? env.prompts.builtins : env.prompts.merged));
     const hadOld = fs.lstatSync(final, { throwIfNoEntry: false }) !== undefined;
     if (hadOld) fs.renameSync(final, old);
     try {
@@ -325,7 +333,7 @@ async function runInstall(scope: SkillScope, env: SkillEnv): Promise<InstallResu
     const refused = scope === 'project' && ws ? symlinkRefusal(ws, final) : null;
     if (refused) { failed.push({ dir: target, message: refused }); continue; }
     try {
-      installInto(target, env);
+      installInto(target, env, scope);
       written.push(final);
     } catch (err) {
       failed.push({ dir: target, message: messageOf(err) });

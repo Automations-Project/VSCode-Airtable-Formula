@@ -27,6 +27,7 @@ describe('skillEnv', () => {
       skillSourceDir: path.join('/ext', 'dist', 'skills', 'airtable-formula'),
       detectedIdes: ['cursor'],
       xdgConfigHome: process.env.XDG_CONFIG_HOME,
+      prompts: { merged: [], builtins: [] },   // filled in by the next change
     });
   });
 

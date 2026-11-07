@@ -14,5 +14,6 @@ export async function skillEnv(context: vscode.ExtensionContext): Promise<SkillE
     skillSourceDir: path.join(context.extensionPath, 'dist', 'skills', 'airtable-formula'),
     detectedIdes: await detectInstalledIdes(),
     xdgConfigHome: process.env.XDG_CONFIG_HOME,
+    prompts: { merged: [], builtins: [] },   // filled in by the next change
   };
 }
