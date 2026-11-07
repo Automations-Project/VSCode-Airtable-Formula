@@ -31,8 +31,10 @@ export interface WriterDeps {
 }
 
 /**
- * `readByClient`: the client reads that location: the current one, and for OpenCode the other
- * of its two files (OpenCode merges them). Amp's nested key and the old `~/.codex` are dead.
+ * `readByClient`: the client may read that location. Only the row's explicit legacy locations
+ * (Amp's nested key, `~/.codex` when CODEX_HOME points elsewhere) are places it never reads; a
+ * sibling config file of the same client (OpenCode's opencode.json, Kilo's kilo.json, MCPorter's
+ * other file) counts as read, the safe side for an entry the user wrote there.
  */
 export interface FoundEntry { entry: Record<string, unknown>; legacy: boolean; native: boolean; readByClient: boolean }
 
@@ -154,9 +156,12 @@ async function findAt(row: McpClientRow, loc: LegacyLocation, name: string, owns
 export async function readServerEntry(row: McpClientRow, name: string, deps: WriterDeps, owns?: Owns): Promise<FoundEntry | null> {
   const current = await findAt(row, { path: resolveConfigPath(row, deps.ctx, deps.exists), serversPath: row.serversPath }, name, owns);
   if (current) return { ...current, legacy: false, readByClient: true };
+  const unread = row.legacy?.(deps.ctx) ?? [];
   for (const loc of legacyLocations(row, deps)) {
     const old = await findAt(row, loc, name, owns);
-    if (old) return { ...old, legacy: true, readByClient: row.layout === 'opencode' && sameSegments(loc.serversPath, row.serversPath) };
+    if (!old) continue;
+    const dead = unread.some((u) => sameFile(u.path, loc.path, deps) && sameSegments(u.serversPath, loc.serversPath));
+    return { ...old, legacy: true, readByClient: !dead };
   }
   return null;
 }

@@ -313,6 +313,20 @@ describe('an entry the extension did not write is never rewritten unasked', () =
     expect(await hasForeignMcpEntry('opencode', deps)).toBe(true);
   });
 
+  it.each([
+    ['kilo-code', 'kilo.json', 'kilo.jsonc', 'mcp'],
+    ['mcporter', 'mcporter.jsonc', 'mcporter.json', 'mcpServers'],
+  ] as const)("%s: a hand-written entry in the sibling file %s counts as read: configured, and the user's own", async (id, sibling, current, key) => {
+    const row = MCP_CLIENT_BY_ID[id];
+    detect(row);
+    const dir = path.dirname(row.globalPath(deps.ctx));
+    write(path.join(dir, sibling), JSON.stringify({ [key]: { 'airtable-user-mcp': { type: 'local', command: ['npx', '-y', 'airtable-user-mcp'] } } }));
+    write(path.join(dir, current), '{}\n');
+    expect(fileOf(row)).toBe(path.join(dir, current));
+    expect(await getMcpHealth(id, deps)).toEqual({ configured: true, healthy: true });
+    expect(await hasForeignMcpEntry(id, deps)).toBe(true);
+  });
+
   it('Kilo Code: a hand-written entry in kilo.json is not moved out when kilo.jsonc becomes current', async () => {
     const row = MCP_CLIENT_BY_ID['kilo-code'];
     detect(row);
