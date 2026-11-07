@@ -42,10 +42,11 @@ function lineAndColumn(text: string, offset: number): { line: number; column: nu
 /**
  * A leading UTF-8 byte order mark, which Windows editors write and jsonc-parser rejects. Every
  * function here reads past it, and setJsoncValue puts it back, so an edited file keeps it.
+ * The TOML writer in lsp-config.ts strips and restores it the same way.
  */
 const BOM = '\uFEFF';
 
-function splitBom(text: string): { bom: string; body: string } {
+export function splitBom(text: string): { bom: string; body: string } {
   return text.startsWith(BOM) ? { bom: BOM, body: text.slice(BOM.length) } : { bom: '', body: text };
 }
 

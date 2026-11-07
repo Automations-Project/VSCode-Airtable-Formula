@@ -1,3 +1,7 @@
+/**
+ * The 23 MCP clients of the extension's client table (auto-config/mcp-clients.ts), in table
+ * order, then the two LSP-only editors. IDE_IDS in webview-contract.ts lists the same ids.
+ */
 export type IdeId =
   | 'cursor'
   | 'windsurf'
@@ -9,6 +13,19 @@ export type IdeId =
   | 'opencode'
   | 'codex-cli'
   | 'zed'
+  | 'antigravity'
+  | 'factory-droid'
+  | 'fx'
+  | 'gemini-cli'
+  | 'github-copilot-cli'
+  | 'grok-build'
+  | 'junie'
+  | 'kilo-code'
+  | 'kimi-code'
+  | 'kiro-cli'
+  | 'mastracode'
+  | 'mcporter'
+  | 'pi'
   | 'helix'
   | 'neovim';
 

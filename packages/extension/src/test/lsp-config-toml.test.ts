@@ -191,3 +191,40 @@ it('configureMcpToml rejects when the config path cannot be read, and writes not
   expect(fs.statSync(cfg).isDirectory()).toBe(true);
   expect(fs.readdirSync(dir)).toEqual(['config.toml']);
 });
+
+// Windows editors write a UTF-8 byte order mark. Read as text it sits in front of the first
+// header, so `\uFEFF[mcp_servers.airtable-user-mcp]` would not match and an Update would append
+// a second table, which makes Codex reject the whole file.
+describe('a config.toml with a UTF-8 BOM', () => {
+  const BOM = '\uFEFF';
+  const OURS = '[mcp_servers.airtable-user-mcp]\ncommand = "node"\n';
+
+  it('our table on the first line is found, replaced (never duplicated), and the BOM stays', async () => {
+    fs.writeFileSync(cfg, BOM + OURS + '\n[model_providers.x]\nname = "x"\n');
+    expect(await readMcpTomlEntry(cfg, K, N)).toEqual({ command: 'node' });
+    await configureMcpToml(cfg, K, N, E);
+    const out = fs.readFileSync(cfg, 'utf8');
+    expect(out.startsWith(BOM + '[model_providers.x]')).toBe(true);
+    expect(out.match(/\[mcp_servers\.airtable-user-mcp\]/g)).toHaveLength(1);
+    expect(await readMcpTomlEntry(cfg, K, N)).toEqual(E);
+  });
+
+  it('a no-op Update leaves the file byte for byte, BOM included', async () => {
+    fs.writeFileSync(cfg, BOM + renderTomlServer(K, N, E));
+    const before = fs.readFileSync(cfg, 'utf8');
+    await configureMcpToml(cfg, K, N, E);
+    expect(fs.readFileSync(cfg, 'utf8')).toBe(before);
+  });
+
+  it('Remove clears our table on the first line and keeps the BOM, the rest and CRLF', async () => {
+    fs.writeFileSync(cfg, BOM + '[mcp_servers.airtable-user-mcp]\r\ncommand = "node"\r\n\r\n[model_providers.x]\r\nname = "x"\r\n');
+    await unconfigureMcpToml(cfg, K, N);
+    expect(fs.readFileSync(cfg, 'utf8')).toBe(BOM + '[model_providers.x]\r\nname = "x"\r\n');
+  });
+
+  it('a BOM-only file gets our table after the BOM', async () => {
+    fs.writeFileSync(cfg, BOM);
+    await configureMcpToml(cfg, K, N, E);
+    expect(fs.readFileSync(cfg, 'utf8')).toBe(BOM + renderTomlServer(K, N, E));
+  });
+});

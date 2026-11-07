@@ -18,6 +18,7 @@ import {
 import { getWebviewHtml } from './html.js';
 import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
+import { MCP_CLIENTS } from '../auto-config/mcp-clients.js';
 import { installSkill, checkSkill, removeSkill, listSkillClients } from '../skills/installer.js';
 import { skillEnv } from '../skills/host-env.js';
 import { getSettings, updateWebviewSetting, type HostBrowserChoice } from '../settings.js';
@@ -35,21 +36,6 @@ const WEBVIEW_LINKS: Record<WebviewLinkId, string> = {
   changelog: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/CHANGELOG.md',
   github: 'https://github.com/Automations-Project/VSCode-Airtable-Formula',
   chrome: 'https://www.google.com/chrome/',
-};
-
-const IDE_DOCS_LINKS: Record<IdeId, string> = {
-  cursor: 'https://cursor.com/download',
-  windsurf: 'https://windsurf.com/download',
-  'windsurf-next': 'https://windsurf.com/download',
-  'claude-code': 'https://docs.claude.com/en/docs/claude-code/quickstart',
-  'claude-desktop': 'https://claude.ai/download',
-  cline: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
-  amp: 'https://ampcode.com/',
-  opencode: 'https://opencode.ai',
-  'codex-cli': 'https://github.com/openai/codex',
-  zed: 'https://zed.dev/download',
-  helix: 'https://helix-editor.com',
-  neovim: 'https://neovim.io',
 };
 
 const CONFIRMATION_COPY: Record<ConfirmationKind, string> = {
@@ -773,7 +759,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'action:openIdeDocs') {
       try {
-        await vscode.env.openExternal(vscode.Uri.parse(IDE_DOCS_LINKS[msg.ideId]));
+        // A fixed host URL from the client table: the webview only names the id.
+        await vscode.env.openExternal(vscode.Uri.parse(IDE_CONFIGS[msg.ideId].docsUrl));
         this.postResult(msg.id, true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
@@ -1732,10 +1719,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
   private async _computeOfficialAirtableState(): Promise<import('@airtable-formula/shared').OfficialAirtableMcpState> {
     const patSet = !!(await this.context.secrets.get('airtable-formula.airtable.pat'));
-    const ideIds = Object.keys(IDE_CONFIGS) as IdeId[];
-    const results = await Promise.all(ideIds.map(async ideId => ({
-      ideId,
-      configured: await isOfficialAirtableConfigured(ideId),
+    // Only the rows that carry the official entry; elsewhere an 'airtable' server is the user's own.
+    const results = await Promise.all(MCP_CLIENTS.filter(r => r.official).map(async r => ({
+      ideId: r.id,
+      configured: await isOfficialAirtableConfigured(r.id),
     })));
     const ideConfigured: Partial<Record<IdeId, boolean>> = {};
     for (const { ideId, configured } of results) {

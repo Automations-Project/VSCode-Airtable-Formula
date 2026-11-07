@@ -305,7 +305,11 @@ describe('DashboardProvider webview trust boundary', () => {
     ['zed', 'https://zed.dev/download'],
     ['helix', 'https://helix-editor.com'],
     ['neovim', 'https://neovim.io'],
+    ['gemini-cli', 'https://github.com/google-gemini/gemini-cli'],
   ] as const)('maps %s docs to the fixed host URL', async (ideId, expected) => {
+    // The URL lives in the real IDE_CONFIGS (from the client table); this file mocks the module.
+    const real = await vi.importActual<typeof import('../auto-config/ide-configs.js')>('../auto-config/ide-configs.js');
+    dependencies.ideConfigs[ideId] = real.IDE_CONFIGS[ideId];
     const { inboundMessage } = mountProvider();
 
     inboundMessage({ type: 'action:openIdeDocs', id: 'abc123', ideId });

@@ -9,6 +9,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
+import type { IdeId } from '@airtable-formula/shared';
 import type { EntryShapeId } from './mcp-entry-shapes.js';
 
 /** Everything a path depends on, so every platform can be computed on any machine. */
@@ -23,30 +24,8 @@ export type McpConfigFormat = 'json' | 'jsonc' | 'toml';
 /** A place we wrote our entry before the port, which the writer moves from. */
 export interface LegacyLocation { path: string; serversPath: readonly string[] }
 
-export type McpClientId =
-  | 'cursor'
-  | 'windsurf'
-  | 'windsurf-next'
-  | 'claude-code'
-  | 'claude-desktop'
-  | 'cline'
-  | 'amp'
-  | 'opencode'
-  | 'codex-cli'
-  | 'zed'
-  | 'antigravity'
-  | 'factory-droid'
-  | 'fx'
-  | 'gemini-cli'
-  | 'github-copilot-cli'
-  | 'grok-build'
-  | 'junie'
-  | 'kilo-code'
-  | 'kimi-code'
-  | 'kiro-cli'
-  | 'mastracode'
-  | 'mcporter'
-  | 'pi';
+/** Every contract id except the two LSP-only editors; the table has one row for each, in IdeId order. */
+export type McpClientId = Exclude<IdeId, 'helix' | 'neovim'>;
 
 export interface McpClientRow {
   id: McpClientId;

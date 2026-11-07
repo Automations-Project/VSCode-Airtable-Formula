@@ -10,6 +10,7 @@ import type {
   DashboardState,
   DaemonStatusInfo,
   DebugState,
+  IdeId,
   IdeStatus,
   OfficialAirtableMcpState,
   PromptDef,
@@ -29,7 +30,8 @@ export const PROMPT_ARG_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 export const MAX_PROMPT_ARGUMENTS = 16;
 export const MAX_PROMPT_TEMPLATE_LENGTH = 16_384;
 
-const IDE_IDS = [
+/** Every IdeId, in IdeId order: the MCP client table's rows, then the LSP-only editors. */
+export const IDE_IDS = [
   'cursor',
   'windsurf',
   'windsurf-next',
@@ -40,9 +42,29 @@ const IDE_IDS = [
   'opencode',
   'codex-cli',
   'zed',
+  'antigravity',
+  'factory-droid',
+  'fx',
+  'gemini-cli',
+  'github-copilot-cli',
+  'grok-build',
+  'junie',
+  'kilo-code',
+  'kimi-code',
+  'kiro-cli',
+  'mastracode',
+  'mcporter',
+  'pi',
   'helix',
   'neovim',
 ] as const;
+// Compile-time guard: the id list must match IdeId exactly, so an id added to the shared type
+// cannot make every state:update carrying it fail validation at runtime, and a stray id here
+// cannot slip past the type.
+const _ideIdsMatchType: [IdeId] extends [(typeof IDE_IDS)[number]]
+  ? [(typeof IDE_IDS)[number]] extends [IdeId] ? true : never
+  : never = true;
+void _ideIdsMatchType;
 
 const AI_SKILL_STATUSES = ['installed', 'outdated', 'missing', 'unsupported'] as const;
 const AI_SKILL_CLIENT_STATUSES = ['installed', 'outdated', 'missing', 'absent'] as const;

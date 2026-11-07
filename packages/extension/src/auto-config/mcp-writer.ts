@@ -40,7 +40,9 @@ const hostStat = (p: string) => fs.statSync(p, { bigint: true });
 /**
  * One file under two names. samePath first; when both exist, the same dev+ino too, because
  * samePath is case-sensitive on darwin while APFS usually is not, and a path can be a symlink.
- * An inode of 0 (FAT, some network shares) proves nothing.
+ * Fail safe: an inode of 0 (FAT, some network shares) or a stat that fails proves nothing, so
+ * it counts as the same file. Every caller then skips the location: a missed cleanup leaves a
+ * copy the next Setup can move, a wrong one would delete the entry the client reads.
  */
 function sameFile(a: string, b: string, deps: WriterDeps): boolean {
   if (samePath(deps.ctx, a, b)) return true;
@@ -49,9 +51,10 @@ function sameFile(a: string, b: string, deps: WriterDeps): boolean {
     const stat = deps.stat ?? hostStat;
     const sa = stat(a);
     const sb = stat(b);
-    return String(sa.ino) !== '0' && String(sa.dev) === String(sb.dev) && String(sa.ino) === String(sb.ino);
+    if (String(sa.ino) === '0' || String(sb.ino) === '0') return true;
+    return String(sa.dev) === String(sb.dev) && String(sa.ino) === String(sb.ino);
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -127,10 +130,12 @@ export async function readServerEntry(row: McpClientRow, name: string, deps: Wri
 }
 
 /**
- * Writes `name` at the current location (`build` gets the container's layout). With
- * `build === null`, removes it from every current container, then from every legacy location.
- * Writing needs a detected client. Removal never creates a file, and prunes only at legacy
- * locations, so a Remove leaves `mcpServers: {}` in the current file.
+ * Writes `name` at the current location (`build` gets the container's layout), or with
+ * `build === null` removes it from every current container. Either way it is then removed from
+ * every legacy location, so a reconfigure moves a pre-port copy (Amp's mcp.servers.airtable,
+ * with its token) instead of leaving it behind. Writing needs a detected client. Removal never
+ * creates a file, and prunes only at legacy locations, so a Remove leaves `mcpServers: {}` in
+ * the current file. Every legacy file is parsed before the first write.
  */
 export async function setServerEntry(
   row: McpClientRow,
@@ -138,13 +143,10 @@ export async function setServerEntry(
   build: ((loc: { native: boolean }) => Record<string, unknown>) | null,
   deps: WriterDeps,
 ): Promise<void> {
-  if (build) {
-    assertDetected(row, deps);
-    return editCurrent(row, name, build, deps);
-  }
+  if (build) assertDetected(row, deps);
   const legacy = legacyLocations(row, deps);
   await assertLegacyParses(row, legacy, name);
-  await editCurrent(row, name, null, deps);
+  await editCurrent(row, name, build, deps);
   for (const loc of legacy) await removeAtLegacy(row, loc, name);
 }
 
@@ -206,11 +208,7 @@ async function assertLegacyParses(row: McpClientRow, locs: readonly LegacyLocati
 }
 
 export async function configureMcpClient(row: McpClientRow, launch: LocalLaunch, deps: WriterDeps): Promise<void> {
-  assertDetected(row, deps);
-  const legacy = legacyLocations(row, deps);
-  await assertLegacyParses(row, legacy, MCP_SERVER_NAME);
   await setServerEntry(row, MCP_SERVER_NAME, (loc) => ENTRY_SHAPES[row.shape](launch, loc), deps);
-  for (const loc of legacy) await removeAtLegacy(row, loc, MCP_SERVER_NAME);
 }
 
 export async function unconfigureMcpClient(row: McpClientRow, deps: WriterDeps): Promise<void> {

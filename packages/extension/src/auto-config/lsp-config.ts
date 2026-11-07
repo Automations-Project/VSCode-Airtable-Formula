@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import type { IdeId } from '@airtable-formula/shared';
 import { IDE_CONFIGS } from './ide-configs.js';
-import { readConfigFile, writeConfigAtomic } from './ide-detection.js';
 import { writeTextAtomic } from './atomic-write.js';
+import { getJsoncValue, pruneEmptyObjects, readTextIfExists, setJsoncValue, splitBom } from './jsonc-config.js';
+import { MCP_CLIENT_BY_ID, hostPathContext, resolveConfigPath } from './mcp-clients.js';
 
 const LSP_SERVER_KEY = 'airtable-lsp';
 
@@ -43,9 +44,11 @@ async function configureHelix(configPath: string): Promise<void> {
 }
 
 async function unconfigureHelix(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
-  if (!existing.includes(HELIX_MARKER)) return;
+  let raw = '';
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
+  if (!raw.includes(HELIX_MARKER)) return;
+  // A BOM in front of our first header would hide it from the section split.
+  const { bom, body: existing } = splitBom(raw);
   // HELIX_BLOCK is FOUR top-level tables, not one: the language-server plus a
   // [[language]] per file type. Remove each of ours and nothing else — a
   // "delete to the next header" cut would orphan the three [[language]] blocks,
@@ -55,7 +58,7 @@ async function unconfigureHelix(configPath: string): Promise<void> {
     if (s.header === HELIX_MARKER) return true;
     return s.header === '[[language]]' && s.text.includes(`language-servers = ["${LSP_SERVER_KEY}"]`);
   });
-  await writeTextAtomic(configPath, next);
+  await writeTextAtomic(configPath, bom + next);
 }
 
 async function isHelixConfigured(configPath: string): Promise<boolean> {
@@ -89,38 +92,39 @@ async function isNeovimConfigured(configPath: string): Promise<boolean> {
   try { await fs.promises.access(configPath); return true; } catch { return false; }
 }
 
-// ── OpenCode: JSON merge into opencode.json (lsp key) ───────────────────────
+// ── OpenCode: the `lsp` key of the file its MCP entry uses ───────────────────
 
-const OPENCODE_LSP_KEY = 'airtable-formula';
+const OPENCODE_LSP_PATH = ['lsp', 'airtable-formula'] as const;
 const OPENCODE_LSP_ENTRY = {
   command: ['npx', '-y', 'airtable-user-lsp', '--stdio'],
   extensions: ['.formula', '.ats', '.ata'],
 };
 
-async function configureOpenCode(configPath: string): Promise<void> {
-  const existing = await readConfigFile(configPath);
-  const lsp = (existing['lsp'] ?? {}) as Record<string, unknown>;
-  lsp[OPENCODE_LSP_KEY] = OPENCODE_LSP_ENTRY;
-  existing['lsp'] = lsp;
-  await writeConfigAtomic(configPath, existing);
+/** opencode.jsonc or opencode.json, whichever the MCP writer resolves, so both entries share one file. */
+function openCodeConfigPath(): string {
+  return resolveConfigPath(MCP_CLIENT_BY_ID.opencode, hostPathContext(), fs.existsSync);
 }
 
+/** Comments and the rest of the file survive; a file that does not parse is never written. */
+async function configureOpenCode(configPath: string): Promise<void> {
+  const before = (await readTextIfExists(configPath)) ?? '';
+  const next = setJsoncValue(before, OPENCODE_LSP_PATH, OPENCODE_LSP_ENTRY, 'jsonc', configPath);
+  if (next !== before) await writeTextAtomic(configPath, next);
+}
+
+/** Removes ours, then an `lsp` object our removal emptied. Creates no file. */
 async function unconfigureOpenCode(configPath: string): Promise<void> {
-  const existing = await readConfigFile(configPath);
-  const lsp = existing['lsp'] as Record<string, unknown> | undefined;
-  if (lsp) {
-    delete lsp[OPENCODE_LSP_KEY];
-    if (Object.keys(lsp).length === 0) delete existing['lsp'];
-    else existing['lsp'] = lsp;
-  }
-  await writeConfigAtomic(configPath, existing);
+  const text = await readTextIfExists(configPath);
+  if (text === null) return;
+  const removed = setJsoncValue(text, OPENCODE_LSP_PATH, undefined, 'jsonc', configPath);
+  if (removed === text) return;
+  await writeTextAtomic(configPath, pruneEmptyObjects(removed, OPENCODE_LSP_PATH.slice(0, 1), 'jsonc', configPath));
 }
 
 async function isOpenCodeLspConfigured(configPath: string): Promise<boolean> {
   try {
-    const existing = await readConfigFile(configPath);
-    const lsp = existing['lsp'] as Record<string, unknown> | undefined;
-    return typeof lsp === 'object' && lsp !== null && OPENCODE_LSP_KEY in lsp;
+    const text = await readTextIfExists(configPath);
+    return text !== null && getJsoncValue(text, OPENCODE_LSP_PATH, 'jsonc', configPath) !== undefined;
   } catch { return false; }
 }
 
@@ -176,35 +180,40 @@ function isOurTable(serversKey: string, name: string, s: TomlSection): boolean {
   return h === `[${serversKey}.${name}]` || h.startsWith(`[${serversKey}.${name}.`);
 }
 
+// A leading UTF-8 BOM (Windows editors write one) is read past and written back: in front of
+// our first header it would hide that table, and an Update would append a duplicate one.
+
 export async function configureMcpToml(
   configPath: string, serversKey: string, name: string, entry: Record<string, unknown>,
 ): Promise<void> {
-  let existing = '';
+  let raw = '';
   try {
-    existing = await fs.promises.readFile(configPath, 'utf8');
+    raw = await fs.promises.readFile(configPath, 'utf8');
   } catch (err) {
     // Only a missing file is an empty one: EACCES/EBUSY/EISDIR must not turn into
     // an overwrite of the user's whole config with just our block.
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
+  const { bom, body: existing } = splitBom(raw);
   const eol = existing.includes('\r\n') ? '\r\n' : '\n';
   const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
   const block = renderTomlServer(serversKey, name, entry).replace(/\n/g, eol);
-  const next = (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block;
-  if (next === existing) return; // a no-op Update leaves the file (and its mtime) alone
+  const next = bom + (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block;
+  if (next === raw) return; // a no-op Update leaves the file (and its mtime) alone
   await writeTextAtomic(configPath, next);
 }
 
 export async function unconfigureMcpToml(configPath: string, serversKey: string, name: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
+  let raw = '';
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
+  const { bom, body: existing } = splitBom(raw);
   // Remove only our own tables. This used to truncate the file from the marker to
   // end-of-file, and since both `configureMcpToml` and `codex mcp add` append there,
   // any MCP server or [model_providers.*] block the user added after Setup sat
   // below ours and was silently destroyed by clicking Unconfigure.
   const next = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
   if (next === existing) return;
-  await writeTextAtomic(configPath, next);
+  await writeTextAtomic(configPath, bom + next);
 }
 
 /**
@@ -222,7 +231,7 @@ export async function readMcpTomlEntry(
   const prefix = `[${serversKey}.${name}.`;
   let entry: Record<string, unknown> | null = null;
   const subs: string[] = [];
-  for (const s of splitTomlSections(raw.replace(/\r\n/g, '\n'))) {
+  for (const s of splitTomlSections(splitBom(raw).body.replace(/\r\n/g, '\n'))) {
     if (s.header === null) continue;
     const h = bareHeader(s.header);
     if (h === main) {
@@ -300,35 +309,40 @@ function removeTomlSections(text: string, isOurs: (s: TomlSection) => boolean): 
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+/** OpenCode's file is resolved at call time (opencode.jsonc may appear); the editors' paths are static. */
+function lspPathFor(ideId: IdeId): string | undefined {
+  return ideId === 'opencode' ? openCodeConfigPath() : IDE_CONFIGS[ideId].lspConfigPath;
+}
+
 export async function configureLspForIde(ideId: IdeId): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
-  switch (cfg.lspConfigFormat) {
-    case 'json-merge':
-      return configureOpenCode(cfg.lspConfigPath);
-    case 'toml-append':  return configureHelix(cfg.lspConfigPath);
-    case 'lua-write':    return configureNeovim(cfg.lspConfigPath);
+  const format = IDE_CONFIGS[ideId].lspConfigFormat;
+  const file = lspPathFor(ideId);
+  if (!file || !format) return;
+  switch (format) {
+    case 'json-merge':   return configureOpenCode(file);
+    case 'toml-append':  return configureHelix(file);
+    case 'lua-write':    return configureNeovim(file);
   }
 }
 
 export async function unconfigureLspForIde(ideId: IdeId): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
-  switch (cfg.lspConfigFormat) {
-    case 'json-merge':
-      return unconfigureOpenCode(cfg.lspConfigPath);
-    case 'toml-append':  return unconfigureHelix(cfg.lspConfigPath);
-    case 'lua-write':    return unconfigureNeovim(cfg.lspConfigPath);
+  const format = IDE_CONFIGS[ideId].lspConfigFormat;
+  const file = lspPathFor(ideId);
+  if (!file || !format) return;
+  switch (format) {
+    case 'json-merge':   return unconfigureOpenCode(file);
+    case 'toml-append':  return unconfigureHelix(file);
+    case 'lua-write':    return unconfigureNeovim(file);
   }
 }
 
 export async function isLspConfigured(ideId: IdeId): Promise<boolean> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return false;
-  switch (cfg.lspConfigFormat) {
-    case 'json-merge':
-      return isOpenCodeLspConfigured(cfg.lspConfigPath);
-    case 'toml-append':  return isHelixConfigured(cfg.lspConfigPath);
-    case 'lua-write':    return isNeovimConfigured(cfg.lspConfigPath);
+  const format = IDE_CONFIGS[ideId].lspConfigFormat;
+  const file = lspPathFor(ideId);
+  if (!file || !format) return false;
+  switch (format) {
+    case 'json-merge':   return isOpenCodeLspConfigured(file);
+    case 'toml-append':  return isHelixConfigured(file);
+    case 'lua-write':    return isNeovimConfigured(file);
   }
 }

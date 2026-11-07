@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mergeServerEntry, removeServerEntry, getNestedKey, setNestedKey } from '../auto-config/ide-detection.js';
 
 // Mock vscode before importing modules that depend on it. `mockConfig` (hoisted so the mock factory
 // can read it) lets a test override specific settings; unset keys fall through to the default.
@@ -12,59 +11,7 @@ vi.mock('vscode', () => ({
   },
 }));
 
-import { buildNpxServerEntry, buildServerEntry, getAllIdeStatuses, isLspConfigured, IDE_CONFIGS } from '../auto-config/index.js';
-
-describe('mergeServerEntry', () => {
-  it('adds server to empty config', () => {
-    const result = mergeServerEntry({}, 'mcpServers', 'airtable', { command: 'node', args: ['/path'] });
-    expect(result).toEqual({ mcpServers: { airtable: { command: 'node', args: ['/path'] } } });
-  });
-
-  it('merges without overwriting existing entries', () => {
-    const existing = { mcpServers: { other: { command: 'python' } } };
-    const result = mergeServerEntry(existing, 'mcpServers', 'airtable', { command: 'node', args: [] });
-    expect(result.mcpServers).toHaveProperty('other');
-    expect(result.mcpServers).toHaveProperty('airtable');
-  });
-
-  it('overwrites existing airtable entry', () => {
-    const existing = { mcpServers: { airtable: { command: 'old-node' } } };
-    const result = mergeServerEntry(existing, 'mcpServers', 'airtable', { command: 'node', args: ['/new'] });
-    expect(result.mcpServers.airtable.command).toBe('node');
-  });
-
-  it('handles dot-notation key (amp format)', () => {
-    const result = mergeServerEntry({}, 'mcp.servers', 'airtable', { command: 'node', args: [] });
-    expect(result.mcp.servers.airtable.command).toBe('node');
-  });
-});
-
-describe('removeServerEntry', () => {
-  it('removes the named server', () => {
-    const config = { mcpServers: { airtable: { command: 'node' }, other: { command: 'python' } } };
-    const result = removeServerEntry(config, 'mcpServers', 'airtable');
-    expect(result.mcpServers).not.toHaveProperty('airtable');
-    expect(result.mcpServers).toHaveProperty('other');
-  });
-
-  it('leaves empty servers object when last entry removed', () => {
-    const config = { mcpServers: { airtable: { command: 'node' } } };
-    const result = removeServerEntry(config, 'mcpServers', 'airtable');
-    expect(result.mcpServers).toEqual({});
-  });
-
-  it('handles dot-notation key', () => {
-    const config = { mcp: { servers: { airtable: { command: 'node' } } } };
-    const result = removeServerEntry(config, 'mcp.servers', 'airtable');
-    expect((result.mcp as any).servers).toEqual({});
-  });
-
-  it('is a no-op for missing server name', () => {
-    const config = { mcpServers: { other: { command: 'python' } } };
-    const result = removeServerEntry(config, 'mcpServers', 'airtable');
-    expect(result).toEqual(config);
-  });
-});
+import { buildNpxServerEntry, buildServerEntry, isLspConfigured, IDE_CONFIGS } from '../auto-config/index.js';
 
 describe('buildNpxServerEntry', () => {
   it('returns npx command structure', () => {
@@ -117,34 +64,10 @@ describe('auto-config propagates transport/auth-mode settings', () => {
   });
 });
 
-describe('getNestedKey / setNestedKey', () => {
-  it('gets nested value by dot path', () => {
-    expect(getNestedKey({ a: { b: 42 } }, 'a.b')).toBe(42);
-  });
-  it('returns undefined for missing path', () => {
-    expect(getNestedKey({}, 'a.b')).toBeUndefined();
-  });
-  it('sets nested value, creating intermediate objects', () => {
-    const obj = {};
-    setNestedKey(obj, 'a.b.c', 99);
-    expect((obj as any).a.b.c).toBe(99);
-  });
-});
-
-// Zed starts only language servers that a Zed extension (or a built-in adapter)
-// registers. The `lsp.airtable-lsp` settings entry Setup used to write was never
-// started: zed-industries/zed#52653 ("not planned").
-describe('Zed has no LSP auto-config', () => {
-  it('is not an LSP target', async () => {
-    expect(IDE_CONFIGS.zed.capabilities).toEqual([]);
+describe('Zed is an MCP client again, with no LSP', () => {
+  it('has MCP and no LSP config', async () => {
+    expect(IDE_CONFIGS.zed.capabilities).toEqual(['mcp']);
     expect(IDE_CONFIGS.zed.lspConfigPath).toBeUndefined();
     expect(await isLspConfigured('zed')).toBe(false);
-  });
-
-  it('is not offered in Setup, like any editor with nothing to configure', async () => {
-    const ids = (await getAllIdeStatuses()).map(status => status.ideId);
-    expect(ids).not.toContain('zed');
-    expect(ids).toContain('helix');
-    for (const id of ids) expect(IDE_CONFIGS[id].capabilities.length).toBeGreaterThan(0);
   });
 });

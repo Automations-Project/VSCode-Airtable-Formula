@@ -49,7 +49,9 @@ describe('every row', () => {
   });
 
   it.each(ROWS)('%s: an undetected client gets no file', async (_id, row) => {
-    await expect(configureMcpClient(row, launch, deps)).rejects.toThrow(`${row.label} was not found on this machine; nothing was written.`);
+    // Hermetic: only the temp home exists, so a real /Applications/Cursor.app cannot detect Cursor.
+    const tempOnly: WriterDeps = { ...deps, exists: (p) => p.startsWith(home) && fs.existsSync(p) };
+    await expect(configureMcpClient(row, launch, tempOnly)).rejects.toThrow(`${row.label} was not found on this machine; nothing was written.`);
     expect(fs.existsSync(fileOf(row))).toBe(false);
   });
 });
@@ -154,6 +156,25 @@ describe('setServerEntry and readServerEntry under another name', () => {
     await setServerEntry(row, 'airtable', null, deps);
     expect(await readServerEntry(row, 'airtable', deps)).toBeNull();
     expect(json(fileOf(row))).toEqual({ 'amp.mcpServers': { [MCP_SERVER_NAME]: ENTRY_SHAPES.standard(launch) } });
+  });
+
+  it("a write also clears a legacy copy: Amp's pre-port mcp.servers.airtable and its old token go", async () => {
+    const row = MCP_CLIENT_BY_ID.amp;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcp: { servers: { airtable: { url: 'u', headers: { Authorization: 'Bearer patOLD' } } } }, theme: 't' }));
+    await setServerEntry(row, 'airtable', () => ({ type: 'http', url: 'u', headers: { Authorization: 'Bearer patNEW' } }), deps);
+    expect(json(fileOf(row))).toEqual({ theme: 't', 'amp.mcpServers': { airtable: { type: 'http', url: 'u', headers: { Authorization: 'Bearer patNEW' } } } });
+    expect(await readServerEntry(row, 'airtable', deps)).toMatchObject({ legacy: false });
+  });
+
+  it('a write parses every legacy file first: a broken one aborts with the current file untouched', async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const dir = path.join(home, '.config', 'opencode');
+    write(path.join(dir, 'opencode.json'), '{ "mcp": ');
+    write(path.join(dir, 'opencode.jsonc'), '{}\n');
+    await expect(setServerEntry(row, 'airtable', () => ({ type: 'remote', url: 'u' }), deps)).rejects.toThrow(/opencode\.json is not valid JSON/);
+    expect(fs.readFileSync(path.join(dir, 'opencode.jsonc'), 'utf8')).toBe('{}\n');
   });
 
   it('refuses an undetected client with nothing written', async () => {
@@ -363,10 +384,23 @@ describe('legacy cleanup boundaries', () => {
       expect(fs.readFileSync(legacyFile, 'utf8')).toBe('');
     });
 
-    it('an inode of 0 (FAT, some network shares) proves nothing', () => {
+    // Fail safe: when identity cannot be proven different, the file might be the current one, so
+    // nothing is cleaned there. A missed cleanup leaves a copy the next Setup can move; a wrong
+    // one deletes the entry the client reads.
+    it('an inode of 0 (FAT, some network shares) proves nothing, so the location is skipped', async () => {
       const { row, legacyFile, ctx } = setup();
       const zero: WriterDeps = { ...deps, ctx, stat: () => ({ dev: 0, ino: 0 }) };
-      expect(legacyLocations(row, zero)).toEqual([{ path: legacyFile, serversPath: ['mcp_servers'] }]);
+      expect(legacyLocations(row, zero)).toEqual([]);
+      await configureMcpClient(row, launch, zero);
+      expect(fs.readFileSync(legacyFile, 'utf8')).toBe(OURS);
+    });
+
+    it('a failed stat proves nothing either, so the location is skipped', async () => {
+      const { row, legacyFile, ctx } = setup();
+      const failing: WriterDeps = { ...deps, ctx, stat: () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); } };
+      expect(legacyLocations(row, failing)).toEqual([]);
+      await configureMcpClient(row, launch, failing);
+      expect(fs.readFileSync(legacyFile, 'utf8')).toBe(OURS);
     });
   });
 });
