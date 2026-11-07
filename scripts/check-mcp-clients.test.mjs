@@ -173,3 +173,16 @@ test('offline: a missing snapshot returns 1', async () => {
   assert.equal(await main([], f.io), 1);
   assert.ok(f.error.join('\n').includes(SNAPSHOT_PATH));
 });
+
+import { readFileSync } from 'node:fs';
+
+test('the drift workflow is weekly and manual, read-only, and never runs on pull requests', () => {
+  const y = readFileSync(new URL('../.github/workflows/mcp-clients-drift.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(y, /schedule:\n\s+- cron: '17 6 \* \* 1'/);
+  assert.match(y, /workflow_dispatch:/);
+  assert.doesNotMatch(y, /pull_request|push:/);
+  assert.match(y, /permissions:\n\s+contents: read/);
+  assert.doesNotMatch(y, /issues: write|gh issue/);
+  assert.match(y, /run: pnpm check:mcp-clients:upstream/);
+  assert.doesNotMatch(y, /run:.*pnpm install/); // the comment explaining the omission may name it
+});
