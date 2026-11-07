@@ -1933,8 +1933,65 @@ function stripDefaultOrType(s) {
     if (m === null) return s;
     at = m.index;
   }
-  while (at > 0 && /\s/.test(s[at - 1])) at--;
-  return s.slice(0, at);
+  return s.slice(0, at).trimEnd();
+}
+function makeSinglePieceBindings(text) {
+  let tailEnd = -1;
+  let trimmedEnd = 0;
+  let lastLine = -1;
+  let cutAfterLine = -1;
+  let cut = -2;
+  let firstStart = 0;
+  const spaceBefore = /* @__PURE__ */ new Map();
+  const skipSpace = (from, to) => {
+    const s = text.slice(from, to);
+    return from + (s.length - s.trimStart().length);
+  };
+  return (start, end) => {
+    if (end !== tailEnd) {
+      tailEnd = end;
+      firstStart = start;
+      trimmedEnd = start + text.slice(start, end).trimEnd().length;
+      const body = text.slice(start, trimmedEnd);
+      const line = Math.max(
+        body.lastIndexOf("\n"),
+        body.lastIndexOf("\r"),
+        body.lastIndexOf("\u2028"),
+        body.lastIndexOf("\u2029")
+      );
+      lastLine = line === -1 ? -1 : start + line;
+      const afterLine = lastLine === -1 ? -1 : text.slice(lastLine + 1, trimmedEnd).search(/[=:]/);
+      cutAfterLine = afterLine === -1 ? -1 : lastLine + 1 + afterLine;
+      cut = -2;
+      spaceBefore.clear();
+    }
+    const b0 = skipSpace(start, trimmedEnd);
+    if (b0 >= trimmedEnd) return [];
+    const b = text.startsWith("...", b0) && b0 + 3 <= trimmedEnd ? b0 + 3 : b0;
+    let at;
+    if (lastLine >= b) {
+      at = cutAfterLine;
+    } else {
+      if (cut !== -1 && cut < b) {
+        const found = text.slice(b, trimmedEnd).search(/[=:]/);
+        cut = found === -1 ? -1 : b + found;
+      }
+      at = cut;
+    }
+    let stop = trimmedEnd;
+    if (at !== -1) {
+      let space = spaceBefore.get(at);
+      if (space === void 0) {
+        space = firstStart + text.slice(firstStart, at).trimEnd().length;
+        spaceBefore.set(at, space);
+      }
+      stop = Math.max(b, space);
+    }
+    const id = skipSpace(b, stop);
+    if (id >= stop || !isIdentStartCode(text.charCodeAt(id))) return [];
+    for (let i = id + 1; i < stop; i++) if (!isIdentCode(text.charCodeAt(i))) return [];
+    return [text.slice(id, stop)];
+  };
 }
 function extractDestructuredBindings(pattern) {
   const inner = pattern.replace(/^[\[{]/, "").replace(/[\]}]$/, "");
@@ -1955,18 +2012,20 @@ function buildLocalSymbols(text) {
   let close = -2;
   let comma = -2;
   let listedClose = -1;
+  const singlePieceBindings = makeSinglePieceBindings(text);
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index + m[0].length - 1;
     if (close !== -1 && close < parenStart) close = text.indexOf(")", parenStart);
     const parenEnd = close;
     if (parenEnd !== -1) {
-      let end = parenEnd;
       if (parenEnd === listedClose) {
         if (comma !== -1 && comma <= parenStart) comma = text.indexOf(",", parenStart + 1);
-        if (comma !== -1 && comma < parenEnd) end = comma;
+        const end = comma !== -1 && comma < parenEnd ? comma : parenEnd;
+        for (const id of singlePieceBindings(parenStart + 1, end)) symbols.add(id);
+      } else {
+        for (const id of extractBindings(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
       }
-      for (const id of extractBindings(text.slice(parenStart + 1, end))) symbols.add(id);
       listedClose = parenEnd;
     }
   }
@@ -2496,8 +2555,65 @@ function stripDefaultOrType2(s) {
     if (m === null) return s;
     at = m.index;
   }
-  while (at > 0 && /\s/.test(s[at - 1])) at--;
-  return s.slice(0, at);
+  return s.slice(0, at).trimEnd();
+}
+function makeSinglePieceBindings2(text) {
+  let tailEnd = -1;
+  let trimmedEnd = 0;
+  let lastLine = -1;
+  let cutAfterLine = -1;
+  let cut = -2;
+  let firstStart = 0;
+  const spaceBefore = /* @__PURE__ */ new Map();
+  const skipSpace = (from, to) => {
+    const s = text.slice(from, to);
+    return from + (s.length - s.trimStart().length);
+  };
+  return (start, end) => {
+    if (end !== tailEnd) {
+      tailEnd = end;
+      firstStart = start;
+      trimmedEnd = start + text.slice(start, end).trimEnd().length;
+      const body = text.slice(start, trimmedEnd);
+      const line = Math.max(
+        body.lastIndexOf("\n"),
+        body.lastIndexOf("\r"),
+        body.lastIndexOf("\u2028"),
+        body.lastIndexOf("\u2029")
+      );
+      lastLine = line === -1 ? -1 : start + line;
+      const afterLine = lastLine === -1 ? -1 : text.slice(lastLine + 1, trimmedEnd).search(/[=:]/);
+      cutAfterLine = afterLine === -1 ? -1 : lastLine + 1 + afterLine;
+      cut = -2;
+      spaceBefore.clear();
+    }
+    const b0 = skipSpace(start, trimmedEnd);
+    if (b0 >= trimmedEnd) return [];
+    const b = text.startsWith("...", b0) && b0 + 3 <= trimmedEnd ? b0 + 3 : b0;
+    let at;
+    if (lastLine >= b) {
+      at = cutAfterLine;
+    } else {
+      if (cut !== -1 && cut < b) {
+        const found = text.slice(b, trimmedEnd).search(/[=:]/);
+        cut = found === -1 ? -1 : b + found;
+      }
+      at = cut;
+    }
+    let stop = trimmedEnd;
+    if (at !== -1) {
+      let space = spaceBefore.get(at);
+      if (space === void 0) {
+        space = firstStart + text.slice(firstStart, at).trimEnd().length;
+        spaceBefore.set(at, space);
+      }
+      stop = Math.max(b, space);
+    }
+    const id = skipSpace(b, stop);
+    if (id >= stop || !isIdentStartCode2(text.charCodeAt(id))) return [];
+    for (let i = id + 1; i < stop; i++) if (!isIdentCode2(text.charCodeAt(i))) return [];
+    return [text.slice(id, stop)];
+  };
 }
 function extractDestructuredBindings2(pattern) {
   const inner = pattern.replace(/^[\[{]/, "").replace(/[\]}]$/, "");
@@ -2605,18 +2721,20 @@ function buildLocalSymbols2(text) {
   let close = -2;
   let comma = -2;
   let listedClose = -1;
+  const singlePieceBindings = makeSinglePieceBindings2(text);
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index + m[0].length - 1;
     if (close !== -1 && close < parenStart) close = text.indexOf(")", parenStart);
     const parenEnd = close;
     if (parenEnd !== -1) {
-      let end = parenEnd;
       if (parenEnd === listedClose) {
         if (comma !== -1 && comma <= parenStart) comma = text.indexOf(",", parenStart + 1);
-        if (comma !== -1 && comma < parenEnd) end = comma;
+        const end = comma !== -1 && comma < parenEnd ? comma : parenEnd;
+        for (const id of singlePieceBindings(parenStart + 1, end)) symbols.add(id);
+      } else {
+        for (const id of extractBindings2(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
       }
-      for (const id of extractBindings2(text.slice(parenStart + 1, end))) symbols.add(id);
       listedClose = parenEnd;
     }
   }

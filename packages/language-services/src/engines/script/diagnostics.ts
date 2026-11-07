@@ -534,8 +534,80 @@ function stripDefaultOrType(s: string): string {
     if (m === null) return s;
     at = m.index;
   }
-  while (at > 0 && /\s/.test(s[at - 1])) at--;
-  return s.slice(0, at);
+  // trimEnd strips exactly the \s set (WhiteSpace + LineTerminator), natively.
+  return s.slice(0, at).trimEnd();
+}
+
+/**
+ * extractBindings(text.slice(start, end)) for a slice holding no ',' (a single
+ * piece), for a run of calls with ascending starts that share one end: the
+ * first pieces of function heads reaching the same ')' with no ',' between.
+ *
+ * Each such piece is a suffix of the previous one, so doing it per head
+ * re-scanned the shared tail -- the trailing whitespace, the [=:] search, the
+ * last line terminator, the whitespace before the [=:] -- once per head
+ * ('function f('.repeat(9090) + 100k spaces + '=1)' took ~1.3-2 s even with
+ * native scans). What depends only on the end is computed once per end; each
+ * call then costs its own leading whitespace and identifier run. The steps
+ * mirror extractBindings exactly: trim, drop a leading '...',
+ * stripDefaultOrType, trim, identifier test.
+ */
+function makeSinglePieceBindings(text: string): (start: number, end: number) => string[] {
+  let tailEnd = -1; // the end the values below were computed for
+  let trimmedEnd = 0; // end of the piece after trimming trailing whitespace
+  let lastLine = -1; // last line terminator in [first start, trimmedEnd), or -1
+  let cutAfterLine = -1; // first [=:] in (lastLine, trimmedEnd), or -1
+  let cut = -2; // first [=:] at or after the last start with no line terminator in its piece (-1: none)
+  let firstStart = 0;
+  const spaceBefore = new Map<number, number>(); // [=:] index -> start of the whitespace run before it
+  const skipSpace = (from: number, to: number) => {
+    const s = text.slice(from, to);
+    return from + (s.length - s.trimStart().length);
+  };
+  return (start, end) => {
+    if (end !== tailEnd) {
+      tailEnd = end;
+      firstStart = start;
+      trimmedEnd = start + text.slice(start, end).trimEnd().length;
+      const body = text.slice(start, trimmedEnd);
+      const line = Math.max(
+        body.lastIndexOf('\n'), body.lastIndexOf('\r'), body.lastIndexOf('\u2028'), body.lastIndexOf('\u2029'));
+      lastLine = line === -1 ? -1 : start + line;
+      const afterLine = lastLine === -1 ? -1 : text.slice(lastLine + 1, trimmedEnd).search(/[=:]/);
+      cutAfterLine = afterLine === -1 ? -1 : lastLine + 1 + afterLine;
+      cut = -2;
+      spaceBefore.clear();
+    }
+    // trim(), then drop a leading '...'
+    const b0 = skipSpace(start, trimmedEnd);
+    if (b0 >= trimmedEnd) return [];
+    const b = text.startsWith('...', b0) && b0 + 3 <= trimmedEnd ? b0 + 3 : b0;
+    // stripDefaultOrType: the first [=:] after the piece's last line terminator
+    let at: number;
+    if (lastLine >= b) {
+      at = cutAfterLine;
+    } else {
+      if (cut !== -1 && cut < b) {
+        const found = text.slice(b, trimmedEnd).search(/[=:]/);
+        cut = found === -1 ? -1 : b + found;
+      }
+      at = cut;
+    }
+    let stop = trimmedEnd;
+    if (at !== -1) {
+      let space = spaceBefore.get(at);
+      if (space === undefined) {
+        space = firstStart + text.slice(firstStart, at).trimEnd().length;
+        spaceBefore.set(at, space);
+      }
+      stop = Math.max(b, space);
+    }
+    // trim() again, then the identifier test
+    const id = skipSpace(b, stop);
+    if (id >= stop || !isIdentStartCode(text.charCodeAt(id))) return [];
+    for (let i = id + 1; i < stop; i++) if (!isIdentCode(text.charCodeAt(i))) return [];
+    return [text.slice(id, stop)];
+  };
 }
 
 /** Extract identifiers from an array or object destructuring pattern. */
@@ -570,22 +642,26 @@ function buildLocalSymbols(text: string): Set<string> {
   // piece after a later head's first ',' is a piece the earlier head already
   // added -- so a later head adds only its first piece. Before, each slice went
   // through split(',') again: O(heads x commas). The next ')' and ',' are found
-  // with forward-only cursors, so neither is rescanned per head.
+  // with forward-only cursors, so neither is rescanned per head, and a later
+  // head's first piece goes through singlePieceBindings, which shares the work
+  // that depends only on where the piece ends.
   let close = -2; // -2: not looked up yet; -1: no ')' at or after the last lookup
   let comma = -2;
   let listedClose = -1; // the ')' whose whole parameter list has been added
+  const singlePieceBindings = makeSinglePieceBindings(text);
   for (const m of text.matchAll(/\bfunction\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g)) {
     symbols.add(m[1]);
     const parenStart = m.index + m[0].length - 1;
     if (close !== -1 && close < parenStart) close = text.indexOf(')', parenStart);
     const parenEnd = close;
     if (parenEnd !== -1) {
-      let end = parenEnd;
       if (parenEnd === listedClose) {
         if (comma !== -1 && comma <= parenStart) comma = text.indexOf(',', parenStart + 1);
-        if (comma !== -1 && comma < parenEnd) end = comma;
+        const end = comma !== -1 && comma < parenEnd ? comma : parenEnd;
+        for (const id of singlePieceBindings(parenStart + 1, end)) symbols.add(id);
+      } else {
+        for (const id of extractBindings(text.slice(parenStart + 1, parenEnd))) symbols.add(id);
       }
-      for (const id of extractBindings(text.slice(parenStart + 1, end))) symbols.add(id);
       listedClose = parenEnd;
     }
   }

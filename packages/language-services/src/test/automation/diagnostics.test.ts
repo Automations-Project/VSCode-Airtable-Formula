@@ -199,6 +199,20 @@ describe('automationDiagnostics — adversarial input stays fast', () => {
     expect(elapsed).toBeLessThan(2_000);
   });
 
+  // Comma-free heads reaching one ')' re-processed overlapping first pieces, and
+  // stripDefaultOrType walked back over the whitespace before '=' with a regex
+  // test per character: ~18-20 s at the cap.
+  it.each([
+    ["'function f('.repeat(9_090) + ' '.repeat(100_000) + '=1)'", () => 'function f('.repeat(9_090) + ' '.repeat(100_000) + '=1)'],
+    ["'function f('.repeat(9_090) + '\\n'.repeat(100_000) + '=1)'", () => 'function f('.repeat(9_090) + '\n'.repeat(100_000) + '=1)'],
+    ["'function f('.repeat(9_090) + '\\t'.repeat(100_000) + '=1)'", () => 'function f('.repeat(9_090) + '\t'.repeat(100_000) + '=1)'],
+    ["'function f('.repeat(18_181) + '=1)'", () => 'function f('.repeat(18_181) + '=1)'],
+  ])('finishes %s in under 2 s', (_label, make) => {
+    const { diags, elapsed } = timed(make());
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
   it('a paren-arrow default value does not hide the earlier parameters', () => {
     const code = 'const process = (records, log = (m) => console.log(m)) => records.map(r => log(r.id));';
     expect(automationDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
