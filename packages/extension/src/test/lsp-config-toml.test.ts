@@ -35,7 +35,7 @@ describe('unconfigureMcpToml preserves user config', () => {
       '\n[mcp_servers.some-other-server]\ntype = "stdio"\ncommand = "other"\nargs = ["--flag"]\n',
     );
 
-    await unconfigureMcpToml(cfg, K, N, E);
+    await unconfigureMcpToml(cfg, K, N);
     const out = fs.readFileSync(cfg, 'utf8');
 
     expect(out).toContain('[mcp_servers.some-other-server]');
@@ -47,7 +47,7 @@ describe('unconfigureMcpToml preserves user config', () => {
   it('keeps config that sits ABOVE our block', async () => {
     fs.writeFileSync(cfg, 'model = "gpt-5"\n\n[model_providers.openai]\nbase_url = "https://x"\n');
     await configureMcpToml(cfg, K, N, E);
-    await unconfigureMcpToml(cfg, K, N, E);
+    await unconfigureMcpToml(cfg, K, N);
     const out = fs.readFileSync(cfg, 'utf8');
 
     expect(out).toContain('model = "gpt-5"');
@@ -61,7 +61,7 @@ describe('unconfigureMcpToml preserves user config', () => {
     // cut the user's value in half.
     fs.writeFileSync(cfg, 'matrix = [\n[1, 2],\n[3, 4],\n]\n');
     await configureMcpToml(cfg, K, N, E);
-    await unconfigureMcpToml(cfg, K, N, E);
+    await unconfigureMcpToml(cfg, K, N);
     const out = fs.readFileSync(cfg, 'utf8');
 
     expect(out).toContain('matrix = [');
@@ -75,13 +75,13 @@ describe('unconfigureMcpToml preserves user config', () => {
     fs.writeFileSync(cfg, original);
     await configureMcpToml(cfg, K, N, E);
     expect(await readMcpTomlEntry(cfg, K, N)).not.toBeNull();
-    await unconfigureMcpToml(cfg, K, N, E);
+    await unconfigureMcpToml(cfg, K, N);
     expect(fs.readFileSync(cfg, 'utf8').trim()).toBe(original.trim());
   });
 
   it('is a no-op when we were never configured', async () => {
     fs.writeFileSync(cfg, 'model = "gpt-5"\n');
-    await unconfigureMcpToml(cfg, K, N, E);
+    await unconfigureMcpToml(cfg, K, N);
     expect(fs.readFileSync(cfg, 'utf8')).toBe('model = "gpt-5"\n');
   });
 });
@@ -183,4 +183,11 @@ describe('configureMcpToml keeps everything that is not ours, byte for byte', ()
     await unconfigureMcpToml(cfg, K, N);
     expect(fs.readFileSync(cfg, 'utf8')).toBe('model = "gpt-5"\r\n\r\n[mcp_servers.other]\r\ncommand = "x"\r\n');
   });
+});
+
+it('configureMcpToml rejects when the config path cannot be read, and writes nothing', async () => {
+  fs.mkdirSync(cfg); // a directory at the config path: readFile fails with EISDIR
+  await expect(configureMcpToml(cfg, K, N, E)).rejects.toThrow();
+  expect(fs.statSync(cfg).isDirectory()).toBe(true);
+  expect(fs.readdirSync(dir)).toEqual(['config.toml']);
 });

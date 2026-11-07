@@ -180,7 +180,13 @@ export async function configureMcpToml(
   configPath: string, serversKey: string, name: string, entry: Record<string, unknown>,
 ): Promise<void> {
   let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
+  try {
+    existing = await fs.promises.readFile(configPath, 'utf8');
+  } catch (err) {
+    // Only a missing file is an empty one: EACCES/EBUSY/EISDIR must not turn into
+    // an overwrite of the user's whole config with just our block.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
   const eol = existing.includes('\r\n') ? '\r\n' : '\n';
   const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
   const block = renderTomlServer(serversKey, name, entry).replace(/\n/g, eol);
