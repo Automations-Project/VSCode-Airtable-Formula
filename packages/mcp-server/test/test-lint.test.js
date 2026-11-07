@@ -80,6 +80,14 @@ describe('lintAirtableCode', () => {
     assert.equal(r.language, 'script');
     assert.ok(elapsed < 3_000, `took ${elapsed.toFixed(0)} ms`);
   });
+
+  it('input deep enough to overflow the stack gets a clear error, and the next call still works', () => {
+    assert.throws(
+      () => lintAirtableCode({ language: 'formula', text: '('.repeat(150_000) }),
+      (e) => e.message === 'input is too deeply nested to analyse',
+    );
+    assert.equal(lintAirtableCode({ language: 'formula', text: 'IF(1,2,3)' }).clean, true);
+  });
 });
 
 describe('lint_airtable_code wiring', () => {
@@ -90,6 +98,10 @@ describe('lint_airtable_code wiring', () => {
     assert.ok(handlerStart > 0, 'handler present');
     const handlerBody = src.slice(handlerStart, src.indexOf('\n  },', handlerStart));
     assert.equal(/\b(auth|client)\./.test(handlerBody), false, 'handler must not touch auth or client');
+    const defStart = src.indexOf("name: 'lint_airtable_code'");
+    const definition = src.slice(defStart, src.indexOf('\n  },', defStart));
+    assert.match(definition, /text: \{ type: 'string', maxLength: LINT_MAX_TEXT_LENGTH,/, 'the text cap is in the schema');
+    assert.equal(MAX_TEXT_LENGTH, 200_000, 'the description promises 200000');
     const cfg = readFileSync(new URL('../src/tool-config.js', import.meta.url), 'utf8');
     assert.match(cfg, /lint_airtable_code:\s*'read'/);
   });

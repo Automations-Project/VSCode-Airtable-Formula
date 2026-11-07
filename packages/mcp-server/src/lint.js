@@ -26,7 +26,7 @@ export function lintAirtableCode({ language, text }) {
   }
 
   const { text: body, offset } = stripHeader(text, language);
-  const all = ENGINES[language](body).map((d) => {
+  const all = analyse(language, body).map((d) => {
     const out = {
       severity: SEVERITY[d.severity] ?? 'info',
       line: d.range.start.line + 1 + offset,
@@ -51,4 +51,17 @@ export function lintAirtableCode({ language, text }) {
   };
   if (all.length > MAX_DIAGNOSTICS) result.truncated = all.length;
   return result;
+}
+
+function analyse(language, body) {
+  try {
+    return ENGINES[language](body);
+  } catch (e) {
+    // The formula parser recurses once per nesting level, so ~125k unbalanced
+    // '(' overflow the stack. Say what is wrong instead of leaking V8's message.
+    if (e instanceof RangeError && e.message.includes('call stack')) {
+      throw new Error('input is too deeply nested to analyse');
+    }
+    throw e;
+  }
 }

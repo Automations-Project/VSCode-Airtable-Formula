@@ -170,7 +170,7 @@ const headerSafe = (s) => String(s).replace(/[\r\n]+/g, ' ').replace(/"/g, "'");
 import { stripHeader } from './formula-header.js';
 import { formulaRefsToNames, buildFieldNameMap } from './formula-refs.js';
 import { uploadAttachmentsByUrl } from './attachments.js';
-import { lintAirtableCode } from './lint.js';
+import { lintAirtableCode, MAX_TEXT_LENGTH as LINT_MAX_TEXT_LENGTH } from './lint.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -693,7 +693,7 @@ SELECT CHOICES:
       type: 'object',
       properties: {
         language: { type: 'string', enum: ['formula', 'script', 'automation'], description: 'Which engine to use: "formula" for an Airtable formula, "script" for a Scripting-extension script, "automation" for an automation "Run script" action' },
-        text: { type: 'string', description: 'The code to check, at most 200000 characters. Pass the file content as-is; an AT: header is skipped.' },
+        text: { type: 'string', maxLength: LINT_MAX_TEXT_LENGTH, description: 'The code to check, at most 200000 characters. Pass the file content as-is; an AT: header is skipped.' },
       },
       required: ['language', 'text'],
     },
