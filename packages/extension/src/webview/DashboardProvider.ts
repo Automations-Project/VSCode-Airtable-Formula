@@ -1330,6 +1330,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             if (idx >= 0) cfg.custom[idx] = def; else cfg.custom.push(def);
           }
         });
+        await this.refreshSkillRecipes();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
@@ -1350,6 +1351,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         await this._writePromptConfig(cfg => {
           cfg.custom = ((cfg.custom ?? []) as { name: string }[]).filter(p => p.name !== msg.name);
         });
+        await this.refreshSkillRecipes();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
@@ -1370,6 +1372,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         await this._writePromptConfig(cfg => {
           if (cfg.overrides) delete cfg.overrides[msg.name];
         });
+        await this.refreshSkillRecipes();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
@@ -1747,6 +1750,24 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
   private async _computePromptsState(): Promise<import('@airtable-formula/shared').PromptsState> {
     return { prompts: await readMergedPrompts(os.homedir()) };
+  }
+
+  /**
+   * The skill carries the prompts as recipes (references/prompts.md), so a prompt edit
+   * re-renders them, but only where the skill is already installed: saving a prompt must
+   * never install it. Problems become a warning; they never fail the prompt action.
+   */
+  private async refreshSkillRecipes(): Promise<void> {
+    try {
+      const env = await skillEnv(this.context);
+      const scope = getSettings().ai.installScope;
+      const clients = await listSkillClients(scope, env);
+      if (!clients.some(c => c.status === 'installed' || c.status === 'outdated')) { return; }
+      const { failed } = await installSkill(scope, env);
+      warnSkillProblems(failed);
+    } catch (err) {
+      warnSkillProblems([{ dir: 'references/prompts.md', message: err instanceof Error ? err.message : String(err) }]);
+    }
   }
 
   private async _writePromptConfig(mutate: (cfg: { overrides: Record<string, unknown>; custom: unknown[] }) => void): Promise<void> {

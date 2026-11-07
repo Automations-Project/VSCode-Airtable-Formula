@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
+import { BUILTIN_PROMPT_DEFS } from '../mcp/prompt-defs.js';
 
 const workspace = vi.hoisted(() => ({
   isTrusted: true,
@@ -27,8 +28,15 @@ describe('skillEnv', () => {
       skillSourceDir: path.join('/ext', 'dist', 'skills', 'airtable-formula'),
       detectedIdes: ['cursor'],
       xdgConfigHome: process.env.XDG_CONFIG_HOME,
-      prompts: { merged: [], builtins: [] },   // filled in by the next change
+      prompts: { merged: expect.any(Array), builtins: BUILTIN_PROMPT_DEFS },
     });
+  });
+
+  it('carries the built-in prompts and the merged list (built-ins plus the user edits)', async () => {
+    const { prompts } = await skillEnv(context);
+    expect(prompts.builtins).toEqual(BUILTIN_PROMPT_DEFS);
+    expect(prompts.merged.length).toBeGreaterThanOrEqual(BUILTIN_PROMPT_DEFS.length);
+    expect(prompts.merged.map(p => p.name)).toEqual(expect.arrayContaining(BUILTIN_PROMPT_DEFS.map(p => p.name)));
   });
 
   it('has no workspace root in Restricted Mode, so project scope never writes into an untrusted repository', async () => {

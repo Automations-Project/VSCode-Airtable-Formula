@@ -13,6 +13,9 @@ export function PromptReconnectDisclosure() {
         <li><strong>Claude Code</strong>: restart the session or run <code>/mcp</code></li>
         <li><strong>Claude Desktop</strong>: restart the app</li>
       </ul>
+      <p className="prompt-hint">
+        Clients that do not show MCP prompts get the same recipes through the AI skill (Setup tab); they refresh when you save here.
+      </p>
     </Disclosure>
   );
 }

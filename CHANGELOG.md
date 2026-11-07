@@ -6,6 +6,16 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added - Prompt recipes in the AI skill (2026-11-07)
+
+- **The AI skill carries your MCP prompts.** Clients that do not show MCP prompts (most of the 70+
+  skill clients) now get the same recipes as `references/prompts.md` inside the installed skill: the
+  10 built-ins, plus your own edits and custom prompts under the `global` scope (`project` scope gets
+  the built-ins only, since that folder can end up in a repository others read). The file is
+  generated at install time from the same merge the Prompts tab uses. Saving, deleting or resetting a
+  prompt re-renders it everywhere the skill is already installed or outdated; it never installs the
+  skill, and a failed refresh shows a warning without failing the prompt action.
+
 ### Added — AI skill installer (2026-11-06)
 
 **Added**
