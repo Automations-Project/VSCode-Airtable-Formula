@@ -147,7 +147,7 @@ function deepestObject(tree: jsonc.Node, path: readonly string[]): { node: jsonc
   return undefined;
 }
 
-/** Exactly one block comment that runs to the end of the text: `/* ... */` and nothing after it. */
+/** Exactly one block comment that runs to the end of the text, with nothing after its closing delimiter. */
 function isOneBlockComment(rest: string): boolean {
   return rest.startsWith('/*') && rest.endsWith('*/') && rest.length >= 4 && !rest.slice(2, -2).includes('*/');
 }
