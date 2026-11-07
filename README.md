@@ -67,7 +67,7 @@
 | **Automation Editor** | Completions, hover docs, diagnostics | `.ata`, `.automation` |
 | **MCP Server (73 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
 | **Language Server (LSP)** | Standalone multi-editor support — Neovim, Helix, OpenCode | All above |
-| **IDE Auto-Setup** | One-click MCP config for Cursor, Windsurf, Claude Desktop, Cline, Amp | — |
+| **IDE Auto-Setup** | One-click MCP config for 23 AI clients (Cursor, Windsurf, Claude Desktop, Claude Code, Cline, Amp, Codex, Gemini CLI and more) | — |
 | **AI Skill** | One Airtable skill folder (rules, function reference, MCP tool guide, workflows) installed into 70+ AI coding clients | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
 | **Tool Profiles** | `read-only` (11 tools) / `safe-write` (55 tools) / `full` (73 tools) / `custom` permission scopes | — |
@@ -130,7 +130,7 @@ This is a coverage map, not a "pick one" decision — the two servers are comple
 | **Tool profiles & per-tool toggles** | ❌ | ✅ read-only (11) / safe-write (55) / full (73) / custom |
 | **Destructive-action safety guards** | Relies on token scopes | ✅ `expectedName` match, dependency summary, `force` flag |
 | **Batch record create limit** | 10 / request | Uses the same Airtable limit; no added restriction |
-| **VS Code / Cursor / Windsurf / Cline / Amp one-click install** | Manual JSON edit per IDE | ✅ One click via the companion extension |
+| **One-click install for 23 AI clients (Cursor, Windsurf, Claude Desktop, Claude Code, Cline, Amp, Codex, Gemini CLI and more)** | Manual JSON edit per IDE | ✅ One click via the companion extension |
 | **Formula editor with IntelliSense** | ❌ | ✅ (VS Code extension) |
 | **Credentials storage** | You manage the PAT | OS keychain, auto-refresh |
 | **Plan requirement** | Airtable plan with API access + token scopes | Any plan you can log into |
@@ -247,15 +247,19 @@ See [`packages/lsp-server/README.md`](packages/lsp-server/README.md) for per-edi
 
 ## Supported IDEs
 
-The extension auto-configures MCP for all major AI-enabled editors:
+The extension auto-configures MCP for 23 AI clients, among them:
 
 <div align="center">
 
-| <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/claude.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/claude-code.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/cursor.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/windsurf.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/cline.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/amp.svg" width="28" /> |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| Claude Desktop | Claude Code | Cursor | Windsurf | Cline | Amp |
+| <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/claude.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/claude-code.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/cursor.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/windsurf.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/cline.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/amp.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/codex-cli.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/opencode.svg" width="28" /> | <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/webview/src/assets/icons/zed.svg" width="28" /> |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Claude Desktop | Claude Code | Cursor | Windsurf | Cline | Amp | Codex CLI | OpenCode | Zed |
 
 </div>
+
+Also supported: Windsurf Next, Antigravity, Factory Droid, fx, Gemini CLI, GitHub Copilot CLI, Grok Build, Junie, Kilo Code, Kimi Code, Kiro CLI, Mastra Code, MCPorter and Pi.
+
+VS Code itself needs no config file, because the extension registers the server there. Only global config files are written, and never one for a client that is not on this machine. The client table comes from [`neondatabase/add-mcp`](https://github.com/neondatabase/add-mcp) (Apache-2.0); see [`packages/extension/THIRD_PARTY_NOTICES.md`](packages/extension/THIRD_PARTY_NOTICES.md).
 
 **Don't use VS Code?** Use the standalone MCP server directly:
 

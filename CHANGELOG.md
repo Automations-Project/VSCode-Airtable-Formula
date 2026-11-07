@@ -6,6 +6,57 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added — MCP clients from add-mcp (2026-11-07)
+
+**Added**
+
+- **23 MCP clients, set up from one table.** The extension now configures MCP for 23 clients from
+  a table ported from [`neondatabase/add-mcp`](https://github.com/neondatabase/add-mcp)
+  (Apache-2.0, pinned by commit; the notice is in `packages/extension/THIRD_PARTY_NOTICES.md`).
+  13 are new: Antigravity, Factory Droid, fx, Gemini CLI, GitHub Copilot CLI, Grok Build, Junie,
+  Kilo Code, Kimi Code, Kiro CLI, Mastra Code, MCPorter and Pi. Zed is back as an MCP client
+  (`context_servers`). Only each client's global config file is written, and a file is never
+  created for a client that is not on this machine. VS Code itself is not in the table, because the
+  extension registers the server there. Goose and Hermes (YAML configs) are not supported yet.
+- **Config files with comments are edited in place.** JSON configs are changed through
+  `jsonc-parser`, so your comments, formatting and key order stay. A file that does not parse is
+  left untouched, and the error names the file, line and column.
+- **A collapsed "N more supported clients" list.** Clients not found on this machine sit in it
+  with a **Docs** button each, instead of a card. A client without a vendored logo gets a
+  monogram.
+- **A weekly drift check.** A scheduled GitHub Actions run compares the table with upstream and
+  fails with a report when add-mcp has moved. It never runs on pull requests.
+  `pnpm check:mcp-clients` does the offline half in `pnpm build` and `pnpm test`.
+
+**Changed — migration**
+
+The next VS Code start moves these for a client that was already set up (or press **Update** on its
+card). Nothing else needs doing.
+
+- **Amp:** our entry moves from the nested `mcp.servers`, which Amp never read, to
+  `amp.mcpServers`.
+- **OpenCode:** `command` becomes one array and `env` becomes `environment` (with `enabled: true`
+  in V1 files; V2 files, which use `mcp.servers`, get the V2 entry). `opencode.jsonc` is used when
+  it exists, and our leftover in `opencode.json` is removed. The official Airtable entry gets
+  OpenCode's `remote` shape.
+- **Codex CLI:** the table now carries the same launcher and environment as every other client
+  and follows `mcp.serverSource`, instead of `npx` with no environment. `type = "stdio"` is gone.
+  Update replaces the table instead of keeping the old one, and CRLF files no longer get a
+  duplicate table.
+- **Cline:** the **Cline** card keeps writing `~/.cline/data/settings/cline_mcp_settings.json`, the
+  one file Cline 4 and later read from the VS Code extension, the CLI and JetBrains. It still
+  detects Cline by `~/.cline`, and now also by the VS Code extension's
+  `globalStorage/saoudrizwan.claude-dev/settings` folder. There is no separate Cline CLI card.
+- **Claude Desktop on Linux:** `~/.config/Claude/claude_desktop_config.json` (under
+  `XDG_CONFIG_HOME` when it is set).
+- **The official Airtable entry is matched only by its URL.** An `airtable` server of your own is
+  never read, replaced or removed as ours.
+- **One broken config file no longer stops the rest.** A file that does not parse fails that client
+  only. **Setup all detected editors** still sets up the others and warns naming the client; the
+  start-up checks do the same and write the failure to the log.
+- **New clients detected on this machine show Needs setup** until you press **Setup all detected
+  editors** (or **Set up** on the card). Nothing is written to them unasked.
+
 ### Added — `lint_airtable_code`, offline checks for formulas and scripts (2026-11-07)
 
 **Added**
