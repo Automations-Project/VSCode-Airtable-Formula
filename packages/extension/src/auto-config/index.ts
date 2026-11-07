@@ -257,13 +257,20 @@ export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string, de
     // The write would replace whatever holds the name there; a server of the user's own is not
     // ours to replace. Checked inside the writer's file lock, so nothing can slip in between.
     if (existing !== undefined && !(isRecord(existing) && isOfficialEntry(existing))) {
-      throw new Error(`${row.label} already has an "airtable" MCP server that is not Airtable's official one; rename it first`);
+      throw new Error(`${row.label} already has an "airtable" MCP server that is not Airtable's official one (${describeForeign(existing)}); rename it first`);
     }
     return buildOfficialAirtableEntry(row, pat, { native });
   }, deps, isOfficialEntry);
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** What the refusal found under "airtable": the url it points at, so the user knows which server it is. */
+function describeForeign(existing: unknown): string {
+  if (!isRecord(existing)) return 'it is not a server entry';
+  const url = [existing.url, existing.serverUrl, existing.httpUrl].find((u): u is string => typeof u === 'string');
+  return url ? `it points at ${url}` : 'it has no url';
+}
 
 export async function unconfigureOfficialAirtableMcp(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = officialRowFor(ideId);

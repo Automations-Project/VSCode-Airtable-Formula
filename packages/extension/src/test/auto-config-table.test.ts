@@ -452,11 +452,30 @@ describe('the official entry is written, read and removed on the eight official 
     write(fileOf(row), JSON.stringify({ mcpServers: { airtable: { type: 'http', url: 'https://example.test/mcp' }, other: { command: 'x' } } }, null, 2));
     const before = fs.readFileSync(fileOf(row), 'utf8');
     await expect(configureOfficialAirtableMcp('cursor', 'patX', deps))
-      .rejects.toThrow('Cursor already has an "airtable" MCP server that is not Airtable\'s official one; rename it first');
+      .rejects.toThrow('Cursor already has an "airtable" MCP server that is not Airtable\'s official one (it points at https://example.test/mcp); rename it first');
     expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(before);
     write(fileOf(row), JSON.stringify({ mcpServers: { airtable: { url: OFFICIAL_URL } } }));
     await configureOfficialAirtableMcp('cursor', 'patX', deps);
     expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers.airtable).toEqual(buildOfficialAirtableEntry(row, 'patX'));
+  });
+
+  it('the refusal says what it found: no url, or not a server entry at all', async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { airtable: { command: 'my-proxy' } } }));
+    await expect(configureOfficialAirtableMcp('cursor', 'patX', deps)).rejects.toThrow('(it has no url)');
+    write(fileOf(row), JSON.stringify({ mcpServers: { airtable: 'oops' } }));
+    await expect(configureOfficialAirtableMcp('cursor', 'patX', deps)).rejects.toThrow('(it is not a server entry)');
+    expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(JSON.stringify({ mcpServers: { airtable: 'oops' } }));
+  });
+
+  // The Setup tab's official list is the webview's copy of the table's `official` rows.
+  it("the webview's OFFICIAL_CLIENTS lists exactly the table's official rows, with their labels", () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../../../webview/src/tabs/setup/OfficialAirtableSection.tsx'), 'utf8');
+    const block = /const OFFICIAL_CLIENTS[^=]*=\s*\[([\s\S]*?)\];/.exec(source)?.[1] ?? '';
+    const listed = [...block.matchAll(/\{\s*id:\s*'([^']+)',\s*label:\s*'([^']+)'\s*\}/g)].map(m => `${m[1]} = ${m[2]}`);
+    expect(listed).toHaveLength(OFFICIAL_IDS.length);
+    expect(listed.sort()).toEqual(MCP_CLIENTS.filter(r => r.official).map(r => `${r.id} = ${r.label}`).sort());
   });
 
   it('helix and neovim: no official entry to read or remove, and configuring it is refused', async () => {
