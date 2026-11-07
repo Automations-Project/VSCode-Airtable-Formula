@@ -162,4 +162,35 @@ describe('automationDiagnostics — adversarial input stays fast', () => {
     expect(diags.filter(d => d.code === 'missing-await')).toHaveLength(28_000);
     expect(elapsed).toBeLessThan(2_000);
   });
+
+  // Identifier regexes: `$` is an identifier char but not a \w one, so \b held at
+  // every a/$ transition and each attempt scanned the rest of the run (~90 s at the cap).
+  it("finishes 'a$'.repeat(100_000) in under 2 s", () => {
+    const { diags, elapsed } = timed('a$'.repeat(100_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  // [^\]};]* in the const/let/var destructuring pattern rescanned to the same stop.
+  it("finishes 'const ['.repeat(28_000) in under 2 s", () => {
+    const { diags, elapsed } = timed('const ['.repeat(28_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  // Many for-heads whose destructuring patterns share one `]`, then a long whitespace
+  // run the of|in tail scans and fails on. The tail used to be retried per head;
+  // at this size that cost about 1.1-1.6 s, so the bound is tighter than 2 s to catch it.
+  it('tries the for-of tail once per binding end, not once per head', () => {
+    const { diags, elapsed } = timed('for(let ['.repeat(11_000) + ']' + ' '.repeat(100_000) + 'x');
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  // \s*[=:].*$ in extractBindings retried \s* from every position of a whitespace run.
+  it('finishes a 200k-character whitespace run inside arrow params in under 2 s', () => {
+    const { diags, elapsed } = timed('(a' + ' '.repeat(199_990) + 'b) =>');
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
 });

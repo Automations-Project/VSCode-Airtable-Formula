@@ -250,17 +250,22 @@ function checkComments(text: string): LsDiagnostic[] {
     });
   }
 
-  const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
-
-  while ((match = blockCommentRegex.exec(text)) !== null) {
+  // The matches of /\/\*[\s\S]*?\*\//g, in linear time. As a regex, every `/*`
+  // with no `*/` after it rescanned to the end of the text ('/* '.repeat(n) was
+  // O(n^2)); but if the first such `/*` finds no `*/`, no later one can.
+  for (let start = text.indexOf('/*'); start !== -1; ) {
+    const close = text.indexOf('*/', start + 2);
+    if (close === -1) break;
+    const end = close + 2;
     diagnostics.push({
-      range: makeRange(text, match.index, match.index + match[0].length),
+      range: makeRange(text, start, end),
       message:
         'Comments are not allowed in Airtable formulas. This will cause an error when used in Airtable.',
       severity: LsSeverity.Warning,
       code: 'no-comments',
       source: 'airtable-formula',
     });
+    start = text.indexOf('/*', end);
   }
 
   return diagnostics;
@@ -595,15 +600,99 @@ function checkCommonTypos(text: string): LsDiagnostic[] {
   return diagnostics;
 }
 
+/**
+ * The matches of /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g, in order, in
+ * linear time: index, the whole match and the divisor (group 2).
+ *
+ * As a regex it was O(n^2) twice over: \{[^}]+ rescanned to the same `}` from
+ * every `{` before it ('{'.repeat(n)), and \d+ was retried from every digit of a
+ * run ('1'.repeat(n)). Every `{` before the same `}` gives the same field-ref
+ * end, and every digit of a run the same number end, and what follows depends
+ * only on that end -- so it is computed once per end, while positions are still
+ * tried in the regex's order. Neither alternative can backtrack to a different
+ * end: a shorter [^}]+ or \d+ is followed by a character that \} or \s*\/
+ * cannot match.
+ */
+function divisionMatches(text: string): Array<{ index: number; match: string; divisor: string }> {
+  const found: Array<{ index: number; match: string; divisor: string }> = [];
+  const len = text.length;
+  const nextClose = new Int32Array(len + 1); // first '}' at or after i, or -1
+  nextClose[len] = -1;
+  for (let i = len - 1; i >= 0; i--) nextClose[i] = text[i] === '}' ? i : nextClose[i + 1];
+
+  const isDigit = (i: number) => {
+    const c = text.charCodeAt(i);
+    return c >= 48 && c <= 57;
+  };
+  // End of \{[^}]+\} at a '{', or -1.
+  const fieldRefEnd = (i: number) => {
+    const close = nextClose[i + 1];
+    return close > i + 1 ? close + 1 : -1;
+  };
+  const space = /\s*/y;
+  const skipSpace = (i: number) => {
+    space.lastIndex = i;
+    space.exec(text);
+    return space.lastIndex;
+  };
+  // \s*\/\s*(\{[^}]+\}) at i.
+  const divisorAt = (i: number): { start: number; end: number } | null => {
+    let j = skipSpace(i);
+    if (text[j] !== '/') return null;
+    j = skipSpace(j + 1);
+    if (text[j] !== '{') return null;
+    const end = fieldRefEnd(j);
+    return end === -1 ? null : { start: j, end };
+  };
+
+  const divisorByDividendEnd = new Map<number, { start: number; end: number } | null>();
+  let runEnd = -1; // end of the digit run holding the last digit position seen
+  let numberEnd = -1; // \d+(?:\.\d+)? end for that run
+  let i = 0;
+  while (i < len) {
+    let dividendEnd = -1;
+    if (text[i] === '{') {
+      dividendEnd = fieldRefEnd(i);
+    } else if (isDigit(i)) {
+      if (i >= runEnd) {
+        runEnd = i + 1;
+        while (isDigit(runEnd)) runEnd++;
+        numberEnd = runEnd;
+        if (text[runEnd] === '.' && isDigit(runEnd + 1)) {
+          numberEnd = runEnd + 2;
+          while (isDigit(numberEnd)) numberEnd++;
+        }
+      }
+      dividendEnd = numberEnd;
+    }
+    if (dividendEnd !== -1) {
+      let divisor = divisorByDividendEnd.get(dividendEnd);
+      if (divisor === undefined) {
+        divisor = divisorAt(dividendEnd);
+        divisorByDividendEnd.set(dividendEnd, divisor);
+      }
+      if (divisor) {
+        found.push({
+          index: i,
+          match: text.slice(i, divisor.end),
+          divisor: text.slice(divisor.start, divisor.end),
+        });
+        i = divisor.end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return found;
+}
+
 function checkDivisionByZero(text: string): LsDiagnostic[] {
   const diagnostics: LsDiagnostic[] = [];
   const exclusionRanges = getExclusionRanges(text);
 
-  // Pattern: field or number divided by a field reference (potential zero)
-  const divisionPattern = /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = divisionPattern.exec(text)) !== null) {
+  // Field or number divided by a field reference (potential zero):
+  // /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g, found in linear time.
+  for (const match of divisionMatches(text)) {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
 
     // Look backwards for an IF( guard that checks for zero
@@ -612,10 +701,10 @@ function checkDivisionByZero(text: string): LsDiagnostic[] {
     const hasGuard = /IF\s*\([^)]*(?:=\s*0|!=\s*0|ISERROR)/i.test(context);
 
     if (!hasGuard) {
-      const divisor = match[2];
+      const divisor = match.divisor;
       diagnostics.push({
-        range: makeRange(text, match.index, match.index + match[0].length),
-        message: `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match[0]})`,
+        range: makeRange(text, match.index, match.index + match.match.length),
+        message: `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match.match})`,
         severity: LsSeverity.Warning,
         code: 'division-by-zero',
         source: 'airtable-formula',
@@ -640,6 +729,29 @@ function checkDivisionByZero(text: string): LsDiagnostic[] {
  * dominates (≥ 60%). The 60% threshold tolerates a handful of sub-IFs inside
  * then-branches that test unrelated conditions.
  */
+/**
+ * c.match(/^(.*?)(?:\s*(?:!=|<=|>=|=|<|>))/)?.[1] ?? null, in linear time. As a
+ * regex, every position of a long whitespace run retried \s* to the end of that
+ * run. The lazy .*? stops at the first k where whitespace and then an operator
+ * follow: the start of the whitespace run before the first operator -- provided
+ * .*? did not have to cross a line terminator to get there.
+ */
+function comparisonLhs(c: string): string | null {
+  let op = 0;
+  while (
+    op < c.length &&
+    !(c[op] === '=' || c[op] === '<' || c[op] === '>' || (c[op] === '!' && c[op + 1] === '='))
+  ) op++;
+  if (op === c.length) return null;
+  let k = op;
+  while (k > 0 && /\s/.test(c[k - 1])) k--;
+  for (let i = 0; i < k; i++) {
+    const ch = c[i];
+    if (ch === '\n' || ch === '\r' || ch === '\u2028' || ch === '\u2029') return null;
+  }
+  return c.slice(0, k);
+}
+
 function isDispatchTablePattern(text: string): boolean {
   const conditions: string[] = [];
 
@@ -676,8 +788,8 @@ function isDispatchTablePattern(text: string): boolean {
 
   const lhsList = conditions
     .map(c => {
-      const m = c.match(/^(.*?)(?:\s*(?:!=|<=|>=|=|<|>))/);
-      return m ? m[1].trim() : '';
+      const lhs = comparisonLhs(c);
+      return lhs !== null ? lhs.trim() : '';
     })
     .filter(Boolean);
 

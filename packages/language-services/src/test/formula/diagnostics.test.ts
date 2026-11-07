@@ -135,3 +135,35 @@ describe('formulaDiagnostics — field names with special characters (2026-07-09
     expect(diags.some(d => d.message.includes('Missing closing bracket'))).toBe(true);
   });
 });
+
+// Each of these regexes was O(n^2) on its shape (5-27 s near the 200k lint cap).
+describe('formulaDiagnostics — adversarial input stays fast', () => {
+  function timed(text: string) {
+    const start = performance.now();
+    const diags = formulaDiagnostics(text);
+    return { diags, elapsed: performance.now() - start };
+  }
+
+  it.each([
+    // division-by-zero: \d+ retried from every digit of a run
+    ["'1'.repeat(200_000)", () => '1'.repeat(200_000)],
+    // division-by-zero: \{[^}]+ rescanned to the same } from every {
+    ["'{'.repeat(100_000)", () => '{'.repeat(100_000)],
+    ["'1/{'.repeat(66_000)", () => '1/{'.repeat(66_000)],
+    // block comments: every unclosed /* rescanned to the end
+    ["'/* '.repeat(66_000)", () => '/* '.repeat(66_000)],
+    // dispatch-table LHS: \s* retried from every position of a whitespace run
+    ["4 nested IFs with 50k-space conditions", () => ('IF(a' + ' '.repeat(49_990) + 'b,').repeat(4)],
+  ])('finishes %s in under 2 s', (_label, make) => {
+    const { diags, elapsed } = timed(make());
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it('still reports the same division and comment diagnostics', () => {
+    // A {field} dividend sits inside an exclusion range, so only the two number dividends count.
+    const codes = formulaDiagnostics('1/{a} + 2.5 / {b} + {c}/{d} /* x */ + 1').map(d => d.code);
+    expect(codes.filter(c => c === 'division-by-zero')).toHaveLength(2);
+    expect(codes.filter(c => c === 'no-comments')).toHaveLength(1);
+  });
+});

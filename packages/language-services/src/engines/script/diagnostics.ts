@@ -357,6 +357,114 @@ function checkMissingAwait(
 // Phase B: scan for unknown bare identifiers before . or (
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Identifier scan: the matches of /\b([a-zA-Z_$][a-zA-Z0-9_$]*)<suffix>/g, in
+// linear time.
+//
+// As a global regex that pattern is O(n^2) on a long identifier run such as
+// 'a$'.repeat(n): `$` is an identifier character but not a \w one, so \b holds
+// at every a/$ transition and each attempt scans to the end of the run before
+// failing. Here each maximal run of identifier characters is visited once.
+// Inside a run the regex can start only where \b holds and the character may
+// begin an identifier; from any such start the identifier extends to the end of
+// the run and the suffix is tried at the same place, so the leftmost start
+// decides the whole run. Each suffix used here is \s* followed by a character
+// that is neither whitespace nor an identifier character, so a shorter
+// identifier (backtracking into the run) could never have matched instead.
+// ---------------------------------------------------------------------------
+
+/** [a-zA-Z0-9_]: what \b treats as a word character. NaN (out of range) is not. */
+function isWordCode(c: number): boolean {
+  return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+}
+
+/** [a-zA-Z_$]: a character that may begin an identifier. */
+function isIdentStartCode(c: number): boolean {
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36;
+}
+
+/** [a-zA-Z0-9_$]: a character that may continue an identifier. */
+function isIdentCode(c: number): boolean {
+  return isWordCode(c) || c === 36;
+}
+
+/**
+ * Group 1 of every match of HEAD([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])TAIL,
+ * in order, as text.matchAll would give it -- in linear time.
+ *
+ * As a regex, [^\]};]* is rescanned from every `[`/`{` it tries up to the same
+ * stop character, so 'const ['.repeat(n) was O(n^2). Here the next stop is
+ * remembered (the queries only move forward). `head` is global and ends in \s+,
+ * so no match can start inside a head match; after a match the head resumes
+ * where it ended, as the regex's lastIndex would. `tail` is sticky or null.
+ * Its outcome depends only on the binding end, which many heads can share (many
+ * `[` before one `]`), so it is tried once per end: otherwise a failing tail
+ * after a long whitespace run was rescanned once per head.
+ */
+function declarationBindings(text: string, head: RegExp, tail: RegExp | null): string[] {
+  const bindings: string[] = [];
+  let stop = -1; // first ] } or ; at or after the last query (text.length: none)
+  const afterTail = new Map<number, number>(); // binding end -> match end, or -1 if the tail fails
+  head.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = head.exec(text)) !== null) {
+    const at = m.index + m[0].length;
+    let end = -1;
+    if (isIdentStartCode(text.charCodeAt(at))) {
+      end = at + 1;
+      while (isIdentCode(text.charCodeAt(end))) end++;
+    } else if (text[at] === '[' || text[at] === '{') {
+      if (stop < at + 1) {
+        stop = at + 1;
+        while (stop < text.length && text[stop] !== ']' && text[stop] !== '}' && text[stop] !== ';') stop++;
+      }
+      if (stop < text.length && text[stop] !== ';') end = stop + 1;
+    }
+    if (end === -1) continue;
+    let matchEnd = end;
+    if (tail) {
+      let after = afterTail.get(end);
+      if (after === undefined) {
+        tail.lastIndex = end;
+        after = tail.test(text) ? tail.lastIndex : -1;
+        afterTail.set(end, after);
+      }
+      if (after === -1) continue;
+      matchEnd = after;
+    }
+    bindings.push(text.slice(at, end));
+    head.lastIndex = matchEnd;
+  }
+  return bindings;
+}
+
+/**
+ * Same index and identifier, in the same order, as
+ * text.matchAll(new RegExp(String.raw`\b([a-zA-Z_$][a-zA-Z0-9_$]*)` + suffix.source, 'g')).
+ * `suffix` must be sticky (y) and of the form \s*<non-identifier, non-space char>.
+ */
+function identifierMatches(text: string, suffix: RegExp): Array<{ index: number; ident: string }> {
+  const found: Array<{ index: number; ident: string }> = [];
+  let resumeAt = 0; // the regex's lastIndex: a match never starts inside the previous one
+  for (const run of text.matchAll(/[a-zA-Z0-9_$]+/g)) {
+    const runEnd = run.index + run[0].length;
+    let start = -1;
+    for (let p = Math.max(run.index, resumeAt); p < runEnd; p++) {
+      const c = text.charCodeAt(p);
+      if (isIdentStartCode(c) && isWordCode(text.charCodeAt(p - 1)) !== isWordCode(c)) {
+        start = p;
+        break;
+      }
+    }
+    if (start === -1) continue;
+    suffix.lastIndex = runEnd;
+    if (!suffix.test(text)) continue;
+    found.push({ index: start, ident: text.slice(start, runEnd) });
+    resumeAt = suffix.lastIndex;
+  }
+  return found;
+}
+
 /**
  * Phase A: Build a set of locally-declared identifiers from the text.
  * Initializes from KNOWN_SAFE. Collects:
@@ -368,8 +476,33 @@ function checkMissingAwait(
 /** Extract simple identifiers from a comma-separated binding list. */
 function extractBindings(str: string): string[] {
   return str.split(',')
-    .map(s => s.trim().replace(/^\.\.\./, '').replace(/\s*[=:].*$/, '').trim())
+    .map(s => stripDefaultOrType(s.trim().replace(/^\.\.\./, '')).trim())
     .filter(s => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+}
+
+/**
+ * s.replace(/\s*[=:].*$/, ''), in linear time. As a regex, every position of a
+ * long whitespace run retried \s* to the end of that run, so '(a' + ' '.repeat(n)
+ * + 'b) =>' was O(n^2). `.*$` (no m flag) must reach the end of s without
+ * crossing a line terminator, so only a [=:] after the last one can match, and
+ * the leftmost match starts at the whitespace run just before the first of those.
+ */
+function stripDefaultOrType(s: string): string {
+  // Native scans only: this runs on every piece of every parameter list, and the
+  // common piece has no [=:] at all.
+  let at = s.search(/[=:]/);
+  if (at === -1) return s;
+  const from =
+    Math.max(s.lastIndexOf('\n'), s.lastIndexOf('\r'), s.lastIndexOf('\u2028'), s.lastIndexOf('\u2029')) + 1;
+  if (at < from) {
+    const after = /[=:]/g;
+    after.lastIndex = from;
+    const m = after.exec(s);
+    if (m === null) return s;
+    at = m.index;
+  }
+  while (at > 0 && /\s/.test(s[at - 1])) at--;
+  return s.slice(0, at);
 }
 
 /** Extract identifiers from an array or object destructuring pattern. */
@@ -382,8 +515,8 @@ function buildLocalSymbols(text: string): Set<string> {
   const symbols = new Set<string>(KNOWN_SAFE);
 
   // const/let/var x or const/let/var [a, b] or const/let/var {a, b}
-  for (const m of text.matchAll(/\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])/g)) {
-    const binding = m[1];
+  // (was /\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])/g)
+  for (const binding of declarationBindings(text, /\b(?:const|let|var)\s+/g, null)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -414,8 +547,8 @@ function buildLocalSymbols(text: string): Set<string> {
   }
 
   // for (const/let/var item of/in ...) or for (const/let/var [a, b] of ...)
-  for (const m of text.matchAll(/\bfor\s*\(\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])\s+(?:of|in)\b/g)) {
-    const binding = m[1];
+  // (was /\bfor\s*\(\s*(?:const|let|var)\s+(<ident>|<destructure>)\s+(?:of|in)\b/g)
+  for (const binding of declarationBindings(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, /\s+(?:of|in)\b/y)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -429,8 +562,9 @@ function buildLocalSymbols(text: string): Set<string> {
   }
 
   // Arrow function params — single param: identifier =>
-  for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
-    if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
+  // (was /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g; see identifierMatches)
+  for (const { ident } of identifierMatches(text, /\s*=>/y)) {
+    if (!JS_KEYWORDS.has(ident)) symbols.add(ident);
   }
 
   // Arrow function params — multi-param: (param1, param2) =>
@@ -460,14 +594,12 @@ function checkUnknownGlobals(
   const diagnostics: LsDiagnostic[] = [];
   const localSymbols = buildLocalSymbols(text);
 
-  // T-03-01: single identifier character-class repetition followed by . or (
-  const identBeforeDotOrParenRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = identBeforeDotOrParenRegex.exec(text)) !== null) {
+  // Identifier followed by . or ( -- the matches of
+  // /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g, found in linear time (identifierMatches).
+  for (const match of identifierMatches(text, /\s*[.(]/y)) {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
 
-    const ident = match[1];
+    const ident = match.ident;
 
     // Skip JS keywords (appear before ( but are not calls)
     if (JS_KEYWORDS.has(ident)) continue;

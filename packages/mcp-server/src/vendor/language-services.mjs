@@ -366,15 +366,18 @@ function checkComments(text) {
       source: "airtable-formula"
     });
   }
-  const blockCommentRegex = /\/\*[\s\S]*?\*\//g;
-  while ((match = blockCommentRegex.exec(text)) !== null) {
+  for (let start = text.indexOf("/*"); start !== -1; ) {
+    const close = text.indexOf("*/", start + 2);
+    if (close === -1) break;
+    const end = close + 2;
     diagnostics.push({
-      range: makeRange(text, match.index, match.index + match[0].length),
+      range: makeRange(text, start, end),
       message: "Comments are not allowed in Airtable formulas. This will cause an error when used in Airtable.",
       severity: 1 /* Warning */,
       code: "no-comments",
       source: "airtable-formula"
     });
+    start = text.indexOf("/*", end);
   }
   return diagnostics;
 }
@@ -632,21 +635,87 @@ function checkCommonTypos(text) {
   }
   return diagnostics;
 }
+function divisionMatches(text) {
+  const found = [];
+  const len = text.length;
+  const nextClose = new Int32Array(len + 1);
+  nextClose[len] = -1;
+  for (let i2 = len - 1; i2 >= 0; i2--) nextClose[i2] = text[i2] === "}" ? i2 : nextClose[i2 + 1];
+  const isDigit = (i2) => {
+    const c = text.charCodeAt(i2);
+    return c >= 48 && c <= 57;
+  };
+  const fieldRefEnd = (i2) => {
+    const close = nextClose[i2 + 1];
+    return close > i2 + 1 ? close + 1 : -1;
+  };
+  const space = /\s*/y;
+  const skipSpace = (i2) => {
+    space.lastIndex = i2;
+    space.exec(text);
+    return space.lastIndex;
+  };
+  const divisorAt = (i2) => {
+    let j = skipSpace(i2);
+    if (text[j] !== "/") return null;
+    j = skipSpace(j + 1);
+    if (text[j] !== "{") return null;
+    const end = fieldRefEnd(j);
+    return end === -1 ? null : { start: j, end };
+  };
+  const divisorByDividendEnd = /* @__PURE__ */ new Map();
+  let runEnd = -1;
+  let numberEnd = -1;
+  let i = 0;
+  while (i < len) {
+    let dividendEnd = -1;
+    if (text[i] === "{") {
+      dividendEnd = fieldRefEnd(i);
+    } else if (isDigit(i)) {
+      if (i >= runEnd) {
+        runEnd = i + 1;
+        while (isDigit(runEnd)) runEnd++;
+        numberEnd = runEnd;
+        if (text[runEnd] === "." && isDigit(runEnd + 1)) {
+          numberEnd = runEnd + 2;
+          while (isDigit(numberEnd)) numberEnd++;
+        }
+      }
+      dividendEnd = numberEnd;
+    }
+    if (dividendEnd !== -1) {
+      let divisor = divisorByDividendEnd.get(dividendEnd);
+      if (divisor === void 0) {
+        divisor = divisorAt(dividendEnd);
+        divisorByDividendEnd.set(dividendEnd, divisor);
+      }
+      if (divisor) {
+        found.push({
+          index: i,
+          match: text.slice(i, divisor.end),
+          divisor: text.slice(divisor.start, divisor.end)
+        });
+        i = divisor.end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return found;
+}
 function checkDivisionByZero(text) {
   const diagnostics = [];
   const exclusionRanges = getExclusionRanges(text);
-  const divisionPattern = /(\{[^}]+\}|\d+(?:\.\d+)?)\s*\/\s*(\{[^}]+\})/g;
-  let match;
-  while ((match = divisionPattern.exec(text)) !== null) {
+  for (const match of divisionMatches(text)) {
     if (isInsideExclusionRange(match.index, exclusionRanges)) continue;
     const lookback = Math.max(0, match.index - 100);
     const context = text.slice(lookback, match.index);
     const hasGuard = /IF\s*\([^)]*(?:=\s*0|!=\s*0|ISERROR)/i.test(context);
     if (!hasGuard) {
-      const divisor = match[2];
+      const divisor = match.divisor;
       diagnostics.push({
-        range: makeRange(text, match.index, match.index + match[0].length),
-        message: `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match[0]})`,
+        range: makeRange(text, match.index, match.index + match.match.length),
+        message: `Potential division by zero. Consider: IF(${divisor}=0, BLANK(), ${match.match})`,
         severity: 1 /* Warning */,
         code: "division-by-zero",
         source: "airtable-formula"
@@ -654,6 +723,18 @@ function checkDivisionByZero(text) {
     }
   }
   return diagnostics;
+}
+function comparisonLhs(c) {
+  let op = 0;
+  while (op < c.length && !(c[op] === "=" || c[op] === "<" || c[op] === ">" || c[op] === "!" && c[op + 1] === "=")) op++;
+  if (op === c.length) return null;
+  let k = op;
+  while (k > 0 && /\s/.test(c[k - 1])) k--;
+  for (let i = 0; i < k; i++) {
+    const ch = c[i];
+    if (ch === "\n" || ch === "\r" || ch === "\u2028" || ch === "\u2029") return null;
+  }
+  return c.slice(0, k);
 }
 function isDispatchTablePattern(text) {
   const conditions = [];
@@ -686,8 +767,8 @@ function isDispatchTablePattern(text) {
   }
   if (conditions.length < 4) return false;
   const lhsList = conditions.map((c) => {
-    const m = c.match(/^(.*?)(?:\s*(?:!=|<=|>=|=|<|>))/);
-    return m ? m[1].trim() : "";
+    const lhs = comparisonLhs(c);
+    return lhs !== null ? lhs.trim() : "";
   }).filter(Boolean);
   if (lhsList.length < 3) return false;
   const counts = /* @__PURE__ */ new Map();
@@ -1716,8 +1797,88 @@ function checkMissingAwait(text, exclusionRanges, newlines) {
   }
   return diagnostics;
 }
+function isWordCode(c) {
+  return c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95;
+}
+function isIdentStartCode(c) {
+  return c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 36;
+}
+function isIdentCode(c) {
+  return isWordCode(c) || c === 36;
+}
+function declarationBindings(text, head, tail) {
+  const bindings = [];
+  let stop = -1;
+  const afterTail = /* @__PURE__ */ new Map();
+  head.lastIndex = 0;
+  let m;
+  while ((m = head.exec(text)) !== null) {
+    const at = m.index + m[0].length;
+    let end = -1;
+    if (isIdentStartCode(text.charCodeAt(at))) {
+      end = at + 1;
+      while (isIdentCode(text.charCodeAt(end))) end++;
+    } else if (text[at] === "[" || text[at] === "{") {
+      if (stop < at + 1) {
+        stop = at + 1;
+        while (stop < text.length && text[stop] !== "]" && text[stop] !== "}" && text[stop] !== ";") stop++;
+      }
+      if (stop < text.length && text[stop] !== ";") end = stop + 1;
+    }
+    if (end === -1) continue;
+    let matchEnd = end;
+    if (tail) {
+      let after = afterTail.get(end);
+      if (after === void 0) {
+        tail.lastIndex = end;
+        after = tail.test(text) ? tail.lastIndex : -1;
+        afterTail.set(end, after);
+      }
+      if (after === -1) continue;
+      matchEnd = after;
+    }
+    bindings.push(text.slice(at, end));
+    head.lastIndex = matchEnd;
+  }
+  return bindings;
+}
+function identifierMatches(text, suffix) {
+  const found = [];
+  let resumeAt = 0;
+  for (const run of text.matchAll(/[a-zA-Z0-9_$]+/g)) {
+    const runEnd = run.index + run[0].length;
+    let start = -1;
+    for (let p = Math.max(run.index, resumeAt); p < runEnd; p++) {
+      const c = text.charCodeAt(p);
+      if (isIdentStartCode(c) && isWordCode(text.charCodeAt(p - 1)) !== isWordCode(c)) {
+        start = p;
+        break;
+      }
+    }
+    if (start === -1) continue;
+    suffix.lastIndex = runEnd;
+    if (!suffix.test(text)) continue;
+    found.push({ index: start, ident: text.slice(start, runEnd) });
+    resumeAt = suffix.lastIndex;
+  }
+  return found;
+}
 function extractBindings(str) {
-  return str.split(",").map((s) => s.trim().replace(/^\.\.\./, "").replace(/\s*[=:].*$/, "").trim()).filter((s) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+  return str.split(",").map((s) => stripDefaultOrType(s.trim().replace(/^\.\.\./, "")).trim()).filter((s) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+}
+function stripDefaultOrType(s) {
+  let at = s.search(/[=:]/);
+  if (at === -1) return s;
+  const from = Math.max(s.lastIndexOf("\n"), s.lastIndexOf("\r"), s.lastIndexOf("\u2028"), s.lastIndexOf("\u2029")) + 1;
+  if (at < from) {
+    const after = /[=:]/g;
+    after.lastIndex = from;
+    const m = after.exec(s);
+    if (m === null) return s;
+    at = m.index;
+  }
+  while (at > 0 && /\s/.test(s[at - 1])) at--;
+  return s.slice(0, at);
 }
 function extractDestructuredBindings(pattern) {
   const inner = pattern.replace(/^[\[{]/, "").replace(/[\]}]$/, "");
@@ -1725,8 +1886,7 @@ function extractDestructuredBindings(pattern) {
 }
 function buildLocalSymbols(text) {
   const symbols = new Set(KNOWN_SAFE);
-  for (const m of text.matchAll(/\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])/g)) {
-    const binding = m[1];
+  for (const binding of declarationBindings(text, /\b(?:const|let|var)\s+/g, null)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -1747,8 +1907,7 @@ function buildLocalSymbols(text) {
   for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
     symbols.add(m[1]);
   }
-  for (const m of text.matchAll(/\bfor\s*\(\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])\s+(?:of|in)\b/g)) {
-    const binding = m[1];
+  for (const binding of declarationBindings(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, /\s+(?:of|in)\b/y)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -1758,8 +1917,8 @@ function buildLocalSymbols(text) {
   for (const m of text.matchAll(/\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g)) {
     symbols.add(m[1]);
   }
-  for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
-    if (!JS_KEYWORDS.has(m[1])) symbols.add(m[1]);
+  for (const { ident } of identifierMatches(text, /\s*=>/y)) {
+    if (!JS_KEYWORDS.has(ident)) symbols.add(ident);
   }
   for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
     for (const id of extractBindings(m[1])) symbols.add(id);
@@ -1769,11 +1928,9 @@ function buildLocalSymbols(text) {
 function checkUnknownGlobals(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const localSymbols = buildLocalSymbols(text);
-  const identBeforeDotOrParenRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g;
-  let match;
-  while ((match = identBeforeDotOrParenRegex.exec(text)) !== null) {
+  for (const match of identifierMatches(text, /\s*[.(]/y)) {
     if (isInsideExclusionRange2(match.index, exclusionRanges)) continue;
-    const ident = match[1];
+    const ident = match.ident;
     if (JS_KEYWORDS.has(ident)) continue;
     if (localSymbols.has(ident)) continue;
     let precIdx = match.index - 1;
@@ -2260,16 +2417,95 @@ var KNOWN_SAFE2 = /* @__PURE__ */ new Set([
   "fetch"
 ]);
 function extractBindings2(str) {
-  return str.split(",").map((s) => s.trim().replace(/^\.\.\./, "").replace(/\s*[=:].*$/, "").trim()).filter((s) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+  return str.split(",").map((s) => stripDefaultOrType2(s.trim().replace(/^\.\.\./, "")).trim()).filter((s) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s));
+}
+function stripDefaultOrType2(s) {
+  let at = s.search(/[=:]/);
+  if (at === -1) return s;
+  const from = Math.max(s.lastIndexOf("\n"), s.lastIndexOf("\r"), s.lastIndexOf("\u2028"), s.lastIndexOf("\u2029")) + 1;
+  if (at < from) {
+    const after = /[=:]/g;
+    after.lastIndex = from;
+    const m = after.exec(s);
+    if (m === null) return s;
+    at = m.index;
+  }
+  while (at > 0 && /\s/.test(s[at - 1])) at--;
+  return s.slice(0, at);
 }
 function extractDestructuredBindings2(pattern) {
   const inner = pattern.replace(/^[\[{]/, "").replace(/[\]}]$/, "");
   return extractBindings2(inner);
 }
+function isWordCode2(c) {
+  return c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95;
+}
+function isIdentStartCode2(c) {
+  return c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 36;
+}
+function isIdentCode2(c) {
+  return isWordCode2(c) || c === 36;
+}
+function declarationBindings2(text, head, tail) {
+  const bindings = [];
+  let stop = -1;
+  const afterTail = /* @__PURE__ */ new Map();
+  head.lastIndex = 0;
+  let m;
+  while ((m = head.exec(text)) !== null) {
+    const at = m.index + m[0].length;
+    let end = -1;
+    if (isIdentStartCode2(text.charCodeAt(at))) {
+      end = at + 1;
+      while (isIdentCode2(text.charCodeAt(end))) end++;
+    } else if (text[at] === "[" || text[at] === "{") {
+      if (stop < at + 1) {
+        stop = at + 1;
+        while (stop < text.length && text[stop] !== "]" && text[stop] !== "}" && text[stop] !== ";") stop++;
+      }
+      if (stop < text.length && text[stop] !== ";") end = stop + 1;
+    }
+    if (end === -1) continue;
+    let matchEnd = end;
+    if (tail) {
+      let after = afterTail.get(end);
+      if (after === void 0) {
+        tail.lastIndex = end;
+        after = tail.test(text) ? tail.lastIndex : -1;
+        afterTail.set(end, after);
+      }
+      if (after === -1) continue;
+      matchEnd = after;
+    }
+    bindings.push(text.slice(at, end));
+    head.lastIndex = matchEnd;
+  }
+  return bindings;
+}
+function identifierMatches2(text, suffix) {
+  const found = [];
+  let resumeAt = 0;
+  for (const run of text.matchAll(/[a-zA-Z0-9_$]+/g)) {
+    const runEnd = run.index + run[0].length;
+    let start = -1;
+    for (let p = Math.max(run.index, resumeAt); p < runEnd; p++) {
+      const c = text.charCodeAt(p);
+      if (isIdentStartCode2(c) && isWordCode2(text.charCodeAt(p - 1)) !== isWordCode2(c)) {
+        start = p;
+        break;
+      }
+    }
+    if (start === -1) continue;
+    suffix.lastIndex = runEnd;
+    if (!suffix.test(text)) continue;
+    found.push({ index: start, ident: text.slice(start, runEnd) });
+    resumeAt = suffix.lastIndex;
+  }
+  return found;
+}
 function buildLocalSymbols2(text) {
   const symbols = new Set(KNOWN_SAFE2);
-  for (const m of text.matchAll(/\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])/g)) {
-    const binding = m[1];
+  for (const binding of declarationBindings2(text, /\b(?:const|let|var)\s+/g, null)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -2290,8 +2526,7 @@ function buildLocalSymbols2(text) {
   for (const m of text.matchAll(/\bclass\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g)) {
     symbols.add(m[1]);
   }
-  for (const m of text.matchAll(/\bfor\s*\(\s*(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*|[\[{][^\]};]*[\]}])\s+(?:of|in)\b/g)) {
-    const binding = m[1];
+  for (const binding of declarationBindings2(text, /\bfor\s*\(\s*(?:const|let|var)\s+/g, /\s+(?:of|in)\b/y)) {
     if (/^[a-zA-Z_$]/.test(binding)) {
       symbols.add(binding);
     } else {
@@ -2301,8 +2536,8 @@ function buildLocalSymbols2(text) {
   for (const m of text.matchAll(/\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)/g)) {
     symbols.add(m[1]);
   }
-  for (const m of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g)) {
-    if (!JS_KEYWORDS2.has(m[1])) symbols.add(m[1]);
+  for (const { ident } of identifierMatches2(text, /\s*=>/y)) {
+    if (!JS_KEYWORDS2.has(ident)) symbols.add(ident);
   }
   for (const m of text.matchAll(/(?<![a-zA-Z0-9_$])\(([^()]*)\)\s*=>/g)) {
     for (const id of extractBindings2(m[1])) symbols.add(id);
@@ -2373,9 +2608,9 @@ function checkMissingAwait2(text, exclusionRanges, newlines) {
 function checkUnknownGlobals2(text, exclusionRanges, newlines) {
   const diagnostics = [];
   const localSymbols = buildLocalSymbols2(text);
-  for (const match of text.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*[.(]/g)) {
+  for (const match of identifierMatches2(text, /\s*[.(]/y)) {
     if (isInsideExclusionRange3(match.index, exclusionRanges)) continue;
-    const ident = match[1];
+    const ident = match.ident;
     if (JS_KEYWORDS2.has(ident)) continue;
     if (localSymbols.has(ident)) continue;
     let precIdx = match.index - 1;
