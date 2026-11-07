@@ -549,7 +549,7 @@
         "airtableFormula.mcp.categories.read": {
           "type": "boolean",
           "default": true,
-          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, list_view_sections, list_record_templates."
+          "description": "Read / Inspect tools: get_base_schema, list_tables, get_table_schema, list_fields, list_views, get_view, validate_formula, lint_airtable_code, list_view_sections, list_record_templates."
         },
         "airtableFormula.mcp.categories.tableWrite": {
           "type": "boolean",
