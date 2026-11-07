@@ -67,6 +67,10 @@ vi.mock('vscode', () => ({
 const dependencies = vi.hoisted(() => ({
   getAllIdeStatuses: vi.fn(async () => []),
   configureMcpForIde: vi.fn(async () => undefined),
+  reapplyMcpForIde: vi.fn(async () => true),
+  hasForeignMcpEntry: vi.fn(async () => false),
+  unconfigureMcpForIde: vi.fn(async () => undefined),
+  configureLspForIde: vi.fn(async () => undefined),
   updateWebviewSetting: vi.fn(async () => undefined),
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
@@ -92,8 +96,10 @@ const skill = vi.hoisted(() => {
 vi.mock('../auto-config/index.js', () => ({
   getAllIdeStatuses: dependencies.getAllIdeStatuses,
   configureMcpForIde: dependencies.configureMcpForIde,
-  unconfigureMcpForIde: vi.fn(),
-  configureLspForIde: vi.fn(),
+  reapplyMcpForIde: dependencies.reapplyMcpForIde,
+  hasForeignMcpEntry: dependencies.hasForeignMcpEntry,
+  unconfigureMcpForIde: dependencies.unconfigureMcpForIde,
+  configureLspForIde: dependencies.configureLspForIde,
   unconfigureLspForIde: vi.fn(),
   configureOfficialAirtableMcp: vi.fn(),
   unconfigureOfficialAirtableMcp: vi.fn(),
@@ -310,7 +316,11 @@ describe('DashboardProvider webview trust boundary', () => {
     ['zed', 'https://zed.dev/download'],
     ['helix', 'https://helix-editor.com'],
     ['neovim', 'https://neovim.io'],
+    ['gemini-cli', 'https://github.com/google-gemini/gemini-cli'],
   ] as const)('maps %s docs to the fixed host URL', async (ideId, expected) => {
+    // The URL lives in the real IDE_CONFIGS (from the client table); this file mocks the module.
+    const real = await vi.importActual<typeof import('../auto-config/ide-configs.js')>('../auto-config/ide-configs.js');
+    dependencies.ideConfigs[ideId] = real.IDE_CONFIGS[ideId];
     const { inboundMessage } = mountProvider();
 
     inboundMessage({ type: 'action:openIdeDocs', id: 'abc123', ideId });
@@ -751,7 +761,9 @@ describe('DashboardProvider webview trust boundary', () => {
       provider.applyConfigurationSideEffect('mcp.serverSource'),
     ]);
 
-    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(1);
+    // The rewrite re-applies (only entries we wrote); it never calls the explicit Setup path.
+    expect(dependencies.reapplyMcpForIde).toHaveBeenCalledTimes(1);
+    expect(dependencies.configureMcpForIde).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1058,6 +1070,167 @@ describe('DashboardProvider webview trust boundary', () => {
     expect(skill.installSkill).toHaveBeenCalledOnce();
     expect(skill.installSkill).toHaveBeenCalledWith('global', skill.env);
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup1', ok: true });
+  });
+
+  it('action:setupAll with one failing client configures the others, installs the skill, pushes state, and warns naming it', async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'] };
+    dependencies.ideConfigs['claude-code'] = { capabilities: ['mcp'] };
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', label: 'Cursor', detected: true },
+      { ideId: 'claude-code', label: 'Claude Code', detected: true },
+      { ideId: 'zed', label: 'Zed', detected: true },
+    ] as never);
+    // Calls start in status order: cursor, claude-code, zed.
+    dependencies.configureMcpForIde
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('~/.claude.json is not valid JSON (line 1, column 3). Nothing was written.'))
+      .mockResolvedValueOnce(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    const pushState = vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup2' });
+
+    await waitForResult('setup2');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(3);
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(skill.installSkill).toHaveBeenCalledOnce();
+    expect(pushState).toHaveBeenCalled();
+    const warning = 'Airtable Formula: could not configure Claude Code: ~/.claude.json is not valid JSON (line 1, column 3). Nothing was written.';
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(warning);
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup2', ok: false, error: warning });
+  });
+
+  it('action:setupAll leaves a hand-written entry alone and reports it as already configured, not as a failure', async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'] };
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', label: 'Cursor', detected: true },
+      { ideId: 'zed', label: 'Zed', detected: true },
+    ] as never);
+    // Checked in status order: Cursor has none of the user's own, Zed has a hand-written entry.
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup3' });
+
+    await waitForResult('setup3');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(1);
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('cursor', expect.anything(), expect.anything());
+    expect(skill.installSkill).toHaveBeenCalledOnce();
+    expect(vscodeMock.showWarningMessage).not.toHaveBeenCalled();
+    expect(vscodeMock.showInformationMessage).toHaveBeenCalledWith(
+      'Airtable Formula: Zed already configured with an airtable-user-mcp entry you wrote; left as is.',
+    );
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup3', ok: true });
+  });
+
+  it("a card's Set up asks before replacing a hand-written entry; Cancel writes nothing", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupIde', id: 'card01', ideId: 'zed' });
+
+    await waitForResult('card01');
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Replace the airtable-user-mcp entry you wrote in Zed?', { modal: true }, 'Replace');
+    expect(dependencies.configureMcpForIde).not.toHaveBeenCalled();
+    expect(skill.installSkill).not.toHaveBeenCalled();
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'card01', ok: false, error: 'Cancelled', cancelled: true });
+  });
+
+  it("a card's Set up on a hand-written entry writes ours after Replace", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce('Replace' as never);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupIde', id: 'card02', ideId: 'zed' });
+
+    await waitForResult('card02');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'card02', ok: true });
+  });
+
+  it('action:setupAll still sets up the LSP of a client whose MCP entry it leaves alone (OpenCode)', async () => {
+    dependencies.ideConfigs.opencode = { capabilities: ['mcp', 'lsp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([{ ideId: 'opencode', label: 'OpenCode', detected: true }] as never);
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup04' });
+
+    await waitForResult('setup04');
+    expect(dependencies.configureMcpForIde).not.toHaveBeenCalled();
+    expect(dependencies.configureLspForIde).toHaveBeenCalledWith('opencode');
+    expect(vscodeMock.showInformationMessage).toHaveBeenCalledWith(
+      'Airtable Formula: OpenCode already configured with an airtable-user-mcp entry you wrote; left as is.',
+    );
+  });
+
+  it("a card's Remove asks before deleting a hand-written entry; Cancel writes nothing", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:unconfigureIde', id: 'remove01', ideId: 'zed' });
+
+    await waitForResult('remove01');
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Remove the airtable-user-mcp entry you wrote in Zed?', { modal: true }, 'Remove');
+    expect(dependencies.unconfigureMcpForIde).not.toHaveBeenCalled();
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'remove01', ok: false, error: 'Cancelled', cancelled: true });
+  });
+
+  it("a card's Remove deletes a hand-written entry after Remove, and does not ask for ours", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce('Remove' as never);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:unconfigureIde', id: 'remove02', ideId: 'zed' });
+    await waitForResult('remove02');
+    expect(dependencies.unconfigureMcpForIde).toHaveBeenCalledWith('zed');
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'remove02', ok: true });
+
+    inboundMessage({ type: 'action:unconfigureIde', id: 'remove03', ideId: 'zed' });
+    await waitForResult('remove03');
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(dependencies.unconfigureMcpForIde).toHaveBeenCalledTimes(2);
+  });
+
+  it("a card's Set up with no hand-written entry does not ask", async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'], label: 'Cursor' } as never;
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupIde', id: 'card03', ideId: 'cursor' });
+
+    await waitForResult('card03');
+    expect(vscodeMock.showWarningMessage).not.toHaveBeenCalled();
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('cursor', expect.anything(), expect.anything());
+  });
+
+  it('the settings rewrite still rewrites the other clients when one fails, and warns naming it', async () => {
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', label: 'Cursor', mcpConfigured: true },
+      { ideId: 'zed', label: 'Zed', mcpConfigured: true },
+    ] as never);
+    dependencies.reapplyMcpForIde.mockRejectedValueOnce(new Error('bad file')).mockResolvedValueOnce(true);
+    const { provider } = mountProvider();
+
+    await expect(provider.applyConfigurationSideEffect('mcp.serverSource')).resolves.toBeUndefined();
+
+    expect(dependencies.reapplyMcpForIde).toHaveBeenCalledTimes(2);
+    expect(dependencies.reapplyMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Airtable Formula: could not configure Cursor: bad file');
   });
 
   describe('prompt saves refresh the skill recipes', () => {

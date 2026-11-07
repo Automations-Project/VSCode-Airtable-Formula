@@ -1,9 +1,14 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import type { IdeId } from '@airtable-formula/shared';
-import { IDE_CONFIGS } from './ide-configs.js';
-import { readConfigFile, writeConfigAtomic } from './ide-detection.js';
+import { IDE_CONFIGS, editorLspConfigPath } from './ide-configs.js';
+import { withFileLock, writeTextAtomic } from './atomic-write.js';
+import { getJsoncValue, pruneEmptyObjects, readTextIfExists, setJsoncValue, splitBom } from './jsonc-config.js';
+import { MCP_CLIENT_BY_ID, hostPathContext, pathKey, resolveConfigPath, samePath, type PathContext } from './mcp-clients.js';
+
+/** Where the LSP functions look: the same paths and file checks as the MCP writer (WriterDeps fits). */
+export interface LspDeps { ctx: PathContext; exists: (p: string) => boolean }
+
+const hostLspDeps = (): LspDeps => ({ ctx: hostPathContext(), exists: fs.existsSync });
 
 const LSP_SERVER_KEY = 'airtable-lsp';
 
@@ -35,18 +40,22 @@ file-types = ["ata", "automation"]
 language-servers = ["airtable-lsp"]
 `;
 
-async function configureHelix(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
-  if (existing.includes(HELIX_MARKER)) return; // already configured
-  const content = existing.trimEnd() + '\n' + HELIX_BLOCK;
+export async function configureHelix(configPath: string): Promise<void> {
+  let raw = '';
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
+  if (raw.includes(HELIX_MARKER)) return; // already configured
+  // trimEnd() counts a BOM as whitespace, so a BOM-only file would lose it.
+  const { bom, body: existing } = splitBom(raw);
+  const content = bom + existing.trimEnd() + '\n' + HELIX_BLOCK;
   await writeTextAtomic(configPath, content);
 }
 
-async function unconfigureHelix(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
-  if (!existing.includes(HELIX_MARKER)) return;
+export async function unconfigureHelix(configPath: string): Promise<void> {
+  let raw = '';
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
+  if (!raw.includes(HELIX_MARKER)) return;
+  // A BOM in front of our first header would hide it from the section split.
+  const { bom, body: existing } = splitBom(raw);
   // HELIX_BLOCK is FOUR top-level tables, not one: the language-server plus a
   // [[language]] per file type. Remove each of ours and nothing else — a
   // "delete to the next header" cut would orphan the three [[language]] blocks,
@@ -56,7 +65,7 @@ async function unconfigureHelix(configPath: string): Promise<void> {
     if (s.header === HELIX_MARKER) return true;
     return s.header === '[[language]]' && s.text.includes(`language-servers = ["${LSP_SERVER_KEY}"]`);
   });
-  await writeTextAtomic(configPath, next);
+  await writeTextAtomic(configPath, bom + next);
 }
 
 async function isHelixConfigured(configPath: string): Promise<boolean> {
@@ -90,77 +99,379 @@ async function isNeovimConfigured(configPath: string): Promise<boolean> {
   try { await fs.promises.access(configPath); return true; } catch { return false; }
 }
 
-// ── OpenCode: JSON merge into opencode.json (lsp key) ───────────────────────
+// ── OpenCode: the `lsp` key of the file its MCP entry uses ───────────────────
 
-const OPENCODE_LSP_KEY = 'airtable-formula';
+const OPENCODE_LSP_PATH = ['lsp', 'airtable-formula'] as const;
 const OPENCODE_LSP_ENTRY = {
   command: ['npx', '-y', 'airtable-user-lsp', '--stdio'],
   extensions: ['.formula', '.ats', '.ata'],
 };
 
-async function configureOpenCode(configPath: string): Promise<void> {
-  const existing = await readConfigFile(configPath);
-  const lsp = (existing['lsp'] ?? {}) as Record<string, unknown>;
-  lsp[OPENCODE_LSP_KEY] = OPENCODE_LSP_ENTRY;
-  existing['lsp'] = lsp;
-  await writeConfigAtomic(configPath, existing);
+/** opencode.jsonc or opencode.json, whichever the MCP writer resolves, so both entries share one file. */
+function openCodeConfigPath(deps: LspDeps): string {
+  return resolveConfigPath(MCP_CLIENT_BY_ID.opencode, deps.ctx, deps.exists);
 }
 
-async function unconfigureOpenCode(configPath: string): Promise<void> {
-  const existing = await readConfigFile(configPath);
-  const lsp = existing['lsp'] as Record<string, unknown> | undefined;
-  if (lsp) {
-    delete lsp[OPENCODE_LSP_KEY];
-    if (Object.keys(lsp).length === 0) delete existing['lsp'];
-    else existing['lsp'] = lsp;
+/**
+ * The other OpenCode config files that exist: with both opencode.json and opencode.jsonc, the one
+ * that is not current, where a pre-port `lsp.airtable-formula` may sit (the MCP writer's legacy rule).
+ */
+function openCodeOtherFiles(current: string, deps: LspDeps): string[] {
+  const row = MCP_CLIENT_BY_ID.opencode;
+  const { ctx } = deps;
+  const candidates = [...(row.preferExisting?.(ctx) ?? []), row.globalPath(ctx)];
+  return candidates.filter((p, i) =>
+    candidates.findIndex((q) => samePath(ctx, p, q)) === i && !samePath(ctx, p, current) && deps.exists(p));
+}
+
+/** Parses every file first, so one that does not parse aborts with nothing written. */
+async function assertParses(files: readonly string[]): Promise<void> {
+  for (const f of files) {
+    const text = await readTextIfExists(f);
+    if (text !== null) getJsoncValue(text, [], 'jsonc', f);
   }
-  await writeConfigAtomic(configPath, existing);
+}
+
+/** Removes ours from one file, then an `lsp` object our removal emptied. Creates no file. */
+async function removeOpenCodeLsp(file: string): Promise<void> {
+  const text = await readTextIfExists(file);
+  if (text === null) return;
+  const removed = setJsoncValue(text, OPENCODE_LSP_PATH, undefined, 'jsonc', file);
+  if (removed === text) return;
+  await writeTextAtomic(file, pruneEmptyObjects(removed, OPENCODE_LSP_PATH.slice(0, 1), 'jsonc', file));
+}
+
+/** Locked with the MCP writer's calls on the same file, so an MCP and an LSP write never interleave. */
+const lockOpenCode = <T>(file: string, deps: LspDeps, fn: () => Promise<T>): Promise<T> => withFileLock(pathKey(deps.ctx, file), fn);
+
+/** Writes ours in the current file and removes the copy from the other one. Comments and the rest of each file survive. */
+async function configureOpenCode(configPath: string, deps: LspDeps): Promise<void> {
+  await lockOpenCode(configPath, deps, async () => {
+    const others = openCodeOtherFiles(configPath, deps);
+    await assertParses([configPath, ...others]);
+    const before = (await readTextIfExists(configPath)) ?? '';
+    const next = setJsoncValue(before, OPENCODE_LSP_PATH, OPENCODE_LSP_ENTRY, 'jsonc', configPath);
+    if (next !== before) await writeTextAtomic(configPath, next);
+    for (const other of others) await removeOpenCodeLsp(other);
+  });
+}
+
+/** Removes ours from both files. */
+async function unconfigureOpenCode(configPath: string, deps: LspDeps): Promise<void> {
+  await lockOpenCode(configPath, deps, async () => {
+    const files = [configPath, ...openCodeOtherFiles(configPath, deps)];
+    await assertParses(files);
+    for (const f of files) await removeOpenCodeLsp(f);
+  });
 }
 
 async function isOpenCodeLspConfigured(configPath: string): Promise<boolean> {
   try {
-    const existing = await readConfigFile(configPath);
-    const lsp = existing['lsp'] as Record<string, unknown> | undefined;
-    return typeof lsp === 'object' && lsp !== null && OPENCODE_LSP_KEY in lsp;
+    const text = await readTextIfExists(configPath);
+    return text !== null && getJsoncValue(text, OPENCODE_LSP_PATH, 'jsonc', configPath) !== undefined;
   } catch { return false; }
 }
 
-// ── Codex CLI: TOML append to config.toml ────────────────────────────────────
+// ── MCP servers in TOML (Codex CLI, Grok Build): [<serversKey>.<name>] ───────
 
-const CODEX_MARKER = '[mcp_servers.airtable-user-mcp]';
+const TOML_BARE_KEY_RE = /^[A-Za-z0-9_-]+$/;
 
-const CODEX_BLOCK = `
-[mcp_servers.airtable-user-mcp]
-type = "stdio"
-command = "npx"
-args = ["-y", "airtable-user-mcp"]
-`;
-
-export async function configureMcpToml(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
-  if (existing.includes(CODEX_MARKER)) return;
-  const content = existing.trimEnd() + '\n' + CODEX_BLOCK;
-  await writeTextAtomic(configPath, content);
+function tomlKey(key: string): string {
+  return TOML_BARE_KEY_RE.test(key) ? key : tomlString(key);
 }
 
-export async function unconfigureMcpToml(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
-  if (!existing.includes(CODEX_MARKER)) return;
-  // Remove only our own table. This used to truncate the file from the marker to
-  // EOF — and since both `configureMcpToml` and `codex mcp add` append at EOF,
-  // any MCP server or [model_providers.*] block the user added after Setup sat
-  // below ours and was silently destroyed by clicking Unconfigure.
-  const next = removeTomlSections(existing, (s) => s.header === CODEX_MARKER);
+/** JSON escapes are a subset of TOML basic-string escapes; DEL is the one JSON leaves raw. */
+function tomlString(s: string): string {
+  return JSON.stringify(s).replace(/\x7f/g, '\\u007f');
+}
+
+function tomlValue(key: string, value: unknown): string {
+  if (typeof value === 'string') return tomlString(value);
+  if (typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
+    return '[' + value.map((v) => tomlString(v as string)).join(', ') + ']';
+  }
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const pairs = Object.entries(value);
+    if (pairs.every(([, v]) => typeof v === 'string')) {
+      return pairs.length === 0
+        ? '{}'
+        : '{ ' + pairs.map(([k, v]) => `${tomlKey(k)} = ${tomlString(v as string)}`).join(', ') + ' }';
+    }
+  }
+  throw new Error(`unsupported TOML value for "${key}"`);
+}
+
+/** Render one MCP server as a `[serversKey.name]` table, with `\n` line endings. */
+export function renderTomlServer(serversKey: string, name: string, entry: Record<string, unknown>): string {
+  let out = `[${serversKey}.${name}]\n`;
+  for (const [key, value] of Object.entries(entry)) {
+    if (value === undefined) continue;
+    out += `${tomlKey(key)} = ${tomlValue(key, value)}\n`;
+  }
+  return out;
+}
+
+/** The header without its trailing comment, quotes and padding: `[ a."b" ] # c` -> `[a.b]`. */
+function bareHeader(header: string): string {
+  return header.replace(/#.*$/, '').replace(/["' \t]/g, '');
+}
+
+/** Our table (`[k.name]`) or one of its sub-tables (`[k.name.env]`). */
+function isOurTable(serversKey: string, name: string, s: TomlSection): boolean {
+  if (s.header === null) return false;
+  const h = bareHeader(s.header);
+  return h === `[${serversKey}.${name}]` || h.startsWith(`[${serversKey}.${name}.`);
+}
+
+// ── Carrying the user's lines over when we rewrite a table of ours ──────────
+
+/** What an Update of our own table keeps: everything but the keys the entry sets and these. */
+export interface TomlCarry { drop: readonly string[] }
+
+/** The first segment of a `key = …` or `dotted.key = …` statement. */
+const TOML_STATEMENT_KEY_RE = /^[ \t]*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)[ \t]*[.=]/;
+
+/** Tracks open brackets and multi-line strings across the lines of one value, outside strings and comments. */
+function scanValue(text: string, state: { depth: number; ml: string | null }): void {
+  let i = 0;
+  while (i < text.length) {
+    if (state.ml) {
+      const end = text.indexOf(state.ml, i);
+      if (end < 0) return;
+      i = end + 3;
+      state.ml = null;
+      continue;
+    }
+    const c = text[i];
+    if (c === '#') return;
+    if (text.startsWith('"""', i) || text.startsWith("'''", i)) { state.ml = text.slice(i, i + 3); i += 3; continue; }
+    if (c === '"') {
+      i++;
+      while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    if (c === '[' || c === '{') state.depth++;
+    else if (c === ']' || c === '}') state.depth--;
+    i++;
+  }
+}
+
+const unquoteSegment = (raw: string): string =>
+  raw.startsWith('"') ? (JSON.parse(raw) as string) : raw.startsWith("'") ? raw.slice(1, -1) : raw;
+
+interface TomlStatement { key: string; lines: string[] }
+
+/** A table body as statements (a key line with its continuation lines) and other lines (`key: null`: comments, blanks). */
+function tomlStatements(lines: readonly string[]): TomlStatement[] {
+  const out: TomlStatement[] = [];
+  for (let i = 0; i < lines.length;) {
+    const m = TOML_STATEMENT_KEY_RE.exec(lines[i]);
+    if (!m) {
+      out.push({ key: '', lines: [lines[i]] });
+      i++;
+      continue;
+    }
+    const statement = [lines[i]];
+    const state = { depth: 0, ml: null as string | null };
+    scanValue(lines[i].slice(m[0].length), state);
+    for (i++; (state.depth > 0 || state.ml !== null) && i < lines.length; i++) {
+      statement.push(lines[i]);
+      scanValue(lines[i], state);
+    }
+    out.push({ key: unquoteSegment(m[1]), lines: statement });
+  }
+  return out;
+}
+
+/** The lines of a table body the entry does not manage: other statements (with their continuation lines) and comments. */
+function unmanagedLines(lines: readonly string[], managed: ReadonlySet<string>): string[] {
+  return tomlStatements(lines).flatMap((s) =>
+    s.key === '' ? s.lines.filter((l) => l.trim() !== '') : managed.has(s.key) ? [] : s.lines);
+}
+
+const TOML_SEGMENT = String.raw`(?:"(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)`;
+const TOML_DOTTED_KEY_RE = new RegExp(String.raw`^[ \t]*(${TOML_SEGMENT}(?:[ \t]*\.[ \t]*${TOML_SEGMENT})*)[ \t]*=(.*)$`);
+const TOML_SEGMENT_RE = new RegExp(TOML_SEGMENT, 'g');
+
+const segmentsOf = (dotted: string): string[] => (dotted.match(TOML_SEGMENT_RE) ?? []).map(unquoteSegment);
+
+const startsWithPath = (full: readonly string[], prefix: readonly string[]): boolean =>
+  full.length >= prefix.length && prefix.every((p, i) => full[i] === p);
+
+/**
+ * Whether `serversKey.name` is defined anywhere but its own `[serversKey.name]` tables: a dotted
+ * key (`mcp_servers.name.command = …` at the top, `name.command = …` under `[mcp_servers]`), an
+ * inline table (`name = { … }` under `[mcp_servers]`, or inside `mcp_servers = { … }`), or an
+ * array of tables. Writing our table beside one is a duplicate key, and Codex rejects the file.
+ */
+export function tomlDefinesOutsideOurTables(text: string, serversKey: string, name: string): boolean {
+  const ours = [serversKey, name];
+  for (const s of splitTomlSections(text.replace(/\r\n/g, '\n'))) {
+    if (isOurTable(serversKey, name, s)) continue;
+    const header = s.header === null ? '' : bareHeader(s.header);
+    if (header.startsWith('[[')) {
+      if (startsWithPath(segmentsOf(header.slice(2, -2)), ours)) return true;
+      continue;
+    }
+    const base = header === '' ? [] : segmentsOf(header.slice(1, -1));
+    const body = s.header === null ? s.text.split('\n') : s.text.split('\n').slice(1);
+    for (const statement of tomlStatements(body)) {
+      if (statement.key === '') continue;
+      const m = TOML_DOTTED_KEY_RE.exec(statement.lines[0]);
+      if (!m) continue;
+      const full = [...base, ...segmentsOf(m[1])];
+      if (startsWithPath(full, ours)) return true;
+      // `mcp_servers = { name = { … } }`: our name as a key of the inline table.
+      if (full.length === 1 && full[0] === serversKey && statement.lines.some((l) => inlineTableHasKey(l, name))) return true;
+    }
+  }
+  return false;
+}
+
+/** Whether a line of an inline table names `key` as one of its keys (`{ key = …`, `, "key" = …`). */
+function inlineTableHasKey(line: string, key: string): boolean {
+  for (const m of line.matchAll(new RegExp(String.raw`[{,][ \t]*(${TOML_SEGMENT})[ \t]*[.=]`, 'g'))) {
+    if (unquoteSegment(m[1]) === key) return true;
+  }
+  return false;
+}
+
+/** From our table and its sub-tables (LF text): the unmanaged lines, then each unmanaged sub-table, verbatim. */
+function carriedFromOurTables(text: string, serversKey: string, name: string, managed: ReadonlySet<string>): string {
+  const main = `[${serversKey}.${name}]`;
+  const prefix = `[${serversKey}.${name}.`;
+  const lines: string[] = [];
+  const tables: string[] = [];
+  for (const s of splitTomlSections(text)) {
+    if (!isOurTable(serversKey, name, s)) continue;
+    const h = bareHeader(s.header as string);
+    if (h === main) lines.push(...unmanagedLines(s.text.split('\n').slice(1), managed));
+    else if (!managed.has(h.slice(prefix.length, -1).split('.')[0])) tables.push(s.text.replace(/\n+$/, '\n'));
+  }
+  return (lines.length > 0 ? lines.join('\n') + '\n' : '') + tables.map((t) => '\n' + t).join('');
+}
+
+// A leading UTF-8 BOM (Windows editors write one) is read past and written back: in front of
+// our first header it would hide that table, and an Update would append a duplicate one.
+
+/**
+ * Writes our table (replacing it and its sub-tables) at the end of the file. With `carry`, an
+ * Update of a table of ours keeps the user's other keys, comments and sub-tables verbatim (an
+ * `env` sub-table is dropped: the entry's inline env carries its keys).
+ */
+export async function configureMcpToml(
+  configPath: string, serversKey: string, name: string, entry: Record<string, unknown>, carry?: TomlCarry,
+): Promise<void> {
+  let raw = '';
+  try {
+    raw = await fs.promises.readFile(configPath, 'utf8');
+  } catch (err) {
+    // Only a missing file is an empty one: EACCES/EBUSY/EISDIR must not turn into
+    // an overwrite of the user's whole config with just our block.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  const { bom, body: existing } = splitBom(raw);
+  if (tomlDefinesOutsideOurTables(existing, serversKey, name)) {
+    throw new Error(
+      `${configPath} already defines ${serversKey}.${name} outside a [${serversKey}.${name}] table; `
+      + 'a second definition would make the file invalid. Remove or rename that one first. Nothing was written.',
+    );
+  }
+  const eol = existing.includes('\r\n') ? '\r\n' : '\n';
+  const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
+  const carried = carry
+    ? carriedFromOurTables(existing.replace(/\r\n/g, '\n'), serversKey, name, new Set([...Object.keys(entry), ...carry.drop]))
+    : '';
+  const block = (renderTomlServer(serversKey, name, entry) + carried).replace(/\n/g, eol);
+  const next = bom + (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block;
+  if (next === raw) return; // a no-op Update leaves the file (and its mtime) alone
   await writeTextAtomic(configPath, next);
 }
 
-export async function isMcpTomlConfigured(configPath: string): Promise<boolean> {
+export async function unconfigureMcpToml(configPath: string, serversKey: string, name: string): Promise<void> {
+  let raw = '';
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
+  const { bom, body: existing } = splitBom(raw);
+  // Remove only our own tables. This used to truncate the file from the marker to
+  // end-of-file, and since both `configureMcpToml` and `codex mcp add` append there,
+  // any MCP server or [model_providers.*] block the user added after Setup sat
+  // below ours and was silently destroyed by clicking Unconfigure.
+  const next = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
+  if (next === existing) return;
+  await writeTextAtomic(configPath, bom + next);
+}
+
+const TOML_KEY_VALUE_RE = /^[ \t]*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=[ \t]*(.*?)[ \t]*$/;
+const TOML_INLINE_PAIR_RE = /("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)[ \t]*=[ \t]*("(?:[^"\\]|\\.)*"|true|false|-?\d+)[ \t]*(?:,[ \t]*|$)/y;
+
+const unquoteKey = (k: string): string => (k.startsWith('"') ? (JSON.parse(k) as string) : k);
+
+/**
+ * A value we can read back: JSON-compatible ones (strings, string arrays, booleans, integers)
+ * as JSON, an inline table of those (`env = { A = "1" }`, what we write) as an object, and
+ * anything else (literal strings, multi-line values, a comment after the value) as `true`.
+ */
+function readTomlValue(raw: string): unknown {
+  try { return JSON.parse(raw); } catch { /* not JSON */ }
+  if (!raw.startsWith('{') || !raw.endsWith('}')) return true;
+  const body = raw.slice(1, -1).trim();
+  const out: Record<string, unknown> = {};
   try {
-    const raw = await fs.promises.readFile(configPath, 'utf8');
-    return raw.includes(CODEX_MARKER);
-  } catch { return false; }
+    for (let i = 0; i < body.length; i = TOML_INLINE_PAIR_RE.lastIndex) {
+      TOML_INLINE_PAIR_RE.lastIndex = i;
+      const m = TOML_INLINE_PAIR_RE.exec(body);
+      if (!m) return true;
+      out[unquoteKey(m[1])] = JSON.parse(m[2]);
+    }
+  } catch { return true; }
+  return out;
+}
+
+/** One `key = value` line of a table; null for blank lines, comments, dotted keys and continuations. */
+export function tomlKeyValue(line: string): { key: string; value: unknown } | null {
+  const m = TOML_KEY_VALUE_RE.exec(line);
+  return m ? { key: unquoteKey(m[1]), value: readTomlValue(m[2]) } : null;
+}
+
+function tableValues(sectionText: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const line of sectionText.split('\n').slice(1)) {
+    const kv = tomlKeyValue(line);
+    if (kv) out[kv.key] = kv.value;
+  }
+  return out;
+}
+
+/**
+ * The keys of our table, one property per `key = value` line (values as readTomlValue reads
+ * them). A sub-table `[k.name.sub]` adds `sub` with its own keys (an `env` sub-table reads like
+ * the inline `env`); a deeper one adds `true`. `null` when we are not there.
+ */
+export async function readMcpTomlEntry(
+  configPath: string, serversKey: string, name: string,
+): Promise<Record<string, unknown> | null> {
+  let raw: string;
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return null; }
+  const main = `[${serversKey}.${name}]`;
+  const prefix = `[${serversKey}.${name}.`;
+  let entry: Record<string, unknown> | null = null;
+  const subs: Array<[string, Record<string, unknown>]> = [];
+  for (const s of splitTomlSections(splitBom(raw).body.replace(/\r\n/g, '\n'))) {
+    if (s.header === null) continue;
+    const h = bareHeader(s.header);
+    if (h === main) entry = tableValues(s.text);
+    else if (h.startsWith(prefix) && h.endsWith(']')) subs.push([h.slice(prefix.length, -1), tableValues(s.text)]);
+  }
+  if (entry === null) return null;
+  for (const [sub, values] of subs) entry[sub] = sub.includes('.') ? true : values;
+  return entry;
 }
 
 // ── Shared TOML section surgery ─────────────────────────────────────────────
@@ -177,7 +488,11 @@ const TOML_HEADER_RE = /^[ \t]*\[\[?[A-Za-z0-9_.\-"' ]+\]\]?[ \t]*(?:#.*)?$/;
 
 interface TomlSection { header: string | null; text: string }
 
-/** Split a TOML document into a preamble plus one entry per top-level header. */
+/**
+ * Split a TOML document into a preamble plus one entry per top-level header.
+ * Expects `\n` line endings: a CRLF file's headers end in `\r`, which
+ * TOML_HEADER_RE never matches, so callers normalise first.
+ */
 function splitTomlSections(text: string): TomlSection[] {
   const sections: TomlSection[] = [];
   let current: TomlSection = { header: null, text: '' };
@@ -194,7 +509,8 @@ function splitTomlSections(text: string): TomlSection[] {
 }
 
 /**
- * Drop only the sections we own, preserving everything else verbatim.
+ * Drop only the sections we own, preserving everything else verbatim (a CRLF
+ * file stays CRLF; a file with nothing of ours comes back untouched).
  *
  * The previous implementation did `existing.slice(0, indexOf(MARKER))` — i.e. it
  * truncated the user's file from our marker to EOF, destroying any config that
@@ -203,57 +519,53 @@ function splitTomlSections(text: string): TomlSection[] {
  * deleted by clicking Unconfigure.
  */
 function removeTomlSections(text: string, isOurs: (s: TomlSection) => boolean): string {
-  const kept = splitTomlSections(text).filter((s) => !isOurs(s));
-  const out = kept.map((s) => s.text).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
-  return out === '' ? '' : out + '\n';
-}
-
-// ── Shared text-file atomic writer ──────────────────────────────────────────
-
-async function writeTextAtomic(filePath: string, content: string): Promise<void> {
-  const tmp = `${filePath}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    // 0600 for the same reason as writeConfigAtomic — these configs can carry a token.
-    await fs.promises.writeFile(tmp, content, { encoding: 'utf8', mode: 0o600 });
-    await fs.promises.rename(tmp, filePath);
-  } catch (err) {
-    await fs.promises.unlink(tmp).catch(() => {});
-    throw err;
-  }
+  const crlf = text.includes('\r\n');
+  const sections = splitTomlSections(text.replace(/\r\n/g, '\n'));
+  const kept = sections.filter((s) => !isOurs(s));
+  if (kept.length === sections.length) return text;
+  const out = kept.map((s) => s.text).join('').trimEnd();
+  const result = out === '' ? '' : out + '\n';
+  return crlf ? result.replace(/\n/g, '\r\n') : result;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-export async function configureLspForIde(ideId: IdeId): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
-  switch (cfg.lspConfigFormat) {
-    case 'json-merge':
-      return configureOpenCode(cfg.lspConfigPath);
-    case 'toml-append':  return configureHelix(cfg.lspConfigPath);
-    case 'lua-write':    return configureNeovim(cfg.lspConfigPath);
+/** OpenCode's file is resolved at call time (opencode.jsonc may appear); the editors' come from the same context. */
+function lspPathFor(ideId: IdeId, deps: LspDeps): string | undefined {
+  if (ideId === 'opencode') return openCodeConfigPath(deps);
+  if (ideId === 'helix' || ideId === 'neovim') return editorLspConfigPath(ideId, deps.ctx);
+  return IDE_CONFIGS[ideId].lspConfigPath;
+}
+
+export async function configureLspForIde(ideId: IdeId, deps: LspDeps = hostLspDeps()): Promise<void> {
+  const format = IDE_CONFIGS[ideId].lspConfigFormat;
+  const file = lspPathFor(ideId, deps);
+  if (!file || !format) return;
+  switch (format) {
+    case 'json-merge':   return configureOpenCode(file, deps);
+    case 'toml-append':  return configureHelix(file);
+    case 'lua-write':    return configureNeovim(file);
   }
 }
 
-export async function unconfigureLspForIde(ideId: IdeId): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return;
-  switch (cfg.lspConfigFormat) {
-    case 'json-merge':
-      return unconfigureOpenCode(cfg.lspConfigPath);
-    case 'toml-append':  return unconfigureHelix(cfg.lspConfigPath);
-    case 'lua-write':    return unconfigureNeovim(cfg.lspConfigPath);
+export async function unconfigureLspForIde(ideId: IdeId, deps: LspDeps = hostLspDeps()): Promise<void> {
+  const format = IDE_CONFIGS[ideId].lspConfigFormat;
+  const file = lspPathFor(ideId, deps);
+  if (!file || !format) return;
+  switch (format) {
+    case 'json-merge':   return unconfigureOpenCode(file, deps);
+    case 'toml-append':  return unconfigureHelix(file);
+    case 'lua-write':    return unconfigureNeovim(file);
   }
 }
 
-export async function isLspConfigured(ideId: IdeId): Promise<boolean> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.lspConfigPath || !cfg.lspConfigFormat) return false;
-  switch (cfg.lspConfigFormat) {
-    case 'json-merge':
-      return isOpenCodeLspConfigured(cfg.lspConfigPath);
-    case 'toml-append':  return isHelixConfigured(cfg.lspConfigPath);
-    case 'lua-write':    return isNeovimConfigured(cfg.lspConfigPath);
+export async function isLspConfigured(ideId: IdeId, deps: LspDeps = hostLspDeps()): Promise<boolean> {
+  const format = IDE_CONFIGS[ideId].lspConfigFormat;
+  const file = lspPathFor(ideId, deps);
+  if (!file || !format) return false;
+  switch (format) {
+    case 'json-merge':   return isOpenCodeLspConfigured(file);
+    case 'toml-append':  return isHelixConfigured(file);
+    case 'lua-write':    return isNeovimConfigured(file);
   }
 }

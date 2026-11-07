@@ -6,7 +6,7 @@
 // tests run on a temp dir.
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AiSkill, AiSkillClient, IdeId, SkillScope } from '@airtable-formula/shared';
+import { IDE_IDS, type AiSkill, type AiSkillClient, type IdeId, type SkillScope } from '@airtable-formula/shared';
 import agentDirs from './agent-dirs.json';
 import type { PromptRecipe } from '../mcp/prompts-state.js';
 import { renderPromptRecipes, RECIPES_FILE } from './prompt-recipes.js';
@@ -73,11 +73,8 @@ const CANONICAL_PROJECT = '.agents/skills';
 const VERSION_PLACEHOLDER = 'version: 0.0.0-dev';
 const CURSOR_POINTER_RULE = '.cursor/rules/airtable-formula.mdc';
 
-// Every IdeId, so checkSkill answers for all of them (the Record type makes a missing id a compile error).
-const ALL_IDES = Object.keys({
-  'cursor': 0, 'windsurf': 0, 'windsurf-next': 0, 'claude-code': 0, 'claude-desktop': 0, 'cline': 0,
-  'amp': 0, 'opencode': 0, 'codex-cli': 0, 'zed': 0, 'helix': 0, 'neovim': 0,
-} satisfies Record<IdeId, 0>) as IdeId[];
+// Every IdeId, so checkSkill answers for all of them (IDE_IDS is guarded against IdeId at compile time).
+const ALL_IDES: readonly IdeId[] = IDE_IDS;
 
 const TABLE: AgentDirEntry[] = [...new Map(
   [...(agentDirs.agents as AgentDirEntry[]), ...EXTRA_AGENTS].map(a => [a.id, a]),

@@ -1,0 +1,141 @@
+{
+  "upstream": "neondatabase/add-mcp",
+  "file": "src/agents.ts",
+  "ref": "5ae1d29a406568b1dedbaa4bd3b8a6fd7ef2195c",
+  "helperSha256": "0eafbb05f5a122e3ab0e8226059176132385921b8de3fde052fd3c6becb40f97",
+  "agents": {
+    "antigravity": {
+      "sha256": "451165f0c9fa9f8285d5581aca4c0adf6735a3f07145262649fb8c5fe9cfddb1",
+      "ported": true,
+      "ourId": "antigravity"
+    },
+    "claude-code": {
+      "sha256": "01b98c95a7e2e71e52fb4ca877cdb889b89392d74e9a53e3247f163053aaa65a",
+      "ported": true,
+      "ourId": "claude-code"
+    },
+    "claude-desktop": {
+      "sha256": "bdada0b0b95b5988363cf336b9cc8c8f49a507e5b441f83e931e851f517ba5ed",
+      "ported": true,
+      "ourId": "claude-desktop"
+    },
+    "cline": {
+      "sha256": "00550f1f888045789f3953665ec0e9c866d3c3b1a1395aa988096b17e703931e",
+      "ported": true,
+      "ourId": "cline",
+      "note": "Cline ≥ 4 (VS Code extension, CLI, JetBrains) reads ~/.cline/data/settings/cline_mcp_settings.json; upstream's globalStorage path is a legacy file Cline migrates once and then ignores. Our row writes the shared file and detects ~/.cline or the extension's globalStorage folder."
+    },
+    "cline-cli": {
+      "sha256": "480e22867e6eac1660b3ef1a966473b663f488dbf3650e75d75edb1d1bf686b5",
+      "ported": true,
+      "ourId": "cline",
+      "note": "Same file as Cline ≥ 4's VS Code extension; folded into our 'cline' row so no two rows share a file."
+    },
+    "codex": {
+      "sha256": "54b7f5b54cdd4e9a42ef512fbb6efe10192f8065054e149d19f5bd9bc7983d6f",
+      "ported": true,
+      "ourId": "codex-cli"
+    },
+    "cursor": {
+      "sha256": "911c29990fcfbf2f614ca18ae572b5c716e2e8924c0c2248b37cdd3d0300897d",
+      "ported": true,
+      "ourId": "cursor"
+    },
+    "factory-droid": {
+      "sha256": "40ccea80a1f202d4800aea0656ec372402e917ff9164d2d032bc7b614cffb81a",
+      "ported": true,
+      "ourId": "factory-droid"
+    },
+    "fx": {
+      "sha256": "7bc6e7358a1cc5083c8bc82da9cab49655c1a94b431ae3abb2ef8eeb4af5584b",
+      "ported": true,
+      "ourId": "fx"
+    },
+    "gemini-cli": {
+      "sha256": "7873ee0c7e5a6e66d1053a9c054a75b36490a54609db9761b95cfc48149056a2",
+      "ported": true,
+      "ourId": "gemini-cli"
+    },
+    "github-copilot-cli": {
+      "sha256": "0087c23525d08847129d05c6edabbd0add043a33b880b6a6f15e0ea9798eecd2",
+      "ported": true,
+      "ourId": "github-copilot-cli"
+    },
+    "goose": {
+      "sha256": "a1738e90765eb20f25b244ece42aabbe5cf05d9dc1444bc6c46fe287abbcc4e9",
+      "ported": false,
+      "reason": "YAML config; needs a YAML writer. Deferred (design call 7)."
+    },
+    "grok-build": {
+      "sha256": "6a0908e997ce416da3ef0f744f49d57eb3924898ddf6e40c91a6eadb149a3d64",
+      "ported": true,
+      "ourId": "grok-build"
+    },
+    "hermes": {
+      "sha256": "fe6e275f540cc9ef13f686e95ec7005afd8b1b8334488df229f2c12ff1e61fac",
+      "ported": false,
+      "reason": "YAML 1.1 config; needs a YAML writer. Deferred (design call 7)."
+    },
+    "junie": {
+      "sha256": "677ad4b807ff5652acb87827d76ebd7ee91206aa7315edc0036cd4b5bd3d98cc",
+      "ported": true,
+      "ourId": "junie"
+    },
+    "kilo-code": {
+      "sha256": "411d55aef2b8371a373649ed9b58c52617702129ab68f7da793a8253cd3ab0d2",
+      "ported": true,
+      "ourId": "kilo-code"
+    },
+    "kimi-code": {
+      "sha256": "b2724888d32e294383c2932fbc191e67b3cfac1ba552318e2290b2dd6a9c868a",
+      "ported": true,
+      "ourId": "kimi-code"
+    },
+    "kiro-cli": {
+      "sha256": "608b8eddc0a46178bf84d7b67c05a17149721771755087deb5bf21309a6801c0",
+      "ported": true,
+      "ourId": "kiro-cli"
+    },
+    "mastracode": {
+      "sha256": "f156a8042e53ebff707982d1930293928d99c8d6063a7643c31f50ba2f7b1b44",
+      "ported": true,
+      "ourId": "mastracode"
+    },
+    "mcporter": {
+      "sha256": "7e5ca2acd2dd3e2088c8adc02add6eef6bb10674db7c5f26e5c7e9ac8506d6b2",
+      "ported": true,
+      "ourId": "mcporter"
+    },
+    "opencode": {
+      "sha256": "9869e36cc3088ec8465e44e068b78be573c303252544642886cb4e6d861238f0",
+      "ported": true,
+      "ourId": "opencode",
+      "note": "The write location also follows resolveOpenCodeUpsertKey in src/opencode-config.ts at the pin (ported to opencode-layout.ts). This check does not hash that file."
+    },
+    "pi": {
+      "sha256": "73537af3ade1266deb84081816dc3dd6637cfc9295f9efedd968f0aa87465da7",
+      "ported": true,
+      "ourId": "pi"
+    },
+    "vscode": {
+      "sha256": "4cecedcdd70f757d14a9ff943a75ced5803d5a3cd89ea3a5585495633719b727",
+      "ported": false,
+      "reason": "The extension registers the server in VS Code through McpServerDefinitionProvider; an mcp.json entry would start a second server and a second browser on the same profile (Chrome exit 21). Design call 11."
+    },
+    "windsurf": {
+      "sha256": "449aa1a85d27a6a2d239817ee8baf5b38a1e39fbcb4a52853df0b777c2969ced",
+      "ported": true,
+      "ourId": "windsurf"
+    },
+    "zed": {
+      "sha256": "424cb5384a024d3e9906bfaae714a57aee814a59cebd9e162406733da6f05936",
+      "ported": true,
+      "ourId": "zed",
+      "note": "macOS path follows Zed's documentation (~/.config/zed/settings.json), not upstream (~/Library/Application Support/Zed/settings.json)."
+    }
+  },
+  "oursOnly": [
+    "amp",
+    "windsurf-next"
+  ]
+}

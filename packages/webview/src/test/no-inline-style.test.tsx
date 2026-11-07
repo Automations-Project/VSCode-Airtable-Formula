@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../App.js';
-import { IdeIcon } from '../components/IdeIcon.js';
+import { IdeIcon, hasIdeIcon } from '../components/IdeIcon.js';
 import { useStore } from '../store.js';
 import { makeDashboardState } from './dashboard-state.fixture.js';
 
@@ -69,5 +69,11 @@ describe('vendored SVG assets are CSP-safe as shipped', () => {
 
     expect(container.querySelector('svg')).toHaveAttribute('width', '20');
     expect(container.querySelectorAll('[style]')).toHaveLength(0);
+  });
+
+  it('ships logos for the twelve vendored ids only', () => {
+    expect(['cursor', 'windsurf', 'windsurf-next', 'claude-code', 'claude-desktop', 'cline', 'amp', 'opencode', 'codex-cli', 'zed', 'helix', 'neovim', 'mcp'].every(id => hasIdeIcon(id as never))).toBe(true);
+    expect(hasIdeIcon('gemini-cli')).toBe(false);
+    expect(render(<IdeIcon ideId="gemini-cli" />).container.innerHTML).toBe('');
   });
 });

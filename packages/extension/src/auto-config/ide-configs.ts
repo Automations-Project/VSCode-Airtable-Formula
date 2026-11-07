@@ -1,6 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import type { IdeId } from '@airtable-formula/shared';
+import { MCP_CLIENTS, MCP_CLIENT_BY_ID, hostPathContext, type McpClientId, type McpClientRow, type PathContext } from './mcp-clients.js';
 
 export type IdeCapability = 'mcp' | 'lsp';
 
@@ -8,15 +9,13 @@ export interface IdeConfig {
   label:           string;
   /** What this IDE supports for auto-configuration. */
   capabilities:    IdeCapability[];
-  detectionPaths:  string[];
-
-  // ── MCP (AI-client IDEs) ────────────────────────────────────────────────
-  mcpConfigPath?:  string;
-  mcpServersKey?:  string;
-  /** Extra fields merged into the MCP server entry (e.g. { type: 'local' } for OpenCode). */
-  mcpEntryExtras?: Record<string, unknown>;
+  /** The page Docs opens. MCP clients take it from their table row. */
+  docsUrl:         string;
+  /** The LSP-only editors' detection; an MCP client is detected by its table row (detectionPathsFor). */
+  detectionPaths?: string[];
 
   // ── LSP (code-editor IDEs) ──────────────────────────────────────────────
+  /** Absent for OpenCode: its `lsp` key sits in the file its MCP entry uses, resolved per call. */
   lspConfigPath?:  string;
   lspConfigFormat?: 'json-merge' | 'toml-append' | 'lua-write';
   /** Shown in the UI — a manual step required after auto-config (e.g. Neovim). */
@@ -27,115 +26,42 @@ const home    = os.homedir();
 const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
 const localAppData = process.env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local');
 
+/** Helix's languages.toml and Neovim's lsp/airtable.lua under a path context, as the MCP paths are. */
+export function editorLspConfigPath(id: 'helix' | 'neovim', c: PathContext): string {
+  const P = c.platform === 'win32' ? path.win32 : path.posix;
+  if (id === 'helix') {
+    return c.platform === 'win32'
+      ? P.join(c.env.APPDATA || P.join(c.home, 'AppData', 'Roaming'), 'helix', 'languages.toml')
+      : P.join(c.home, '.config', 'helix', 'languages.toml');
+  }
+  return c.platform === 'win32'
+    ? P.join(c.env.LOCALAPPDATA || P.join(c.home, 'AppData', 'Local'), 'nvim', 'lsp', 'airtable.lua')
+    : P.join(c.home, '.config', 'nvim', 'lsp', 'airtable.lua');
+}
+
+/**
+ * An MCP client's config comes from its row. OpenCode also reads language servers from its config
+ * file. Zed is an MCP client (context_servers) with no LSP auto-config: Zed starts only the
+ * language servers that a Zed extension or a built-in adapter registers, so an `lsp` settings
+ * entry is never started (zed-industries/zed#52653, closed "not planned").
+ */
+function fromRow(row: McpClientRow): IdeConfig {
+  if (row.id === 'opencode') {
+    return { label: row.label, capabilities: ['mcp', 'lsp'], docsUrl: row.docsUrl, lspConfigFormat: 'json-merge' };
+  }
+  return { label: row.label, capabilities: ['mcp'], docsUrl: row.docsUrl };
+}
+
+/** Every IdeId in IDE_IDS order: the client table's rows, then the LSP-only editors. */
 export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
-  // ── VS Code family (MCP auto-config; LSP implicit via extension) ─────────
-  'cursor': {
-    label: 'Cursor',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.cursor', 'mcp.json'),
-    mcpServersKey:  'mcpServers',
-    detectionPaths: [
-      path.join(home, '.cursor'),
-      '/Applications/Cursor.app',
-      path.join(localAppData, 'Programs', 'cursor'),
-    ],
-  },
-  // Windsurf was rebranded to "Devin Desktop" (2026-06-02, in-place OTA rename).
-  // The `.codeium/windsurf*` paths are unchanged per the vendor docs, so the
-  // MCP config + detection paths stay; only the display label updates.
-  'windsurf': {
-    label: 'Devin Desktop (Windsurf)',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
-    mcpServersKey:  'mcpServers',
-    detectionPaths: [path.join(home, '.codeium', 'windsurf')],
-  },
-  'windsurf-next': {
-    label: 'Devin Desktop Next (Windsurf Next)',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.codeium', 'windsurf-next', 'mcp_config.json'),
-    mcpServersKey:  'mcpServers',
-    detectionPaths: [path.join(home, '.codeium', 'windsurf-next')],
-  },
-  'cline': {
-    label: 'Cline',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.cline', 'data', 'settings', 'cline_mcp_settings.json'),
-    mcpServersKey:  'mcpServers',
-    detectionPaths: [path.join(home, '.cline')],
-  },
-
-  // ── AI-client tools (MCP only) ──────────────────────────────────────────
-  'claude-code': {
-    label: 'Claude Code',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.claude.json'),
-    mcpServersKey:  'mcpServers',
-    detectionPaths: [path.join(home, '.claude.json'), path.join(home, '.claude')],
-  },
-  'claude-desktop': {
-    label: 'Claude Desktop',
-    capabilities: ['mcp'],
-    mcpConfigPath: process.platform === 'win32'
-      ? path.join(appData, 'Claude', 'claude_desktop_config.json')
-      : path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
-    mcpServersKey:  'mcpServers',
-    detectionPaths: [
-      path.join(appData, 'Claude'),
-      path.join(home, 'Library', 'Application Support', 'Claude'),
-    ],
-  },
-  'amp': {
-    label: 'Amp',
-    capabilities: ['mcp'],
-    mcpConfigPath:  path.join(home, '.config', 'amp', 'settings.json'),
-    mcpServersKey:  'mcp.servers',
-    detectionPaths: [path.join(home, '.config', 'amp')],
-  },
-  'opencode': {
-    label: 'OpenCode',
-    capabilities: ['mcp', 'lsp'],
-    mcpConfigPath:   path.join(home, '.config', 'opencode', 'opencode.json'),
-    mcpServersKey:   'mcp',
-    mcpEntryExtras:  { type: 'local' },
-    lspConfigPath:   path.join(home, '.config', 'opencode', 'opencode.json'),
-    lspConfigFormat: 'json-merge',
-    detectionPaths: [path.join(home, '.config', 'opencode')],
-  },
-  'codex-cli': {
-    label: 'Codex CLI',
-    capabilities: ['mcp'],
-    // TOML format — handled by configureMcpForIde via lspConfigFormat: 'toml-append'
-    // Reusing lspConfigPath/format here; mcpConfigPath is absent so the JSON path is skipped.
-    mcpConfigPath:  path.join(home, '.codex', 'config.toml'),
-    mcpServersKey:  '',   // unused for TOML; section key embedded in toml-append logic
-    detectionPaths: [path.join(home, '.codex')],
-  },
-
-  // ── Detected only (nothing to configure) ────────────────────────────────
-  // Zed has no LSP auto-config. Zed starts only the language servers that a Zed
-  // extension or a built-in adapter registers, so the `lsp.airtable-lsp` entry
-  // Setup used to merge into settings.json was never started
-  // (zed-industries/zed#52653, closed "not planned"). Real support needs a Zed
-  // extension. Editors with no capabilities are left out of the Setup list.
-  'zed': {
-    label: 'Zed',
-    capabilities: [],
-    detectionPaths: [
-      path.join(home, '.config', 'zed'),
-      path.join(home, 'Library', 'Application Support', 'Zed'),
-      path.join(appData, 'Zed'),
-      '/Applications/Zed.app',
-    ],
-  },
+  ...(Object.fromEntries(MCP_CLIENTS.map((r) => [r.id, fromRow(r)])) as Record<McpClientId, IdeConfig>),
 
   // ── Code editors (LSP only) ─────────────────────────────────────────────
   'helix': {
     label: 'Helix',
     capabilities: ['lsp'],
-    lspConfigPath: process.platform === 'win32'
-      ? path.join(appData, 'helix', 'languages.toml')
-      : path.join(home, '.config', 'helix', 'languages.toml'),
+    docsUrl: 'https://helix-editor.com',
+    lspConfigPath: editorLspConfigPath('helix', hostPathContext()),
     lspConfigFormat: 'toml-append',
     detectionPaths: [
       path.join(home, '.config', 'helix'),
@@ -145,9 +71,8 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
   'neovim': {
     label: 'Neovim',
     capabilities: ['lsp'],
-    lspConfigPath: process.platform === 'win32'
-      ? path.join(localAppData, 'nvim', 'lsp', 'airtable.lua')
-      : path.join(home, '.config', 'nvim', 'lsp', 'airtable.lua'),
+    docsUrl: 'https://neovim.io',
+    lspConfigPath: editorLspConfigPath('neovim', hostPathContext()),
     lspConfigFormat: 'lua-write',
     lspManualStep:  "Add `vim.lsp.enable('airtable')` to your init.lua to activate",
     detectionPaths: [
@@ -156,3 +81,14 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
     ],
   },
 };
+
+/** The client table row of an id; undefined for the LSP-only editors. */
+export function mcpRowFor(ideId: IdeId): McpClientRow | undefined {
+  return (MCP_CLIENT_BY_ID as Readonly<Partial<Record<IdeId, McpClientRow>>>)[ideId];
+}
+
+/** Where an IDE is looked for: its table row's detection paths, else its static list. */
+export function detectionPathsFor(ideId: IdeId, ctx: PathContext): readonly string[] {
+  const row = mcpRowFor(ideId);
+  return row ? row.detect(ctx) : IDE_CONFIGS[ideId].detectionPaths ?? [];
+}

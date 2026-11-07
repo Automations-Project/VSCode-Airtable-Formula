@@ -1,0 +1,30 @@
+name: MCP client table drift
+
+# Compares the add-mcp agents table pinned in scripts/mcp-clients-upstream.json with
+# upstream main. Weekly and on demand only: an upstream change must never turn an
+# unrelated pull request red. On drift the run fails and prints the report; it opens
+# no issue, so it needs no write permission. Scheduled runs use the default branch.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      # No `pnpm install`: the checker uses only Node builtins.
+      - name: Compare the pinned add-mcp table with upstream main
+        run: pnpm check:mcp-clients:upstream
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

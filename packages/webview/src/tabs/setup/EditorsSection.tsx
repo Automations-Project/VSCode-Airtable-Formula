@@ -1,6 +1,7 @@
 import React from 'react';
 import type { IdeStatus } from '@shared/types.js';
 import { ActionButton } from '../../components/ActionButton.js';
+import { AgentMark } from '../../components/AgentMark.js';
 import { EditorCard } from '../../components/EditorCard.js';
 import { Section } from '../../components/Section.js';
 import { OutcomeFeedback } from '../../components/SettingRow.js';
@@ -24,7 +25,9 @@ export function EditorsSection() {
   const setupAllFallback = useFocusFallback<HTMLButtonElement>(() => document.getElementById('editors-heading'));
 
   const detected = ideStatuses.filter(ide => ide.detected);
-  const undetected = ideStatuses.filter(ide => !ide.detected);
+  const undetected = ideStatuses
+    .filter(ide => !ide.detected)
+    .sort((a, b) => a.label.localeCompare(b.label, 'en'));
   const needWork = summarizeClients(detected).filter(client => client.state !== 'ready').length;
 
   const description = ideStatuses.length === 0
@@ -43,7 +46,6 @@ export function EditorsSection() {
         locked={setupAllPending}
         onSetup={() => setupIde(status.ideId)}
         onUnconfigure={() => unconfigureIde(status.ideId)}
-        onDocs={() => openIdeDocs(status.ideId)}
         onInstallSkill={installSkill}
       />
     </li>
@@ -81,8 +83,23 @@ export function EditorsSection() {
           {detected.length > 0 && <ul className="editor-list">{detected.map(renderCard)}</ul>}
           {undetected.length > 0 && (
             <details className="disclosure" open={detected.length === 0}>
-              <summary>Show available editors</summary>
-              <ul className="editor-list disclosure__body">{undetected.map(renderCard)}</ul>
+              <summary>{`${undetected.length} more supported ${undetected.length === 1 ? 'client' : 'clients'}`}</summary>
+              <ul className="skill-chips disclosure__body" aria-label="More supported clients">
+                {undetected.map(({ ideId, label }) => (
+                  <li key={ideId} className="skill-chip">
+                    <AgentMark client={{ id: ideId, name: label, ideId }} />
+                    <span>{label}</span>
+                    <button
+                      type="button"
+                      className="link-button"
+                      aria-label={`Docs for ${label}`}
+                      onClick={() => openIdeDocs(ideId)}
+                    >
+                      Docs
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </details>
           )}
         </>

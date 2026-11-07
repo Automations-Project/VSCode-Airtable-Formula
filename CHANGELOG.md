@@ -6,6 +6,82 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+### Added — MCP clients from add-mcp (2026-11-07)
+
+**Added**
+
+- **23 MCP clients, set up from one table.** The extension now configures MCP for 23 clients from
+  a table ported from [`neondatabase/add-mcp`](https://github.com/neondatabase/add-mcp)
+  (Apache-2.0, pinned by commit; the notice is in `packages/extension/THIRD_PARTY_NOTICES.md`).
+  13 are new: Antigravity, Factory Droid, fx, Gemini CLI, GitHub Copilot CLI, Grok Build, Junie,
+  Kilo Code, Kimi Code, Kiro CLI, Mastra Code, MCPorter and Pi. Zed is back as an MCP client
+  (`context_servers`). Only each client's global config file is written, and a file is never
+  created for a client that is not on this machine. VS Code itself is not in the table, because the
+  extension registers the server there. Goose and Hermes (YAML configs) are not supported yet.
+- **Config files with comments are edited in place.** JSON configs are changed through
+  `jsonc-parser`: our entry is added first in its object, on lines of its own, and removed by
+  deleting those lines. Every other line, comment, trailing comma and key order stays as it was.
+  The one exception is the line of an object written on one line: an empty `{}` opens up for our
+  entry, and a one-line file gets our entry on that line. A file that does not parse is left
+  untouched, and the error names the file, line and column.
+- **A collapsed "N more supported clients" list.** Clients not found on this machine sit in it
+  with a **Docs** button each, instead of a card. A client without a vendored logo gets a
+  monogram.
+- **A weekly drift check.** A scheduled GitHub Actions run compares the table with upstream and
+  fails with a report when add-mcp has moved. It never runs on pull requests.
+  `pnpm check:mcp-clients` does the offline half in `pnpm build` and `pnpm test`.
+
+**Changed — migration**
+
+The next VS Code start updates the `airtable-user-mcp` entries the extension wrote before (or press
+**Update** on the card). Those are the entries that set `AIRTABLE_HEADLESS_ONLY=1` together with
+the extension's `AIRTABLE_PROFILE_DIR`, start `~/.airtable-user-mcp/start.mjs`, or are the old Codex
+`npx` block. An `airtable-user-mcp` entry you wrote yourself (for example a standalone `npx` entry
+with your own `AIRTABLE_AUTH_MODE` and cookie) is never rewritten or moved by the start-up check or
+by a settings change. **Setup all detected editors** leaves it alone too, and reports that client as
+already configured. **Set up** and **Remove** on that client's card ask before replacing or deleting
+it. An entry of your own in a place the client never reads (Amp's nested `mcp.servers`, or
+`~/.codex` when `CODEX_HOME` points elsewhere) is not a setup: the client shows **Needs setup**, and
+Setup writes ours where the client reads and leaves your copy alone.
+
+An update changes only the keys the extension manages: the launch, and its own `AIRTABLE_*`
+environment variables. Every other key in the entry stays, such as Cline's `autoApprove` and
+`timeout`, a `disabled: true` you set, Codex's `startup_timeout_sec`, and your own environment
+variables.
+
+- **Amp:** our entry moves from the nested `mcp.servers`, which Amp never read, to
+  `amp.mcpServers`.
+- **OpenCode:** `command` becomes one array and `env` becomes `environment` (with `enabled: true`
+  in V1 files; V2 files, which use `mcp.servers`, get the V2 entry). `opencode.jsonc` is used when
+  it exists, and our leftover in `opencode.json` is removed, the LSP entry included.
+- **The official Airtable entry on Amp and OpenCode** moves only when you press **Configure** in
+  the Official Airtable section, not at start-up or on **Update**. Until then a copy in the old place
+  reads as not configured: Amp's `mcp.servers`, an OpenCode `type: "http"` entry, or a copy in
+  `opencode.json` once `opencode.jsonc` exists. Configure writes it to Amp's `amp.mcpServers`, and
+  in OpenCode's `remote` shape.
+- **Codex CLI:** the table now carries the same launcher and environment as every other client
+  and follows `mcp.serverSource`, instead of `npx` with no environment. `type = "stdio"` is gone.
+  Update rewrites our table at the end of `config.toml`, keeping your other keys, comments and
+  sub-tables in it. The keys of an `env` sub-table move into the inline `env`. CRLF files no longer
+  get a duplicate table. If
+  `config.toml` already defines `airtable-user-mcp` some other way (an inline table or dotted key
+  under `[mcp_servers]`), Setup refuses with nothing written instead of adding a second definition.
+- **Cline:** the **Cline** card keeps writing `~/.cline/data/settings/cline_mcp_settings.json`, the
+  one file Cline 4 and later read from the VS Code extension, the CLI and JetBrains. It still
+  detects Cline by `~/.cline`, and now also by the VS Code extension's
+  `globalStorage/saoudrizwan.claude-dev/settings` folder. There is no separate Cline CLI card. Our
+  entry gains `disabled: false` when it has no `disabled` key.
+- **Claude Desktop on Linux:** `~/.config/Claude/claude_desktop_config.json` (under
+  `XDG_CONFIG_HOME` when it is set).
+- **The official Airtable entry is matched only by its URL.** An `airtable` server of your own is
+  never read, replaced or removed as ours. **Configure** refuses, naming the URL it found, when one
+  is in the way.
+- **One broken config file no longer stops the rest.** A file that does not parse fails that client
+  only. **Setup all detected editors** still sets up the others and warns naming the client; the
+  start-up checks do the same and write the failure to the log.
+- **New clients detected on this machine show Needs setup** until you press **Setup all detected
+  editors** (or **Set up** on the card). Nothing is written to them unasked.
+
 ### Added — Prompt recipes in the AI skill (2026-11-07)
 
 - **The AI skill carries your MCP prompts.** Clients that do not show MCP prompts (most of the 70+

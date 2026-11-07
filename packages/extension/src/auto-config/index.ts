@@ -1,13 +1,19 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import type { AiSkill, IdeId, IdeStatus } from '@airtable-formula/shared';
+import { IDE_IDS, type AiSkill, type IdeId, type IdeStatus } from '@airtable-formula/shared';
 import { getSettings, minutesToIdleParkMs } from '../settings.js';
-import { IDE_CONFIGS } from './ide-configs.js';
-import { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
-import { configureLspForIde, unconfigureLspForIde, isLspConfigured, configureMcpToml, unconfigureMcpToml, isMcpTomlConfigured } from './lsp-config.js';
+import { IDE_CONFIGS, mcpRowFor } from './ide-configs.js';
+import { isIdeInstalled } from './ide-detection.js';
+import { isLspConfigured } from './lsp-config.js';
+import { hostPathContext, type McpClientRow } from './mcp-clients.js';
+import { readLaunch } from './mcp-entry-shapes.js';
+import {
+  MCP_SERVER_NAME, configureMcpClient, isOurEntry, readMcpClientHealth, readServerEntry, setServerEntry,
+  unconfigureMcpClient, type FoundEntry, type WriterDeps,
+} from './mcp-writer.js';
 
-const MCP_SERVER_NAME = 'airtable-user-mcp';
+// Our local entry is MCP_SERVER_NAME ('airtable-user-mcp'); the official remote one:
 const OFFICIAL_AIRTABLE_NAME = 'airtable';
 const OFFICIAL_AIRTABLE_URL = 'https://mcp.airtable.com/mcp';
 
@@ -110,109 +116,94 @@ export function buildNpxServerEntry(): Record<string, unknown> {
   };
 }
 
-export async function configureMcpForIde(ideId: IdeId, serverPath: string, serverEntry?: Record<string, unknown>): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return;
-
-  // Codex CLI uses TOML — delegate to the TOML handler
-  if (cfg.lspConfigFormat === undefined && ideId === 'codex-cli') {
-    return configureMcpToml(cfg.mcpConfigPath);
-  }
-  // codex-cli special-case: mcpConfigPath present but no mcpServersKey for JSON path
-  if (!cfg.mcpServersKey) return;
-
-  const base = serverEntry ?? buildServerEntry(serverPath);
-  const entry = cfg.mcpEntryExtras ? { ...cfg.mcpEntryExtras, ...base } : base;
-  const existing = await readConfigFile(cfg.mcpConfigPath);
-  const merged = mergeServerEntry(existing, cfg.mcpServersKey, MCP_SERVER_NAME, entry);
-  await writeConfigAtomic(cfg.mcpConfigPath, merged);
+/** This host's paths, file checks and launcher: what every function below uses unless a test passes its own. */
+export function hostWriterDeps(): WriterDeps {
+  return {
+    ctx: hostPathContext(), exists: fs.existsSync,
+    launcher: { script: LAUNCHER_SCRIPT, config: LAUNCHER_CONFIG, profileDir: path.join(LAUNCHER_DIR, '.chrome-profile') },
+  };
 }
 
-export async function unconfigureMcpForIde(ideId: IdeId): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return;
-  if (ideId === 'codex-cli') return unconfigureMcpToml(cfg.mcpConfigPath);
-  if (!cfg.mcpServersKey) return;
-  const existing = await readConfigFile(cfg.mcpConfigPath);
-  const cleaned = removeServerEntry(existing, cfg.mcpServersKey, MCP_SERVER_NAME);
-  await writeConfigAtomic(cfg.mcpConfigPath, cleaned);
+/**
+ * Writes our entry in the client's current location, in the client's shape, and moves any copy
+ * from an old location. An editor with no MCP row (Helix, Neovim) has nothing to write. Throws
+ * when the client is not detected or a file does not parse; nothing is written then.
+ */
+export async function configureMcpForIde(
+  ideId: IdeId,
+  serverPath: string,
+  serverEntry?: Record<string, unknown>,
+  deps: WriterDeps = hostWriterDeps(),
+): Promise<void> {
+  const row = mcpRowFor(ideId);
+  if (!row) return;
+  const launch = readLaunch(serverEntry ?? buildServerEntry(serverPath));
+  if (!launch) throw new Error('the MCP server entry has no command');
+  await configureMcpClient(row, launch, deps);
 }
 
-export async function isMcpConfigured(ideId: IdeId): Promise<boolean> {
+/**
+ * The activation auto-heal and the settings rewrite: re-writes the entry with the current settings
+ * only when the client has one we wrote (isOurEntry). A hand-written entry, or none, is left
+ * alone. Returns whether it re-wrote.
+ */
+export async function reapplyMcpForIde(
+  ideId: IdeId,
+  serverPath: string,
+  serverEntry?: Record<string, unknown>,
+  deps: WriterDeps = hostWriterDeps(),
+): Promise<boolean> {
+  const row = mcpRowFor(ideId);
+  if (!row) return false;
+  const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
+  if (!found || !isOurEntry(found.entry, deps)) return false;
+  await configureMcpForIde(ideId, serverPath, serverEntry, deps);
+  return true;
+}
+
+/**
+ * Whether the client has an `airtable-user-mcp` entry the extension did not write (isOurEntry): a
+ * working setup of the user's, which Setup all leaves byte for byte and a card's Set up asks about
+ * before replacing. False when the file does not parse; Setup then reports that itself.
+ */
+export async function hasForeignMcpEntry(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<boolean> {
+  const row = mcpRowFor(ideId);
+  if (!row) return false;
   try {
-    const cfg = IDE_CONFIGS[ideId];
-    if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return false;
-    if (ideId === 'codex-cli') return isMcpTomlConfigured(cfg.mcpConfigPath);
-    if (!cfg.mcpServersKey) return false;
-    const existing = await readConfigFile(cfg.mcpConfigPath);
-    const parts = cfg.mcpServersKey.split('.');
-    let cur: unknown = existing;
-    for (const p of parts) {
-      if (typeof cur !== 'object' || cur === null) return false;
-      cur = (cur as Record<string, unknown>)[p];
-    }
-    return typeof cur === 'object' && cur !== null && MCP_SERVER_NAME in (cur as object);
+    const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
+    // A copy where the client never looks is no working setup: Setup may write ours beside it.
+    return found !== null && found.readByClient && !isOurEntry(found.entry, deps);
   } catch { return false; }
 }
 
-export async function getMcpHealth(ideId: IdeId): Promise<{ configured: boolean; healthy: boolean }> {
-  try {
-    const cfg = IDE_CONFIGS[ideId];
-    if (!cfg.mcpConfigPath || !cfg.capabilities.includes('mcp')) return { configured: false, healthy: false };
-    if (ideId === 'codex-cli') {
-      const ok = await isMcpTomlConfigured(cfg.mcpConfigPath);
-      return { configured: ok, healthy: ok };
-    }
-    if (!cfg.mcpServersKey) return { configured: false, healthy: false };
-    const existing = await readConfigFile(cfg.mcpConfigPath);
-    const parts = cfg.mcpServersKey.split('.');
-    let cur: unknown = existing;
-    for (const p of parts) {
-      if (typeof cur !== 'object' || cur === null) return { configured: false, healthy: false };
-      cur = (cur as Record<string, unknown>)[p];
-    }
-    if (typeof cur !== 'object' || cur === null || !(MCP_SERVER_NAME in (cur as object))) {
-      return { configured: false, healthy: false };
-    }
-    const entry = (cur as Record<string, unknown>)[MCP_SERVER_NAME] as Record<string, unknown>;
-    if (entry.command === 'npx') return { configured: true, healthy: true };
-    const args = entry.args as string[] | undefined;
-    if (args && args.length > 0) {
-      const target = args[0];
-      if (target === LAUNCHER_SCRIPT) {
-        try {
-          await fs.promises.access(LAUNCHER_SCRIPT);
-          await fs.promises.access(LAUNCHER_CONFIG);
-          return { configured: true, healthy: true };
-        } catch {
-          return { configured: true, healthy: false };
-        }
-      }
-      try {
-        await fs.promises.access(target);
-        return { configured: true, healthy: true };
-      } catch {
-        return { configured: true, healthy: false };
-      }
-    }
-    return { configured: true, healthy: true };
-  } catch { return { configured: false, healthy: false }; }
+export async function unconfigureMcpForIde(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {
+  const row = mcpRowFor(ideId);
+  if (row) await unconfigureMcpClient(row, deps);
+}
+
+export async function getMcpHealth(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<{ configured: boolean; healthy: boolean }> {
+  const row = mcpRowFor(ideId);
+  return row ? readMcpClientHealth(row, deps) : { configured: false, healthy: false };
+}
+
+export async function isMcpConfigured(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<boolean> {
+  return (await getMcpHealth(ideId, deps)).configured;
 }
 
 function missingAiSkill(): AiSkill {
   return { status: 'missing' };
 }
 
-export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
+export async function getIdeStatus(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<IdeStatus> {
   const cfg = IDE_CONFIGS[ideId];
-  const detected = await isIdeInstalled(ideId);
+  const detected = await isIdeInstalled(ideId, deps.ctx, deps.exists);
   const hasMcp = cfg.capabilities.includes('mcp');
   const hasLsp = cfg.capabilities.includes('lsp');
   const health = (detected && hasMcp)
-    ? await getMcpHealth(ideId)
+    ? await getMcpHealth(ideId, deps)
     : { configured: false, healthy: false };
   const lspConfigured = (detected && hasLsp)
-    ? await isLspConfigured(ideId)
+    ? await isLspConfigured(ideId, deps)
     : undefined;
   return {
     ideId,
@@ -226,63 +217,95 @@ export async function getIdeStatus(ideId: IdeId): Promise<IdeStatus> {
   };
 }
 
-export async function getAllIdeStatuses(): Promise<IdeStatus[]> {
-  // An editor with no capabilities has nothing Setup could configure, so it gets no card.
-  const ids = (Object.keys(IDE_CONFIGS) as IdeId[]).filter(id => IDE_CONFIGS[id].capabilities.length > 0);
-  return Promise.all(ids.map(getIdeStatus));
+/** One status per IdeId, in IDE_IDS order. Every id has MCP or LSP, so every one gets a card. */
+export async function getAllIdeStatuses(deps: WriterDeps = hostWriterDeps()): Promise<IdeStatus[]> {
+  return Promise.all(IDE_IDS.map(id => getIdeStatus(id, deps)));
 }
 
 // ── Official Airtable MCP (https://mcp.airtable.com/mcp) ───────────────────
 
-function buildOfficialAirtableEntry(ideId: IdeId, pat: string): Record<string, unknown> {
-  const isWindsurf = ideId === 'windsurf' || ideId === 'windsurf-next';
+/**
+ * The official entry in the row's shape. `loc.native` is OpenCode's V2 key (`mcp.servers`), where
+ * `enabled` is omitted, as for our local entry.
+ */
+export function buildOfficialAirtableEntry(row: McpClientRow, pat: string, loc: { native: boolean } = { native: false }): Record<string, unknown> {
+  const headers = { Authorization: `Bearer ${pat}` };
+  // OpenCode knows `local` and `remote` servers only: add-mcp's transformOpenCodeConfig remote branch.
+  if (row.layout === 'opencode') {
+    return loc.native
+      ? { type: 'remote', url: OFFICIAL_AIRTABLE_URL, headers }
+      : { type: 'remote', url: OFFICIAL_AIRTABLE_URL, headers, enabled: true };
+  }
   // Windsurf uses 'serverUrl'; all other MCP clients use 'url'.
   // Claude Code (and most MCP clients) also require "type": "http" to recognise
   // remote HTTP servers — without it the entry is silently ignored.
-  const urlKey = isWindsurf ? 'serverUrl' : 'url';
-  return {
-    ...(isWindsurf ? {} : { type: 'http' }),
-    [urlKey]: OFFICIAL_AIRTABLE_URL,
-    headers: { Authorization: `Bearer ${pat}` },
-  };
+  return row.official === 'serverUrl'
+    ? { serverUrl: OFFICIAL_AIRTABLE_URL, headers }
+    : { type: 'http', url: OFFICIAL_AIRTABLE_URL, headers };
 }
 
-export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.mcpConfigPath || !cfg.mcpServersKey || !cfg.capabilities.includes('mcp')) return;
-  if (ideId === 'codex-cli') return; // TOML format not supported for official MCP
-  const entry = buildOfficialAirtableEntry(ideId, pat);
-  const existing = await readConfigFile(cfg.mcpConfigPath);
-  const merged = mergeServerEntry(existing, cfg.mcpServersKey, OFFICIAL_AIRTABLE_NAME, entry);
-  await writeConfigAtomic(cfg.mcpConfigPath, merged);
+/**
+ * The row whose 'airtable' entry can be ours: only the eight rows with `official` set. Anywhere
+ * else an 'airtable' server is the user's own, so it is never read, written or removed as ours.
+ */
+function officialRowFor(ideId: IdeId): McpClientRow | null {
+  const row = mcpRowFor(ideId);
+  return row?.official ? row : null;
 }
 
-export async function unconfigureOfficialAirtableMcp(ideId: IdeId): Promise<void> {
-  const cfg = IDE_CONFIGS[ideId];
-  if (!cfg.mcpConfigPath || !cfg.mcpServersKey || !cfg.capabilities.includes('mcp')) return;
-  if (ideId === 'codex-cli') return;
-  const existing = await readConfigFile(cfg.mcpConfigPath);
-  const cleaned = removeServerEntry(existing, cfg.mcpServersKey, OFFICIAL_AIRTABLE_NAME);
-  await writeConfigAtomic(cfg.mcpConfigPath, cleaned);
+/** On those rows, an 'airtable' entry is ours only while it points at the official server. */
+const isOfficialEntry = (entry: Record<string, unknown>): boolean =>
+  entry.url === OFFICIAL_AIRTABLE_URL || entry.serverUrl === OFFICIAL_AIRTABLE_URL;
+
+/**
+ * Configured: ours, where the client reads it, and in the shape we write now (so OpenCode's old
+ * `type: 'http'` copy is not). Anything less is cleaned up by the next Configure.
+ */
+function isOfficialEntryCurrent(row: McpClientRow, found: FoundEntry): boolean {
+  if (found.legacy) return false;
+  const expected = buildOfficialAirtableEntry(row, '', { native: found.native });
+  return Object.keys(expected).every(k => Object.prototype.hasOwnProperty.call(found.entry, k))
+    && (expected.type === undefined || found.entry.type === expected.type);
 }
 
-export async function isOfficialAirtableConfigured(ideId: IdeId): Promise<boolean> {
-  try {
-    const cfg = IDE_CONFIGS[ideId];
-    if (!cfg.mcpConfigPath || !cfg.mcpServersKey || !cfg.capabilities.includes('mcp')) return false;
-    if (ideId === 'codex-cli') return false;
-    const existing = await readConfigFile(cfg.mcpConfigPath);
-    const parts = cfg.mcpServersKey.split('.');
-    let cur: unknown = existing;
-    for (const p of parts) {
-      if (typeof cur !== 'object' || cur === null) return false;
-      cur = (cur as Record<string, unknown>)[p];
+export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string, deps: WriterDeps = hostWriterDeps()): Promise<void> {
+  const row = officialRowFor(ideId);
+  if (!row) throw new Error(`${IDE_CONFIGS[ideId].label} does not support the official Airtable server here.`);
+  await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, ({ native, existing }) => {
+    // The write would replace whatever holds the name there; a server of the user's own is not
+    // ours to replace. Checked inside the writer's file lock, so nothing can slip in between.
+    if (existing !== undefined && !(isRecord(existing) && isOfficialEntry(existing))) {
+      throw new Error(`${row.label} already has an "airtable" MCP server that is not Airtable's official one (${describeForeign(existing)}); rename it first`);
     }
-    return typeof cur === 'object' && cur !== null && OFFICIAL_AIRTABLE_NAME in (cur as object);
+    return buildOfficialAirtableEntry(row, pat, { native });
+  }, deps, isOfficialEntry);
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** What the refusal found under "airtable": the url it points at, so the user knows which server it is. */
+function describeForeign(existing: unknown): string {
+  if (!isRecord(existing)) return 'it is not a server entry';
+  const url = [existing.url, existing.serverUrl, existing.httpUrl].find((u): u is string => typeof u === 'string');
+  return url ? `it points at ${url}` : 'it has no url';
+}
+
+export async function unconfigureOfficialAirtableMcp(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {
+  const row = officialRowFor(ideId);
+  if (row) await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, null, deps, isOfficialEntry);
+}
+
+export async function isOfficialAirtableConfigured(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<boolean> {
+  const row = officialRowFor(ideId);
+  if (!row) return false;
+  try {
+    const found = await readServerEntry(row, OFFICIAL_AIRTABLE_NAME, deps, isOfficialEntry);
+    return found !== null && isOfficialEntryCurrent(row, found);
   } catch { return false; }
 }
 
-export { detectInstalledIdes, isIdeInstalled, readConfigFile, writeConfigAtomic, mergeServerEntry, removeServerEntry } from './ide-detection.js';
-export { IDE_CONFIGS } from './ide-configs.js';
+export { settleByClient, type ClientFailure } from './settle-by-client.js';
+export { detectInstalledIdes, isIdeInstalled } from './ide-detection.js';
+export { IDE_CONFIGS, detectionPathsFor } from './ide-configs.js';
 export type { IdeConfig } from './ide-configs.js';
 export { configureLspForIde, unconfigureLspForIde, isLspConfigured } from './lsp-config.js';

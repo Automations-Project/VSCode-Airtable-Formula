@@ -9,6 +9,7 @@
 
 # 2. Allow top-level config & docs
 !.gitignore
+!.gitattributes
 !.npmrc
 !package.json
 !pnpm-lock.yaml

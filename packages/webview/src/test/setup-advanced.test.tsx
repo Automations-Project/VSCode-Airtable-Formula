@@ -738,6 +738,15 @@ describe('Official Airtable MCP', () => {
     expect(await within(official()).findByText('Configuration copied')).toBeVisible();
   });
 
+  it("the snippet uses each client's shape: OpenCode remote, Windsurf serverUrl, others type http", () => {
+    const entry = (ide: string) => (JSON.parse(`{${getOfficialAirtableSnippet(ide)}}`) as { airtable: unknown }).airtable;
+    const url = 'https://mcp.airtable.com/mcp';
+    const headers = { Authorization: 'Bearer {{AIRTABLE_PAT}}' };
+    expect(entry('opencode')).toEqual({ type: 'remote', url, headers, enabled: true });
+    expect(entry('windsurf')).toEqual({ serverUrl: url, headers });
+    expect(entry('cursor')).toEqual({ type: 'http', url, headers });
+  });
+
   it('opens when a configured editor has no saved PAT', () => {
     seed({ officialAirtable: { patSet: false, ideConfigured: { cursor: true } } });
     render(<Setup navigate={vi.fn()} />);

@@ -84,6 +84,14 @@ describe('getMcpSnippet mcp port', () => {
     expect(text).toContain('"url"');
   });
 
+  it('every manual snippet names our server airtable-user-mcp, never the official entry name airtable', () => {
+    for (const ide of ['claude-code', 'claude-desktop', 'cursor', 'windsurf', 'cline']) {
+      for (const variant of ['http', 'stdio'] as const) {
+        expect(getMcpSnippet(ide, variant, 3100).startsWith('"airtable-user-mcp": {'), `${ide} ${variant}`).toBe(true);
+      }
+    }
+  });
+
   it('Claude Code HTTP uses type: http and url keys', () => {
     const text = getMcpSnippet('claude-code', 'http', 3100);
     expect(text).toContain('"type": "http"');

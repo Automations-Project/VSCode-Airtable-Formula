@@ -5,6 +5,7 @@ import { useFocusFallback } from '../lib/useFocusFallback.js';
 import { summarizeClients, type ClientSummary } from '../selectors/readiness.js';
 import { useStore } from '../store.js';
 import { ActionButton } from './ActionButton.js';
+import { AgentMark } from './AgentMark.js';
 import { IdeIcon, type IdeIconTone } from './IdeIcon.js';
 import { Pill } from './Pill.js';
 import { OutcomeFeedback } from './SettingRow.js';
@@ -40,8 +41,6 @@ interface EditorCardProps {
   /** Start the action; returns its id, or null when it was refused. */
   onSetup: () => string | null;
   onUnconfigure: () => string | null;
-  /** Opens the editor's install/docs page through the host. Omit to hide Docs. */
-  onDocs?: () => void;
   /** True only while THIS editor's own action is in flight. */
   loading: boolean;
   /** A conflicting action (setup-all) is rewriting every editor: hold this card's actions. */
@@ -58,7 +57,6 @@ export function EditorCard({
   status,
   onSetup,
   onUnconfigure,
-  onDocs,
   loading,
   locked = false,
   onInstallSkill,
@@ -121,7 +119,7 @@ export function EditorCard({
       data-state={state ?? 'not-detected'}
     >
       <header className="editor-card__header">
-        <IdeIcon ideId={ideId} size={18} tone={status.detected ? 'default' : 'muted'} />
+        <AgentMark client={{ id: ideId, name: label, ideId }} />
         <h3 id={headingId} className="editor-card__name">{label}</h3>
         {status.version && <span className="editor-card__version">{status.version}</span>}
         <span className="editor-card__state">{stateLabel}</span>
@@ -212,11 +210,6 @@ export function EditorCard({
             onClick={() => run('remove', onUnconfigure)}
           >
             Remove
-          </ActionButton>
-        )}
-        {!status.detected && onDocs && (
-          <ActionButton aria-label={`Docs for ${label}`} onClick={onDocs}>
-            Docs
           </ActionButton>
         )}
       </div>

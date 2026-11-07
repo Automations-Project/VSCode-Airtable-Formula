@@ -19,9 +19,10 @@ export function formatUptime(ms: number | null | undefined): string {
   return `${h}h ${m}m`;
 }
 
+// Our own server, by the name Setup writes (airtable-user-mcp); "airtable" is the official entry's name.
 export function getMcpSnippet(ide: string, variant: McpSnippetVariant, port: SnippetPort): string {
   if (variant === 'stdio') {
-    return `"airtable": {
+    return `"airtable-user-mcp": {
   "command": "npx",
   "args": ["-y", "airtable-user-mcp"]
 }`;
@@ -36,7 +37,7 @@ export function getMcpSnippet(ide: string, variant: McpSnippetVariant, port: Sni
   // Each IDE has a slightly different key name (Pitfall 2 in RESEARCH.md)
   // Windsurf: serverUrl (not url)
   if (ide === 'windsurf') {
-    return `"airtable": {
+    return `"airtable-user-mcp": {
   "serverUrl": "${mcpUrl}",
   "headers": {
     "Authorization": "Bearer {{BEARER_TOKEN}}"
@@ -46,7 +47,7 @@ export function getMcpSnippet(ide: string, variant: McpSnippetVariant, port: Sni
 
   // Cursor + Cline: url only (no type: http)
   if (ide === 'cursor' || ide === 'cline') {
-    return `"airtable": {
+    return `"airtable-user-mcp": {
   "url": "${mcpUrl}",
   "headers": {
     "Authorization": "Bearer {{BEARER_TOKEN}}"
@@ -55,7 +56,7 @@ export function getMcpSnippet(ide: string, variant: McpSnippetVariant, port: Sni
   }
 
   // claude-code, claude-desktop (and any future IDE) — type: "http" + url
-  return `"airtable": {
+  return `"airtable-user-mcp": {
   "type": "http",
   "url": "${mcpUrl}",
   "headers": {
@@ -143,6 +144,17 @@ vim.lsp.enable('airtable_formula')`;
 }
 
 export function getOfficialAirtableSnippet(ide: string): string {
+  // OpenCode knows `local` and `remote` servers only (the shape Configure writes there).
+  if (ide === 'opencode') {
+    return `"airtable": {
+  "type": "remote",
+  "url": "https://mcp.airtable.com/mcp",
+  "headers": {
+    "Authorization": "Bearer {{AIRTABLE_PAT}}"
+  },
+  "enabled": true
+}`;
+  }
   const isWindsurf = ide === 'windsurf' || ide === 'windsurf-next';
   // Windsurf uses 'serverUrl'; everyone else uses 'url'.
   // Claude Code and most MCP clients require "type": "http" to recognise

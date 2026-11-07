@@ -215,24 +215,39 @@ describe('Editors section', () => {
     render(<Setup navigate={vi.fn()} />);
 
     const cursor = within(editors()).getByRole('heading', { name: 'Cursor' });
-    const helix = within(editors()).getByRole('heading', { name: 'Helix' });
-    expect(cursor.compareDocumentPosition(helix) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const more = within(editors()).getByText('1 more supported client');
+    expect(cursor.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('puts undetected editors behind a Show available editors disclosure', async () => {
+  it('collapses undetected clients into a closed, sorted list with no cards', async () => {
     seed({
       ideStatuses: [
         ide({ ideId: 'cursor', label: 'Cursor' }),
-        ide({ ideId: 'helix', label: 'Helix', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'zed', label: 'Zed', detected: false, mcpConfigured: false }),
+        ide({ ideId: 'gemini-cli', label: 'Gemini CLI', detected: false, mcpConfigured: false }),
       ],
     });
-
     render(<Setup navigate={vi.fn()} />);
-
-    const summary = within(editors()).getByText('Show available editors');
+    const summary = within(editors()).getByText('2 more supported clients');
     expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByRole('article', { name: 'Zed' })).toBeNull();
     await userEvent.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
+    const list = within(editors()).getByRole('list', { name: 'More supported clients' });
+    expect(within(list).getAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['Docs for Gemini CLI', 'Docs for Zed']);
+    expect(document.querySelector('a[href]')).toBeNull();
+  });
+
+  it('opens the list when nothing is detected, and a client without a logo gets a monogram', () => {
+    seed({ ideStatuses: [ide({ ideId: 'gemini-cli', label: 'Gemini CLI', detected: false, mcpConfigured: false })] });
+    render(<Setup navigate={vi.fn()} />);
+    expect(within(editors()).getByText('1 more supported client').closest('details')).toHaveAttribute('open');
+    expect(document.querySelector('.skill-chip .monogram')?.textContent).toBe('G');
+  });
+
+  it('a detected client without a vendored logo shows a monogram on its card', () => {
+    seed({ ideStatuses: [ide({ ideId: 'kilo-code', label: 'Kilo Code' })] });
+    render(<Setup navigate={vi.fn()} />);
+    expect(card('Kilo Code').querySelector('.monogram')?.textContent).toBe('K');
   });
 
   it('offers Setup all detected editors when more than one needs work', async () => {
@@ -400,7 +415,7 @@ describe('Editors section', () => {
 
     render(<Setup navigate={vi.fn()} />);
 
-    await userEvent.click(within(editors()).getByText('Show available editors'));
+    await userEvent.click(within(editors()).getByText('1 more supported client'));
     await userEvent.click(screen.getByRole('button', { name: 'Docs for Helix' }));
     expect(posted('action:openIdeDocs')).toEqual([expect.objectContaining({ ideId: 'helix' })]);
     expect(document.querySelector('a[href]')).toBeNull();
@@ -421,7 +436,7 @@ describe('Editors section', () => {
     expect(within(card('Cursor')).getByText('Ready')).toBeVisible();
     expect(within(card('Claude Code')).getByText('Needs setup')).toBeVisible();
     expect(within(card('Cline')).getByText('Partial')).toBeVisible();
-    expect(within(card('Helix')).getByText('Not detected')).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'Helix' })).toBeNull();
   });
 
   it('spells out partial MCP and LSP states without relying on colour', () => {

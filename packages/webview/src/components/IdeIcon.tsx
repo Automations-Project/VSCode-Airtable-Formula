@@ -14,7 +14,8 @@ import zedSvg        from '../assets/icons/zed.svg?raw';
 import helixSvg      from '../assets/icons/helix.svg?raw';
 import neovimSvg     from '../assets/icons/neovim.svg?raw';
 
-const IDE_ICONS: Record<IdeId | 'mcp', string> = {
+// The twelve vendored logos. Every other client has none: hasIdeIcon is false and IdeIcon renders nothing.
+const IDE_ICONS: Readonly<Partial<Record<IdeId, string>>> = {
   'cursor':         cursorSvg,
   'windsurf':       windsurfSvg,
   'windsurf-next':  windsurfSvg,
@@ -27,8 +28,18 @@ const IDE_ICONS: Record<IdeId | 'mcp', string> = {
   'zed':            zedSvg,
   'helix':          helixSvg,
   'neovim':         neovimSvg,
-  'mcp':            mcpSvg,
 };
+
+const MCP_ICON = mcpSvg;
+
+function iconFor(id: IdeId | 'mcp'): string | undefined {
+  return id === 'mcp' ? MCP_ICON : IDE_ICONS[id];
+}
+
+/** Whether a vendored logo exists for the id; IdeIcon renders nothing when it does not. */
+export function hasIdeIcon(id: IdeId | 'mcp'): boolean {
+  return iconFor(id) !== undefined;
+}
 
 export type IdeIconTone = 'default' | 'muted' | 'ok' | 'warn' | 'bad' | 'info';
 
@@ -48,7 +59,7 @@ function sizedSvg(svg: string, size: number): string {
 
 /** Decorative: every use sits beside a text label. */
 export function IdeIcon({ ideId, size = 16, tone = 'default' }: IdeIconProps) {
-  const svg = IDE_ICONS[ideId];
+  const svg = iconFor(ideId);
   if (!svg) return null;
 
   return (

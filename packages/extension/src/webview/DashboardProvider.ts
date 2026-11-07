@@ -16,8 +16,10 @@ import {
   type WebviewMessage,
 } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
-import { getAllIdeStatuses, configureMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, hasForeignMcpEntry, reapplyMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
+import { MCP_CLIENTS } from '../auto-config/mcp-clients.js';
+import { settleByClient, type ClientFailure } from '../auto-config/settle-by-client.js';
 import { installSkill, checkSkill, removeSkill, listSkillClients } from '../skills/installer.js';
 import { skillEnv } from '../skills/host-env.js';
 import { getSettings, updateWebviewSetting, type HostBrowserChoice } from '../settings.js';
@@ -36,21 +38,6 @@ const WEBVIEW_LINKS: Record<WebviewLinkId, string> = {
   changelog: 'https://github.com/Automations-Project/VSCode-Airtable-Formula/blob/main/CHANGELOG.md',
   github: 'https://github.com/Automations-Project/VSCode-Airtable-Formula',
   chrome: 'https://www.google.com/chrome/',
-};
-
-const IDE_DOCS_LINKS: Record<IdeId, string> = {
-  cursor: 'https://cursor.com/download',
-  windsurf: 'https://windsurf.com/download',
-  'windsurf-next': 'https://windsurf.com/download',
-  'claude-code': 'https://docs.claude.com/en/docs/claude-code/quickstart',
-  'claude-desktop': 'https://claude.ai/download',
-  cline: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
-  amp: 'https://ampcode.com/',
-  opencode: 'https://opencode.ai',
-  'codex-cli': 'https://github.com/openai/codex',
-  zed: 'https://zed.dev/download',
-  helix: 'https://helix-editor.com',
-  neovim: 'https://neovim.io',
 };
 
 const CONFIRMATION_COPY: Record<ConfirmationKind, string> = {
@@ -187,6 +174,20 @@ export function warnSkillProblems(failed: readonly { dir: string; message: strin
       ? `Airtable Formula: the AI skill failed in ${failed.length === 1 ? '1 folder' : `${failed.length} folders`}: ${failed.map(f => `${f.dir}: ${f.message}`).join('; ')}`
       : undefined;
   if (text) void vscode.window.showWarningMessage(text);
+  return text;
+}
+
+/** The summary line for clients Setup all left alone because their entry is one the user wrote; undefined when none. */
+export function alreadyConfiguredNote(skipped: readonly { label: string }[]): string | undefined {
+  if (skipped.length === 0) return undefined;
+  return `${skipped.map(s => s.label).join(', ')} already configured with an airtable-user-mcp entry you wrote; left as is.`;
+}
+
+/** Shows one warning naming the clients whose MCP config could not be written and returns its text; undefined when none failed. */
+export function warnClientFailures(failed: readonly ClientFailure[]): string | undefined {
+  if (failed.length === 0) return undefined;
+  const text = `Airtable Formula: could not configure ${failed.map(f => `${f.label}: ${f.message}`).join('; ')}`;
+  void vscode.window.showWarningMessage(text);
   return text;
 }
 
@@ -540,6 +541,18 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const serverEntry = getServerEntry(this.context);
         const settings = getSettings();
         const caps = IDE_CONFIGS[msg.ideId].capabilities;
+        // The one place the user points at a client: an entry they wrote may be replaced, after asking.
+        if (caps.includes('mcp') && await hasForeignMcpEntry(msg.ideId)) {
+          const choice = await vscode.window.showWarningMessage(
+            `Replace the airtable-user-mcp entry you wrote in ${IDE_CONFIGS[msg.ideId].label}?`,
+            { modal: true },
+            'Replace',
+          );
+          if (choice !== 'Replace') {
+            this.postResult(msg.id, false, 'Cancelled', true);
+            return;
+          }
+        }
         if (caps.includes('mcp')) await configureMcpForIde(msg.ideId, serverPath, serverEntry);
         if (caps.includes('lsp')) await configureLspForIde(msg.ideId);
         await installSkill(settings.ai.installScope, await skillEnv(this.context));
@@ -557,17 +570,26 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const serverEntry = getServerEntry(this.context);
         const settings = getSettings();
         const statuses = await getAllIdeStatuses();
-        await Promise.all(
-          statuses.filter(s => s.detected).map(async s => {
-            const caps = IDE_CONFIGS[s.ideId].capabilities;
-            if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
-            if (caps.includes('lsp')) await configureLspForIde(s.ideId);
-          })
-        );
+        const detected = statuses.filter(s => s.detected);
+        const skipped = new Set<string>();
+        // One client's bad config file fails that client only: the rest, the skill and the state push still run.
+        const { failed } = await settleByClient(detected, async s => {
+          // An MCP entry the user wrote is a working setup of theirs: Setup all leaves it byte for
+          // byte. Their client's LSP entry is still ours to set up (OpenCode).
+          const theirs = await hasForeignMcpEntry(s.ideId);
+          if (theirs) skipped.add(s.ideId);
+          const caps = IDE_CONFIGS[s.ideId].capabilities;
+          if (caps.includes('mcp') && !theirs) await configureMcpForIde(s.ideId, serverPath, serverEntry);
+          if (caps.includes('lsp')) await configureLspForIde(s.ideId);
+        });
+        this.traceClientFailures('setup_all', failed);
         // Once, not per IDE: every client reads the same skill folders.
         await installSkill(settings.ai.installScope, await skillEnv(this.context));
         await this.pushState();
-        this.postResult(msg.id, true);
+        const warning = warnClientFailures(failed);
+        const note = alreadyConfiguredNote(detected.filter(s => skipped.has(s.ideId)));
+        if (note) void vscode.window.showInformationMessage(`Airtable Formula: ${note}`);
+        this.postResult(msg.id, warning === undefined, warning);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
       }
@@ -606,6 +628,18 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'action:unconfigureIde') {
       try {
         const caps = IDE_CONFIGS[msg.ideId].capabilities;
+        // Removing an entry the user wrote takes their own setup away: ask, as Set up does.
+        if (caps.includes('mcp') && await hasForeignMcpEntry(msg.ideId)) {
+          const choice = await vscode.window.showWarningMessage(
+            `Remove the airtable-user-mcp entry you wrote in ${IDE_CONFIGS[msg.ideId].label}?`,
+            { modal: true },
+            'Remove',
+          );
+          if (choice !== 'Remove') {
+            this.postResult(msg.id, false, 'Cancelled', true);
+            return;
+          }
+        }
         if (caps.includes('mcp')) await unconfigureMcpForIde(msg.ideId);
         if (caps.includes('lsp')) await unconfigureLspForIde(msg.ideId);
         await this.pushState();
@@ -774,7 +808,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
     if (msg.type === 'action:openIdeDocs') {
       try {
-        await vscode.env.openExternal(vscode.Uri.parse(IDE_DOCS_LINKS[msg.ideId]));
+        // A fixed host URL from the client table: the webview only names the id.
+        await vscode.env.openExternal(vscode.Uri.parse(IDE_CONFIGS[msg.ideId].docsUrl));
         this.postResult(msg.id, true);
       } catch (err) {
         this.postResult(msg.id, false, String(err));
@@ -1736,10 +1771,10 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
   private async _computeOfficialAirtableState(): Promise<import('@airtable-formula/shared').OfficialAirtableMcpState> {
     const patSet = !!(await this.context.secrets.get('airtable-formula.airtable.pat'));
-    const ideIds = Object.keys(IDE_CONFIGS) as IdeId[];
-    const results = await Promise.all(ideIds.map(async ideId => ({
-      ideId,
-      configured: await isOfficialAirtableConfigured(ideId),
+    // Only the rows that carry the official entry; elsewhere an 'airtable' server is the user's own.
+    const results = await Promise.all(MCP_CLIENTS.filter(r => r.official).map(async r => ({
+      ideId: r.id,
+      configured: await isOfficialAirtableConfigured(r.id),
     })));
     const ideConfigured: Partial<Record<IdeId, boolean>> = {};
     for (const { ideId, configured } of results) {
@@ -1929,19 +1964,21 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const serverPath = getBundledServerPath(this.context);
     const serverEntry = getServerEntry(this.context);
     const statuses = await getAllIdeStatuses();
-    await Promise.all(
-      statuses
-        .filter(s => s.mcpConfigured)
-        .map(async s => {
-          try {
-            await configureMcpForIde(s.ideId, serverPath, serverEntry);
-          } catch (err) {
-            this._debugCollector?.trace('ext', 'error', 'mcp_config:rewrite_failed', { ideId: s.ideId }, String(err));
-            console.error(`[airtable-formula] Failed to re-apply MCP config for ${s.ideId}:`, err);
-            throw err;
-          }
-        }),
+    // Only entries we wrote are re-written; a hand-written one keeps its own env. One client's
+    // bad config file is reported and skipped; the others are still rewritten.
+    const { failed } = await settleByClient(
+      statuses.filter(s => s.mcpConfigured),
+      s => reapplyMcpForIde(s.ideId, serverPath, serverEntry),
     );
+    this.traceClientFailures('rewrite', failed);
+    warnClientFailures(failed);
+  }
+
+  private traceClientFailures(phase: string, failed: readonly ClientFailure[]): void {
+    for (const f of failed) {
+      this._debugCollector?.trace('ext', 'error', `mcp_config:${phase}_failed`, { ideId: f.ideId, label: f.label }, f.message);
+      console.error(`[airtable-formula] Failed to write the MCP config for ${f.label} (${phase}): ${f.message}`);
+    }
   }
 
   private postResult(

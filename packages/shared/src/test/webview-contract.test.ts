@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  IDE_IDS,
   parseExtensionMessage,
   parseWebviewMessage,
 } from '../webview-contract.js';
@@ -845,5 +846,22 @@ describe('parseExtensionMessage', () => {
         },
       },
     }).ok).toBe(false);
+  });
+});
+
+describe('IDE_IDS', () => {
+  it('lists the 23 MCP clients, then the two LSP-only editors, once each', () => {
+    expect(IDE_IDS).toEqual([
+      'cursor', 'windsurf', 'windsurf-next', 'claude-code', 'claude-desktop', 'cline', 'amp', 'opencode', 'codex-cli', 'zed',
+      'antigravity', 'factory-droid', 'fx', 'gemini-cli', 'github-copilot-cli', 'grok-build', 'junie',
+      'kilo-code', 'kimi-code', 'kiro-cli', 'mastracode', 'mcporter', 'pi', 'helix', 'neovim',
+    ]);
+  });
+
+  it('accepts a status and an action for a new client, and still rejects an unknown id', () => {
+    const status = { ...completeDashboardState.ideStatuses[0], ideId: 'gemini-cli', label: 'Gemini CLI' };
+    expect(parseExtensionMessage({ type: 'state:update', payload: { ...completeDashboardState, ideStatuses: [status] } }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'action:setupIde', id: 'abc123', ideId: 'kilo-code' }).ok).toBe(true);
+    expect(parseWebviewMessage({ type: 'action:setupIde', id: 'abc123', ideId: 'vscode' }).ok).toBe(false);
   });
 });
