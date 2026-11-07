@@ -112,6 +112,9 @@ describe('lint_airtable_code through a live MCP session', () => {
   it('has no credentials: a tool that needs Airtable fails, and lint still answers', async () => {
     const tables = await client.callTool({ name: 'list_tables', arguments: { appId: 'appXXXXXXXXXXXXXX' } });
     assert.equal(tables.isError, true);
+    // MISSING, not merely an error: a cookie leaking in from the shell fails as
+    // BYO_CREDENTIALS_INVALID after a real request to Airtable.
+    assert.match(tables.content[0].text, /CREDENTIALS_MISSING/);
     const r = await client.callTool({ name: 'lint_airtable_code', arguments: { language: 'formula', text: 'IF(1,2,3)' } });
     assert.notEqual(r.isError, true);
     assert.equal(parse(r).clean, true);
