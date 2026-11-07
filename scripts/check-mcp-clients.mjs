@@ -35,6 +35,7 @@ export const ATTRIBUTED_FILES = [
   TABLE_PATH,
   'packages/extension/src/auto-config/mcp-entry-shapes.ts',
   'packages/extension/src/auto-config/opencode-layout.ts',
+  'packages/extension/THIRD_PARTY_NOTICES.md',
 ];
 export const MIN_AGENTS = 20;
 

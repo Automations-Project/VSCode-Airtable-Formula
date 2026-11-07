@@ -72,7 +72,7 @@ test('extracts table rows from the TypeScript source as text', () => {
 });
 
 const header = `// Ported and modified from neondatabase/add-mcp src/agents.ts\n// at ${PIN}\n// Licensed under the Apache License, Version 2.0;\n`;
-const files = { 'packages/extension/src/auto-config/mcp-clients.ts': header, 'packages/extension/src/auto-config/mcp-entry-shapes.ts': header, 'packages/extension/src/auto-config/opencode-layout.ts': header };
+const files = { 'packages/extension/src/auto-config/mcp-clients.ts': header, 'packages/extension/src/auto-config/mcp-entry-shapes.ts': header, 'packages/extension/src/auto-config/opencode-layout.ts': header, 'packages/extension/THIRD_PARTY_NOTICES.md': header };
 const snapshot = {
   ref: PIN, helperSha256: 'c'.repeat(64), oursOnly: ['amp'],
   agents: { codex: { sha256: 'd'.repeat(64), ported: true, ourId: 'codex-cli' }, vscode: { sha256: 'e'.repeat(64), ported: false, reason: 'registered by the extension' } },
@@ -180,6 +180,10 @@ test('--upstream: a source with too few agents returns 1 instead of throwing', a
 });
 
 const TABLE = "const ROWS = [\n  { id: 'codex-cli', upstream: 'codex', x: 1 },\n  { id: 'amp', upstream: null, x: 2 },\n];\n";
+
+test('offline: the notices file is attributed like the ported files', () => {
+  assert.match(checkOffline({ snapshot, rows, files: { ...files, 'packages/extension/THIRD_PARTY_NOTICES.md': null } }).join('\n'), /THIRD_PARTY_NOTICES\.md.*missing/);
+});
 
 test('offline: agreement prints the pass line and returns 0', async () => {
   const f = fakeIo({ files: { [SNAPSHOT_PATH]: JSON.stringify(snapshot), [TABLE_PATH]: header + TABLE, ...Object.fromEntries(ATTRIBUTED_FILES.slice(1).map(p => [p, header])) } });
