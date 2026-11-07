@@ -16,6 +16,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   available in every tool profile, including `read-only`. Tool counts are now 73 overall, 11 in
   `read-only` and 55 in `safe-write`. The AI skill tells assistants to lint first, then call
   `validate_formula` when a base is available.
+- **The diagnostics engines no longer stall on pathological input.** Several scans in the formula,
+  script and automation engines were quadratic: a crafted 200,000-character input could keep the
+  editor, the language server or the shared MCP daemon busy for tens of seconds. Every scan is now
+  linear, with identical results on real code, and regression tests pin the worst shapes under two
+  seconds.
 
 ### Added — AI skill installer (2026-11-06)
 

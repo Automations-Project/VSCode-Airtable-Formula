@@ -230,6 +230,9 @@ function stripDefaultOrType(s: string): string {
  * call then costs its own leading whitespace and identifier run. The steps
  * mirror extractBindings exactly: trim, drop a leading '...',
  * stripDefaultOrType, trim, identifier test.
+ *
+ * Contract: exact only under the calling loop's order: pieces hold no comma, ends never
+ * decrease, and each start follows the previous end. A second caller must keep that order.
  */
 function makeSinglePieceBindings(text: string): (start: number, end: number) => string[] {
   let tailEnd = -1; // the end the values below were computed for
