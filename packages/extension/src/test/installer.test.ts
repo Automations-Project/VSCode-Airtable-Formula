@@ -144,8 +144,10 @@ describe('skill installer', () => {
     const target = path.join(home, '.cursor', 'skills');
     const rename = vi.mocked(fs.renameSync);
     const real = rename.getMockImplementation()!;
+    let recipesInTmpAtSwap: boolean | undefined;
     rename.mockImplementation((from, to) => {
       if (String(to) === path.join(target, 'airtable-formula') && path.basename(String(from)) === `.airtable-formula.tmp-${process.pid}`) {
+        recipesInTmpAtSwap = fs.existsSync(path.join(String(from), 'references', 'prompts.md'));
         throw Object.assign(new Error('EPERM: simulated'), { code: 'EPERM' });
       }
       return real(from, to);
@@ -156,6 +158,7 @@ describe('skill installer', () => {
     } finally {
       rename.mockImplementation(real);
     }
+    expect(recipesInTmpAtSwap).toBe(true);   // written before the swap, so it moves in with the folder
     expect(fs.existsSync(path.join(target, 'airtable-formula'))).toBe(false);
     expect(fs.existsSync(path.join(target, 'airtable-formula', 'references', 'prompts.md'))).toBe(false);
   });

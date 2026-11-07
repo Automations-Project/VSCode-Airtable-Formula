@@ -9,7 +9,8 @@ const HEADER = [
   '# Airtable task recipes',
   '',
   'These are the airtable-user-mcp prompts, as recipes. Your MCP client may also show them as',
-  'slash commands; the text is the same. An input is written as `{inputName}` (lowerCamelCase).',
+  'slash commands. In a global install they include the user\'s own edits; a project install',
+  'carries the built-in recipes only. An input is written as `{inputName}` (lowerCamelCase).',
   'Take each input from the user\'s request. If a required input is missing, ask for it before',
   'you start.',
 ].join('\n');
