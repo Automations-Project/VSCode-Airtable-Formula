@@ -179,6 +179,28 @@ export async function getIdeStatus(ideId: IdeId, deps: WriterDeps = hostWriterDe
   };
 }
 
+export interface ClientFailure { ideId: IdeId; label: string; message: string }
+
+/**
+ * Runs `fn` for every client at once and waits for all of them. One client's failure (an
+ * unparsable config file) fails that client only: the others still run, and the caller logs
+ * `failed` and reports `ok`.
+ */
+export async function settleByClient<T extends { ideId: IdeId; label: string }>(
+  statuses: readonly T[],
+  fn: (status: T) => Promise<unknown>,
+): Promise<{ ok: T[]; failed: ClientFailure[] }> {
+  const results = await Promise.allSettled(statuses.map(async s => fn(s)));
+  const ok: T[] = [];
+  const failed: ClientFailure[] = [];
+  results.forEach((r, i) => {
+    const { ideId, label } = statuses[i];
+    if (r.status === 'fulfilled') ok.push(statuses[i]);
+    else failed.push({ ideId, label, message: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+  });
+  return { ok, failed };
+}
+
 /** One status per IdeId, in IDE_IDS order. Every id has MCP or LSP, so every one gets a card. */
 export async function getAllIdeStatuses(deps: WriterDeps = hostWriterDeps()): Promise<IdeStatus[]> {
   return Promise.all(IDE_IDS.map(id => getIdeStatus(id, deps)));

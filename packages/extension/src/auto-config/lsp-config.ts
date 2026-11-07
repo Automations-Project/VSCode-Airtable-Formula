@@ -35,15 +35,17 @@ file-types = ["ata", "automation"]
 language-servers = ["airtable-lsp"]
 `;
 
-async function configureHelix(configPath: string): Promise<void> {
-  let existing = '';
-  try { existing = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
-  if (existing.includes(HELIX_MARKER)) return; // already configured
-  const content = existing.trimEnd() + '\n' + HELIX_BLOCK;
+export async function configureHelix(configPath: string): Promise<void> {
+  let raw = '';
+  try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { /* new file */ }
+  if (raw.includes(HELIX_MARKER)) return; // already configured
+  // trimEnd() counts a BOM as whitespace, so a BOM-only file would lose it.
+  const { bom, body: existing } = splitBom(raw);
+  const content = bom + existing.trimEnd() + '\n' + HELIX_BLOCK;
   await writeTextAtomic(configPath, content);
 }
 
-async function unconfigureHelix(configPath: string): Promise<void> {
+export async function unconfigureHelix(configPath: string): Promise<void> {
   let raw = '';
   try { raw = await fs.promises.readFile(configPath, 'utf8'); } catch { return; }
   if (!raw.includes(HELIX_MARKER)) return;

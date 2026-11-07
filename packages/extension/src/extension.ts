@@ -32,7 +32,7 @@ type LocalToolCategoryKey =
     | 'recordWrite' | 'recordDestructive'
     | 'sync' | 'daemon';
 import { getSettings } from './settings.js';
-import { getAllIdeStatuses, configureMcpForIde, ensureLauncher } from './auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, ensureLauncher, settleByClient, type ClientFailure } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
 import { installSkill, checkSkill } from './skills/installer.js';
 import { skillEnv } from './skills/host-env.js';
@@ -175,6 +175,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const data = Object.keys(ev.data).length > 0 ? ' ' + JSON.stringify(ev.data) : '';
         const err = ev.error ? ` ERROR: ${ev.error}` : '';
         debugOutput.appendLine(`${time} ${tag}${data}${err}`);
+    };
+
+    // A client whose config cannot be written (an unparsable file) is logged and skipped;
+    // the other clients in the same loop are still configured.
+    const logClientFailures = (phase: string, failed: readonly ClientFailure[]): void => {
+        for (const f of failed) {
+            debugCollector.trace('ext', 'error', `mcp_config:${phase}_failed`, { ideId: f.ideId, label: f.label }, f.message);
+            console.warn(`[AirtableFormula] MCP config for ${f.label} failed (${phase}): ${f.message}`);
+        }
     };
 
     // ── Formula features (existing, unchanged) ──────────────────────────
@@ -443,11 +452,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const settings = getSettings();
             const serverPath = getBundledServerPath(context);
             const statuses = await getAllIdeStatuses();
-            await Promise.all(statuses.filter(s => s.detected).map(s => configureMcpForIde(s.ideId, serverPath)));
+            const { failed } = await settleByClient(statuses.filter(s => s.detected), s => configureMcpForIde(s.ideId, serverPath));
+            logClientFailures('setup_all', failed);
             // Once, not per IDE: every client reads the same skill folders.
             await installSkill(settings.ai.installScope, await skillEnv(context));
             dashboardProvider.refresh();
-            vscode.window.showInformationMessage('Airtable Formula: All IDEs configured.');
+            if (failed.length > 0) {
+                vscode.window.showWarningMessage(`Airtable Formula: could not configure ${failed.map(f => `${f.label} (${f.message})`).join('; ')}. The other detected IDEs are configured.`);
+            } else {
+                vscode.window.showInformationMessage('Airtable Formula: All IDEs configured.');
+            }
         }),
         vscode.commands.registerCommand('airtable-formula.installAISkills', async () => {
             const { written, failed, noWorkspace } = await installSkill(getSettings().ai.installScope, await skillEnv(context));
@@ -749,7 +763,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (staleIdes.length > 0) {
             const entry = getServerEntry(context);
             const serverPath = getBundledServerPath(context);
-            await Promise.all(staleIdes.map(s => configureMcpForIde(s.ideId, serverPath, entry)));
+            const { failed } = await settleByClient(staleIdes, s => configureMcpForIde(s.ideId, serverPath, entry));
+            logClientFailures('auto_heal', failed);
             dashboardProvider.refresh();
         }
     }
@@ -766,8 +781,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const statuses = await getAllIdeStatuses();
             const detectedReady = statuses.filter(s => s.detected && !s.mcpConfigured);
             if (detectedReady.length > 0) {
-                await Promise.all(detectedReady.map(s => configureMcpForIde(s.ideId, serverPath, entry)));
-                vscode.window.showInformationMessage(`Airtable Formula: MCP configured for ${detectedReady.map(s => s.label).join(', ')}.`);
+                const { ok, failed } = await settleByClient(detectedReady, s => configureMcpForIde(s.ideId, serverPath, entry));
+                logClientFailures('first_launch', failed);
+                if (ok.length > 0) {
+                    vscode.window.showInformationMessage(`Airtable Formula: MCP configured for ${ok.map(s => s.label).join(', ')}.`);
+                }
             }
         }
         if (settings.ai.autoInstallFiles) {

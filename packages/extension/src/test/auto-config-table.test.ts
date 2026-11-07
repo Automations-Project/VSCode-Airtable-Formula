@@ -20,8 +20,8 @@ import { MCP_CLIENTS, MCP_CLIENT_BY_ID, resolveConfigPath, type McpClientId, typ
 import { readServerEntry, setServerEntry, type WriterDeps } from '../auto-config/mcp-writer.js';
 import {
   buildOfficialAirtableEntry, configureLspForIde, configureMcpForIde, configureOfficialAirtableMcp, getAllIdeStatuses,
-  getIdeStatus, getMcpHealth, isLspConfigured, isMcpConfigured, isOfficialAirtableConfigured, unconfigureLspForIde,
-  unconfigureMcpForIde, unconfigureOfficialAirtableMcp,
+  getIdeStatus, getMcpHealth, isLspConfigured, isMcpConfigured, isOfficialAirtableConfigured, settleByClient,
+  unconfigureLspForIde, unconfigureMcpForIde, unconfigureOfficialAirtableMcp,
 } from '../auto-config/index.js';
 
 let home: string;
@@ -90,6 +90,12 @@ it.each(MCP_CLIENTS.map(r => r.id))('%s: first-launch setup, stale-path auto-hea
   await configureMcpForIde(id, '/unused', entry, deps);
   s = await getIdeStatus(id, deps);
   expect([s.mcpConfigured, s.mcpServerHealthy]).toEqual([true, true]);
+  // A stale path, as an older extension version left it: configured but unhealthy, and the
+  // configure that auto-heal runs makes it healthy again.
+  await configureMcpForIde(id, '/unused', { ...entry, args: [path.join(home, 'gone', 'dist', 'mcp', 'index.mjs')] }, deps);
+  expect(await getMcpHealth(id, deps)).toEqual({ configured: true, healthy: false });
+  await configureMcpForIde(id, '/unused', entry, deps);
+  expect(await getMcpHealth(id, deps)).toEqual({ configured: true, healthy: true });
   fs.rmSync(deps.launcher.config);
   expect((await getIdeStatus(id, deps)).mcpServerHealthy).toBe(false);      // what auto-heal selects
   fs.writeFileSync(deps.launcher.config, '{}');
@@ -138,6 +144,48 @@ it("the official Airtable entry keeps today's shapes and clients, and lands unde
   expect(parse(fs.readFileSync(path.join(home, '.config', 'amp', 'settings.json'), 'utf8'))['amp.mcpServers'].airtable)
     .toEqual({ type: 'http', url: 'https://mcp.airtable.com/mcp', headers: auth });
   await expect(configureOfficialAirtableMcp('gemini-cli', 'patX', deps)).rejects.toThrow('Gemini CLI does not support the official Airtable server here.');
+});
+
+// The activation loops (auto-heal, first-launch auto-config) and Setup all run every client at
+// once; with 23 clients, one unparsable config file must fail that client only.
+describe('settleByClient: one failing client never stops the others', () => {
+  it('keeps the successes in order and reports each failure with its label', async () => {
+    const statuses = [
+      { ideId: 'cursor', label: 'Cursor' },
+      { ideId: 'zed', label: 'Zed' },
+      { ideId: 'pi', label: 'Pi' },
+    ] as const;
+    const result = await settleByClient(statuses, async s => { if (s.ideId === 'zed') throw new Error('bad json'); });
+    expect(result.ok.map(s => s.ideId)).toEqual(['cursor', 'pi']);
+    expect(result.failed).toEqual([{ ideId: 'zed', label: 'Zed', message: 'bad json' }]);
+  });
+
+  it('a synchronous throw and a rejection that is not an Error are failures too', async () => {
+    const statuses = [{ ideId: 'cursor', label: 'Cursor' }, { ideId: 'amp', label: 'Amp' }] as const;
+    const result = await settleByClient(statuses, s => {
+      if (s.ideId === 'cursor') throw new Error('sync');
+      return Promise.reject('plain');
+    });
+    expect(result.ok).toEqual([]);
+    expect(result.failed).toEqual([
+      { ideId: 'cursor', label: 'Cursor', message: 'sync' },
+      { ideId: 'amp', label: 'Amp', message: 'plain' },
+    ]);
+  });
+
+  it('first-launch auto-config: an unparsable Cursor config fails Cursor, Claude Code is still configured', async () => {
+    const entry = { command: 'node', args: [deps.launcher.script], env: {} };
+    detect(MCP_CLIENT_BY_ID.cursor);
+    detect(MCP_CLIENT_BY_ID['claude-code']);
+    write(fileOf(MCP_CLIENT_BY_ID.cursor), '{ "mcpServers": ');
+    const ready = (await getAllIdeStatuses(deps)).filter(s => s.detected && !s.mcpConfigured);
+    expect(ready.map(s => s.ideId)).toEqual(['cursor', 'claude-code']);
+    const { ok, failed } = await settleByClient(ready, s => configureMcpForIde(s.ideId, '/unused', entry, deps));
+    expect(ok.map(s => s.label)).toEqual(['Claude Code']);
+    expect(failed).toEqual([{ ideId: 'cursor', label: 'Cursor', message: expect.stringMatching(/is not valid JSON/) }]);
+    expect(await getMcpHealth('claude-code', deps)).toEqual({ configured: true, healthy: true });
+    expect(fs.readFileSync(fileOf(MCP_CLIENT_BY_ID.cursor), 'utf8')).toBe('{ "mcpServers": ');
+  });
 });
 
 // ── Carried from the Task 6 review ──────────────────────────────────────────

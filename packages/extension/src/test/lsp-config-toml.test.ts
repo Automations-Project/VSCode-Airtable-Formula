@@ -3,7 +3,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  configureHelix,
   configureMcpToml,
+  unconfigureHelix,
   unconfigureMcpToml,
   readMcpTomlEntry,
   renderTomlServer,
@@ -220,6 +222,29 @@ describe('a config.toml with a UTF-8 BOM', () => {
     fs.writeFileSync(cfg, BOM + '[mcp_servers.airtable-user-mcp]\r\ncommand = "node"\r\n\r\n[model_providers.x]\r\nname = "x"\r\n');
     await unconfigureMcpToml(cfg, K, N);
     expect(fs.readFileSync(cfg, 'utf8')).toBe(BOM + '[model_providers.x]\r\nname = "x"\r\n');
+  });
+
+  it('Helix: our four tables right after the BOM are removed, and the BOM and the user table stay', async () => {
+    await configureHelix(cfg); // into an empty file, to get our tables exactly as Setup writes them
+    const ours = fs.readFileSync(cfg, 'utf8').trim() + '\n';
+    expect(ours.startsWith('[language-server.airtable-lsp]')).toBe(true);
+    expect(ours.match(/^\[\[language\]\]$/gm)).toHaveLength(3);
+    const user = '[[language]]\nname = "rust"\n';
+    fs.writeFileSync(cfg, BOM + ours + '\n' + user);
+    await unconfigureHelix(cfg);
+    expect(fs.readFileSync(cfg, 'utf8')).toBe(BOM + user);
+  });
+
+  it('Helix: Setup on a BOM file keeps the BOM, adds our tables once, and Remove restores the file', async () => {
+    const user = '[[language]]\nname = "rust"\n';
+    fs.writeFileSync(cfg, BOM + user);
+    await configureHelix(cfg);
+    await configureHelix(cfg);
+    const out = fs.readFileSync(cfg, 'utf8');
+    expect(out.startsWith(BOM + user)).toBe(true);
+    expect(out.match(/\[language-server\.airtable-lsp\]/g)).toHaveLength(1);
+    await unconfigureHelix(cfg);
+    expect(fs.readFileSync(cfg, 'utf8')).toBe(BOM + user);
   });
 
   it('a BOM-only file gets our table after the BOM', async () => {
