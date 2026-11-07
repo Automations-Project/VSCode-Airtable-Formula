@@ -1,9 +1,8 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import type { IdeId } from '@airtable-formula/shared';
 import { IDE_CONFIGS } from './ide-configs.js';
 import { readConfigFile, writeConfigAtomic } from './ide-detection.js';
+import { writeTextAtomic } from './atomic-write.js';
 
 const LSP_SERVER_KEY = 'airtable-lsp';
 
@@ -206,21 +205,6 @@ function removeTomlSections(text: string, isOurs: (s: TomlSection) => boolean): 
   const kept = splitTomlSections(text).filter((s) => !isOurs(s));
   const out = kept.map((s) => s.text).join('').replace(/\n{3,}/g, '\n\n').trimEnd();
   return out === '' ? '' : out + '\n';
-}
-
-// ── Shared text-file atomic writer ──────────────────────────────────────────
-
-async function writeTextAtomic(filePath: string, content: string): Promise<void> {
-  const tmp = `${filePath}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    // 0600 for the same reason as writeConfigAtomic — these configs can carry a token.
-    await fs.promises.writeFile(tmp, content, { encoding: 'utf8', mode: 0o600 });
-    await fs.promises.rename(tmp, filePath);
-  } catch (err) {
-    await fs.promises.unlink(tmp).catch(() => {});
-    throw err;
-  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

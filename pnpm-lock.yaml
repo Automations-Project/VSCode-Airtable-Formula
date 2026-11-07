@@ -61,6 +61,9 @@ importers:
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       prettier:
         specifier: 3.8.3
         version: 3.8.3

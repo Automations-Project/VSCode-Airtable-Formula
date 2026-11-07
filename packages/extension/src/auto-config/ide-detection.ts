@@ -1,8 +1,7 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
 import type { IdeId } from '@airtable-formula/shared';
 import { IDE_CONFIGS } from './ide-configs.js';
+import { writeTextAtomic } from './atomic-write.js';
 
 export function getNestedKey(obj: Record<string, unknown>, dotPath: string): unknown {
   return dotPath.split('.').reduce<unknown>((cur, key) => {
@@ -76,19 +75,5 @@ export async function readConfigFile(filePath: string): Promise<Record<string, u
 }
 
 export async function writeConfigAtomic(filePath: string, config: Record<string, unknown>): Promise<void> {
-  // H10 — unique random suffix per write so two concurrent calls for the same
-  // target file (e.g. a double-click on "Setup") cannot collide on the tmp
-  // path and truncate each other's output.
-  const tmp = `${filePath}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    // 0600 — this file carries the Airtable PAT (Authorization: Bearer pat…). The
-    // rename below replaces the destination inode, so without an explicit mode any
-    // restrictive permissions the user had set are reset to 0644. No-op on Windows.
-    await fs.promises.writeFile(tmp, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
-    await fs.promises.rename(tmp, filePath);
-  } catch (err) {
-    await fs.promises.unlink(tmp).catch(() => {});
-    throw err;
-  }
+  await writeTextAtomic(filePath, JSON.stringify(config, null, 2) + '\n');
 }

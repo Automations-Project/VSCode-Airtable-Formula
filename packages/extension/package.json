@@ -769,6 +769,7 @@
     "adm-zip": "^0.6.1",
     "airtable-user-mcp": "workspace:*",
     "archiver": "^7.0.1",
+    "jsonc-parser": "^3.3.1",
     "prettier": "3.8.3",
     "terser": "^5.51.2",
     "tsup": "^8.5.1",
