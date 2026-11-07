@@ -277,6 +277,42 @@ describe('an entry the extension did not write is never rewritten unasked', () =
     expect(await hasForeignMcpEntry('helix', deps)).toBe(false);
   });
 
+  // A copy the client never reads is no setup at all: the client reads as not configured, so Setup
+  // all and the first launch set it up (the dead copy, not ours, stays where it is).
+  it("Amp: a hand-written entry only at the nested key Amp never reads is not configured, and Setup writes ours", async () => {
+    const row = MCP_CLIENT_BY_ID.amp;
+    detect(row);
+    const file = path.join(home, '.config', 'amp', 'settings.json');
+    write(file, JSON.stringify({ mcp: { servers: { 'airtable-user-mcp': HAND } } }, null, 2) + '\n');
+    const s = await getIdeStatus('amp', deps);
+    expect([s.detected, s.mcpConfigured]).toEqual([true, false]);
+    expect(await hasForeignMcpEntry('amp', deps)).toBe(false);
+    await configureMcpForIde('amp', '/unused', ours(), deps);
+    const doc = parse(fs.readFileSync(file, 'utf8'));
+    expect(doc['amp.mcpServers']['airtable-user-mcp']).toEqual(ours());
+    expect(doc.mcp.servers['airtable-user-mcp']).toEqual(HAND);
+    expect(await getMcpHealth('amp', deps)).toEqual({ configured: true, healthy: true });
+  });
+
+  it('Codex: a hand-written entry only in ~/.codex while CODEX_HOME points elsewhere is not configured', async () => {
+    const row = MCP_CLIENT_BY_ID['codex-cli'];
+    detect(row);
+    write(path.join(home, '.codex', 'config.toml'), '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\n');
+    const moved: WriterDeps = { ...deps, ctx: { ...deps.ctx, env: { ...deps.ctx.env, CODEX_HOME: path.join(home, 'elsewhere') } } };
+    expect(await getMcpHealth('codex-cli', moved)).toEqual({ configured: false, healthy: false });
+    expect(await hasForeignMcpEntry('codex-cli', moved)).toBe(false);
+  });
+
+  it("OpenCode reads both its files, so a hand-written entry in opencode.json beside opencode.jsonc is still the user's setup", async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const dir = path.join(home, '.config', 'opencode');
+    write(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { 'airtable-user-mcp': { type: 'local', command: ['npx', '-y', 'airtable-user-mcp'] } } }));
+    write(path.join(dir, 'opencode.jsonc'), '{}\n');
+    expect(await getMcpHealth('opencode', deps)).toEqual({ configured: true, healthy: true });
+    expect(await hasForeignMcpEntry('opencode', deps)).toBe(true);
+  });
+
   it('Kilo Code: a hand-written entry in kilo.json is not moved out when kilo.jsonc becomes current', async () => {
     const row = MCP_CLIENT_BY_ID['kilo-code'];
     detect(row);
@@ -585,6 +621,27 @@ describe("OpenCode's LSP entry shares the MCP entry's file", () => {
     write(path.join(dir, 'opencode.jsonc'), '{}\n');
     await expect(configureLspForIde('opencode')).rejects.toThrow(/opencode\.json is not valid JSON/);
     expect(fs.readFileSync(path.join(dir, 'opencode.jsonc'), 'utf8')).toBe('{}\n');
+  });
+
+  it('the LSP functions take the same deps as the MCP ones: another home is used, not HOME', async () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'atf-lsp-'));
+    try {
+      const otherDeps: WriterDeps = { ...deps, ctx: { ...deps.ctx, home: other, env: { APPDATA: path.join(other, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(other, 'AppData', 'Local') } } };
+      await configureLspForIde('opencode', otherDeps);
+      expect(fs.existsSync(path.join(other, '.config', 'opencode', 'opencode.jsonc'))).toBe(true);
+      expect(fs.existsSync(path.join(home, '.config', 'opencode'))).toBe(false);
+      expect(await isLspConfigured('opencode', otherDeps)).toBe(true);
+      await configureLspForIde('helix', otherDeps);
+      const helix = process.platform === 'win32'
+        ? path.join(other, 'AppData', 'Roaming', 'helix', 'languages.toml')
+        : path.join(other, '.config', 'helix', 'languages.toml');
+      expect(fs.readFileSync(helix, 'utf8')).toContain('[language-server.airtable-lsp]');
+      expect(await isLspConfigured('helix', otherDeps)).toBe(true);
+      await unconfigureLspForIde('helix', otherDeps);
+      expect(await isLspConfigured('helix', otherDeps)).toBe(false);
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
   });
 
   it('a file that does not parse is left alone, and Remove creates no file', async () => {

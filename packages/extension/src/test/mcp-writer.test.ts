@@ -145,7 +145,7 @@ describe('setServerEntry and readServerEntry under another name', () => {
     detect(row);
     await configureMcpClient(row, launch, deps);
     await setServerEntry(row, 'airtable', () => ({ type: 'http', url: 'https://mcp.airtable.com/mcp' }), deps);
-    expect(await readServerEntry(row, 'airtable', deps)).toEqual({ entry: { type: 'http', url: 'https://mcp.airtable.com/mcp' }, legacy: false, native: false });
+    expect(await readServerEntry(row, 'airtable', deps)).toEqual({ entry: { type: 'http', url: 'https://mcp.airtable.com/mcp' }, legacy: false, native: false, readByClient: true });
     await setServerEntry(row, 'airtable', null, deps);
     expect(await readServerEntry(row, 'airtable', deps)).toBeNull();
     expect(json(fileOf(row))).toEqual({ 'amp.mcpServers': { [MCP_SERVER_NAME]: ENTRY_SHAPES.standard(launch) } });
@@ -259,7 +259,8 @@ describe('entries in old places', () => {
     const dir = path.join(home, '.config', 'opencode');
     write(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { [MCP_SERVER_NAME]: ENTRY_SHAPES.opencode(launch) } }));
     write(path.join(dir, 'opencode.jsonc'), '{}\n');
-    expect(await readServerEntry(row, MCP_SERVER_NAME, deps)).toEqual({ entry: ENTRY_SHAPES.opencode(launch), legacy: true, native: false });
+    // OpenCode merges its two files, so the copy in opencode.json is one the client reads.
+    expect(await readServerEntry(row, MCP_SERVER_NAME, deps)).toEqual({ entry: ENTRY_SHAPES.opencode(launch), legacy: true, native: false, readByClient: true });
     expect(await readMcpClientHealth(row, deps)).toEqual({ configured: true, healthy: false });
   });
 

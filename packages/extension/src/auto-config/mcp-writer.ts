@@ -30,7 +30,11 @@ export interface WriterDeps {
   stat?: (p: string) => { dev: number | bigint; ino: number | bigint };
 }
 
-export interface FoundEntry { entry: Record<string, unknown>; legacy: boolean; native: boolean }
+/**
+ * `readByClient`: the client reads that location: the current one, and for OpenCode the other
+ * of its two files (OpenCode merges them). Amp's nested key and the old `~/.codex` are dead.
+ */
+export interface FoundEntry { entry: Record<string, unknown>; legacy: boolean; native: boolean; readByClient: boolean }
 
 /**
  * What `build` gets: the container's layout and whatever is already under the name there (in
@@ -149,10 +153,10 @@ async function findAt(row: McpClientRow, loc: LegacyLocation, name: string, owns
 /** Our entry at the current location first, then at a legacy one. Throws when a file does not parse. */
 export async function readServerEntry(row: McpClientRow, name: string, deps: WriterDeps, owns?: Owns): Promise<FoundEntry | null> {
   const current = await findAt(row, { path: resolveConfigPath(row, deps.ctx, deps.exists), serversPath: row.serversPath }, name, owns);
-  if (current) return { ...current, legacy: false };
+  if (current) return { ...current, legacy: false, readByClient: true };
   for (const loc of legacyLocations(row, deps)) {
     const old = await findAt(row, loc, name, owns);
-    if (old) return { ...old, legacy: true };
+    if (old) return { ...old, legacy: true, readByClient: row.layout === 'opencode' && sameSegments(loc.serversPath, row.serversPath) };
   }
   return null;
 }
@@ -384,7 +388,8 @@ export async function readMcpClientHealth(row: McpClientRow, deps: WriterDeps): 
   try {
     const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
     if (!found) return { configured: false, healthy: false };
-    if (!isOurEntry(found.entry, deps)) return { configured: true, healthy: true };
+    // The user's own entry is not ours to judge, but one where the client never looks is no setup.
+    if (!isOurEntry(found.entry, deps)) return found.readByClient ? { configured: true, healthy: true } : { configured: false, healthy: false };
     if (found.legacy) return { configured: true, healthy: false };
     const launch = readLaunch(found.entry);
     if (!launch) return { configured: true, healthy: true };

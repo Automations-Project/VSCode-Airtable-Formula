@@ -1,7 +1,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import type { IdeId } from '@airtable-formula/shared';
-import { MCP_CLIENTS, MCP_CLIENT_BY_ID, type McpClientId, type McpClientRow, type PathContext } from './mcp-clients.js';
+import { MCP_CLIENTS, MCP_CLIENT_BY_ID, hostPathContext, type McpClientId, type McpClientRow, type PathContext } from './mcp-clients.js';
 
 export type IdeCapability = 'mcp' | 'lsp';
 
@@ -26,6 +26,19 @@ const home    = os.homedir();
 const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
 const localAppData = process.env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local');
 
+/** Helix's languages.toml and Neovim's lsp/airtable.lua under a path context, as the MCP paths are. */
+export function editorLspConfigPath(id: 'helix' | 'neovim', c: PathContext): string {
+  const P = c.platform === 'win32' ? path.win32 : path.posix;
+  if (id === 'helix') {
+    return c.platform === 'win32'
+      ? P.join(c.env.APPDATA || P.join(c.home, 'AppData', 'Roaming'), 'helix', 'languages.toml')
+      : P.join(c.home, '.config', 'helix', 'languages.toml');
+  }
+  return c.platform === 'win32'
+    ? P.join(c.env.LOCALAPPDATA || P.join(c.home, 'AppData', 'Local'), 'nvim', 'lsp', 'airtable.lua')
+    : P.join(c.home, '.config', 'nvim', 'lsp', 'airtable.lua');
+}
+
 /**
  * An MCP client's config comes from its row. OpenCode also reads language servers from its config
  * file. Zed is an MCP client (context_servers) with no LSP auto-config: Zed starts only the
@@ -48,9 +61,7 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
     label: 'Helix',
     capabilities: ['lsp'],
     docsUrl: 'https://helix-editor.com',
-    lspConfigPath: process.platform === 'win32'
-      ? path.join(appData, 'helix', 'languages.toml')
-      : path.join(home, '.config', 'helix', 'languages.toml'),
+    lspConfigPath: editorLspConfigPath('helix', hostPathContext()),
     lspConfigFormat: 'toml-append',
     detectionPaths: [
       path.join(home, '.config', 'helix'),
@@ -61,9 +72,7 @@ export const IDE_CONFIGS: Record<IdeId, IdeConfig> = {
     label: 'Neovim',
     capabilities: ['lsp'],
     docsUrl: 'https://neovim.io',
-    lspConfigPath: process.platform === 'win32'
-      ? path.join(localAppData, 'nvim', 'lsp', 'airtable.lua')
-      : path.join(home, '.config', 'nvim', 'lsp', 'airtable.lua'),
+    lspConfigPath: editorLspConfigPath('neovim', hostPathContext()),
     lspConfigFormat: 'lua-write',
     lspManualStep:  "Add `vim.lsp.enable('airtable')` to your init.lua to activate",
     detectionPaths: [

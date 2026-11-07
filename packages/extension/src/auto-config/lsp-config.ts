@@ -1,9 +1,14 @@
 import * as fs from 'fs';
 import type { IdeId } from '@airtable-formula/shared';
-import { IDE_CONFIGS } from './ide-configs.js';
+import { IDE_CONFIGS, editorLspConfigPath } from './ide-configs.js';
 import { withFileLock, writeTextAtomic } from './atomic-write.js';
 import { getJsoncValue, pruneEmptyObjects, readTextIfExists, setJsoncValue, splitBom } from './jsonc-config.js';
-import { MCP_CLIENT_BY_ID, hostPathContext, pathKey, resolveConfigPath, samePath } from './mcp-clients.js';
+import { MCP_CLIENT_BY_ID, hostPathContext, pathKey, resolveConfigPath, samePath, type PathContext } from './mcp-clients.js';
+
+/** Where the LSP functions look: the same paths and file checks as the MCP writer (WriterDeps fits). */
+export interface LspDeps { ctx: PathContext; exists: (p: string) => boolean }
+
+const hostLspDeps = (): LspDeps => ({ ctx: hostPathContext(), exists: fs.existsSync });
 
 const LSP_SERVER_KEY = 'airtable-lsp';
 
@@ -103,20 +108,20 @@ const OPENCODE_LSP_ENTRY = {
 };
 
 /** opencode.jsonc or opencode.json, whichever the MCP writer resolves, so both entries share one file. */
-function openCodeConfigPath(): string {
-  return resolveConfigPath(MCP_CLIENT_BY_ID.opencode, hostPathContext(), fs.existsSync);
+function openCodeConfigPath(deps: LspDeps): string {
+  return resolveConfigPath(MCP_CLIENT_BY_ID.opencode, deps.ctx, deps.exists);
 }
 
 /**
  * The other OpenCode config files that exist: with both opencode.json and opencode.jsonc, the one
  * that is not current, where a pre-port `lsp.airtable-formula` may sit (the MCP writer's legacy rule).
  */
-function openCodeOtherFiles(current: string): string[] {
+function openCodeOtherFiles(current: string, deps: LspDeps): string[] {
   const row = MCP_CLIENT_BY_ID.opencode;
-  const ctx = hostPathContext();
+  const { ctx } = deps;
   const candidates = [...(row.preferExisting?.(ctx) ?? []), row.globalPath(ctx)];
   return candidates.filter((p, i) =>
-    candidates.findIndex((q) => samePath(ctx, p, q)) === i && !samePath(ctx, p, current) && fs.existsSync(p));
+    candidates.findIndex((q) => samePath(ctx, p, q)) === i && !samePath(ctx, p, current) && deps.exists(p));
 }
 
 /** Parses every file first, so one that does not parse aborts with nothing written. */
@@ -137,12 +142,12 @@ async function removeOpenCodeLsp(file: string): Promise<void> {
 }
 
 /** Locked with the MCP writer's calls on the same file, so an MCP and an LSP write never interleave. */
-const lockOpenCode = <T>(file: string, fn: () => Promise<T>): Promise<T> => withFileLock(pathKey(hostPathContext(), file), fn);
+const lockOpenCode = <T>(file: string, deps: LspDeps, fn: () => Promise<T>): Promise<T> => withFileLock(pathKey(deps.ctx, file), fn);
 
 /** Writes ours in the current file and removes the copy from the other one. Comments and the rest of each file survive. */
-async function configureOpenCode(configPath: string): Promise<void> {
-  await lockOpenCode(configPath, async () => {
-    const others = openCodeOtherFiles(configPath);
+async function configureOpenCode(configPath: string, deps: LspDeps): Promise<void> {
+  await lockOpenCode(configPath, deps, async () => {
+    const others = openCodeOtherFiles(configPath, deps);
     await assertParses([configPath, ...others]);
     const before = (await readTextIfExists(configPath)) ?? '';
     const next = setJsoncValue(before, OPENCODE_LSP_PATH, OPENCODE_LSP_ENTRY, 'jsonc', configPath);
@@ -152,9 +157,9 @@ async function configureOpenCode(configPath: string): Promise<void> {
 }
 
 /** Removes ours from both files. */
-async function unconfigureOpenCode(configPath: string): Promise<void> {
-  await lockOpenCode(configPath, async () => {
-    const files = [configPath, ...openCodeOtherFiles(configPath)];
+async function unconfigureOpenCode(configPath: string, deps: LspDeps): Promise<void> {
+  await lockOpenCode(configPath, deps, async () => {
+    const files = [configPath, ...openCodeOtherFiles(configPath, deps)];
     await assertParses(files);
     for (const f of files) await removeOpenCodeLsp(f);
   });
@@ -525,36 +530,38 @@ function removeTomlSections(text: string, isOurs: (s: TomlSection) => boolean): 
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-/** OpenCode's file is resolved at call time (opencode.jsonc may appear); the editors' paths are static. */
-function lspPathFor(ideId: IdeId): string | undefined {
-  return ideId === 'opencode' ? openCodeConfigPath() : IDE_CONFIGS[ideId].lspConfigPath;
+/** OpenCode's file is resolved at call time (opencode.jsonc may appear); the editors' come from the same context. */
+function lspPathFor(ideId: IdeId, deps: LspDeps): string | undefined {
+  if (ideId === 'opencode') return openCodeConfigPath(deps);
+  if (ideId === 'helix' || ideId === 'neovim') return editorLspConfigPath(ideId, deps.ctx);
+  return IDE_CONFIGS[ideId].lspConfigPath;
 }
 
-export async function configureLspForIde(ideId: IdeId): Promise<void> {
+export async function configureLspForIde(ideId: IdeId, deps: LspDeps = hostLspDeps()): Promise<void> {
   const format = IDE_CONFIGS[ideId].lspConfigFormat;
-  const file = lspPathFor(ideId);
+  const file = lspPathFor(ideId, deps);
   if (!file || !format) return;
   switch (format) {
-    case 'json-merge':   return configureOpenCode(file);
+    case 'json-merge':   return configureOpenCode(file, deps);
     case 'toml-append':  return configureHelix(file);
     case 'lua-write':    return configureNeovim(file);
   }
 }
 
-export async function unconfigureLspForIde(ideId: IdeId): Promise<void> {
+export async function unconfigureLspForIde(ideId: IdeId, deps: LspDeps = hostLspDeps()): Promise<void> {
   const format = IDE_CONFIGS[ideId].lspConfigFormat;
-  const file = lspPathFor(ideId);
+  const file = lspPathFor(ideId, deps);
   if (!file || !format) return;
   switch (format) {
-    case 'json-merge':   return unconfigureOpenCode(file);
+    case 'json-merge':   return unconfigureOpenCode(file, deps);
     case 'toml-append':  return unconfigureHelix(file);
     case 'lua-write':    return unconfigureNeovim(file);
   }
 }
 
-export async function isLspConfigured(ideId: IdeId): Promise<boolean> {
+export async function isLspConfigured(ideId: IdeId, deps: LspDeps = hostLspDeps()): Promise<boolean> {
   const format = IDE_CONFIGS[ideId].lspConfigFormat;
-  const file = lspPathFor(ideId);
+  const file = lspPathFor(ideId, deps);
   if (!file || !format) return false;
   switch (format) {
     case 'json-merge':   return isOpenCodeLspConfigured(file);

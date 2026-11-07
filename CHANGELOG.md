@@ -19,9 +19,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   created for a client that is not on this machine. VS Code itself is not in the table, because the
   extension registers the server there. Goose and Hermes (YAML configs) are not supported yet.
 - **Config files with comments are edited in place.** JSON configs are changed through
-  `jsonc-parser`: our entry is added first in its object and removed by deleting its own lines, so
-  every other line, comment, trailing comma and key order stays byte for byte. A file that does not
-  parse is left untouched, and the error names the file, line and column.
+  `jsonc-parser`: our entry is added first in its object, on lines of its own, and removed by
+  deleting those lines. Every other line, comment, trailing comma and key order stays as it was.
+  The one exception is the line of an object written on one line: an empty `{}` opens up for our
+  entry, and a one-line file gets our entry on that line. A file that does not parse is left
+  untouched, and the error names the file, line and column.
 - **A collapsed "N more supported clients" list.** Clients not found on this machine sit in it
   with a **Docs** button each, instead of a card. A client without a vendored logo gets a
   monogram.
@@ -32,11 +34,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 **Changed — migration**
 
 The next VS Code start updates the `airtable-user-mcp` entries the extension wrote before (or press
-**Update** on the card). Those are the entries that set `AIRTABLE_HEADLESS_ONLY=1`, start
-`~/.airtable-user-mcp/start.mjs`, or are the old Codex `npx` block. An `airtable-user-mcp` entry you
-wrote yourself (for example a standalone `npx` entry with your own `AIRTABLE_AUTH_MODE` and cookie)
-is never rewritten or moved by the start-up check or by a settings change. Only **Set up** on that
-client's card replaces it.
+**Update** on the card). Those are the entries that set `AIRTABLE_HEADLESS_ONLY=1` together with
+the extension's `AIRTABLE_PROFILE_DIR`, start `~/.airtable-user-mcp/start.mjs`, or are the old Codex
+`npx` block. An `airtable-user-mcp` entry you wrote yourself (for example a standalone `npx` entry
+with your own `AIRTABLE_AUTH_MODE` and cookie) is never rewritten or moved by the start-up check or
+by a settings change. **Setup all detected editors** leaves it alone too, and reports that client as
+already configured. **Set up** and **Remove** on that client's card ask before replacing or deleting
+it. An entry of your own in a place the client never reads (Amp's nested `mcp.servers`, or
+`~/.codex` when `CODEX_HOME` points elsewhere) is not a setup: the client shows **Needs setup**, and
+Setup writes ours where the client reads and leaves your copy alone.
 
 An update changes only the keys the extension manages: the launch, and its own `AIRTABLE_*`
 environment variables. Every other key in the entry stays, such as Cline's `autoApprove` and
@@ -55,8 +61,9 @@ variables.
   in OpenCode's `remote` shape.
 - **Codex CLI:** the table now carries the same launcher and environment as every other client
   and follows `mcp.serverSource`, instead of `npx` with no environment. `type = "stdio"` is gone.
-  Update replaces our table in place, keeping your other keys, comments and sub-tables. The keys of
-  an `env` sub-table move into the inline `env`. CRLF files no longer get a duplicate table. If
+  Update rewrites our table at the end of `config.toml`, keeping your other keys, comments and
+  sub-tables in it. The keys of an `env` sub-table move into the inline `env`. CRLF files no longer
+  get a duplicate table. If
   `config.toml` already defines `airtable-user-mcp` some other way (an inline table or dotted key
   under `[mcp_servers]`), Setup refuses with nothing written instead of adding a second definition.
 - **Cline:** the **Cline** card keeps writing `~/.cline/data/settings/cline_mcp_settings.json`, the

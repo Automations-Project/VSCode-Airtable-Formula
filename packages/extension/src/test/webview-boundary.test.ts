@@ -69,6 +69,8 @@ const dependencies = vi.hoisted(() => ({
   configureMcpForIde: vi.fn(async () => undefined),
   reapplyMcpForIde: vi.fn(async () => true),
   hasForeignMcpEntry: vi.fn(async () => false),
+  unconfigureMcpForIde: vi.fn(async () => undefined),
+  configureLspForIde: vi.fn(async () => undefined),
   updateWebviewSetting: vi.fn(async () => undefined),
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
@@ -96,8 +98,8 @@ vi.mock('../auto-config/index.js', () => ({
   configureMcpForIde: dependencies.configureMcpForIde,
   reapplyMcpForIde: dependencies.reapplyMcpForIde,
   hasForeignMcpEntry: dependencies.hasForeignMcpEntry,
-  unconfigureMcpForIde: vi.fn(),
-  configureLspForIde: vi.fn(),
+  unconfigureMcpForIde: dependencies.unconfigureMcpForIde,
+  configureLspForIde: dependencies.configureLspForIde,
   unconfigureLspForIde: vi.fn(),
   configureOfficialAirtableMcp: vi.fn(),
   unconfigureOfficialAirtableMcp: vi.fn(),
@@ -1152,6 +1154,56 @@ describe('DashboardProvider webview trust boundary', () => {
     await waitForResult('card02');
     expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'card02', ok: true });
+  });
+
+  it('action:setupAll still sets up the LSP of a client whose MCP entry it leaves alone (OpenCode)', async () => {
+    dependencies.ideConfigs.opencode = { capabilities: ['mcp', 'lsp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([{ ideId: 'opencode', label: 'OpenCode', detected: true }] as never);
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup04' });
+
+    await waitForResult('setup04');
+    expect(dependencies.configureMcpForIde).not.toHaveBeenCalled();
+    expect(dependencies.configureLspForIde).toHaveBeenCalledWith('opencode');
+    expect(vscodeMock.showInformationMessage).toHaveBeenCalledWith(
+      'Airtable Formula: OpenCode already configured with an airtable-user-mcp entry you wrote; left as is.',
+    );
+  });
+
+  it("a card's Remove asks before deleting a hand-written entry; Cancel writes nothing", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:unconfigureIde', id: 'remove01', ideId: 'zed' });
+
+    await waitForResult('remove01');
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Remove the airtable-user-mcp entry you wrote in Zed?', { modal: true }, 'Remove');
+    expect(dependencies.unconfigureMcpForIde).not.toHaveBeenCalled();
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'remove01', ok: false, error: 'Cancelled', cancelled: true });
+  });
+
+  it("a card's Remove deletes a hand-written entry after Remove, and does not ask for ours", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce('Remove' as never);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:unconfigureIde', id: 'remove02', ideId: 'zed' });
+    await waitForResult('remove02');
+    expect(dependencies.unconfigureMcpForIde).toHaveBeenCalledWith('zed');
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'remove02', ok: true });
+
+    inboundMessage({ type: 'action:unconfigureIde', id: 'remove03', ideId: 'zed' });
+    await waitForResult('remove03');
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(dependencies.unconfigureMcpForIde).toHaveBeenCalledTimes(2);
   });
 
   it("a card's Set up with no hand-written entry does not ask", async () => {

@@ -574,13 +574,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const skipped = new Set<string>();
         // One client's bad config file fails that client only: the rest, the skill and the state push still run.
         const { failed } = await settleByClient(detected, async s => {
-          // An entry the user wrote is a working setup of theirs: Setup all leaves it byte for byte.
-          if (await hasForeignMcpEntry(s.ideId)) {
-            skipped.add(s.ideId);
-            return;
-          }
+          // An MCP entry the user wrote is a working setup of theirs: Setup all leaves it byte for
+          // byte. Their client's LSP entry is still ours to set up (OpenCode).
+          const theirs = await hasForeignMcpEntry(s.ideId);
+          if (theirs) skipped.add(s.ideId);
           const caps = IDE_CONFIGS[s.ideId].capabilities;
-          if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
+          if (caps.includes('mcp') && !theirs) await configureMcpForIde(s.ideId, serverPath, serverEntry);
           if (caps.includes('lsp')) await configureLspForIde(s.ideId);
         });
         this.traceClientFailures('setup_all', failed);
@@ -629,6 +628,18 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (msg.type === 'action:unconfigureIde') {
       try {
         const caps = IDE_CONFIGS[msg.ideId].capabilities;
+        // Removing an entry the user wrote takes their own setup away: ask, as Set up does.
+        if (caps.includes('mcp') && await hasForeignMcpEntry(msg.ideId)) {
+          const choice = await vscode.window.showWarningMessage(
+            `Remove the airtable-user-mcp entry you wrote in ${IDE_CONFIGS[msg.ideId].label}?`,
+            { modal: true },
+            'Remove',
+          );
+          if (choice !== 'Remove') {
+            this.postResult(msg.id, false, 'Cancelled', true);
+            return;
+          }
+        }
         if (caps.includes('mcp')) await unconfigureMcpForIde(msg.ideId);
         if (caps.includes('lsp')) await unconfigureLspForIde(msg.ideId);
         await this.pushState();

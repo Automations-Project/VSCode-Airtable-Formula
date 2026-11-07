@@ -171,7 +171,8 @@ export async function hasForeignMcpEntry(ideId: IdeId, deps: WriterDeps = hostWr
   if (!row) return false;
   try {
     const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
-    return found !== null && !isOurEntry(found.entry, deps);
+    // A copy where the client never looks is no working setup: Setup may write ours beside it.
+    return found !== null && found.readByClient && !isOurEntry(found.entry, deps);
   } catch { return false; }
 }
 
@@ -202,7 +203,7 @@ export async function getIdeStatus(ideId: IdeId, deps: WriterDeps = hostWriterDe
     ? await getMcpHealth(ideId, deps)
     : { configured: false, healthy: false };
   const lspConfigured = (detected && hasLsp)
-    ? await isLspConfigured(ideId)
+    ? await isLspConfigured(ideId, deps)
     : undefined;
   return {
     ideId,
