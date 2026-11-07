@@ -1,0 +1,3 @@
+# Scripts are ES modules run by Node and imported by vitest; a CRLF checkout breaks vitest's import.
+scripts/*.mjs text eol=lf
+scripts/*.json text eol=lf
