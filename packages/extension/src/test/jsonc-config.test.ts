@@ -46,8 +46,8 @@ describe('setJsoncValue', () => {
     const added = setJsoncValue(ZED, ['context_servers', 'airtable-user-mcp'], ENTRY, 'jsonc', F);
     const out = setJsoncValue(added, ['context_servers', 'airtable-user-mcp'], { command: 'npx' }, 'jsonc', F);
     expect(getJsoncValue(out, ['context_servers', 'airtable-user-mcp'], 'jsonc', F)).toEqual({ command: 'npx' });
-    expect(out.indexOf('"other"')).toBeLessThan(out.indexOf('"airtable-user-mcp"'));
-    expect(out.indexOf('"airtable-user-mcp"')).toBeLessThan(out.indexOf('"vim_mode"'));
+    expect(out.indexOf('"airtable-user-mcp"')).toBe(added.indexOf('"airtable-user-mcp"'));
+    expectLinesInOrder(out, ZED);
   });
 
   it('treats a dotted key as one key (Amp "amp.mcpServers")', () => {
@@ -70,12 +70,13 @@ describe('setJsoncValue', () => {
 
   it('keeps tab indentation', () => {
     const out = setJsoncValue('{\n\t"a": 1\n}\n', ['mcpServers', 'x'], { b: 2 }, 'json', F);
-    expect(out).toBe('{\n\t"a": 1,\n\t"mcpServers": {\n\t\t"x": {\n\t\t\t"b": 2\n\t\t}\n\t}\n}\n');
+    expect(out).toBe('{\n\t"mcpServers": {\n\t\t"x": {\n\t\t\t"b": 2\n\t\t}\n\t},\n\t"a": 1\n}\n');
   });
 
   it('keeps CRLF line endings', () => {
     const out = setJsoncValue('{\r\n  "a": 1\r\n}\r\n', ['mcpServers', 'x'], { b: 2 }, 'json', F);
-    expect(out).toBe('{\r\n  "a": 1,\r\n  "mcpServers": {\r\n    "x": {\r\n      "b": 2\r\n    }\r\n  }\r\n}\r\n');
+    expect(out).toBe('{\r\n  "mcpServers": {\r\n    "x": {\r\n      "b": 2\r\n    }\r\n  },\r\n  "a": 1\r\n}\r\n');
+    expect(setJsoncValue(out, ['mcpServers'], undefined, 'json', F)).toBe('{\r\n  "a": 1\r\n}\r\n');
   });
 
   it('removing from a file without the parent, or from an empty file, returns the text unchanged', () => {
@@ -106,6 +107,61 @@ describe('parseJsonc', () => {
 
   it('refuses a document that is not an object', () => {
     expect(() => parseJsonc('[1]', 'json', F)).toThrow('/cfg/settings.json must contain a JSON object. Nothing was written.');
+  });
+});
+
+// Our member is added first in its object and removed by deleting its own lines, so the user's
+// lines (a compact server with a trailing comment, Zed's trailing commas) stay byte for byte.
+describe("the user's neighbouring lines are never re-flowed", () => {
+  const OURS = ['mcpServers', 'airtable-user-mcp'];
+  const VALUE = { command: 'npx', args: ['-y', 'airtable-user-mcp'] };
+  const roundTrip = (text: string, format: 'json' | 'jsonc' = 'json', path = OURS) => {
+    const added = setJsoncValue(text, path, VALUE, format, F);
+    for (const line of text.split('\n')) expect(added.split('\n'), line).toContain(line);
+    expect(getJsoncValue(added, path, format, F)).toEqual(VALUE);
+    expect(setJsoncValue(added, path, undefined, format, F)).toBe(text);
+  };
+
+  it.each([
+    ['a trailing // comment', '{\n  "mcpServers": {\n    "github": { "command": "gh" } // my github server\n  }\n}\n'],
+    ['a trailing /* */ comment', '{\n  "mcpServers": {\n    "github": { "command": "gh" } /* my github server */\n  },\n  "x": 1\n}\n'],
+    ['comments after commas', '{\n  "mcpServers": {\n    "a": { "command": "a" }, // A\n    "b": { "command": "b" } // B\n  }\n}\n'],
+    ['an empty object holding a comment', '{\n  "mcpServers": {\n    // add servers here\n  }\n}\n'],
+    ['a commented-out server', '{\n  "mcpServers": {\n    "a": { "command": "a" }\n    // "old": { "command": "old" }\n  }\n}\n'],
+  ])('a compact last sibling with %s: set keeps every line, remove restores the file', (_name, text) => roundTrip(text));
+
+  it("Zed's trailing commas", () => roundTrip(ZED, 'jsonc', ['context_servers', 'airtable-user-mcp']));
+
+  it('an empty object opens for our entry and is {} again after Remove', () => {
+    const text = '{\n  "mcpServers": {},\n  "x": 1\n}\n';
+    const added = setJsoncValue(text, OURS, VALUE, 'json', F);
+    expect(added.endsWith('  },\n  "x": 1\n}\n')).toBe(true);
+    expect(setJsoncValue(added, OURS, undefined, 'json', F)).toBe(text);
+  });
+
+  it('a file on one line gets a compact insert and comes back exactly', () => {
+    const text = '{"mcpServers":{"a":{"command":"a"}},"theme":"dark"}\n';
+    const added = setJsoncValue(text, OURS, VALUE, 'json', F);
+    expect(added).toBe('{"mcpServers":{"airtable-user-mcp": {"command":"npx","args":["-y","airtable-user-mcp"]},"a":{"command":"a"}},"theme":"dark"}\n');
+    expect(setJsoncValue(added, OURS, undefined, 'json', F)).toBe(text);
+  });
+
+  it('our entry written last (as main wrote it) goes with its lines and the comma before it; the comment stays put', () => {
+    const before = '{\n  "mcpServers": {\n    "github": { "command": "gh" }, // my github server\n    "airtable-user-mcp": {\n      "command": "npx"\n    }\n  }\n}\n';
+    expect(setJsoncValue(before, OURS, undefined, 'json', F))
+      .toBe('{\n  "mcpServers": {\n    "github": { "command": "gh" } // my github server\n  }\n}\n');
+  });
+
+  it('our entry written first goes with its own lines; the compact sibling after it is untouched', () => {
+    const text = '{\n  "mcpServers": {\n    "airtable-user-mcp": { "command": "npx" },\n    "github": { "command": "gh" } /* mine */\n  }\n}\n';
+    expect(setJsoncValue(text, OURS, undefined, 'json', F))
+      .toBe('{\n  "mcpServers": {\n    "github": { "command": "gh" } /* mine */\n  }\n}\n');
+  });
+
+  it('a member sharing a line loses its own text and one comma only', () => {
+    expect(setJsoncValue('{ "a": 1, "airtable-user-mcp": 2, "b": 3 }\n', ['airtable-user-mcp'], undefined, 'json', F)).toBe('{ "a": 1, "b": 3 }\n');
+    expect(setJsoncValue('{ "a": 1, "airtable-user-mcp": 2 }\n', ['airtable-user-mcp'], undefined, 'json', F)).toBe('{ "a": 1 }\n');
+    expect(setJsoncValue('{\n  "a": 1,\n  "airtable-user-mcp": 2,\n}\n', ['airtable-user-mcp'], undefined, 'jsonc', F)).toBe('{\n  "a": 1,\n}\n');
   });
 });
 
@@ -143,7 +199,7 @@ describe('a leading UTF-8 BOM (Windows editors write one)', () => {
   it('is kept on set and on remove, once, and removal restores the file byte for byte', () => {
     const text = BOM + '{\n  "a": 1\n}\n';
     const added = setJsoncValue(text, ['mcpServers', 'x'], { b: 2 }, 'json', F);
-    expect(added).toBe(BOM + '{\n  "a": 1,\n  "mcpServers": {\n    "x": {\n      "b": 2\n    }\n  }\n}\n');
+    expect(added).toBe(BOM + '{\n  "mcpServers": {\n    "x": {\n      "b": 2\n    }\n  },\n  "a": 1\n}\n');
     const removed = setJsoncValue(added, ['mcpServers', 'x'], undefined, 'json', F);
     expect(removed.startsWith(BOM) && !removed.slice(1).includes(BOM)).toBe(true);
     expect(parse(removed.slice(1))).toEqual({ a: 1, mcpServers: {} });

@@ -89,6 +89,12 @@ export function getJsoncValue(text: string, jsonPath: readonly string[], format:
  * Sets (or, for `value === undefined`, removes) the value at `jsonPath`, editing the text in place so
  * comments, trailing commas, key order and indentation survive. Returns the new text. A file that does
  * not parse is never edited.
+ *
+ * Every other line stays byte for byte. A new property goes first in its object: jsonc's formatter
+ * re-flows every line an insert touches, and the opening brace's line is the only one that holds
+ * nothing of the user's (an insert after the last member re-flowed that member and moved its
+ * trailing comment). An object written on one line with members gets a compact insert, unformatted. A removal
+ * deletes the member's own lines through the parse tree (removeMember), never through the formatter.
  */
 export function setJsoncValue(
   raw: string,
@@ -100,10 +106,14 @@ export function setJsoncValue(
   const { bom, body: text } = splitBom(raw);
   const doc = parseJsonc(text, format, file);
   const path = [...jsonPath];
+  const fmt = detectFormatting(text);
+  const tree = jsonc.parseTree(text, [], { allowTrailingComma: format === 'jsonc', disallowComments: false });
 
+  let out: string;
   if (value === undefined) {
-    const tree = jsonc.parseTree(text);
-    if (!tree || !jsonc.findNodeAtLocation(tree, path)) return raw;
+    const node = tree && jsonc.findNodeAtLocation(tree, path);
+    if (!node) return raw;
+    out = removeMember(text, node);
   } else {
     let cur: unknown = doc;
     for (const seg of path.slice(0, -1)) {
@@ -113,14 +123,91 @@ export function setJsoncValue(
         throw new Error(`${file}: "${seg}" is not a JSON object. Nothing was written.`);
       }
     }
+    const container = tree ? deepestObject(tree, path) : undefined;
+    // A one-line object the user wrote with members in it stays one line; an empty {} opens up.
+    const oneLine = container !== undefined && (container.children?.length ?? 0) > 0
+      && !text.slice(container.offset, container.offset + container.length).includes('\n');
+    const edits = jsonc.modify(text, path, value, { formattingOptions: oneLine ? undefined : fmt, getInsertionIndex: () => 0 });
+    out = jsonc.applyEdits(text, edits);
   }
-
-  const fmt = detectFormatting(text);
-  // Formatting options are needed for removals too: without them a removed first member leaves the
-  // next one on the opening brace's line.
-  const edits = jsonc.modify(text, path, value, { formattingOptions: fmt });
-  const out = jsonc.applyEdits(text, edits);
   return bom + (out.endsWith('\n') ? out : out + fmt.eol);
+}
+
+/** The object the value at `path` is set in: its parent when it exists, else the deepest existing ancestor. */
+function deepestObject(tree: jsonc.Node, path: readonly string[]): jsonc.Node | undefined {
+  for (let i = path.length - 1; i >= 0; i--) {
+    const node = i === 0 ? tree : jsonc.findNodeAtLocation(tree, path.slice(0, i));
+    if (node?.type === 'object') return node;
+  }
+  return undefined;
+}
+
+const cut = (text: string, from: number, to: number): string => text.slice(0, from) + text.slice(to);
+
+const lineStartOf = (text: string, pos: number): number => text.lastIndexOf('\n', pos - 1) + 1;
+
+/** Just past the newline that ends `pos`'s line (or the end of the text). */
+function lineEndOf(text: string, pos: number): number {
+  const nl = text.indexOf('\n', pos);
+  return nl < 0 ? text.length : nl + 1;
+}
+
+/** From `pos` to the end of its line: nothing but whitespace, or one comment. */
+function restOfLineIsTrailing(text: string, pos: number): boolean {
+  const nl = text.indexOf('\n', pos);
+  const rest = text.slice(pos, nl < 0 ? text.length : nl).trim();
+  return rest === '' || rest.startsWith('//') || (rest.startsWith('/*') && rest.indexOf('*/') === rest.length - 2);
+}
+
+function skipBlanks(text: string, pos: number): number {
+  let i = pos;
+  while (text[i] === ' ' || text[i] === '\t') i++;
+  return i;
+}
+
+/** The offset of the comma that follows `pos` (past whitespace and comments), or -1. */
+function commaAfter(text: string, pos: number): number {
+  const scanner = jsonc.createScanner(text, true);
+  scanner.setPosition(pos);
+  let token = scanner.scan();
+  while (token === jsonc.SyntaxKind.LineCommentTrivia || token === jsonc.SyntaxKind.BlockCommentTrivia) token = scanner.scan();
+  return token === jsonc.SyntaxKind.CommaToken ? scanner.getTokenOffset() : -1;
+}
+
+/**
+ * Removes the member whose value is `valueNode`. A member on lines of its own loses exactly those
+ * lines (with its comma, or the comma before it when it was last); one sharing a line loses its
+ * text and one comma. An object it was the only member of, with nothing but whitespace left
+ * inside, becomes `{}`.
+ */
+function removeMember(text: string, valueNode: jsonc.Node): string {
+  const prop = valueNode.parent as jsonc.Node;
+  const obj = prop.parent as jsonc.Node;
+  const siblings = obj.children ?? [];
+  const index = siblings.indexOf(prop);
+  const start = prop.offset;
+  const end = prop.offset + prop.length;
+  const ownLine = text.slice(lineStartOf(text, start), start).trim() === '';
+  const comma = commaAfter(text, end);
+  let out: string;
+  if (comma >= 0) {
+    out = ownLine && restOfLineIsTrailing(text, comma + 1)
+      ? cut(text, lineStartOf(text, start), lineEndOf(text, comma + 1))
+      : cut(text, start, skipBlanks(text, comma + 1));
+  } else if (index > 0) {
+    const previous = siblings[index - 1];
+    const before = commaAfter(text, previous.offset + previous.length);
+    out = ownLine && restOfLineIsTrailing(text, end)
+      ? cut(cut(text, lineStartOf(text, start), lineEndOf(text, end)), before, before + 1)
+      : cut(text, before, end);
+  } else {
+    out = ownLine && restOfLineIsTrailing(text, end) ? cut(text, lineStartOf(text, start), lineEndOf(text, end)) : cut(text, start, end);
+  }
+  if (siblings.length === 1) {
+    const close = obj.offset + obj.length - 1 - (text.length - out.length);
+    if (out.slice(obj.offset + 1, close).trim() === '') out = out.slice(0, obj.offset + 1) + out.slice(close);
+  }
+  return out;
 }
 
 /** Removes each object along `jsonPath` that is now empty, innermost first, stopping at the first non-empty one. */
