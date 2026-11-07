@@ -27,6 +27,13 @@ export interface WriterDeps {
 
 export interface FoundEntry { entry: Record<string, unknown>; legacy: boolean; native: boolean }
 
+/**
+ * Which entries under a name are ours. Without one, everything under the name is (our local
+ * entry has a name nobody else uses); the official 'airtable' entry passes one that matches the
+ * official URL, so a user's own 'airtable' server is never read or removed as ours.
+ */
+export type Owns = (entry: Record<string, unknown>) => boolean;
+
 interface Container { path: readonly string[]; native: boolean }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -36,6 +43,16 @@ const sameSegments = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((s, i) => s === b[i]);
 
 const hostStat = (p: string) => fs.statSync(p, { bigint: true });
+
+/** A value under the name may be removed: anything, or with `owns` only an entry it claims. */
+const removable = (v: unknown, owns: Owns | undefined): boolean => (owns ? isPlainObject(v) && owns(v) : true);
+
+/** The TOML twin of `removable`: our table, read back, is claimed. */
+async function tomlRemovable(file: string, key: string, name: string, owns: Owns | undefined): Promise<boolean> {
+  if (!owns) return true;
+  const entry = await readMcpTomlEntry(file, key, name);
+  return entry !== null && owns(entry);
+}
 
 /**
  * One file under two names. samePath first; when both exist, the same dev+ino too, because
@@ -103,27 +120,27 @@ export function legacyLocations(row: McpClientRow, deps: WriterDeps): LegacyLoca
   return out;
 }
 
-async function findAt(row: McpClientRow, loc: LegacyLocation, name: string): Promise<{ entry: Record<string, unknown>; native: boolean } | null> {
+async function findAt(row: McpClientRow, loc: LegacyLocation, name: string, owns?: Owns): Promise<{ entry: Record<string, unknown>; native: boolean } | null> {
   if (row.format === 'toml') {
     const entry = await readMcpTomlEntry(loc.path, loc.serversPath[0], name);
-    return entry ? { entry, native: false } : null;
+    return entry && (!owns || owns(entry)) ? { entry, native: false } : null;
   }
   const text = await readTextIfExists(loc.path);
   if (text === null) return null;
   const doc = parseJsonc(text, row.format, loc.path);
   for (const c of containersAt(row, loc.serversPath, doc, name, loc.path)) {
     const v = valueAt(doc, [...c.path, name]);
-    if (isPlainObject(v)) return { entry: v, native: c.native };
+    if (isPlainObject(v) && (!owns || owns(v))) return { entry: v, native: c.native };
   }
   return null;
 }
 
 /** Our entry at the current location first, then at a legacy one. Throws when a file does not parse. */
-export async function readServerEntry(row: McpClientRow, name: string, deps: WriterDeps): Promise<FoundEntry | null> {
-  const current = await findAt(row, { path: resolveConfigPath(row, deps.ctx, deps.exists), serversPath: row.serversPath }, name);
+export async function readServerEntry(row: McpClientRow, name: string, deps: WriterDeps, owns?: Owns): Promise<FoundEntry | null> {
+  const current = await findAt(row, { path: resolveConfigPath(row, deps.ctx, deps.exists), serversPath: row.serversPath }, name, owns);
   if (current) return { ...current, legacy: false };
   for (const loc of legacyLocations(row, deps)) {
-    const old = await findAt(row, loc, name);
+    const old = await findAt(row, loc, name, owns);
     if (old) return { ...old, legacy: true };
   }
   return null;
@@ -135,19 +152,21 @@ export async function readServerEntry(row: McpClientRow, name: string, deps: Wri
  * every legacy location, so a reconfigure moves a pre-port copy (Amp's mcp.servers.airtable,
  * with its token) instead of leaving it behind. Writing needs a detected client. Removal never
  * creates a file, and prunes only at legacy locations, so a Remove leaves `mcpServers: {}` in
- * the current file. Every legacy file is parsed before the first write.
+ * the current file. Every legacy file is parsed before the first write. With `owns`, only the
+ * entries it claims are removed; the write itself still replaces whatever holds the name there.
  */
 export async function setServerEntry(
   row: McpClientRow,
   name: string,
   build: ((loc: { native: boolean }) => Record<string, unknown>) | null,
   deps: WriterDeps,
+  owns?: Owns,
 ): Promise<void> {
   if (build) assertDetected(row, deps);
   const legacy = legacyLocations(row, deps);
   await assertLegacyParses(row, legacy, name);
-  await editCurrent(row, name, build, deps);
-  for (const loc of legacy) await removeAtLegacy(row, loc, name);
+  await editCurrent(row, name, build, deps, owns);
+  for (const loc of legacy) await removeAtLegacy(row, loc, name, owns);
 }
 
 async function editCurrent(
@@ -155,12 +174,13 @@ async function editCurrent(
   name: string,
   build: ((loc: { native: boolean }) => Record<string, unknown>) | null,
   deps: WriterDeps,
+  owns: Owns | undefined,
 ): Promise<void> {
   const file = resolveConfigPath(row, deps.ctx, deps.exists);
   if (row.format === 'toml') {
     const key = row.serversPath[0];
     if (build) await configureMcpToml(file, key, name, build({ native: false }));
-    else await unconfigureMcpToml(file, key, name);
+    else if (await tomlRemovable(file, key, name, owns)) await unconfigureMcpToml(file, key, name);
     return;
   }
   const format = row.format;
@@ -177,20 +197,26 @@ async function editCurrent(
   // A removal clears every current container. A write clears OpenCode's other layout, where a
   // copy would be a second, stale server of the same name.
   for (const c of containersAt(row, row.serversPath, doc, name, file)) {
-    if (!at || !sameSegments(c.path, at.path)) next = setJsoncValue(next, [...c.path, name], undefined, format, file);
+    if (at && sameSegments(c.path, at.path)) continue;
+    if (!removable(valueAt(doc, [...c.path, name]), owns)) continue;
+    next = setJsoncValue(next, [...c.path, name], undefined, format, file);
   }
   if (next !== before) await writeTextAtomic(file, next);
 }
 
 /** Removes `name` at a legacy location, pruning the objects our removal emptied along its servers path. */
-async function removeAtLegacy(row: McpClientRow, loc: LegacyLocation, name: string): Promise<void> {
-  if (row.format === 'toml') return unconfigureMcpToml(loc.path, loc.serversPath[0], name);
+async function removeAtLegacy(row: McpClientRow, loc: LegacyLocation, name: string, owns: Owns | undefined): Promise<void> {
+  if (row.format === 'toml') {
+    if (await tomlRemovable(loc.path, loc.serversPath[0], name, owns)) await unconfigureMcpToml(loc.path, loc.serversPath[0], name);
+    return;
+  }
   const format = row.format;
   const text = await readTextIfExists(loc.path);
   if (text === null) return;
   const doc = parseJsonc(text, format, loc.path);
   let next = text;
   for (const c of containersAt(row, loc.serversPath, doc, name, loc.path)) {
+    if (!removable(valueAt(doc, [...c.path, name]), owns)) continue;
     const removed = setJsoncValue(next, [...c.path, name], undefined, format, loc.path);
     // Prune only after our own removal: an empty object the user left there is theirs.
     if (removed !== next) next = pruneEmptyObjects(removed, c.path, format, loc.path);

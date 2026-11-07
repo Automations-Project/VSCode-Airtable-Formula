@@ -9,7 +9,7 @@ import { isLspConfigured } from './lsp-config.js';
 import { hostPathContext, type McpClientRow } from './mcp-clients.js';
 import { readLaunch } from './mcp-entry-shapes.js';
 import {
-  configureMcpClient, readMcpClientHealth, readServerEntry, setServerEntry, unconfigureMcpClient, type WriterDeps,
+  configureMcpClient, readMcpClientHealth, readServerEntry, setServerEntry, unconfigureMcpClient, type FoundEntry, type WriterDeps,
 } from './mcp-writer.js';
 
 // Our local entry is mcp-writer.ts's MCP_SERVER_NAME ('airtable-user-mcp'); the official remote one:
@@ -186,8 +186,18 @@ export async function getAllIdeStatuses(deps: WriterDeps = hostWriterDeps()): Pr
 
 // ── Official Airtable MCP (https://mcp.airtable.com/mcp) ───────────────────
 
-export function buildOfficialAirtableEntry(row: McpClientRow, pat: string): Record<string, unknown> {
+/**
+ * The official entry in the row's shape. `loc.native` is OpenCode's V2 key (`mcp.servers`), where
+ * `enabled` is omitted, as for our local entry.
+ */
+export function buildOfficialAirtableEntry(row: McpClientRow, pat: string, loc: { native: boolean } = { native: false }): Record<string, unknown> {
   const headers = { Authorization: `Bearer ${pat}` };
+  // OpenCode knows `local` and `remote` servers only: add-mcp's transformOpenCodeConfig remote branch.
+  if (row.layout === 'opencode') {
+    return loc.native
+      ? { type: 'remote', url: OFFICIAL_AIRTABLE_URL, headers }
+      : { type: 'remote', url: OFFICIAL_AIRTABLE_URL, headers, enabled: true };
+  }
   // Windsurf uses 'serverUrl'; all other MCP clients use 'url'.
   // Claude Code (and most MCP clients) also require "type": "http" to recognise
   // remote HTTP servers — without it the entry is silently ignored.
@@ -197,30 +207,46 @@ export function buildOfficialAirtableEntry(row: McpClientRow, pat: string): Reco
 }
 
 /**
- * The row whose 'airtable' entry is ours: only the eight rows with `official` set. Anywhere else
- * an 'airtable' server is the user's own, so it is never read, written or removed as ours.
+ * The row whose 'airtable' entry can be ours: only the eight rows with `official` set. Anywhere
+ * else an 'airtable' server is the user's own, so it is never read, written or removed as ours.
  */
 function officialRowFor(ideId: IdeId): McpClientRow | null {
   const row = mcpRowFor(ideId);
   return row?.official ? row : null;
 }
 
+/** On those rows, an 'airtable' entry is ours only while it points at the official server. */
+const isOfficialEntry = (entry: Record<string, unknown>): boolean =>
+  entry.url === OFFICIAL_AIRTABLE_URL || entry.serverUrl === OFFICIAL_AIRTABLE_URL;
+
+/**
+ * Configured: ours, where the client reads it, and in the shape we write now (so OpenCode's old
+ * `type: 'http'` copy is not). Anything less is cleaned up by the next Configure.
+ */
+function isOfficialEntryCurrent(row: McpClientRow, found: FoundEntry): boolean {
+  if (found.legacy) return false;
+  const expected = buildOfficialAirtableEntry(row, '', { native: found.native });
+  return Object.keys(expected).every(k => Object.prototype.hasOwnProperty.call(found.entry, k))
+    && (expected.type === undefined || found.entry.type === expected.type);
+}
+
 export async function configureOfficialAirtableMcp(ideId: IdeId, pat: string, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = officialRowFor(ideId);
   if (!row) throw new Error(`${IDE_CONFIGS[ideId].label} does not support the official Airtable server here.`);
-  await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, () => buildOfficialAirtableEntry(row, pat), deps);
+  await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, (loc) => buildOfficialAirtableEntry(row, pat, loc), deps, isOfficialEntry);
 }
 
 export async function unconfigureOfficialAirtableMcp(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = officialRowFor(ideId);
-  if (row) await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, null, deps);
+  if (row) await setServerEntry(row, OFFICIAL_AIRTABLE_NAME, null, deps, isOfficialEntry);
 }
 
 export async function isOfficialAirtableConfigured(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<boolean> {
   const row = officialRowFor(ideId);
   if (!row) return false;
   try {
-    return (await readServerEntry(row, OFFICIAL_AIRTABLE_NAME, deps)) !== null;
+    const found = await readServerEntry(row, OFFICIAL_AIRTABLE_NAME, deps, isOfficialEntry);
+    return found !== null && isOfficialEntryCurrent(row, found);
   } catch { return false; }
 }
 

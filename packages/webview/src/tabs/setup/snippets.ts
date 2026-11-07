@@ -143,6 +143,17 @@ vim.lsp.enable('airtable_formula')`;
 }
 
 export function getOfficialAirtableSnippet(ide: string): string {
+  // OpenCode knows `local` and `remote` servers only (the shape Configure writes there).
+  if (ide === 'opencode') {
+    return `"airtable": {
+  "type": "remote",
+  "url": "https://mcp.airtable.com/mcp",
+  "headers": {
+    "Authorization": "Bearer {{AIRTABLE_PAT}}"
+  },
+  "enabled": true
+}`;
+  }
   const isWindsurf = ide === 'windsurf' || ide === 'windsurf-next';
   // Windsurf uses 'serverUrl'; everyone else uses 'url'.
   // Claude Code and most MCP clients require "type": "http" to recognise

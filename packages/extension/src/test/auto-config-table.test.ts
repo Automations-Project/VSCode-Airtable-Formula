@@ -184,6 +184,18 @@ describe('the official entry is written, read and removed on the eight official 
     expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(text);
   });
 
+  // Only an 'airtable' entry pointing at the official URL is ours.
+  it.each(['cursor', 'claude-code'] as const)("%s: a user's own 'airtable' server with another url is not ours: not configured, never removed", async id => {
+    const row = MCP_CLIENT_BY_ID[id];
+    detect(row);
+    const mine = { type: 'http', url: 'https://example.test/my-airtable-proxy/mcp', headers: { Authorization: 'Bearer mine' } };
+    write(fileOf(row), JSON.stringify({ mcpServers: { airtable: mine, other: { command: 'x' } } }, null, 2));
+    const before = fs.readFileSync(fileOf(row), 'utf8');
+    expect(await isOfficialAirtableConfigured(id, deps)).toBe(false);
+    await unconfigureOfficialAirtableMcp(id, deps);
+    expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(before);
+  });
+
   it('helix and neovim: no official entry to read or remove, and configuring it is refused', async () => {
     for (const id of ['helix', 'neovim'] as const) {
       expect(await isOfficialAirtableConfigured(id, deps)).toBe(false);
@@ -239,6 +251,41 @@ describe("OpenCode's LSP entry shares the MCP entry's file", () => {
   });
 });
 
+// OpenCode knows `local` and `remote` servers only; add-mcp's transformOpenCodeConfig remote branch.
+describe("OpenCode's official entry is a remote server", () => {
+  const AUTH = { Authorization: 'Bearer patX' };
+  const dir = () => path.join(home, '.config', 'opencode');
+
+  it('a V1 file gets type remote with enabled; a V2-only file gets it under mcp.servers without enabled', async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    expect(buildOfficialAirtableEntry(row, 'patX')).toEqual({ type: 'remote', url: OFFICIAL_URL, headers: AUTH, enabled: true });
+    expect(buildOfficialAirtableEntry(row, 'patX', { native: true })).toEqual({ type: 'remote', url: OFFICIAL_URL, headers: AUTH });
+    detect(row);
+    await configureOfficialAirtableMcp('opencode', 'patX', deps);
+    const v1 = path.join(dir(), 'opencode.jsonc');
+    expect(parse(fs.readFileSync(v1, 'utf8')).mcp.airtable).toEqual({ type: 'remote', url: OFFICIAL_URL, headers: AUTH, enabled: true });
+    expect(await isOfficialAirtableConfigured('opencode', deps)).toBe(true);
+    write(v1, JSON.stringify({ mcp: { servers: { other: { type: 'local', command: ['x'] } } } }));
+    await configureOfficialAirtableMcp('opencode', 'patX', deps);
+    expect(parse(fs.readFileSync(v1, 'utf8')).mcp.servers.airtable).toEqual({ type: 'remote', url: OFFICIAL_URL, headers: AUTH });
+    expect(await isOfficialAirtableConfigured('opencode', deps)).toBe(true);
+  });
+
+  it("today's type http copy is a stale official entry: not configured, replaced on Configure, removed by Remove", async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const file = path.join(dir(), 'opencode.json');
+    write(file, JSON.stringify({ mcp: { airtable: { type: 'http', url: OFFICIAL_URL, headers: { Authorization: 'Bearer patOLD' } } } }, null, 2));
+    expect(await isOfficialAirtableConfigured('opencode', deps)).toBe(false);
+    await configureOfficialAirtableMcp('opencode', 'patX', deps);
+    expect(parse(fs.readFileSync(file, 'utf8')).mcp).toEqual({ airtable: { type: 'remote', url: OFFICIAL_URL, headers: AUTH, enabled: true } });
+    expect(await isOfficialAirtableConfigured('opencode', deps)).toBe(true);
+    write(file, JSON.stringify({ mcp: { airtable: { type: 'http', url: OFFICIAL_URL, headers: AUTH }, servers: { airtable: { type: 'remote', url: OFFICIAL_URL, headers: AUTH } } } }));
+    await unconfigureOfficialAirtableMcp('opencode', deps);
+    expect(parse(fs.readFileSync(file, 'utf8'))).toEqual({ mcp: { servers: {} } });
+  });
+});
+
 describe('a reconfigure clears the copies in old places too', () => {
   it('Amp: configuring the official entry moves the pre-port mcp.servers.airtable, and its old token, out', async () => {
     const amp = MCP_CLIENT_BY_ID.amp;
@@ -246,14 +293,40 @@ describe('a reconfigure clears the copies in old places too', () => {
     const file = path.join(home, '.config', 'amp', 'settings.json');
     const old = { type: 'http', url: OFFICIAL_URL, headers: { Authorization: 'Bearer patOLD' } };
     write(file, JSON.stringify({ mcp: { servers: { airtable: old } }, 'amp.dangerouslyAllowAll': false }, null, 2));
-    expect(await isOfficialAirtableConfigured('amp', deps)).toBe(true);
+    // Amp never reads mcp.servers, so the copy is not a working setup: Configure is offered.
+    expect(await isOfficialAirtableConfigured('amp', deps)).toBe(false);
     await configureOfficialAirtableMcp('amp', 'patNEW', deps);
+    expect(await isOfficialAirtableConfigured('amp', deps)).toBe(true);
     const text = fs.readFileSync(file, 'utf8');
     expect(text).not.toContain('patOLD');
     expect(parse(text)).toEqual({
       'amp.dangerouslyAllowAll': false,
       'amp.mcpServers': { airtable: { type: 'http', url: OFFICIAL_URL, headers: { Authorization: 'Bearer patNEW' } } },
     });
+  });
+
+  it('Amp: an old-place airtable entry that points elsewhere is not ours, so Configure leaves it', async () => {
+    const amp = MCP_CLIENT_BY_ID.amp;
+    detect(amp);
+    const file = path.join(home, '.config', 'amp', 'settings.json');
+    const mine = { url: 'https://example.test/mcp' };
+    write(file, JSON.stringify({ mcp: { servers: { airtable: mine } } }, null, 2));
+    await configureOfficialAirtableMcp('amp', 'patX', deps);
+    expect(parse(fs.readFileSync(file, 'utf8')).mcp).toEqual({ servers: { airtable: mine } });
+    expect(await isOfficialAirtableConfigured('amp', deps)).toBe(true);
+  });
+
+  it('OpenCode: the official entry only in opencode.json while opencode.jsonc exists is not configured, and Configure consolidates it', async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const dir = path.join(home, '.config', 'opencode');
+    write(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { airtable: buildOfficialAirtableEntry(row, 'patOLD') }, theme: 'x' }));
+    write(path.join(dir, 'opencode.jsonc'), '{\n  // mine\n}\n');
+    expect(await isOfficialAirtableConfigured('opencode', deps)).toBe(false);
+    await configureOfficialAirtableMcp('opencode', 'patNEW', deps);
+    expect(await isOfficialAirtableConfigured('opencode', deps)).toBe(true);
+    expect(parse(fs.readFileSync(path.join(dir, 'opencode.json'), 'utf8'))).toEqual({ theme: 'x' });
+    expect(parse(fs.readFileSync(path.join(dir, 'opencode.jsonc'), 'utf8')).mcp.airtable).toEqual(buildOfficialAirtableEntry(row, 'patNEW'));
   });
 
   it('Amp: Setup of our local entry moves the pre-port copy and keeps a user server beside it', async () => {
