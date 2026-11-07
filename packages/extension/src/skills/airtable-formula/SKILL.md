@@ -90,3 +90,4 @@ Load these on demand:
 - [references/functions.md](references/functions.md) - Airtable function quick reference
 - [references/mcp-tools.md](references/mcp-tools.md) - airtable-user-mcp tools guide
 - [references/workflows.md](references/workflows.md) - debug, create and convert workflows, plus the agent persona
+- [references/prompts.md](references/prompts.md) - task recipes: the airtable-user-mcp prompts, with the user's own edits in global installs only (written at install time)

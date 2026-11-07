@@ -28,7 +28,8 @@ import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
 import type { DaemonManager } from '../mcp/daemon-manager.js';
-import { BUILTIN_PROMPT_DEFS, BUILTIN_NAMES } from '../mcp/prompt-defs.js';
+import { BUILTIN_NAMES } from '../mcp/prompt-defs.js';
+import { readMergedPrompts, normalizePromptsConfig, type PromptsConfig } from '../mcp/prompts-state.js';
 
 const WEBVIEW_LINKS: Record<WebviewLinkId, string> = {
   docs: 'https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula',
@@ -1325,10 +1326,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             cfg.overrides[def.name] = def;
           } else {
             cfg.custom = cfg.custom ?? [];
-            const idx = (cfg.custom as { name: string }[]).findIndex(p => p.name === def.name);
+            const idx = (cfg.custom as ({ name?: unknown } | null)[]).findIndex(p => p?.name === def.name);
             if (idx >= 0) cfg.custom[idx] = def; else cfg.custom.push(def);
           }
         });
+        await this.refreshSkillRecipes();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
@@ -1347,8 +1349,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           return;
         }
         await this._writePromptConfig(cfg => {
-          cfg.custom = ((cfg.custom ?? []) as { name: string }[]).filter(p => p.name !== msg.name);
+          cfg.custom = ((cfg.custom ?? []) as ({ name?: unknown } | null)[]).filter(p => p?.name !== msg.name);
         });
+        await this.refreshSkillRecipes();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
@@ -1369,6 +1372,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         await this._writePromptConfig(cfg => {
           if (cfg.overrides) delete cfg.overrides[msg.name];
         });
+        await this.refreshSkillRecipes();
         await this.pushState();
         this.postResult(msg.id, true);
       } catch (err) { this.postResult(msg.id, false, String(err)); }
@@ -1745,37 +1749,40 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   }
 
   private async _computePromptsState(): Promise<import('@airtable-formula/shared').PromptsState> {
-    const configPath = path.join(os.homedir(), '.airtable-user-mcp', 'prompts.json');
-    let userConfig: { overrides?: Record<string, { name: string; description: string; arguments: import('@airtable-formula/shared').PromptArg[]; template: string }>; custom?: import('@airtable-formula/shared').PromptDef[] } = {};
-    try {
-      const raw = await (await import('fs/promises')).readFile(configPath, 'utf8');
-      userConfig = JSON.parse(raw);
-    } catch { /* no config yet */ }
-
-    const prompts: import('@airtable-formula/shared').PromptDef[] = BUILTIN_PROMPT_DEFS.map(p => {
-      const override = userConfig.overrides?.[p.name];
-      return override
-        ? { ...override, isBuiltin: true, isModified: true }
-        : { ...p, isBuiltin: true, isModified: false };
-    });
-
-    for (const c of (userConfig.custom ?? [])) {
-      prompts.push({ ...c, isBuiltin: false, isModified: false });
-    }
-
-    return { prompts };
+    return { prompts: await readMergedPrompts(os.homedir()) };
   }
 
-  private async _writePromptConfig(mutate: (cfg: { overrides: Record<string, unknown>; custom: unknown[] }) => void): Promise<void> {
+  /**
+   * The skill carries the prompts as recipes (references/prompts.md), so a prompt edit
+   * re-renders them, but only where the skill is already installed: saving a prompt must
+   * never install it. Problems become a warning; they never fail the prompt action.
+   * Global scope only: a project copy carries the built-ins, which an edit does not change,
+   * and re-installing it would touch the user's repository (skill folders, the Cursor
+   * pointer rule, legacy-file deletion) on every save.
+   */
+  private async refreshSkillRecipes(): Promise<void> {
+    try {
+      const scope = getSettings().ai.installScope;
+      if (scope === 'project') { return; }
+      const env = await skillEnv(this.context);
+      const clients = await listSkillClients(scope, env);
+      if (!clients.some(c => c.status === 'installed' || c.status === 'outdated')) { return; }
+      const { failed } = await installSkill(scope, env);
+      warnSkillProblems(failed);
+    } catch (err) {
+      warnSkillProblems([{ dir: 'references/prompts.md', message: err instanceof Error ? err.message : String(err) }]);
+    }
+  }
+
+  private async _writePromptConfig(mutate: (cfg: PromptsConfig) => void): Promise<void> {
     const configPath = path.join(os.homedir(), '.airtable-user-mcp', 'prompts.json');
     const fsP = await import('fs/promises');
-    let cfg: { overrides: Record<string, unknown>; custom: unknown[] } = { overrides: {}, custom: [] };
+    let raw: unknown;
     try {
-      const raw = await fsP.readFile(configPath, 'utf8');
-      cfg = JSON.parse(raw);
-      if (!cfg.overrides) { cfg.overrides = {}; }
-      if (!cfg.custom) { cfg.custom = []; }
+      raw = JSON.parse(await fsP.readFile(configPath, 'utf8'));
     } catch { /* no config yet */ }
+    // A hand-edited file may hold any JSON: `[]`, or `overrides` as a list; never mutate that shape.
+    const cfg = normalizePromptsConfig(raw);
     mutate(cfg);
     await fsP.mkdir(path.dirname(configPath), { recursive: true });
     const data = JSON.stringify(cfg, null, 2) + '\n';

@@ -71,6 +71,8 @@ const dependencies = vi.hoisted(() => ({
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
   readdir: vi.fn(async () => []),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
   ideConfigs: {} as Record<string, { capabilities: string[] }>,
 }));
 
@@ -147,9 +149,11 @@ vi.mock('../webview/html.js', () => ({ getWebviewHtml: vi.fn(() => '<html></html
 vi.mock('fs/promises', () => ({
   stat: dependencies.stat,
   readdir: dependencies.readdir,
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
+  readFile: dependencies.readFile,
+  writeFile: dependencies.writeFile,
   mkdir: vi.fn(),
+  rename: vi.fn(),
+  unlink: vi.fn(async () => undefined),
 }));
 
 import * as vscode from 'vscode';
@@ -211,6 +215,7 @@ describe('DashboardProvider webview trust boundary', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    dependencies.readFile.mockReset();
     skill.scope = 'global';
     vscodeMock.configValues.clear();
     for (const key of Object.keys(dependencies.ideConfigs)) delete dependencies.ideConfigs[key];
@@ -1053,6 +1058,108 @@ describe('DashboardProvider webview trust boundary', () => {
     expect(skill.installSkill).toHaveBeenCalledOnce();
     expect(skill.installSkill).toHaveBeenCalledWith('global', skill.env);
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup1', ok: true });
+  });
+
+  describe('prompt saves refresh the skill recipes', () => {
+    const installedRow = { id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'installed', canonical: true };
+    const prompt = { name: 'custom-one', description: 'd', arguments: [], template: 't', isBuiltin: false, isModified: false };
+
+    const save = async () => {
+      const { provider, inboundMessage } = mountProvider();
+      vi.spyOn(provider as any, '_writePromptConfig').mockResolvedValue(undefined);
+      vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+      inboundMessage({ type: 'action:save-prompt', id: 'saveprompt1', prompt });
+      await waitForResult('saveprompt1');
+    };
+
+    it('save-prompt refreshes the skill when it is installed somewhere', async () => {
+      skill.listSkillClients.mockResolvedValueOnce([installedRow] as any);
+      await save();
+      expect(skill.installSkill).toHaveBeenCalledOnce();
+      expect(skill.installSkill).toHaveBeenCalledWith('global', skill.env);
+    });
+
+    it('save-prompt refreshes an outdated skill too', async () => {
+      skill.listSkillClients.mockResolvedValueOnce([{ ...installedRow, status: 'outdated' }] as any);
+      await save();
+      expect(skill.installSkill).toHaveBeenCalledOnce();
+    });
+
+    it('save-prompt does not install the skill when it is missing everywhere', async () => {
+      await save();
+      expect(skill.installSkill).not.toHaveBeenCalled();
+    });
+
+    it('save-prompt never re-installs a project-scope skill, even where it is installed', async () => {
+      skill.scope = 'project';
+      skill.listSkillClients.mockResolvedValue([installedRow] as any);
+      try {
+        await save();
+      } finally {
+        skill.listSkillClients.mockReset();
+      }
+      expect(skill.installSkill).not.toHaveBeenCalled();
+      expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'saveprompt1', ok: true });
+    });
+
+    it.each([
+      ['action:delete-prompt', 'Delete'],
+      ['action:reset-prompt', 'Reset'],
+    ] as const)('%s refreshes the skill when it is installed', async (type, button) => {
+      vscodeMock.showWarningMessage.mockResolvedValueOnce(button);
+      skill.listSkillClients.mockResolvedValueOnce([installedRow] as any);
+      const { provider, inboundMessage } = mountProvider();
+      vi.spyOn(provider as any, '_writePromptConfig').mockResolvedValue(undefined);
+      vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+      inboundMessage({ type, id: 'prompt9', name: 'custom-one' });
+      await waitForResult('prompt9');
+      expect(skill.installSkill).toHaveBeenCalledOnce();
+    });
+
+    it('a failing refresh does not fail the prompt save, and is reported as a warning', async () => {
+      skill.listSkillClients.mockResolvedValueOnce([installedRow] as any);
+      skill.installSkill.mockRejectedValueOnce(new Error('disk full'));
+      await save();
+      expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'saveprompt1', ok: true });
+      expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('disk full'));
+    });
+
+    it('per-folder install failures are reported as a warning without failing the save', async () => {
+      skill.listSkillClients.mockResolvedValueOnce([installedRow] as any);
+      skill.installSkill.mockResolvedValueOnce({ written: [], failed: [{ dir: '~/.agents/skills', message: 'EACCES' }] } as any);
+      await save();
+      expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'saveprompt1', ok: true });
+      expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('EACCES'));
+    });
+
+    it('the refresh runs after the write and before the state push', async () => {
+      skill.listSkillClients.mockResolvedValueOnce([installedRow] as any);
+      const { provider, inboundMessage } = mountProvider();
+      const write = vi.spyOn(provider as any, '_writePromptConfig').mockResolvedValue(undefined);
+      const push = vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+      inboundMessage({ type: 'action:save-prompt', id: 'saveprompt1', prompt });
+      await waitForResult('saveprompt1');
+      const install = skill.installSkill.mock.invocationCallOrder[0];
+      expect(write.mock.invocationCallOrder[0]).toBeLessThan(install);
+      expect(install).toBeLessThan(push.mock.invocationCallOrder[0]);
+    });
+  });
+
+  it.each([
+    ['[]', '[]'],
+    ['overrides as a list and custom as an object', JSON.stringify({ overrides: [], custom: {} })],
+  ])('a prompts.json holding %s still saves as { overrides, custom: [saved] }', async (_label, file) => {
+    dependencies.readFile.mockResolvedValue(file);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+    const prompt = { name: 'custom-one', description: 'd', arguments: [], template: 't' };
+
+    inboundMessage({ type: 'action:save-prompt', id: 'saveprompt2', prompt: { ...prompt, isBuiltin: false, isModified: false } });
+
+    await waitForResult('saveprompt2');
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'saveprompt2', ok: true });
+    const [, data] = dependencies.writeFile.mock.calls.at(-1)!;
+    expect(JSON.parse(data)).toEqual({ overrides: {}, custom: [prompt] });
   });
 
   it('state:update carries the client ledger from listSkillClients', async () => {
