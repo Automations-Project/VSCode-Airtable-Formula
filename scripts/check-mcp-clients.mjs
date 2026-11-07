@@ -15,8 +15,17 @@
  * (`getAgentTypes`, prompts) is CLI plumbing, not paths or shapes, and is not
  * hashed.
  *
- * Pure functions only here; the CLI (`main`) is below them.
+ * Pure functions first; the CLI (`main`) is at the bottom.
+ *
+ *   pnpm check:mcp-clients             offline: snapshot <-> table <-> attribution headers
+ *   pnpm check:mcp-clients:upstream    network: has upstream moved past the pin?
+ *   pnpm record:mcp-clients            network: re-pin (keeps our decisions, flags new agents)
  */
+
+import { createHash } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 export const UPSTREAM_REPO = 'neondatabase/add-mcp';
 export const UPSTREAM_FILE = 'src/agents.ts';
@@ -28,8 +37,6 @@ export const ATTRIBUTED_FILES = [
   'packages/extension/src/auto-config/opencode-layout.ts',
 ];
 export const MIN_AGENTS = 20;
-
-import { createHash } from 'node:crypto';
 
 export function sha256(text) {
   return createHash('sha256').update(text).digest('hex');
@@ -180,4 +187,119 @@ export function recordSnapshot(previous, hashed, ref) {
     agents,
     oursOnly: prev.oursOnly ?? [],
   };
+}
+
+const SHORT = sha => sha.slice(0, 7);
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function defaultIo(root) {
+  return {
+    fetch: (url, init) => fetch(url, init),
+    readFile: rel => readFile(resolve(root, rel), 'utf8'),
+    writeFile: (rel, text) => writeFile(resolve(root, rel), text),
+    log: m => console.log(m),
+    error: m => console.error(m),
+    env: process.env,
+  };
+}
+
+async function readOrNull(io, rel) {
+  try {
+    return await io.readFile(rel);
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+async function runOffline(io) {
+  const snapshotText = await readOrNull(io, SNAPSHOT_PATH);
+  if (snapshotText === null) {
+    io.error(`✗ check-mcp-clients: ${SNAPSHOT_PATH} is missing; run pnpm record:mcp-clients`);
+    return 1;
+  }
+  const snapshot = JSON.parse(snapshotText);
+  const rows = extractTableRows((await readOrNull(io, TABLE_PATH)) ?? '');
+  const files = {};
+  for (const path of ATTRIBUTED_FILES) files[path] = await readOrNull(io, path);
+  const problems = checkOffline({ snapshot, rows, files });
+  if (problems.length) {
+    io.error(`✗ check-mcp-clients:\n${problems.map(p => `  - ${p}`).join('\n')}`);
+    return 1;
+  }
+  const all = Object.values(snapshot.agents);
+  const ported = all.filter(a => a.ported).length;
+  io.log(
+    `✓ check-mcp-clients: ${rows.length} rows agree with add-mcp@${SHORT(snapshot.ref)} (${ported} ported, ${snapshot.oursOnly.length} ours only, ${all.length - ported} not ported)`,
+  );
+  return 0;
+}
+
+async function get(io, url, headers) {
+  const res = await io.fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`GET ${url} -> HTTP ${res.status}`);
+  return res;
+}
+
+async function resolveRef(io, ref) {
+  if (/^[0-9a-f]{40}$/.test(ref)) return ref;
+  const url = `https://api.github.com/repos/${UPSTREAM_REPO}/commits/${ref}`;
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (io.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${io.env.GITHUB_TOKEN}`;
+  const { sha } = await (await get(io, url, headers)).json();
+  if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error(`GET ${url} -> no commit sha in the response`);
+  return sha;
+}
+
+async function runUpstream(io, argv) {
+  const refArg = argv.find(a => a.startsWith('--ref='));
+  const ref = refArg ? refArg.slice('--ref='.length) : 'main';
+  let sha;
+  let hashed;
+  try {
+    sha = await resolveRef(io, ref);
+    hashed = hashAgentsSource(await (await get(io, `https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${UPSTREAM_FILE}`)).text());
+  } catch (err) {
+    io.error(`✗ check-mcp-clients: ${err instanceof Error ? err.message : err}`);
+    return 1;
+  }
+  const snapshotText = await readOrNull(io, SNAPSHOT_PATH);
+
+  if (argv.includes('--record')) {
+    const next = recordSnapshot(snapshotText === null ? null : JSON.parse(snapshotText), hashed, sha);
+    await io.writeFile(SNAPSHOT_PATH, `${JSON.stringify(next, null, 2)}\n`);
+    io.log(
+      `recorded ${Object.keys(next.agents).length} agents at ${SHORT(sha)}; review any agent marked "not reviewed", update the attribution headers to the new ref, then run pnpm check:mcp-clients`,
+    );
+    return 0;
+  }
+
+  if (snapshotText === null) {
+    io.error(`✗ check-mcp-clients: ${SNAPSHOT_PATH} is missing; run pnpm record:mcp-clients`);
+    return 1;
+  }
+  const snapshot = JSON.parse(snapshotText);
+  const diff = diffSnapshot(snapshot, hashed);
+  if (diff.added.length || diff.removed.length || diff.changed.length || diff.helperChanged) {
+    io.error(formatDriftReport(diff, { pinned: snapshot.ref, latest: sha }));
+    return 1;
+  }
+  io.log(
+    `✓ check-mcp-clients: add-mcp ${UPSTREAM_FILE} at ${SHORT(sha)} matches the pin ${SHORT(snapshot.ref)} (helper + ${Object.keys(hashed.agents).length} agents)`,
+  );
+  return 0;
+}
+
+export async function main(argv = process.argv.slice(2), io, root = ROOT) {
+  io ??= defaultIo(root);
+  try {
+    return argv.includes('--upstream') ? await runUpstream(io, argv) : await runOffline(io);
+  } catch (err) {
+    io.error(`✗ check-mcp-clients: ${err instanceof Error ? err.message : err}`);
+    return 1;
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().then(code => process.exit(code));
 }

@@ -99,3 +99,77 @@ test('record keeps decisions, re-pins hashes, adds new agents unreviewed and dro
   assert.equal('vscode' in next.agents, false);
   assert.deepEqual(next.oursOnly, ['amp']);
 });
+
+import { main, SNAPSHOT_PATH, TABLE_PATH, ATTRIBUTED_FILES } from './check-mcp-clients.mjs';
+
+function fakeIo({ responses = {}, files = {} } = {}) {
+  const out = { log: [], error: [], written: {} };
+  return Object.assign(out, {
+    io: {
+      fetch: async (url) => {
+        const r = responses[url];
+        if (!r) return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+        return { ok: true, status: 200, text: async () => r, json: async () => JSON.parse(r) };
+      },
+      readFile: async (rel) => { if (!(rel in files)) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } return files[rel]; },
+      writeFile: async (rel, text) => { out.written[rel] = text; },
+      log: (m) => out.log.push(m), error: (m) => out.error.push(m), env: {},
+    },
+  });
+}
+const RAW = (sha) => `https://raw.githubusercontent.com/neondatabase/add-mcp/${sha}/src/agents.ts`;
+
+test('--upstream: no drift returns 0', async () => {
+  const snap = recordSnapshot(null, hashAgentsSource(source(22)), PIN);
+  const f = fakeIo({ responses: { [`https://api.github.com/repos/neondatabase/add-mcp/commits/main`]: JSON.stringify({ sha: LATEST }), [RAW(LATEST)]: source(22) }, files: { 'scripts/mcp-clients-upstream.json': JSON.stringify(snap) } });
+  assert.equal(await main(['--upstream'], f.io), 0);
+  assert.match(f.log.join('\n'), /matches the pin/);
+});
+
+test('--upstream: drift returns 1 and prints the report', async () => {
+  const snap = recordSnapshot(null, hashAgentsSource(source(22)), PIN);
+  const f = fakeIo({ responses: { [RAW(LATEST)]: source(23) }, files: { 'scripts/mcp-clients-upstream.json': JSON.stringify(snap) } });
+  assert.equal(await main(['--upstream', `--ref=${LATEST}`], f.io), 1);
+  assert.match(f.error.join('\n') + f.log.join('\n'), new RegExp(`added: {3}${id(22)}`));
+});
+
+test('--upstream: an HTTP failure returns 1 and names the URL', async () => {
+  const f = fakeIo({ files: { 'scripts/mcp-clients-upstream.json': '{}' } });
+  assert.equal(await main(['--upstream', `--ref=${LATEST}`], f.io), 1);
+  assert.ok(f.error.join('\n').includes(RAW(LATEST)));
+});
+
+test('--upstream --record writes the snapshot at the resolved sha', async () => {
+  const f = fakeIo({ responses: { [RAW(PIN)]: source(22) } });
+  assert.equal(await main(['--upstream', '--record', `--ref=${PIN}`], f.io), 0);
+  const written = JSON.parse(f.written['scripts/mcp-clients-upstream.json']);
+  assert.equal(written.ref, PIN);
+  assert.equal(Object.keys(written.agents).length, 22);
+});
+
+test('--upstream: a source with too few agents returns 1 instead of throwing', async () => {
+  const snap = recordSnapshot(null, hashAgentsSource(source(22)), PIN);
+  const f = fakeIo({ responses: { [RAW(LATEST)]: source(5) }, files: { 'scripts/mcp-clients-upstream.json': JSON.stringify(snap) } });
+  assert.equal(await main(['--upstream', `--ref=${LATEST}`], f.io), 1);
+  assert.match(f.error.join('\n'), /extracted 5 agents/);
+});
+
+const TABLE = "const ROWS = [\n  { id: 'codex-cli', upstream: 'codex', x: 1 },\n  { id: 'amp', upstream: null, x: 2 },\n];\n";
+
+test('offline: agreement prints the pass line and returns 0', async () => {
+  const f = fakeIo({ files: { [SNAPSHOT_PATH]: JSON.stringify(snapshot), [TABLE_PATH]: header + TABLE, ...Object.fromEntries(ATTRIBUTED_FILES.slice(1).map(p => [p, header])) } });
+  assert.equal(await main([], f.io), 0);
+  assert.equal(f.log.join('\n'), '✓ check-mcp-clients: 2 rows agree with add-mcp@aaaaaaa (1 ported, 1 ours only, 1 not ported)');
+});
+
+test('offline: a disagreement prints each problem and returns 1', async () => {
+  const f = fakeIo({ files: { [SNAPSHOT_PATH]: JSON.stringify(snapshot), [TABLE_PATH]: header + TABLE.replace("'codex-cli'", "'codex'"), ...Object.fromEntries(ATTRIBUTED_FILES.slice(1).map(p => [p, header])) } });
+  assert.equal(await main([], f.io), 1);
+  assert.match(f.error.join('\n'), /✗ check-mcp-clients:[\s\S]*codex.*codex-cli/);
+});
+
+test('offline: a missing snapshot returns 1', async () => {
+  const f = fakeIo();
+  assert.equal(await main([], f.io), 1);
+  assert.ok(f.error.join('\n').includes(SNAPSHOT_PATH));
+});
