@@ -3,6 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { detectInstalledIdes } from '../auto-config/ide-detection.js';
 import type { SkillEnv } from './installer.js';
+import { readMergedPrompts } from '../mcp/prompts-state.js';
+import { BUILTIN_PROMPT_DEFS } from '../mcp/prompt-defs.js';
 
 /** The installer's view of this host: home, workspace, extension version and detected IDEs. */
 export async function skillEnv(context: vscode.ExtensionContext): Promise<SkillEnv> {
@@ -14,5 +16,6 @@ export async function skillEnv(context: vscode.ExtensionContext): Promise<SkillE
     skillSourceDir: path.join(context.extensionPath, 'dist', 'skills', 'airtable-formula'),
     detectedIdes: await detectInstalledIdes(),
     xdgConfigHome: process.env.XDG_CONFIG_HOME,
+    prompts: { merged: await readMergedPrompts(os.homedir()), builtins: BUILTIN_PROMPT_DEFS },
   };
 }

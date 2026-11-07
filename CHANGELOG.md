@@ -57,6 +57,24 @@ card). Nothing else needs doing.
 - **New clients detected on this machine show Needs setup** until you press **Setup all detected
   editors** (or **Set up** on the card). Nothing is written to them unasked.
 
+### Added — Prompt recipes in the AI skill (2026-11-07)
+
+- **The AI skill carries your MCP prompts.** Clients that do not show MCP prompts (most of the 70+
+  skill clients) now get the same recipes as `references/prompts.md` inside the installed skill: the
+  10 built-ins, plus your own edits and custom prompts under the `global` scope (`project` scope gets
+  the built-ins only, since that folder can end up in a repository others read). The file is
+  generated at install time from the same merge the Prompts tab uses, and an install writes it into
+  every skills folder it resolves. Saving, deleting or resetting a prompt re-runs the install for the
+  current scope, `global` only, when the skill is already installed or outdated in at least one
+  folder: it then writes every resolved folder, as any install does. It never installs a skill that
+  is not installed anywhere yet, never touches a `project`-scope copy (that copy carries no edits),
+  and a failed refresh shows a warning without failing the prompt action.
+- **A hand-edited `prompts.json` can no longer freeze the dashboard.** An entry the Prompts tab cannot
+  show (a malformed argument, a name with capitals or spaces, an argument without `required`) is
+  skipped in the Prompts tab and the skill alike; before, one such entry made the dashboard drop every
+  state update, so no tab refreshed. Unknown keys are dropped, and a `prompts.json` holding `[]` or a
+  wrongly shaped `overrides` / `custom` is read as empty and replaced by a valid file on the next save.
+
 ### Added — `lint_airtable_code`, offline checks for formulas and scripts (2026-11-07)
 
 **Added**

@@ -8,17 +8,26 @@ vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
   return { ...actual, renameSync: vi.fn(actual.renameSync) };
 });
+// The real renderer, wrapped so a test can count how often an install renders.
+vi.mock('../skills/prompt-recipes.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../skills/prompt-recipes.js')>();
+  return { ...actual, renderPromptRecipes: vi.fn(actual.renderPromptRecipes) };
+});
 
 import {
   expandHome, resolveTargets, installSkill, checkSkill, removeSkill, listSkillClients,
   type SkillEnv,
 } from '../skills/installer.js';
+import { renderPromptRecipes } from '../skills/prompt-recipes.js';
 
 let root: string;
 let home: string;
 let ws: string;
 let src: string;
 let env: SkillEnv;
+
+const builtinRecipe = { name: 'airtable-builtin-recipe', description: 'A built-in', arguments: [], template: 'Do the built-in thing' };
+const customRecipe = { name: 'my-custom-recipe', description: 'A custom one', arguments: [], template: 'Do my thing' };
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'airtable-skill-'));
@@ -31,7 +40,10 @@ beforeEach(() => {
   fs.writeFileSync(path.join(src, 'SKILL.md'),
     '---\nname: airtable-formula\ndescription: test skill\nmetadata:\n  version: 0.0.0-dev\n  source: test\n---\n\n# Airtable Formula\n');
   fs.writeFileSync(path.join(src, 'references', 'rules.md'), '# Rules\n');
-  env = { home, workspaceRoot: ws, version: '2.3.0', skillSourceDir: src, detectedIdes: ['cursor', 'claude-code'] };
+  env = {
+    home, workspaceRoot: ws, version: '2.3.0', skillSourceDir: src, detectedIdes: ['cursor', 'claude-code'],
+    prompts: { merged: [builtinRecipe, customRecipe], builtins: [builtinRecipe] },
+  };
 });
 
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -103,6 +115,52 @@ describe('skill installer', () => {
     expect(fs.readFileSync(path.join(target, 'airtable-formula', 'SKILL.md'), 'utf8')).toContain('version: 2.3.0');
     expect(fs.existsSync(path.join(target, 'airtable-formula', 'references', 'rules.md'))).toBe(true);
     expect(fs.readdirSync(target)).toEqual(['airtable-formula']);
+  });
+
+  it('global install writes references/prompts.md with the merged prompts', async () => {
+    const r = await installSkill('global', env);
+    expect(r.failed).toEqual([]);
+    const md = fs.readFileSync(path.join(home, '.cursor', 'skills', 'airtable-formula', 'references', 'prompts.md'), 'utf8');
+    expect(md).toContain('## airtable-builtin-recipe');
+    expect(md).toContain('## my-custom-recipe');
+  });
+
+  it('project install writes built-ins only, never the custom prompts', async () => {
+    const r = await installSkill('project', env);
+    expect(r.failed).toEqual([]);
+    const md = fs.readFileSync(path.join(ws, '.claude', 'skills', 'airtable-formula', 'references', 'prompts.md'), 'utf8');
+    expect(md).toContain('## airtable-builtin-recipe');
+    expect(md).not.toContain('## my-custom-recipe');
+  });
+
+  it('renders the recipes once per install, not once per target', async () => {
+    vi.mocked(renderPromptRecipes).mockClear();
+    const r = await installSkill('global', env);
+    expect(r.written.length).toBeGreaterThan(1);
+    expect(renderPromptRecipes).toHaveBeenCalledOnce();
+  });
+
+  it('the recipes file is inside the swapped folder, not written after it', async () => {
+    const target = path.join(home, '.cursor', 'skills');
+    const rename = vi.mocked(fs.renameSync);
+    const real = rename.getMockImplementation()!;
+    let recipesInTmpAtSwap: boolean | undefined;
+    rename.mockImplementation((from, to) => {
+      if (String(to) === path.join(target, 'airtable-formula') && path.basename(String(from)) === `.airtable-formula.tmp-${process.pid}`) {
+        recipesInTmpAtSwap = fs.existsSync(path.join(String(from), 'references', 'prompts.md'));
+        throw Object.assign(new Error('EPERM: simulated'), { code: 'EPERM' });
+      }
+      return real(from, to);
+    });
+    try {
+      const r = await installSkill('global', env);
+      expect(r.failed.map(f => f.dir)).toContain(target);
+    } finally {
+      rename.mockImplementation(real);
+    }
+    expect(recipesInTmpAtSwap).toBe(true);   // written before the swap, so it moves in with the folder
+    expect(fs.existsSync(path.join(target, 'airtable-formula'))).toBe(false);
+    expect(fs.existsSync(path.join(target, 'airtable-formula', 'references', 'prompts.md'))).toBe(false);
   });
 
   it('install continues past an unwritable target and reports it', async () => {

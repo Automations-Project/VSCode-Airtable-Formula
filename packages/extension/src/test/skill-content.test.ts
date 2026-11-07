@@ -17,10 +17,12 @@ describe('airtable-formula skill folder', () => {
     for (const word of ['Airtable', 'formula', '.formula', 'MCP']) expect(description).toContain(word);
   });
 
-  it('references every file in references/ and nothing else', () => {
+  it('references every file in references/ plus the install-time prompts.md, and nothing else', () => {
     const refs = fs.readdirSync(path.join(dir, 'references')).sort();
     expect(refs).toEqual(['functions.md', 'mcp-tools.md', 'rules.md', 'workflows.md']);
-    for (const f of refs) expect(skill).toContain(`references/${f}`);
+    for (const f of [...refs, 'prompts.md']) expect(skill).toContain(`references/${f}`);
+    // each link names its file twice (label and target), so count distinct files
+    expect(new Set(skill.match(/references\/[a-z-]+\.md/g)).size).toBe(refs.length + 1);
   });
 
   it('keeps the canonical tool-count line in mcp-tools.md', () => {

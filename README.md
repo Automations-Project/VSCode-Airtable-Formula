@@ -68,7 +68,7 @@
 | **MCP Server (73 tools + `manage_tools`)** | Full Airtable internal API — schema, views, fields, records, extensions, templates | — |
 | **Language Server (LSP)** | Standalone multi-editor support — Neovim, Helix, OpenCode | All above |
 | **IDE Auto-Setup** | One-click MCP config for 23 AI clients (Cursor, Windsurf, Claude Desktop, Claude Code, Cline, Amp, Codex, Gemini CLI and more) | — |
-| **AI Skill** | One Airtable skill folder (rules, function reference, MCP tool guide, workflows) installed into 70+ AI coding clients | — |
+| **AI Skill** | One Airtable skill folder (rules, function reference, MCP tool guide, workflows, prompt recipes) installed into 70+ AI coding clients; it carries the MCP prompts as recipes, with your own edits under global scope | — |
 | **Daemon + Tunnel** | Persistent background server; optional Cloudflare or ngrok remote access | — |
 | **Tool Profiles** | `read-only` (11 tools) / `safe-write` (55 tools) / `full` (73 tools) / `custom` permission scopes | — |
 | **OS Keychain Auth** | Browser-based Airtable login with SSO/2FA — credentials in your OS keychain | — |
