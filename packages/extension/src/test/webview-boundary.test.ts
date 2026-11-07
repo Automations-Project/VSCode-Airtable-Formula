@@ -1090,6 +1090,18 @@ describe('DashboardProvider webview trust boundary', () => {
       expect(skill.installSkill).not.toHaveBeenCalled();
     });
 
+    it('save-prompt never re-installs a project-scope skill, even where it is installed', async () => {
+      skill.scope = 'project';
+      skill.listSkillClients.mockResolvedValue([installedRow] as any);
+      try {
+        await save();
+      } finally {
+        skill.listSkillClients.mockReset();
+      }
+      expect(skill.installSkill).not.toHaveBeenCalled();
+      expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'saveprompt1', ok: true });
+    });
+
     it.each([
       ['action:delete-prompt', 'Delete'],
       ['action:reset-prompt', 'Reset'],

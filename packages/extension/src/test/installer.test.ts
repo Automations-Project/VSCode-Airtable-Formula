@@ -8,11 +8,17 @@ vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
   return { ...actual, renameSync: vi.fn(actual.renameSync) };
 });
+// The real renderer, wrapped so a test can count how often an install renders.
+vi.mock('../skills/prompt-recipes.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../skills/prompt-recipes.js')>();
+  return { ...actual, renderPromptRecipes: vi.fn(actual.renderPromptRecipes) };
+});
 
 import {
   expandHome, resolveTargets, installSkill, checkSkill, removeSkill, listSkillClients,
   type SkillEnv,
 } from '../skills/installer.js';
+import { renderPromptRecipes } from '../skills/prompt-recipes.js';
 
 let root: string;
 let home: string;
@@ -125,6 +131,13 @@ describe('skill installer', () => {
     const md = fs.readFileSync(path.join(ws, '.claude', 'skills', 'airtable-formula', 'references', 'prompts.md'), 'utf8');
     expect(md).toContain('## airtable-builtin-recipe');
     expect(md).not.toContain('## my-custom-recipe');
+  });
+
+  it('renders the recipes once per install, not once per target', async () => {
+    vi.mocked(renderPromptRecipes).mockClear();
+    const r = await installSkill('global', env);
+    expect(r.written.length).toBeGreaterThan(1);
+    expect(renderPromptRecipes).toHaveBeenCalledOnce();
   });
 
   it('the recipes file is inside the swapped folder, not written after it', async () => {

@@ -187,7 +187,7 @@ function clearTmpDirs(target: string): void {
  * all-or-nothing, so the target holds the old folder or the new one, never a half-deleted one
  * (deleting first lost the working install when the rename then failed, e.g. on a Windows EPERM).
  */
-function installInto(target: string, env: SkillEnv, scope: SkillScope): void {
+function installInto(target: string, env: SkillEnv, recipesMarkdown: string): void {
   const final = path.join(target, SKILL_DIR_NAME);
   const tmp = path.join(target, `${TMP_PREFIX}${process.pid}`);
   const old = path.join(target, `${TMP_PREFIX}old-${process.pid}`);   // a leftover: our next sweep, or any once this pid is gone
@@ -198,10 +198,9 @@ function installInto(target: string, env: SkillEnv, scope: SkillScope): void {
     fs.cpSync(env.skillSourceDir, tmp, { recursive: true });
     const skillMd = path.join(tmp, 'SKILL.md');
     fs.writeFileSync(skillMd, fs.readFileSync(skillMd, 'utf8').replace(VERSION_PLACEHOLDER, `version: ${env.version}`));
-    // Project scope lands in a repository others may read: the user's own prompt edits stay out of it.
     const recipes = path.join(tmp, RECIPES_FILE);
     fs.mkdirSync(path.dirname(recipes), { recursive: true });
-    fs.writeFileSync(recipes, renderPromptRecipes(scope === 'project' ? env.prompts.builtins : env.prompts.merged));
+    fs.writeFileSync(recipes, recipesMarkdown);
     const hadOld = fs.lstatSync(final, { throwIfNoEntry: false }) !== undefined;
     if (hadOld) fs.renameSync(final, old);
     try {
@@ -319,6 +318,7 @@ let inflight: Promise<InstallResult> | null = null;
  * process: a call made while one is running gets that run's result.
  */
 export async function installSkill(scope: SkillScope, env: SkillEnv): Promise<InstallResult> {
+  // The dedup is safe only while runInstall stays synchronous (no await): else a caller could join an older run with stale prompts.
   if (!inflight) inflight = runInstall(scope, env).finally(() => { inflight = null; });
   return inflight;
 }
@@ -328,12 +328,14 @@ async function runInstall(scope: SkillScope, env: SkillEnv): Promise<InstallResu
   if (scope === 'project' && !ws) return { written: [], failed: [], noWorkspace: true };
   const written: string[] = [];
   const failed: Failure[] = [];
+  // Project scope lands in a repository others may read: the user's own prompt edits stay out of it.
+  const recipes = renderPromptRecipes(scope === 'project' ? env.prompts.builtins : env.prompts.merged);
   for (const target of resolveTargets(scope, env).targets) {
     const final = path.join(target, SKILL_DIR_NAME);
     const refused = scope === 'project' && ws ? symlinkRefusal(ws, final) : null;
     if (refused) { failed.push({ dir: target, message: refused }); continue; }
     try {
-      installInto(target, env, scope);
+      installInto(target, env, recipes);
       written.push(final);
     } catch (err) {
       failed.push({ dir: target, message: messageOf(err) });

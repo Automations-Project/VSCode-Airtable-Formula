@@ -1756,11 +1756,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
    * The skill carries the prompts as recipes (references/prompts.md), so a prompt edit
    * re-renders them, but only where the skill is already installed: saving a prompt must
    * never install it. Problems become a warning; they never fail the prompt action.
+   * Global scope only: a project copy carries the built-ins, which an edit does not change,
+   * and re-installing it would touch the user's repository (skill folders, the Cursor
+   * pointer rule, legacy-file deletion) on every save.
    */
   private async refreshSkillRecipes(): Promise<void> {
     try {
-      const env = await skillEnv(this.context);
       const scope = getSettings().ai.installScope;
+      if (scope === 'project') { return; }
+      const env = await skillEnv(this.context);
       const clients = await listSkillClients(scope, env);
       if (!clients.some(c => c.status === 'installed' || c.status === 'outdated')) { return; }
       const { failed } = await installSkill(scope, env);
