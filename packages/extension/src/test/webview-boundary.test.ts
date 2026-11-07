@@ -71,6 +71,8 @@ const dependencies = vi.hoisted(() => ({
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
   readdir: vi.fn(async () => []),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
   ideConfigs: {} as Record<string, { capabilities: string[] }>,
 }));
 
@@ -147,9 +149,11 @@ vi.mock('../webview/html.js', () => ({ getWebviewHtml: vi.fn(() => '<html></html
 vi.mock('fs/promises', () => ({
   stat: dependencies.stat,
   readdir: dependencies.readdir,
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
+  readFile: dependencies.readFile,
+  writeFile: dependencies.writeFile,
   mkdir: vi.fn(),
+  rename: vi.fn(),
+  unlink: vi.fn(async () => undefined),
 }));
 
 import * as vscode from 'vscode';
@@ -211,6 +215,7 @@ describe('DashboardProvider webview trust boundary', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    dependencies.readFile.mockReset();
     skill.scope = 'global';
     vscodeMock.configValues.clear();
     for (const key of Object.keys(dependencies.ideConfigs)) delete dependencies.ideConfigs[key];
@@ -1126,6 +1131,23 @@ describe('DashboardProvider webview trust boundary', () => {
       expect(write.mock.invocationCallOrder[0]).toBeLessThan(install);
       expect(install).toBeLessThan(push.mock.invocationCallOrder[0]);
     });
+  });
+
+  it.each([
+    ['[]', '[]'],
+    ['overrides as a list and custom as an object', JSON.stringify({ overrides: [], custom: {} })],
+  ])('a prompts.json holding %s still saves as { overrides, custom: [saved] }', async (_label, file) => {
+    dependencies.readFile.mockResolvedValue(file);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+    const prompt = { name: 'custom-one', description: 'd', arguments: [], template: 't' };
+
+    inboundMessage({ type: 'action:save-prompt', id: 'saveprompt2', prompt: { ...prompt, isBuiltin: false, isModified: false } });
+
+    await waitForResult('saveprompt2');
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'saveprompt2', ok: true });
+    const [, data] = dependencies.writeFile.mock.calls.at(-1)!;
+    expect(JSON.parse(data)).toEqual({ overrides: {}, custom: [prompt] });
   });
 
   it('state:update carries the client ledger from listSkillClients', async () => {

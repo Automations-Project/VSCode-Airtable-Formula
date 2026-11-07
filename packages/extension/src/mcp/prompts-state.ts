@@ -6,38 +6,74 @@
  */
 import * as fsP from 'fs/promises';
 import * as path from 'path';
-import type { PromptDef } from '@airtable-formula/shared';
+import { isPromptDef, type PromptDef } from '@airtable-formula/shared';
 import { BUILTIN_PROMPT_DEFS } from './prompt-defs.js';
 
 export type PromptRecipe = Pick<PromptDef, 'name' | 'description' | 'arguments' | 'template'>;
 
-export function isPromptRecipe(value: unknown): value is PromptRecipe {
-  if (typeof value !== 'object' || value === null) { return false; }
-  const v = value as Record<string, unknown>;
-  return typeof v.name === 'string'
-    && typeof v.description === 'string'
-    && typeof v.template === 'string'
-    && Array.isArray(v.arguments);
+export interface PromptsConfig {
+  overrides: Record<string, unknown>;
+  custom: unknown[];
+  [key: string]: unknown;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * prompts.json as written by hand or by an older version: a non-object becomes empty,
+ * and `overrides` / `custom` of the wrong shape are reset. Other top-level keys are kept,
+ * so a save never drops what it does not understand.
+ */
+export function normalizePromptsConfig(raw: unknown): PromptsConfig {
+  const cfg = isPlainObject(raw) ? raw : {};
+  return {
+    ...cfg,
+    overrides: isPlainObject(cfg.overrides) ? cfg.overrides : {},
+    custom: Array.isArray(cfg.custom) ? cfg.custom : [],
+  };
+}
+
+/**
+ * The entry cut down to the four recipe fields (arguments to their three), accepted only if
+ * the result passes the dashboard's own `isPromptDef`. Anything the contract would reject
+ * (a null argument, an uppercase name, a missing `required`) is skipped here, because one bad
+ * entry reaching the dashboard drops the whole state:update, and the renderer cannot print it.
+ */
+function toPromptDef(entry: unknown, isBuiltin: boolean, isModified: boolean): PromptDef | null {
+  if (!isPlainObject(entry) || !Array.isArray(entry.arguments)) { return null; }
+  const projected = {
+    name: entry.name,
+    description: entry.description,
+    arguments: entry.arguments.map((a: unknown) => (
+      isPlainObject(a) ? { name: a.name, description: a.description, required: a.required } : a
+    )),
+    template: entry.template,
+    isBuiltin,
+    isModified,
+  };
+  return isPromptDef(projected) ? projected : null;
 }
 
 export function mergePrompts(builtins: readonly PromptRecipe[], config: unknown): PromptDef[] {
-  const cfg = (typeof config === 'object' && config !== null ? config : {}) as { overrides?: unknown; custom?: unknown };
-  const overrides = (typeof cfg.overrides === 'object' && cfg.overrides !== null ? cfg.overrides : {}) as Record<string, unknown>;
-  const names = new Set(builtins.map(b => b.name));
+  const { overrides, custom } = normalizePromptsConfig(config);
 
   const out: PromptDef[] = builtins.map(b => {
-    const override = overrides[b.name];
-    return isPromptRecipe(override)
-      ? { ...override, isBuiltin: true, isModified: true }
-      : { ...b, isBuiltin: true, isModified: false };
+    const override = Object.hasOwn(overrides, b.name) ? overrides[b.name] : undefined;
+    // An override filed under one name but carrying another would rename the built-in: keep the built-in.
+    const def = isPlainObject(override) && override.name === b.name ? toPromptDef(override, true, true) : null;
+    return def ?? { ...b, isBuiltin: true, isModified: false };
   });
 
-  if (Array.isArray(cfg.custom)) {
-    for (const c of cfg.custom) {
-      if (isPromptRecipe(c) && !names.has(c.name)) {
-        out.push({ ...c, isBuiltin: false, isModified: false });
-      }
-    }
+  // First entry with a name wins, like the server's renderPrompt (`find`); built-in names are taken.
+  const taken = new Set(builtins.map(b => b.name));
+  for (const c of custom) {
+    const name = isPlainObject(c) ? c.name : undefined;
+    if (typeof name !== 'string' || taken.has(name)) { continue; }
+    taken.add(name);
+    const def = toPromptDef(c, false, false);
+    if (def) { out.push(def); }
   }
   return out;
 }

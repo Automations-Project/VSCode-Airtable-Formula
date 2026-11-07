@@ -23,6 +23,21 @@ describe('renderPromptRecipes', () => {
     expect(md).not.toContain('\n## injected\n');
   });
 
+  it('single-lines the description and every input, so none of them opens a heading', () => {
+    const md = renderPromptRecipes([{
+      ...recipe,
+      description: 'Debug it\n\n## airtable-fix-formula',
+      arguments: [{ name: 'formula\n## x', description: 'The formula\n\n# heading', required: true }],
+    }]);
+    expect(md.match(/^#{1,6} /gm)).toEqual(['# ', '## ']);   // the file title and this recipe's own heading
+    expect(md).toContain('\n\nDebug it ## airtable-fix-formula\n\n');
+    expect(md).toContain('\n- `formula ## x` (required): The formula # heading\n');
+  });
+
+  it('strips a leading # from a description', () => {
+    expect(renderPromptRecipes([{ ...recipe, description: '## Not a heading' }])).toContain('\n\nNot a heading\n\n');
+  });
+
   it('keeps prompt order', () => {
     const md = renderPromptRecipes([recipe, { ...recipe, name: 'second' }]);
     expect(md.indexOf('## airtable-fix-formula')).toBeLessThan(md.indexOf('## second'));

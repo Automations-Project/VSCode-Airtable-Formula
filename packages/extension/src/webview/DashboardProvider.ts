@@ -29,7 +29,7 @@ import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
 import type { DaemonManager } from '../mcp/daemon-manager.js';
 import { BUILTIN_NAMES } from '../mcp/prompt-defs.js';
-import { readMergedPrompts } from '../mcp/prompts-state.js';
+import { readMergedPrompts, normalizePromptsConfig, type PromptsConfig } from '../mcp/prompts-state.js';
 
 const WEBVIEW_LINKS: Record<WebviewLinkId, string> = {
   docs: 'https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula',
@@ -1326,7 +1326,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             cfg.overrides[def.name] = def;
           } else {
             cfg.custom = cfg.custom ?? [];
-            const idx = (cfg.custom as { name: string }[]).findIndex(p => p.name === def.name);
+            const idx = (cfg.custom as ({ name?: unknown } | null)[]).findIndex(p => p?.name === def.name);
             if (idx >= 0) cfg.custom[idx] = def; else cfg.custom.push(def);
           }
         });
@@ -1349,7 +1349,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
           return;
         }
         await this._writePromptConfig(cfg => {
-          cfg.custom = ((cfg.custom ?? []) as { name: string }[]).filter(p => p.name !== msg.name);
+          cfg.custom = ((cfg.custom ?? []) as ({ name?: unknown } | null)[]).filter(p => p?.name !== msg.name);
         });
         await this.refreshSkillRecipes();
         await this.pushState();
@@ -1770,16 +1770,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async _writePromptConfig(mutate: (cfg: { overrides: Record<string, unknown>; custom: unknown[] }) => void): Promise<void> {
+  private async _writePromptConfig(mutate: (cfg: PromptsConfig) => void): Promise<void> {
     const configPath = path.join(os.homedir(), '.airtable-user-mcp', 'prompts.json');
     const fsP = await import('fs/promises');
-    let cfg: { overrides: Record<string, unknown>; custom: unknown[] } = { overrides: {}, custom: [] };
+    let raw: unknown;
     try {
-      const raw = await fsP.readFile(configPath, 'utf8');
-      cfg = JSON.parse(raw);
-      if (!cfg.overrides) { cfg.overrides = {}; }
-      if (!cfg.custom) { cfg.custom = []; }
+      raw = JSON.parse(await fsP.readFile(configPath, 'utf8'));
     } catch { /* no config yet */ }
+    // A hand-edited file may hold any JSON: `[]`, or `overrides` as a list; never mutate that shape.
+    const cfg = normalizePromptsConfig(raw);
     mutate(cfg);
     await fsP.mkdir(path.dirname(configPath), { recursive: true });
     const data = JSON.stringify(cfg, null, 2) + '\n';
