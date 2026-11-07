@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { withFileLock, writeTextAtomic } from './atomic-write.js';
 import { parseJsonc, pruneEmptyObjects, readTextIfExists, setJsoncValue } from './jsonc-config.js';
 import { configureMcpToml, readMcpTomlEntry, unconfigureMcpToml } from './lsp-config.js';
@@ -20,7 +21,11 @@ export const MCP_SERVER_NAME = 'airtable-user-mcp';
 export interface WriterDeps {
   ctx: PathContext;
   exists: (p: string) => boolean;                  // fs.existsSync in the host
-  launcher: { script: string; config: string };    // ~/.airtable-user-mcp/start.mjs, ~/.airtable-user-mcp/bundled-path.json
+  /**
+   * ~/.airtable-user-mcp/start.mjs and bundled-path.json, and the browser profile our entries put in
+   * AIRTABLE_PROFILE_DIR (default: `.chrome-profile` beside the launcher, where buildServerEntry puts it).
+   */
+  launcher: { script: string; config: string; profileDir?: string };
   /** File identity for "one file under two names"; defaults to fs.statSync (bigint, so NTFS ids keep every bit). */
   stat?: (p: string) => { dev: number | bigint; ino: number | bigint };
 }
@@ -252,23 +257,39 @@ async function assertLegacyParses(row: McpClientRow, locs: readonly LegacyLocati
   }
 }
 
-/** The block main's Codex writer emitted, which carries no other mark of ours: matched exactly (no env). */
+/** No env, or one holding none of the keys we manage (the user added their own). */
+const holdsNoManagedEnv = (env: unknown): boolean =>
+  env === undefined || (isPlainObject(env) && !Object.keys(env).some((k) => MANAGED_ENV_KEYS.has(k)));
+
+/**
+ * The block main's Codex writer emitted, which carries no other mark of ours: type, command and
+ * args matched exactly. Main never wrote an env, so an env of the user's own keys keeps it ours
+ * (Update then keeps those keys); one setting a key we manage is the user's own configuration.
+ */
 function isMainEraCodexBlock(entry: Record<string, unknown>): boolean {
   const args = entry.args;
   return entry.type === 'stdio' && entry.command === 'npx'
     && Array.isArray(args) && args.length === 2 && args[0] === '-y' && args[1] === 'airtable-user-mcp'
-    && entry.env === undefined && entry.environment === undefined;
+    && holdsNoManagedEnv(entry.env) && holdsNoManagedEnv(entry.environment);
+}
+
+/** The browser profile dir our entries set in AIRTABLE_PROFILE_DIR. */
+function ourProfileDir(deps: WriterDeps): string {
+  const P = deps.ctx.platform === 'win32' ? path.win32 : path.posix;
+  return deps.launcher.profileDir ?? P.join(P.dirname(deps.launcher.script), '.chrome-profile');
 }
 
 /**
- * Whether an entry under our name is one the extension wrote. Every entry we write sets
- * AIRTABLE_HEADLESS_ONLY=1 or launches the stable launcher, and main's Codex block is matched
- * exactly. Anything else is the user's own (a standalone npx entry with its own env, an
- * add-mcp entry): health does not judge it, and nothing rewrites or moves it unasked.
+ * Whether an entry under our name is one the extension wrote. Every entry we write (main's too)
+ * sets both AIRTABLE_HEADLESS_ONLY=1 and AIRTABLE_PROFILE_DIR to our profile, or launches the
+ * stable launcher, and main's Codex block is matched exactly. Anything else is the user's own (a
+ * standalone npx entry with its own env, one that only copies the headless flag, an add-mcp
+ * entry): health does not judge it, and nothing rewrites or moves it unasked.
  */
 export function isOurEntry(entry: Record<string, unknown>, deps: WriterDeps): boolean {
   const env = isPlainObject(entry.env) ? entry.env : isPlainObject(entry.environment) ? entry.environment : {};
-  if (env.AIRTABLE_HEADLESS_ONLY === '1') return true;
+  if (env.AIRTABLE_HEADLESS_ONLY === '1' && typeof env.AIRTABLE_PROFILE_DIR === 'string'
+    && samePath(deps.ctx, env.AIRTABLE_PROFILE_DIR, ourProfileDir(deps))) return true;
   const target = readLaunch(entry)?.args[0];
   if (target !== undefined && samePath(deps.ctx, target, deps.launcher.script)) return true;
   return isMainEraCodexBlock(entry);

@@ -124,22 +124,52 @@ export function setJsoncValue(
       }
     }
     const container = tree ? deepestObject(tree, path) : undefined;
-    // A one-line object the user wrote with members in it stays one line; an empty {} opens up.
-    const oneLine = container !== undefined && (container.children?.length ?? 0) > 0
-      && !text.slice(container.offset, container.offset + container.length).includes('\n');
-    const edits = jsonc.modify(text, path, value, { formattingOptions: oneLine ? undefined : fmt, getInsertionIndex: () => 0 });
-    out = jsonc.applyEdits(text, edits);
+    const inserting = !tree || !jsonc.findNodeAtLocation(tree, path);
+    if (container && inserting && braceLineEndsInComment(text, container.node)) {
+      out = insertBelowBraceLine(text, container.node, path.slice(container.depth), value, fmt);
+    } else {
+      // A one-line object the user wrote with members in it stays one line; an empty {} opens up.
+      const oneLine = container !== undefined && (container.node.children?.length ?? 0) > 0
+        && !text.slice(container.node.offset, container.node.offset + container.node.length).includes('\n');
+      const edits = jsonc.modify(text, path, value, { formattingOptions: oneLine ? undefined : fmt, getInsertionIndex: () => 0 });
+      out = jsonc.applyEdits(text, edits);
+    }
   }
   return bom + (out.endsWith('\n') ? out : out + fmt.eol);
 }
 
-/** The object the value at `path` is set in: its parent when it exists, else the deepest existing ancestor. */
-function deepestObject(tree: jsonc.Node, path: readonly string[]): jsonc.Node | undefined {
+/** The object the value at `path` is set in (its parent when it exists, else the deepest existing ancestor), and how deep it sits. */
+function deepestObject(tree: jsonc.Node, path: readonly string[]): { node: jsonc.Node; depth: number } | undefined {
   for (let i = path.length - 1; i >= 0; i--) {
     const node = i === 0 ? tree : jsonc.findNodeAtLocation(tree, path.slice(0, i));
-    if (node?.type === 'object') return node;
+    if (node?.type === 'object') return { node, depth: i };
   }
   return undefined;
+}
+
+/** `{ // my servers`: the opening brace's line goes on with a comment and nothing else. */
+function braceLineEndsInComment(text: string, obj: jsonc.Node): boolean {
+  const nl = text.indexOf('\n', obj.offset);
+  if (nl < 0) return false;
+  const rest = text.slice(obj.offset + 1, nl).trim();
+  return rest.startsWith('//') || (rest.startsWith('/*') && rest.indexOf('*/') === rest.length - 2);
+}
+
+/**
+ * Inserts `segments[0]` (holding `value`, nested under the other segments) first in `obj`, on lines
+ * of its own just below the opening brace's line, indented like the first member: the formatter
+ * would re-flow the brace line and push its comment after our member, where Remove would take it.
+ */
+function insertBelowBraceLine(text: string, obj: jsonc.Node, segments: readonly string[], value: unknown, fmt: Formatting): string {
+  const nested = segments.slice(1).reduceRight<unknown>((v, seg) => ({ [seg]: v }), value);
+  const unit = fmt.insertSpaces ? ' '.repeat(fmt.tabSize) : '\t';
+  const indentAt = (pos: number) => /^[ \t]*/.exec(text.slice(lineStartOf(text, pos)))?.[0] ?? '';
+  const first = obj.children?.[0];
+  const indent = first ? indentAt(first.offset) : indentAt(obj.offset) + unit;
+  const body = JSON.stringify(nested, null, unit).split('\n').join(fmt.eol + indent);
+  const member = `${indent}${JSON.stringify(segments[0])}: ${body}${first ? ',' : ''}${fmt.eol}`;
+  const at = lineEndOf(text, obj.offset);
+  return text.slice(0, at) + member + text.slice(at);
 }
 
 const cut = (text: string, from: number, to: number): string => text.slice(0, from) + text.slice(to);

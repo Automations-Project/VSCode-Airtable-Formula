@@ -132,6 +132,23 @@ describe("the user's neighbouring lines are never re-flowed", () => {
 
   it("Zed's trailing commas", () => roundTrip(ZED, 'jsonc', ['context_servers', 'airtable-user-mcp']));
 
+  // A comment after the opening brace belongs to that line: our member goes on lines of its own
+  // below it, so Remove takes exactly those lines and the comment never moves.
+  it.each([
+    ["the container's brace line", '{\n  "mcpServers": { // my servers\n    "a": { "command": "a" }\n  }\n}\n', OURS],
+    ['an empty container', '{\n  "mcpServers": { /* none yet */\n  }\n}\n', OURS],
+    ['the root brace line', '{ // my settings\n  "theme": "x"\n}\n', ['airtable-user-mcp']],
+  ])('a comment on %s stays put through add and remove, LF and CRLF', (_name, lf, path) => {
+    for (const text of [lf, lf.replace(/\n/g, '\r\n')]) {
+      const added = setJsoncValue(text, path, VALUE, 'jsonc', F);
+      const braceLine = text.split('\n').find(l => l.includes('/'));
+      expect(added.split('\n')).toContain(braceLine);
+      expect(getJsoncValue(added, path, 'jsonc', F)).toEqual(VALUE);
+      if (text.includes('\r')) expect(/[^\r]\n/.test(added)).toBe(false);
+      expect(setJsoncValue(added, path, undefined, 'jsonc', F)).toBe(text);
+    }
+  });
+
   it('an empty object opens for our entry and is {} again after Remove', () => {
     const text = '{\n  "mcpServers": {},\n  "x": 1\n}\n';
     const added = setJsoncValue(text, OURS, VALUE, 'json', F);

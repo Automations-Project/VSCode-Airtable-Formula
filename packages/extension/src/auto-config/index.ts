@@ -118,7 +118,10 @@ export function buildNpxServerEntry(): Record<string, unknown> {
 
 /** This host's paths, file checks and launcher: what every function below uses unless a test passes its own. */
 export function hostWriterDeps(): WriterDeps {
-  return { ctx: hostPathContext(), exists: fs.existsSync, launcher: { script: LAUNCHER_SCRIPT, config: LAUNCHER_CONFIG } };
+  return {
+    ctx: hostPathContext(), exists: fs.existsSync,
+    launcher: { script: LAUNCHER_SCRIPT, config: LAUNCHER_CONFIG, profileDir: path.join(LAUNCHER_DIR, '.chrome-profile') },
+  };
 }
 
 /**

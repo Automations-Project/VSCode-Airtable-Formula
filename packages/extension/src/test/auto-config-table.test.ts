@@ -56,6 +56,8 @@ const fileOf = (row: McpClientRow) => resolveConfigPath(row, deps.ctx, deps.exis
 const detect = (row: McpClientRow) => fs.mkdirSync(row.detect(deps.ctx)[0], { recursive: true });
 const write = (p: string, text: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); };
 const OFFICIAL_URL = 'https://mcp.airtable.com/mcp';
+/** Both env marks our writers always set: the headless flag and our browser profile dir. */
+const ourEnv = () => ({ AIRTABLE_HEADLESS_ONLY: '1', AIRTABLE_PROFILE_DIR: path.join(home, '.airtable-user-mcp', '.chrome-profile') });
 const OFFICIAL_IDS: McpClientId[] = ['cursor', 'windsurf', 'windsurf-next', 'claude-code', 'claude-desktop', 'cline', 'amp', 'opencode'];
 
 it('the table ids are the contract ids minus the LSP-only editors, in order', () => {
@@ -86,7 +88,7 @@ it('labels, docs links and detection paths come from the table', () => {
 it.each(MCP_CLIENTS.map(r => r.id))('%s: first-launch setup, stale-path auto-heal and remove through the public functions', async id => {
   const row = MCP_CLIENT_BY_ID[id];
   fs.mkdirSync(row.detect(deps.ctx)[0], { recursive: true });
-  const entry = { command: 'node', args: [deps.launcher.script], env: { AIRTABLE_HEADLESS_ONLY: '1' } };
+  const entry = { command: 'node', args: [deps.launcher.script], env: ourEnv() };
   let s = await getIdeStatus(id, deps);
   expect([s.detected, s.mcpConfigured]).toEqual([true, false]);            // what first-launch auto-config selects
   await configureMcpForIde(id, '/unused', entry, deps);
@@ -217,11 +219,33 @@ describe('an entry the extension did not write is never rewritten unasked', () =
   it.each(['zed', 'factory-droid', 'kimi-code'] as const)('%s: our own entry in an old shape and a stale path still heals', async id => {
     const row = MCP_CLIENT_BY_ID[id];
     detect(row);
-    const stale = ENTRY_SHAPES.standard({ command: 'node', args: [path.join(home, 'old-ext', 'dist', 'mcp', 'index.mjs')], env: { AIRTABLE_HEADLESS_ONLY: '1' } });
+    const stale = ENTRY_SHAPES.standard({ command: 'node', args: [path.join(home, 'old-ext', 'dist', 'mcp', 'index.mjs')], env: ourEnv() });
     write(fileOf(row), JSON.stringify({ [row.serversPath[0]]: { 'airtable-user-mcp': stale } }, null, 2) + '\n');
     expect(await healSelects(id)).toBe(true);
     expect(await reapplyMcpForIde(id, '/unused', ours(), deps)).toBe(true);
     expect(await getMcpHealth(id, deps)).toEqual({ configured: true, healthy: true });
+  });
+
+  it('a hand-written entry that only sets AIRTABLE_HEADLESS_ONLY (no profile dir of ours) is not ours', async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { 'airtable-user-mcp': { command: 'npx', args: ['-y', 'airtable-user-mcp'], env: { AIRTABLE_HEADLESS_ONLY: '1', AIRTABLE_COOKIE: 'c' } } } }, null, 2) + '\n');
+    const before = fs.readFileSync(fileOf(row), 'utf8');
+    expect(await hasForeignMcpEntry('cursor', deps)).toBe(true);
+    expect(await reapplyMcpForIde('cursor', '/unused', ours(), deps)).toBe(false);
+    expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(before);
+  });
+
+  it("Codex: main's block with an env sub-table of the user's own keys is ours; Setup keeps that env and startup_timeout_sec", async () => {
+    const row = MCP_CLIENT_BY_ID['codex-cli'];
+    detect(row);
+    write(fileOf(row), 'model = "o3"\r\n\r\n[mcp_servers.airtable-user-mcp]\r\ntype = "stdio"\r\ncommand = "npx"\r\nargs = ["-y", "airtable-user-mcp"]\r\nstartup_timeout_sec = 60\r\n\r\n[mcp_servers.airtable-user-mcp.env]\r\nMINE = "x"\r\n');
+    expect(await hasForeignMcpEntry('codex-cli', deps)).toBe(false);
+    await configureMcpForIde('codex-cli', '/unused', ours(), deps);
+    const text = fs.readFileSync(fileOf(row), 'utf8');
+    expect(text).not.toContain('type = ');
+    expect(text).toContain('startup_timeout_sec = 60\r\n');
+    expect(await readMcpTomlEntry(fileOf(row), 'mcp_servers', 'airtable-user-mcp')).toMatchObject({ command: 'node', env: { MINE: 'x', AIRTABLE_HEADLESS_ONLY: '1' } });
   });
 
   it("Codex: main's exact npx block is ours and heals; the same block with an env of its own is not", async () => {
@@ -232,7 +256,7 @@ describe('an entry the extension did not write is never rewritten unasked', () =
     expect(await healSelects('codex-cli')).toBe(true);
     expect(await reapplyMcpForIde('codex-cli', '/unused', ours(), deps)).toBe(true);
     expect(await getMcpHealth('codex-cli', deps)).toEqual({ configured: true, healthy: true });
-    const withEnv = mainEra + '\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_COOKIE = "c"\n';
+    const withEnv = mainEra + '\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_AUTH_MODE = "byo"\nAIRTABLE_COOKIE = "c"\n';
     write(fileOf(row), withEnv);
     expect(await getMcpHealth('codex-cli', deps)).toEqual({ configured: true, healthy: true });
     expect(await reapplyMcpForIde('codex-cli', '/unused', ours(), deps)).toBe(false);
@@ -656,7 +680,7 @@ describe('a reconfigure clears the copies in old places too', () => {
     const amp = MCP_CLIENT_BY_ID.amp;
     detect(amp);
     const file = path.join(home, '.config', 'amp', 'settings.json');
-    write(file, JSON.stringify({ mcp: { servers: { 'airtable-user-mcp': { command: 'node', args: ['/old/index.mjs'], env: { AIRTABLE_HEADLESS_ONLY: '1' } }, other: { command: 'x' } } } }, null, 2));
+    write(file, JSON.stringify({ mcp: { servers: { 'airtable-user-mcp': { command: 'node', args: ['/old/index.mjs'], env: ourEnv() }, other: { command: 'x' } } } }, null, 2));
     await configureMcpForIde('amp', '/unused', { command: 'node', args: [deps.launcher.script], env: {} }, deps);
     expect(parse(fs.readFileSync(file, 'utf8'))).toEqual({
       mcp: { servers: { other: { command: 'x' } } },

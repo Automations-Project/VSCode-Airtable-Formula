@@ -12,7 +12,8 @@ vi.mock('vscode', () => ({
 }));
 
 import { buildNpxServerEntry, buildServerEntry, isLspConfigured, IDE_CONFIGS } from '../auto-config/index.js';
-import { MANAGED_ENV_KEYS } from '../auto-config/mcp-writer.js';
+import { MANAGED_ENV_KEYS, isOurEntry } from '../auto-config/mcp-writer.js';
+import { hostWriterDeps } from '../auto-config/index.js';
 
 describe('buildNpxServerEntry', () => {
   it('returns npx command structure', () => {
@@ -66,6 +67,12 @@ describe('auto-config propagates transport/auth-mode settings', () => {
       const keys = Object.keys(entry.env as object);
       expect(keys).toContain('AIRTABLE_BROWSER_PATH');
       for (const k of keys) expect(MANAGED_ENV_KEYS.has(k), k).toBe(true);
+    }
+  });
+
+  it('the entries the extension builds are ones the writer recognises as its own', () => {
+    for (const entry of [buildNpxServerEntry(), buildServerEntry('/x/dist/mcp/index.mjs')]) {
+      expect(isOurEntry(entry, hostWriterDeps())).toBe(true);
     }
   });
 

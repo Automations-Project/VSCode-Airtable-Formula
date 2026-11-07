@@ -14,6 +14,8 @@ import {
 let home: string;
 let deps: WriterDeps;
 let launch: LocalLaunch;
+/** Both env marks our writers always set: the headless flag and our browser profile dir. */
+let ourEnv: () => Record<string, string>;
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'atf-mcp-'));
@@ -28,6 +30,7 @@ beforeEach(() => {
     launcher: { script, config },
   };
   launch = { command: 'node', args: [script], env: { AIRTABLE_HEADLESS_ONLY: '1' } };
+  ourEnv = () => ({ AIRTABLE_HEADLESS_ONLY: '1', AIRTABLE_PROFILE_DIR: path.join(home, '.airtable-user-mcp', '.chrome-profile') });
 });
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
@@ -264,7 +267,7 @@ describe('entries in old places', () => {
     const row = MCP_CLIENT_BY_ID.opencode;
     detect(row);
     const file = path.join(home, '.config', 'opencode', 'opencode.jsonc');
-    const old = { type: 'local', command: ['old'], environment: { AIRTABLE_HEADLESS_ONLY: '1' } };
+    const old = { type: 'local', command: ['old'], environment: ourEnv() };
     write(file, JSON.stringify({ mcp: { [MCP_SERVER_NAME]: old, servers: { [MCP_SERVER_NAME]: old } } }));
     await configureMcpClient(row, launch, deps);
     expect(json(file)).toEqual({ mcp: { servers: { [MCP_SERVER_NAME]: ENTRY_SHAPES.opencode(launch, { native: true }) } } });
@@ -310,7 +313,7 @@ describe('entries in old places', () => {
     const row = MCP_CLIENT_BY_ID['codex-cli'];
     detect(row);
     const old = path.join(home, '.codex', 'config.toml');
-    write(old, '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\n\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_HEADLESS_ONLY = "1"\n\n[model_providers.x]\nname = "x"\n');
+    write(old, `[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\n\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_HEADLESS_ONLY = "1"\nAIRTABLE_PROFILE_DIR = ${JSON.stringify(ourEnv().AIRTABLE_PROFILE_DIR)}\n\n[model_providers.x]\nname = "x"\n`);
     const moved: WriterDeps = { ...deps, ctx: { ...deps.ctx, env: { ...deps.ctx.env, CODEX_HOME: path.join(home, 'elsewhere') } } };
     expect(await readMcpClientHealth(row, moved)).toEqual({ configured: true, healthy: false });
     await configureMcpClient(row, launch, moved);
@@ -354,8 +357,9 @@ describe('legacy cleanup boundaries', () => {
   // The legacy path and the current path can name one file (a case-insensitive APFS volume,
   // a symlink): when both exist, the same dev+ino is the same file, whatever samePath says.
   describe('one file under two names', () => {
-    const OURS = '[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nenv = { AIRTABLE_HEADLESS_ONLY = "1" }\n';
+    let OURS = '';
     const setup = () => {
+      OURS = `[mcp_servers.airtable-user-mcp]\ncommand = "npx"\nenv = { AIRTABLE_HEADLESS_ONLY = "1", AIRTABLE_PROFILE_DIR = ${JSON.stringify(ourEnv().AIRTABLE_PROFILE_DIR)} }\n`;
       const row = MCP_CLIENT_BY_ID['codex-cli'];
       detect(row);
       const legacyFile = path.join(home, '.codex', 'config.toml');
@@ -420,7 +424,7 @@ describe('health', () => {
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: false });
   });
   it('a missing absolute server path is unhealthy (an older extension wrote one)', async () => {
-    seed({ command: 'node', args: [path.join(home, 'gone', 'index.mjs')], env: { AIRTABLE_HEADLESS_ONLY: '1' } });
+    seed({ command: 'node', args: [path.join(home, 'gone', 'index.mjs')], env: ourEnv() });
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: false });
   });
   it('a remote entry under our name is not ours to judge', async () => {
@@ -430,7 +434,7 @@ describe('health', () => {
 
   // Added beyond the brief.
   it('an existing absolute server path is healthy, and no args is healthy', async () => {
-    const env = { AIRTABLE_HEADLESS_ONLY: '1' };
+    const env = ourEnv();
     seed({ command: 'node', args: [deps.launcher.config], env });
     expect(await readMcpClientHealth(row(), deps)).toEqual({ configured: true, healthy: true });
     seed({ command: 'my-airtable-wrapper', args: [], env });
@@ -447,12 +451,18 @@ describe('health', () => {
   });
 
   it("isOurEntry: our env mark, the launcher, or main's exact Codex block; nothing else", () => {
-    expect(isOurEntry({ command: 'npx', env: { AIRTABLE_HEADLESS_ONLY: '1' } }, deps)).toBe(true);
-    expect(isOurEntry({ type: 'local', command: ['npx'], environment: { AIRTABLE_HEADLESS_ONLY: '1' } }, deps)).toBe(true);
+    expect(isOurEntry({ command: 'npx', env: ourEnv() }, deps)).toBe(true);
+    expect(isOurEntry({ type: 'local', command: ['npx'], environment: ourEnv() }, deps)).toBe(true);
+    // The headless flag alone, or with another profile dir, is something a user can write too.
+    expect(isOurEntry({ command: 'npx', env: { AIRTABLE_HEADLESS_ONLY: '1' } }, deps)).toBe(false);
+    expect(isOurEntry({ command: 'npx', env: { AIRTABLE_HEADLESS_ONLY: '1', AIRTABLE_PROFILE_DIR: path.join(home, 'my-profile') } }, deps)).toBe(false);
+    // Main's Codex block: an env of the user's own keeps it ours; one of our managed keys makes it theirs.
+    const main = { type: 'stdio', command: 'npx', args: ['-y', 'airtable-user-mcp'] };
+    expect(isOurEntry({ ...main, env: { MINE: 'x' } }, deps)).toBe(true);
+    expect(isOurEntry({ ...main, env: { AIRTABLE_AUTH_MODE: 'byo' } }, deps)).toBe(false);
     expect(isOurEntry({ command: 'node', args: [deps.launcher.script] }, deps)).toBe(true);
     expect(isOurEntry({ type: 'local', command: ['node', deps.launcher.script] }, deps)).toBe(true);
     expect(isOurEntry({ type: 'stdio', command: 'npx', args: ['-y', 'airtable-user-mcp'] }, deps)).toBe(true);
-    expect(isOurEntry({ type: 'stdio', command: 'npx', args: ['-y', 'airtable-user-mcp'], env: { A: '1' } }, deps)).toBe(false);
     expect(isOurEntry({ command: 'npx', args: ['-y', 'airtable-user-mcp'], env: { AIRTABLE_AUTH_MODE: 'byo' } }, deps)).toBe(false);
     expect(isOurEntry({ command: 'npx', env: { AIRTABLE_HEADLESS_ONLY: 1 } }, deps)).toBe(false);
   });
