@@ -3,12 +3,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"  srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg">
-  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 72 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
+  <img src="https://raw.githubusercontent.com/Automations-Project/VSCode-Airtable-Formula/main/packages/mcp-server/assets/banner-light.svg" alt="airtable-user-mcp — 73 Airtable tools (plus manage_tools) your AI assistant can't get from the official Airtable REST API" width="900" />
 </picture>
 
 # airtable-user-mcp
 
-**Community add-on to the official Airtable MCP — 72 tools + `manage_tools` your AI assistant can't get from the public REST API**
+**Community add-on to the official Airtable MCP — 73 tools + `manage_tools` your AI assistant can't get from the public REST API**
 
 <table align="center">
 <tr>
@@ -85,7 +85,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 
 | Capability | Official Airtable MCP | **airtable-user-mcp** |
 |---|---|---|
-| Total tools | ~17 | **73** (72 + `manage_tools`) |
+| Total tools | ~17 | **74** (73 + `manage_tools`) |
 | Auth | PAT or OAuth, per-scope | **Log in once with your normal account** (SSO/2FA supported) |
 | Transport | HTTP (remote) | stdio (local, private) |
 | Data routing | Through `mcp.airtable.com` | **Direct from your machine** |
@@ -111,7 +111,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 | Form metadata (description, redirect, attribution, branding) | ❌ | ✅ |
 | Extension & dashboard page management | ❌ | ✅ install, enable, rename, duplicate, remove |
 | Daemon self-diagnosis (is the session dead, the browser busy, or the daemon gone?) | ❌ | ✅ `manage_daemon` `action=status` — plus start / restart / stop / tunnel / token rotation |
-| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (10 tools) / `safe-write` (54 tools) / `full` (72 tools) / `custom` |
+| Tool profiles & per-tool toggles | ❌ | ✅ `read-only` (11 tools) / `safe-write` (55 tools) / `full` (73 tools) / `custom` |
 | Install effort | Manual PAT + JSON edit per client | Single `claude mcp add` or JSON snippet |
 | Price | Free | Free, MIT |
 
@@ -137,7 +137,7 @@ The official Airtable MCP is a thin wrapper over the public Web API. That API �
 npx airtable-user-mcp
 ```
 
-That's it. Your MCP client connects via **stdio** and gets access to all 73 tools (72 Airtable tools + `manage_tools`).
+That's it. Your MCP client connects via **stdio** and gets access to all 74 tools (73 Airtable tools + `manage_tools`).
 
 When the daemon is running (started automatically by the VS Code extension, or via `npx airtable-user-mcp daemon start`),
 subsequent `npx airtable-user-mcp` invocations transparently proxy their stdio to the shared daemon —
@@ -292,7 +292,7 @@ Add the `airtable` entry to `mcpServers`:
 }
 ```
 
-Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see all 73 tools.
+Save, then **fully quit and reopen Claude Desktop** (closing the window is not enough). A hammer/plug icon in the chat input confirms the server is connected — click it to see all 74 tools.
 
 </details>
 
@@ -315,7 +315,7 @@ Verify:
 claude mcp list
 ```
 
-You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and all 73 tools are available.
+You should see `airtable: npx -y airtable-user-mcp - ✓ Connected`. Start a Claude Code session in that directory and all 74 tools are available.
 
 </details>
 
@@ -426,11 +426,11 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 
 ---
 
-## Tools (72 + `manage_tools`)
+## Tools (73 + `manage_tools`)
 
-72 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 73 tools total under the default `full` profile.
+73 tools are gated by the active [tool profile](#coverage-map) (`read-only` / `safe-write` / `full` / `custom`) and grouped by category below. `manage_tools` — list profiles, switch the active profile, toggle individual tools/categories — is a meta-tool always available regardless of profile, so a connected client's `tools/list` returns 74 tools total under the default `full` profile.
 
-### Schema Read (9)
+### Schema Read (10)
 
 | Tool | Description |
 |:-----|:------------|
@@ -441,6 +441,7 @@ npx airtable-user-mcp daemon status    Show daemon status and port (JSON)
 | `list_views` | All views in a table with IDs, names, and types |
 | `get_view` | Read a single view's full state — filters, sorts, grouping, visibility, description |
 | `validate_formula` | Validate a formula expression before applying |
+| `lint_airtable_code` | Offline static check of a formula, Scripting-extension script or automation script — 1-based line/column diagnostics, no base, login or browser needed |
 | `list_view_sections` | List sidebar sections for a table with their view membership |
 | `list_record_templates` | List record templates (saved row scaffolds) for a table |
 

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added (2026-11-07 - `lint_airtable_code`)
+
+- **`lint_airtable_code` tool: offline diagnostics for Airtable code.** Checks a formula, a Scripting-extension
+  script or an automation script (`language: formula | script | automation`) and returns 1-based line/column
+  diagnostics with severity `error | warning | info | hint`. It needs no base, no login and no browser, so it
+  always answers, and it is in the `read` category: available in every profile, including `read-only`
+  (tool counts: 72 to 73 overall, 10 to 11 in `read-only`, 54 to 55 in `safe-write`). Run it before
+  `validate_formula`, which remains the authoritative check against a real table.
+
 ### Fixed (2026-11-07 — tunnel stayed "auto-disabled")
 
 - **Re-enabling or disabling a tunnel now clears its "auto-disabled" state.** The 401-burst tripwire sets

@@ -143,7 +143,7 @@ describe('Tool safety', () => {
   it('reports the enabled count and how many tools are hidden', () => {
     render(<Settings navigate={vi.fn()} />);
 
-    expect(within(toolSafety()).getByText('54 of 72 tools enabled')).toBeVisible();
+    expect(within(toolSafety()).getByText('55 of 73 tools enabled')).toBeVisible();
     expect(within(toolSafety()).getByText(/18 hidden from AI agents/)).toBeVisible();
   });
 

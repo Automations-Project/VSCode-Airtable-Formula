@@ -85,7 +85,7 @@ describe('ToolProfileManager legacy custom-profile migration', () => {
     const { saved, snapshot } = await initializeWithCustomTools({ list_tables: true });
     expect(saved.customTools.download_formula_field).toBe(false);
     expect(saved.customTools.download_base_formulas).toBe(false);
-    expect(snapshot.enabledCount).toBe(67);
+    expect(snapshot.enabledCount).toBe(68);
   });
 
   it('preserves explicit disabled values from the older on-disk custom profile', async () => {
@@ -95,7 +95,7 @@ describe('ToolProfileManager legacy custom-profile migration', () => {
     });
     expect(saved.customTools.download_formula_field).toBe(false);
     expect(saved.customTools.download_base_formulas).toBe(false);
-    expect(snapshot.enabledCount).toBe(67);
+    expect(snapshot.enabledCount).toBe(68);
   });
 
   it('preserves mixed per-tool values instead of widening the whole new category', async () => {
@@ -105,7 +105,7 @@ describe('ToolProfileManager legacy custom-profile migration', () => {
     });
     expect(saved.customTools.download_formula_field).toBe(true);
     expect(saved.customTools.download_base_formulas).toBe(false);
-    expect(snapshot.enabledCount).toBe(68);
+    expect(snapshot.enabledCount).toBe(69);
     expect(report).toContain('on  download_formula_field');
     expect(report).toContain('off download_base_formulas');
   });

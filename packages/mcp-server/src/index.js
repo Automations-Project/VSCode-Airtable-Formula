@@ -170,6 +170,7 @@ const headerSafe = (s) => String(s).replace(/[\r\n]+/g, ' ').replace(/"/g, "'");
 import { stripHeader } from './formula-header.js';
 import { formulaRefsToNames, buildFieldNameMap } from './formula-refs.js';
 import { uploadAttachmentsByUrl } from './attachments.js';
+import { lintAirtableCode, MAX_TEXT_LENGTH as LINT_MAX_TEXT_LENGTH } from './lint.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -233,7 +234,7 @@ const server = new Server(
     title: 'Airtable User MCP',
     version: PKG_VERSION,
     description:
-      'Manage Airtable bases with 72 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
+      'Manage Airtable bases with 73 Airtable tools + `manage_tools`: schema inspection, table/field/view CRUD, ' +
       'formula/rollup/lookup/count field management, view configuration (filters, sorts, groups, column layout), ' +
       'select field choices with color support, formula validation and file-based bulk editing, ' +
       'record create/update/duplicate/delete plus URL-based attachment uploads, base-to-base schema and record sync, ' +
@@ -682,6 +683,19 @@ SELECT CHOICES:
         debug: debugProp,
       },
       required: ['appId', 'tableId', 'formulaText'],
+    },
+  },
+  {
+    name: 'lint_airtable_code',
+    description: 'Offline static check of Airtable code: a formula, a Scripting-extension script, or an automation script. Needs no base, no login and no browser, so it always answers. Run it after writing or editing any formula or script, fix every error, then use validate_formula when a base is available for the authoritative check against a real table. Returns 1-based line/column diagnostics with severity error | warning | info | hint. A leading "# AT:" (formula) or "// AT:" (script, automation) file header is ignored.',
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        language: { type: 'string', enum: ['formula', 'script', 'automation'], description: 'Which engine to use: "formula" for an Airtable formula, "script" for a Scripting-extension script, "automation" for an automation "Run script" action' },
+        text: { type: 'string', maxLength: LINT_MAX_TEXT_LENGTH, description: 'The code to check, at most 200000 characters. Pass the file content as-is; an AT: header is skipped.' },
+      },
+      required: ['language', 'text'],
     },
   },
   {
@@ -2048,6 +2062,14 @@ const handlers = {
     const clean = stripHeader(formulaText, 'formula').text;
     const result = await client.validateFormula(appId, tableId, clean);
     return ok(result, result, debug);
+  },
+
+  async lint_airtable_code({ language, text }) {
+    try {
+      return ok(lintAirtableCode({ language, text }));
+    } catch (e) {
+      return err(e.message);
+    }
   },
 
   async download_formula_field({ appId, fieldId, outputPath, debug }) {

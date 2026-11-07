@@ -79,3 +79,93 @@ describe('scriptDiagnostics — SCRIPT-05 unknown global', () => {
     expect(scriptDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
   });
 });
+
+// Before the arrow-param and missing-await scans were bounded, each of these
+// took 20-40 s on one thread (a lint call could pin the shared MCP daemon).
+describe('scriptDiagnostics — adversarial input stays fast', () => {
+  function timed(text: string) {
+    const start = performance.now();
+    const diags = scriptDiagnostics(text);
+    return { diags, elapsed: performance.now() - start };
+  }
+
+  it("finishes '('.repeat(200_000) in under 2 s", () => {
+    const { diags, elapsed } = timed('('.repeat(200_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it("finishes 'xAsync('.repeat(28_000) in under 2 s, still flagging every call", () => {
+    const { diags, elapsed } = timed('xAsync('.repeat(28_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(diags.filter(d => d.code === 'missing-await')).toHaveLength(28_000);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  // Identifier regexes: `$` is an identifier char but not a \w one, so \b held at
+  // every a/$ transition and each attempt scanned the rest of the run (~90 s at the cap).
+  it("finishes 'a$'.repeat(100_000) in under 2 s", () => {
+    const { diags, elapsed } = timed('a$'.repeat(100_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  // [^\]};]* in the const/let/var destructuring pattern rescanned to the same stop.
+  it("finishes 'const ['.repeat(28_000) in under 2 s", () => {
+    const { diags, elapsed } = timed('const ['.repeat(28_000));
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  // Many for-heads whose destructuring patterns share one `]`, then a long whitespace
+  // run the of|in tail scans and fails on. The tail used to be retried per head;
+  // at this size that cost about 1.1-1.6 s, so the bound is tighter than 2 s to catch it.
+  it('tries the for-of tail once per binding end, not once per head', () => {
+    const { diags, elapsed } = timed('for(let ['.repeat(11_000) + ']' + ' '.repeat(100_000) + 'x');
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  // function NAME( heads reaching the same ')' each re-split their whole parameter
+  // slice on ',': O(heads x commas), 17 s to over 60 s at the cap.
+  it.each([
+    ["'function f(a,'.repeat(15_384) + ')'", () => 'function f(a,'.repeat(15_384) + ')'],
+    ["'function f('.repeat(9_090) + ','.repeat(100_000) + ')'", () => 'function f('.repeat(9_090) + ','.repeat(100_000) + ')'],
+    ["'function f('.repeat(9_090) + 'a=1,'.repeat(25_000) + ')'", () => 'function f('.repeat(9_090) + 'a=1,'.repeat(25_000) + ')'],
+  ])('finishes %s in under 2 s', (_label, make) => {
+    const { diags, elapsed } = timed(make());
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  // Comma-free heads reaching one ')' re-processed overlapping first pieces, and
+  // stripDefaultOrType walked back over the whitespace before '=' with a regex
+  // test per character: ~18-20 s at the cap.
+  it.each([
+    ["'function f('.repeat(9_090) + ' '.repeat(100_000) + '=1)'", () => 'function f('.repeat(9_090) + ' '.repeat(100_000) + '=1)'],
+    ["'function f('.repeat(9_090) + '\\n'.repeat(100_000) + '=1)'", () => 'function f('.repeat(9_090) + '\n'.repeat(100_000) + '=1)'],
+    ["'function f('.repeat(9_090) + '\\t'.repeat(100_000) + '=1)'", () => 'function f('.repeat(9_090) + '\t'.repeat(100_000) + '=1)'],
+    ["'function f('.repeat(18_181) + '=1)'", () => 'function f('.repeat(18_181) + '=1)'],
+  ])('finishes %s in under 2 s', (_label, make) => {
+    const { diags, elapsed } = timed(make());
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
+  it('a paren-arrow default value does not hide the earlier parameters', () => {
+    const code = 'const process = (records, log = (m) => console.log(m)) => records.map(r => log(r.id));';
+    expect(scriptDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
+  });
+
+  it('every parameter of functions sharing one closing paren is still declared', () => {
+    const code = 'function f(a, function g(b, c) { return a.x + b.y + c.z }';
+    expect(scriptDiagnostics(code).filter(d => d.code === 'unknown-global')).toHaveLength(0);
+  });
+
+  // \s*[=:].*$ in extractBindings retried \s* from every position of a whitespace run.
+  it('finishes a 200k-character whitespace run inside arrow params in under 2 s', () => {
+    const { diags, elapsed } = timed('(a' + ' '.repeat(199_990) + 'b) =>');
+    expect(Array.isArray(diags)).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  });
+});
