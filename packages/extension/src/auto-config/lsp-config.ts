@@ -190,7 +190,9 @@ export async function configureMcpToml(
   const eol = existing.includes('\r\n') ? '\r\n' : '\n';
   const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
   const block = renderTomlServer(serversKey, name, entry).replace(/\n/g, eol);
-  await writeTextAtomic(configPath, (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block);
+  const next = (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block;
+  if (next === existing) return; // a no-op Update leaves the file (and its mtime) alone
+  await writeTextAtomic(configPath, next);
 }
 
 export async function unconfigureMcpToml(configPath: string, serversKey: string, name: string): Promise<void> {

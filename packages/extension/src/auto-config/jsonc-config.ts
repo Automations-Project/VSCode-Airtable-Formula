@@ -39,8 +39,19 @@ function lineAndColumn(text: string, offset: number): { line: number; column: nu
   return { line, column: offset - (before.lastIndexOf('\n') + 1) + 1 };
 }
 
+/**
+ * A leading UTF-8 byte order mark, which Windows editors write and jsonc-parser rejects. Every
+ * function here reads past it, and setJsoncValue puts it back, so an edited file keeps it.
+ */
+const BOM = '\uFEFF';
+
+function splitBom(text: string): { bom: string; body: string } {
+  return text.startsWith(BOM) ? { bom: BOM, body: text.slice(BOM.length) } : { bom: '', body: text };
+}
+
 /** Parses an object document. An empty or comment-only file is `{}`. Throws on anything malformed. */
-export function parseJsonc(text: string, format: JsonFormat, file: string): Record<string, unknown> {
+export function parseJsonc(raw: string, format: JsonFormat, file: string): Record<string, unknown> {
+  const text = splitBom(raw).body;
   const errors: jsonc.ParseError[] = [];
   const value: unknown = jsonc.parse(text, errors, {
     allowTrailingComma: format === 'jsonc',
@@ -79,18 +90,19 @@ export function getJsoncValue(text: string, jsonPath: readonly string[], format:
  * not parse is never edited.
  */
 export function setJsoncValue(
-  text: string,
+  raw: string,
   jsonPath: readonly string[],
   value: unknown,
   format: JsonFormat,
   file: string,
 ): string {
+  const { bom, body: text } = splitBom(raw);
   const doc = parseJsonc(text, format, file);
   const path = [...jsonPath];
 
   if (value === undefined) {
     const tree = jsonc.parseTree(text);
-    if (!tree || !jsonc.findNodeAtLocation(tree, path)) return text;
+    if (!tree || !jsonc.findNodeAtLocation(tree, path)) return raw;
   } else {
     let cur: unknown = doc;
     for (const seg of path.slice(0, -1)) {
@@ -107,7 +119,7 @@ export function setJsoncValue(
   // next one on the opening brace's line.
   const edits = jsonc.modify(text, path, value, { formattingOptions: fmt });
   const out = jsonc.applyEdits(text, edits);
-  return out.endsWith('\n') ? out : out + fmt.eol;
+  return bom + (out.endsWith('\n') ? out : out + fmt.eol);
 }
 
 /** Removes each object along `jsonPath` that is now empty, innermost first, stopping at the first non-empty one. */

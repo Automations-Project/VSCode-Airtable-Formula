@@ -125,3 +125,32 @@ describe('detectFormatting', () => {
     expect(detectFormatting('')).toEqual({ insertSpaces: true, tabSize: 2, eol: '\n' });
   });
 });
+
+describe('a leading UTF-8 BOM (Windows editors write one)', () => {
+  const BOM = '\uFEFF';
+
+  it('is read past, and a BOM-only file is {}', () => {
+    expect(parseJsonc(BOM + '{ "a": 1 }', 'json', F)).toEqual({ a: 1 });
+    expect(parseJsonc(BOM, 'json', F)).toEqual({});
+    expect(getJsoncValue(BOM + '{ "a": { "b": 2 } }', ['a', 'b'], 'json', F)).toBe(2);
+  });
+
+  it('reports positions as an editor shows them, without the BOM', () => {
+    expect(() => parseJsonc(BOM + '{ "a": 1, }', 'json', F))
+      .toThrow('/cfg/settings.json is not valid JSON (line 1, column 11). Nothing was written.');
+  });
+
+  it('is kept on set and on remove, once, and removal restores the file byte for byte', () => {
+    const text = BOM + '{\n  "a": 1\n}\n';
+    const added = setJsoncValue(text, ['mcpServers', 'x'], { b: 2 }, 'json', F);
+    expect(added).toBe(BOM + '{\n  "a": 1,\n  "mcpServers": {\n    "x": {\n      "b": 2\n    }\n  }\n}\n');
+    const removed = setJsoncValue(added, ['mcpServers', 'x'], undefined, 'json', F);
+    expect(removed.startsWith(BOM) && !removed.slice(1).includes(BOM)).toBe(true);
+    expect(parse(removed.slice(1))).toEqual({ a: 1, mcpServers: {} });
+    expect(pruneEmptyObjects(removed, ['mcpServers'], 'json', F)).toBe(text);
+  });
+
+  it('is not added to a file that had none', () => {
+    expect(setJsoncValue('{}', ['a'], 1, 'json', F).startsWith(BOM)).toBe(false);
+  });
+});
