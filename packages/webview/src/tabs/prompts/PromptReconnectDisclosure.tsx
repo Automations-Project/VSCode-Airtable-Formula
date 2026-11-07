@@ -14,7 +14,7 @@ export function PromptReconnectDisclosure() {
         <li><strong>Claude Desktop</strong>: restart the app</li>
       </ul>
       <p className="prompt-hint">
-        Clients that do not show MCP prompts get the same recipes through the AI skill (Setup tab); they refresh when you save here.
+        Clients that do not show MCP prompts get these as recipes through the AI skill (Setup tab). Once the skill is installed in global scope, the recipes refresh when you save here; project scope carries the built-in prompts only.
       </p>
     </Disclosure>
   );
