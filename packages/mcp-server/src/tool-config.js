@@ -23,6 +23,7 @@ export const TOOL_CATEGORIES = {
   list_views:             'read',
   get_view:               'read',
   validate_formula:       'read',
+  lint_airtable_code:     'read',
   list_view_sections:     'read',
   // These READ from Airtable but WRITE to the local filesystem, so they are not
   // `read`: the read-only profile is advertised as "reading only" and a tool that

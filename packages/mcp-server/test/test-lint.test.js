@@ -1,6 +1,7 @@
 // node --test
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { lintAirtableCode, MAX_TEXT_LENGTH, MAX_DIAGNOSTICS } from '../src/lint.js';
 
 describe('lintAirtableCode', () => {
@@ -70,5 +71,18 @@ describe('lintAirtableCode', () => {
   it('rejects text over the limit', () => {
     const text = 'a'.repeat(MAX_TEXT_LENGTH + 1);
     assert.throws(() => lintAirtableCode({ language: 'formula', text }), /too long/);
+  });
+});
+
+describe('lint_airtable_code wiring', () => {
+  it('is defined, handled and categorised as read, and the handler never touches auth or client', () => {
+    const src = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+    assert.ok(src.includes("name: 'lint_airtable_code'"));
+    const handlerStart = src.indexOf('async lint_airtable_code(');
+    assert.ok(handlerStart > 0, 'handler present');
+    const handlerBody = src.slice(handlerStart, src.indexOf('\n  },', handlerStart));
+    assert.equal(/\b(auth|client)\./.test(handlerBody), false, 'handler must not touch auth or client');
+    const cfg = readFileSync(new URL('../src/tool-config.js', import.meta.url), 'utf8');
+    assert.match(cfg, /lint_airtable_code:\s*'read'/);
   });
 });
