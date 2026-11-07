@@ -68,6 +68,7 @@ const dependencies = vi.hoisted(() => ({
   getAllIdeStatuses: vi.fn(async () => []),
   configureMcpForIde: vi.fn(async () => undefined),
   reapplyMcpForIde: vi.fn(async () => true),
+  hasForeignMcpEntry: vi.fn(async () => false),
   updateWebviewSetting: vi.fn(async () => undefined),
   detectAllBrowsers: vi.fn(),
   stat: vi.fn(),
@@ -94,6 +95,7 @@ vi.mock('../auto-config/index.js', () => ({
   getAllIdeStatuses: dependencies.getAllIdeStatuses,
   configureMcpForIde: dependencies.configureMcpForIde,
   reapplyMcpForIde: dependencies.reapplyMcpForIde,
+  hasForeignMcpEntry: dependencies.hasForeignMcpEntry,
   unconfigureMcpForIde: vi.fn(),
   configureLspForIde: vi.fn(),
   unconfigureLspForIde: vi.fn(),
@@ -1095,6 +1097,73 @@ describe('DashboardProvider webview trust boundary', () => {
     const warning = 'Airtable Formula: could not configure Claude Code: ~/.claude.json is not valid JSON (line 1, column 3). Nothing was written.';
     expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith(warning);
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup2', ok: false, error: warning });
+  });
+
+  it('action:setupAll leaves a hand-written entry alone and reports it as already configured, not as a failure', async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'] };
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'] };
+    dependencies.getAllIdeStatuses.mockResolvedValueOnce([
+      { ideId: 'cursor', label: 'Cursor', detected: true },
+      { ideId: 'zed', label: 'Zed', detected: true },
+    ] as never);
+    // Checked in status order: Cursor has none of the user's own, Zed has a hand-written entry.
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupAll', id: 'setup3' });
+
+    await waitForResult('setup3');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(1);
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('cursor', expect.anything(), expect.anything());
+    expect(skill.installSkill).toHaveBeenCalledOnce();
+    expect(vscodeMock.showWarningMessage).not.toHaveBeenCalled();
+    expect(vscodeMock.showInformationMessage).toHaveBeenCalledWith(
+      'Airtable Formula: Zed already configured with an airtable-user-mcp entry you wrote; left as is.',
+    );
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'setup3', ok: true });
+  });
+
+  it("a card's Set up asks before replacing a hand-written entry; Cancel writes nothing", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce(undefined);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupIde', id: 'card01', ideId: 'zed' });
+
+    await waitForResult('card01');
+    expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Replace the airtable-user-mcp entry you wrote in Zed?', { modal: true }, 'Replace');
+    expect(dependencies.configureMcpForIde).not.toHaveBeenCalled();
+    expect(skill.installSkill).not.toHaveBeenCalled();
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'card01', ok: false, error: 'Cancelled', cancelled: true });
+  });
+
+  it("a card's Set up on a hand-written entry writes ours after Replace", async () => {
+    dependencies.ideConfigs.zed = { capabilities: ['mcp'], label: 'Zed' } as never;
+    dependencies.hasForeignMcpEntry.mockResolvedValueOnce(true);
+    vscodeMock.showWarningMessage.mockResolvedValueOnce('Replace' as never);
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupIde', id: 'card02', ideId: 'zed' });
+
+    await waitForResult('card02');
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'card02', ok: true });
+  });
+
+  it("a card's Set up with no hand-written entry does not ask", async () => {
+    dependencies.ideConfigs.cursor = { capabilities: ['mcp'], label: 'Cursor' } as never;
+    const { provider, inboundMessage } = mountProvider();
+    vi.spyOn(provider, 'pushState').mockResolvedValue(undefined);
+
+    inboundMessage({ type: 'action:setupIde', id: 'card03', ideId: 'cursor' });
+
+    await waitForResult('card03');
+    expect(vscodeMock.showWarningMessage).not.toHaveBeenCalled();
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('cursor', expect.anything(), expect.anything());
   });
 
   it('the settings rewrite still rewrites the other clients when one fails, and warns naming it', async () => {

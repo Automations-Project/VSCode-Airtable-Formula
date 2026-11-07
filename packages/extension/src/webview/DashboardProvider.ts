@@ -16,7 +16,7 @@ import {
   type WebviewMessage,
 } from '@airtable-formula/shared';
 import { getWebviewHtml } from './html.js';
-import { getAllIdeStatuses, configureMcpForIde, reapplyMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, hasForeignMcpEntry, reapplyMcpForIde, unconfigureMcpForIde, configureLspForIde, unconfigureLspForIde, configureOfficialAirtableMcp, unconfigureOfficialAirtableMcp, isOfficialAirtableConfigured } from '../auto-config/index.js';
 import { IDE_CONFIGS } from '../auto-config/ide-configs.js';
 import { MCP_CLIENTS } from '../auto-config/mcp-clients.js';
 import { settleByClient, type ClientFailure } from '../auto-config/settle-by-client.js';
@@ -175,6 +175,12 @@ export function warnSkillProblems(failed: readonly { dir: string; message: strin
       : undefined;
   if (text) void vscode.window.showWarningMessage(text);
   return text;
+}
+
+/** The summary line for clients Setup all left alone because their entry is one the user wrote; undefined when none. */
+export function alreadyConfiguredNote(skipped: readonly { label: string }[]): string | undefined {
+  if (skipped.length === 0) return undefined;
+  return `${skipped.map(s => s.label).join(', ')} already configured with an airtable-user-mcp entry you wrote; left as is.`;
 }
 
 /** Shows one warning naming the clients whose MCP config could not be written and returns its text; undefined when none failed. */
@@ -535,6 +541,18 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const serverEntry = getServerEntry(this.context);
         const settings = getSettings();
         const caps = IDE_CONFIGS[msg.ideId].capabilities;
+        // The one place the user points at a client: an entry they wrote may be replaced, after asking.
+        if (caps.includes('mcp') && await hasForeignMcpEntry(msg.ideId)) {
+          const choice = await vscode.window.showWarningMessage(
+            `Replace the airtable-user-mcp entry you wrote in ${IDE_CONFIGS[msg.ideId].label}?`,
+            { modal: true },
+            'Replace',
+          );
+          if (choice !== 'Replace') {
+            this.postResult(msg.id, false, 'Cancelled', true);
+            return;
+          }
+        }
         if (caps.includes('mcp')) await configureMcpForIde(msg.ideId, serverPath, serverEntry);
         if (caps.includes('lsp')) await configureLspForIde(msg.ideId);
         await installSkill(settings.ai.installScope, await skillEnv(this.context));
@@ -552,8 +570,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const serverEntry = getServerEntry(this.context);
         const settings = getSettings();
         const statuses = await getAllIdeStatuses();
+        const detected = statuses.filter(s => s.detected);
+        const skipped = new Set<string>();
         // One client's bad config file fails that client only: the rest, the skill and the state push still run.
-        const { failed } = await settleByClient(statuses.filter(s => s.detected), async s => {
+        const { failed } = await settleByClient(detected, async s => {
+          // An entry the user wrote is a working setup of theirs: Setup all leaves it byte for byte.
+          if (await hasForeignMcpEntry(s.ideId)) {
+            skipped.add(s.ideId);
+            return;
+          }
           const caps = IDE_CONFIGS[s.ideId].capabilities;
           if (caps.includes('mcp')) await configureMcpForIde(s.ideId, serverPath, serverEntry);
           if (caps.includes('lsp')) await configureLspForIde(s.ideId);
@@ -563,6 +588,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         await installSkill(settings.ai.installScope, await skillEnv(this.context));
         await this.pushState();
         const warning = warnClientFailures(failed);
+        const note = alreadyConfiguredNote(detected.filter(s => skipped.has(s.ideId)));
+        if (note) void vscode.window.showInformationMessage(`Airtable Formula: ${note}`);
         this.postResult(msg.id, warning === undefined, warning);
       } catch (err) {
         this.postResult(msg.id, false, String(err));

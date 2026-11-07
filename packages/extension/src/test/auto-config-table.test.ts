@@ -20,7 +20,7 @@ import { MCP_CLIENTS, MCP_CLIENT_BY_ID, resolveConfigPath, type McpClientId, typ
 import { readServerEntry, setServerEntry, type WriterDeps } from '../auto-config/mcp-writer.js';
 import {
   buildOfficialAirtableEntry, configureLspForIde, configureMcpForIde, configureOfficialAirtableMcp, getAllIdeStatuses,
-  getIdeStatus, getMcpHealth, isLspConfigured, isMcpConfigured, isOfficialAirtableConfigured, reapplyMcpForIde,
+  getIdeStatus, getMcpHealth, hasForeignMcpEntry, isLspConfigured, isMcpConfigured, isOfficialAirtableConfigured, reapplyMcpForIde,
   settleByClient, unconfigureLspForIde, unconfigureMcpForIde, unconfigureOfficialAirtableMcp,
 } from '../auto-config/index.js';
 import { ENTRY_SHAPES } from '../auto-config/mcp-entry-shapes.js';
@@ -237,6 +237,20 @@ describe('an entry the extension did not write is never rewritten unasked', () =
     expect(await getMcpHealth('codex-cli', deps)).toEqual({ configured: true, healthy: true });
     expect(await reapplyMcpForIde('codex-cli', '/unused', ours(), deps)).toBe(false);
     expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(withEnv);
+  });
+
+  // What Setup all skips (left byte for byte) and what a card's Set up asks about before replacing.
+  it('hasForeignMcpEntry: an entry under our name that we did not write, and nothing else', async () => {
+    const row = MCP_CLIENT_BY_ID.zed;
+    detect(row);
+    expect(await hasForeignMcpEntry('zed', deps)).toBe(false);
+    write(fileOf(row), JSON.stringify({ context_servers: { 'airtable-user-mcp': HAND } }, null, 2) + '\n');
+    expect(await hasForeignMcpEntry('zed', deps)).toBe(true);
+    await configureMcpForIde('zed', '/unused', ours(), deps); // the card's Set up, after Replace
+    expect(await hasForeignMcpEntry('zed', deps)).toBe(false);
+    write(fileOf(row), '{ "context_servers": ');
+    expect(await hasForeignMcpEntry('zed', deps)).toBe(false); // unparsable: Setup reports the error itself
+    expect(await hasForeignMcpEntry('helix', deps)).toBe(false);
   });
 
   it('Kilo Code: a hand-written entry in kilo.json is not moved out when kilo.jsonc becomes current', async () => {

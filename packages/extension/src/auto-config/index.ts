@@ -158,6 +158,20 @@ export async function reapplyMcpForIde(
   return true;
 }
 
+/**
+ * Whether the client has an `airtable-user-mcp` entry the extension did not write (isOurEntry): a
+ * working setup of the user's, which Setup all leaves byte for byte and a card's Set up asks about
+ * before replacing. False when the file does not parse; Setup then reports that itself.
+ */
+export async function hasForeignMcpEntry(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<boolean> {
+  const row = mcpRowFor(ideId);
+  if (!row) return false;
+  try {
+    const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
+    return found !== null && !isOurEntry(found.entry, deps);
+  } catch { return false; }
+}
+
 export async function unconfigureMcpForIde(ideId: IdeId, deps: WriterDeps = hostWriterDeps()): Promise<void> {
   const row = mcpRowFor(ideId);
   if (row) await unconfigureMcpClient(row, deps);

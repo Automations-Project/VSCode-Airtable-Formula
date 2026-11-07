@@ -7,7 +7,7 @@ import * as os from 'os';
 // `airtable-formula.installAISkills` command below). The legacy detectIDE()
 // path in `./skills/skillInstaller.ts` has been removed — it was running in
 // parallel with the dashboard path with divergent template content.
-import { DashboardProvider, warnClientFailures, warnSkillProblems } from './webview/DashboardProvider.js';
+import { DashboardProvider, alreadyConfiguredNote, warnClientFailures, warnSkillProblems } from './webview/DashboardProvider.js';
 import { registerLanguageProviders } from './language/registration.js';
 import { registerMcpProvider } from './mcp/registration.js';
 import { AuthManager } from './mcp/auth-manager.js';
@@ -32,7 +32,7 @@ type LocalToolCategoryKey =
     | 'recordWrite' | 'recordDestructive'
     | 'sync' | 'daemon';
 import { getSettings } from './settings.js';
-import { getAllIdeStatuses, configureMcpForIde, reapplyMcpForIde, ensureLauncher, settleByClient, type ClientFailure } from './auto-config/index.js';
+import { getAllIdeStatuses, configureMcpForIde, hasForeignMcpEntry, reapplyMcpForIde, ensureLauncher, settleByClient, type ClientFailure } from './auto-config/index.js';
 import { IDE_CONFIGS } from './auto-config/ide-configs.js';
 import { installSkill, checkSkill } from './skills/installer.js';
 import { skillEnv } from './skills/host-env.js';
@@ -452,13 +452,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const settings = getSettings();
             const serverPath = getBundledServerPath(context);
             const statuses = await getAllIdeStatuses();
-            const { failed } = await settleByClient(statuses.filter(s => s.detected), s => configureMcpForIde(s.ideId, serverPath));
+            const detected = statuses.filter(s => s.detected);
+            const skipped = new Set<string>();
+            const { failed } = await settleByClient(detected, async s => {
+                // An entry the user wrote is a working setup of theirs: Setup all leaves it byte for byte.
+                if (await hasForeignMcpEntry(s.ideId)) {
+                    skipped.add(s.ideId);
+                    return;
+                }
+                await configureMcpForIde(s.ideId, serverPath);
+            });
             logClientFailures('setup_all', failed);
             // Once, not per IDE: every client reads the same skill folders.
             await installSkill(settings.ai.installScope, await skillEnv(context));
             dashboardProvider.refresh();
             if (!warnClientFailures(failed)) {
-                vscode.window.showInformationMessage('Airtable Formula: All IDEs configured.');
+                const note = alreadyConfiguredNote(detected.filter(s => skipped.has(s.ideId)));
+                vscode.window.showInformationMessage(`Airtable Formula: All IDEs configured.${note ? ` ${note}` : ''}`);
             }
         }),
         vscode.commands.registerCommand('airtable-formula.installAISkills', async () => {
