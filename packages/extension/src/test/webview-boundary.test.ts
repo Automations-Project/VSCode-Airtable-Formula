@@ -1106,6 +1106,7 @@ describe('DashboardProvider webview trust boundary', () => {
     expect(dependencies.configureMcpForIde).toHaveBeenCalledTimes(2);
     expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
     expect(vscodeMock.showWarningMessage).toHaveBeenCalledWith('Airtable Formula: could not configure Cursor: bad file');
+  });
 
   describe('prompt saves refresh the skill recipes', () => {
     const installedRow = { id: 'agents', name: 'Standard skills folder', dir: '~/.agents/skills', status: 'installed', canonical: true };
