@@ -24,6 +24,7 @@ import {
   settleByClient, unconfigureLspForIde, unconfigureMcpForIde, unconfigureOfficialAirtableMcp,
 } from '../auto-config/index.js';
 import { ENTRY_SHAPES } from '../auto-config/mcp-entry-shapes.js';
+import { readMcpTomlEntry } from '../auto-config/lsp-config.js';
 
 let home: string;
 let deps: WriterDeps;
@@ -248,6 +249,99 @@ describe('an entry the extension did not write is never rewritten unasked', () =
     await configureMcpForIde('kilo-code', '/unused', ours(), deps);
     expect(fs.readFileSync(path.join(dir, 'kilo.json'), 'utf8')).toBe(theirs);
     expect(await getMcpHealth('kilo-code', deps)).toEqual({ configured: true, healthy: true });
+  });
+});
+
+// Writing over an entry we wrote keeps every key we do not manage.
+describe('Update merges into our entry; it never drops a user key', () => {
+  const ourEnv = () => ({ AIRTABLE_HEADLESS_ONLY: '1' });
+  const ours = () => ({ command: 'node', args: [deps.launcher.script], env: ourEnv() });
+
+  it("Cline: a main-era entry keeps autoApprove and timeout through auto-heal, and gains disabled: false", async () => {
+    const row = MCP_CLIENT_BY_ID.cline;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { 'airtable-user-mcp': { ...ours(), autoApprove: ['list_bases', 'get_base_schema'], timeout: 120 } } }, null, 2) + '\n');
+    expect(await getMcpHealth('cline', deps)).toEqual({ configured: true, healthy: false });
+    expect(await reapplyMcpForIde('cline', '/unused', ours(), deps)).toBe(true);
+    expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers['airtable-user-mcp'])
+      .toEqual({ ...ours(), autoApprove: ['list_bases', 'get_base_schema'], timeout: 120, disabled: false });
+    expect(await getMcpHealth('cline', deps)).toEqual({ configured: true, healthy: true });
+  });
+
+  it('Cline: a server the user switched off stays off across Update and the settings rewrite', async () => {
+    const row = MCP_CLIENT_BY_ID.cline;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { 'airtable-user-mcp': { ...ours(), disabled: true } } }, null, 2) + '\n');
+    await configureMcpForIde('cline', '/unused', ours(), deps);
+    await reapplyMcpForIde('cline', '/unused', ours(), deps);
+    expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers['airtable-user-mcp'].disabled).toBe(true);
+    expect(await getMcpHealth('cline', deps)).toEqual({ configured: true, healthy: true });
+  });
+
+  it("our env keys follow the settings; the user's own env keys stay (Cursor)", async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    const env = { AIRTABLE_HEADLESS_ONLY: '1', AIRTABLE_AUTH_MODE: 'byo', HTTPS_PROXY: 'http://proxy:8080', AIRTABLE_COOKIE: 'c' };
+    write(fileOf(row), JSON.stringify({ mcpServers: { 'airtable-user-mcp': { command: 'node', args: [deps.launcher.script], env, note: 'mine' } } }, null, 2) + '\n');
+    await configureMcpForIde('cursor', '/unused', ours(), deps);
+    expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers['airtable-user-mcp']).toEqual({
+      command: 'node', args: [deps.launcher.script], env: { AIRTABLE_HEADLESS_ONLY: '1', HTTPS_PROXY: 'http://proxy:8080', AIRTABLE_COOKIE: 'c' }, note: 'mine',
+    });
+  });
+
+  it("OpenCode: main's command-string entry becomes the V1 shape; the user's env keys move to environment, enabled: false stays", async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const file = path.join(home, '.config', 'opencode', 'opencode.json');
+    write(file, JSON.stringify({ mcp: { 'airtable-user-mcp': { type: 'local', command: 'node', args: [deps.launcher.script], env: { ...ourEnv(), MINE: 'x' }, enabled: false } } }, null, 2) + '\n');
+    await configureMcpForIde('opencode', '/unused', ours(), deps);
+    expect(parse(fs.readFileSync(file, 'utf8')).mcp['airtable-user-mcp'])
+      .toEqual({ type: 'local', command: ['node', deps.launcher.script], enabled: false, environment: { ...ourEnv(), MINE: 'x' } });
+  });
+
+  it("GitHub Copilot CLI: the user's tool filter stays", async () => {
+    const row = MCP_CLIENT_BY_ID['github-copilot-cli'];
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { 'airtable-user-mcp': { type: 'stdio', ...ours(), tools: ['list_bases'] } } }, null, 2) + '\n');
+    await configureMcpForIde('github-copilot-cli', '/unused', ours(), deps);
+    expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers['airtable-user-mcp'].tools).toEqual(['list_bases']);
+  });
+
+  it('Codex: startup_timeout_sec, a comment and an env sub-table key survive; one env, and a second Update is a no-op', async () => {
+    const row = MCP_CLIENT_BY_ID['codex-cli'];
+    detect(row);
+    const script = JSON.stringify(deps.launcher.script);
+    write(fileOf(row), `model = "o3"\n\n[mcp_servers.airtable-user-mcp]\ncommand = "node"\nargs = [${script}]\n# keep me\nstartup_timeout_sec = 60\ntools = [\n  "a",\n]\n\n[mcp_servers.airtable-user-mcp.env]\nAIRTABLE_HEADLESS_ONLY = "1"\nFOO = "bar"\n\n[mcp_servers.airtable-user-mcp.tool_timeouts]\nx = 5\n`);
+    await configureMcpForIde('codex-cli', '/unused', ours(), deps);
+    const text = fs.readFileSync(fileOf(row), 'utf8');
+    expect(text).toContain('startup_timeout_sec = 60\n');
+    expect(text).toContain('# keep me\n');
+    expect(text).toContain('tools = [\n  "a",\n]\n');
+    expect(text).toContain('[mcp_servers.airtable-user-mcp.tool_timeouts]\nx = 5\n');
+    expect(text).not.toContain('[mcp_servers.airtable-user-mcp.env]');
+    expect(text.match(/^env = /gm)).toHaveLength(1);
+    expect(await readMcpTomlEntry(fileOf(row), 'mcp_servers', 'airtable-user-mcp')).toMatchObject({ env: { AIRTABLE_HEADLESS_ONLY: '1', FOO: 'bar' } });
+    expect(await getMcpHealth('codex-cli', deps)).toEqual({ configured: true, healthy: true });
+    await configureMcpForIde('codex-cli', '/unused', ours(), deps);
+    expect(fs.readFileSync(fileOf(row), 'utf8')).toBe(text);
+  });
+
+  it("Codex: main's block loses its stale type and keeps a user's startup_timeout_sec", async () => {
+    const row = MCP_CLIENT_BY_ID['codex-cli'];
+    detect(row);
+    write(fileOf(row), '[mcp_servers.airtable-user-mcp]\ntype = "stdio"\ncommand = "npx"\nargs = ["-y", "airtable-user-mcp"]\nstartup_timeout_sec = 60\n');
+    expect(await reapplyMcpForIde('codex-cli', '/unused', ours(), deps)).toBe(true);
+    const text = fs.readFileSync(fileOf(row), 'utf8');
+    expect(text).not.toContain('type = ');
+    expect(text).toContain('startup_timeout_sec = 60\n');
+  });
+
+  it('an entry we did not write is replaced by an explicit Setup, user keys and all', async () => {
+    const row = MCP_CLIENT_BY_ID.cursor;
+    detect(row);
+    write(fileOf(row), JSON.stringify({ mcpServers: { 'airtable-user-mcp': { command: 'npx', args: [], env: { X: '1' }, note: 'theirs' } } }));
+    await configureMcpForIde('cursor', '/unused', ours(), deps);
+    expect(parse(fs.readFileSync(fileOf(row), 'utf8')).mcpServers['airtable-user-mcp']).toEqual(ours());
   });
 });
 

@@ -182,11 +182,94 @@ function isOurTable(serversKey: string, name: string, s: TomlSection): boolean {
   return h === `[${serversKey}.${name}]` || h.startsWith(`[${serversKey}.${name}.`);
 }
 
+// ── Carrying the user's lines over when we rewrite a table of ours ──────────
+
+/** What an Update of our own table keeps: everything but the keys the entry sets and these. */
+export interface TomlCarry { drop: readonly string[] }
+
+/** The first segment of a `key = …` or `dotted.key = …` statement. */
+const TOML_STATEMENT_KEY_RE = /^[ \t]*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)[ \t]*[.=]/;
+
+/** Tracks open brackets and multi-line strings across the lines of one value, outside strings and comments. */
+function scanValue(text: string, state: { depth: number; ml: string | null }): void {
+  let i = 0;
+  while (i < text.length) {
+    if (state.ml) {
+      const end = text.indexOf(state.ml, i);
+      if (end < 0) return;
+      i = end + 3;
+      state.ml = null;
+      continue;
+    }
+    const c = text[i];
+    if (c === '#') return;
+    if (text.startsWith('"""', i) || text.startsWith("'''", i)) { state.ml = text.slice(i, i + 3); i += 3; continue; }
+    if (c === '"') {
+      i++;
+      while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      i = end < 0 ? text.length : end + 1;
+      continue;
+    }
+    if (c === '[' || c === '{') state.depth++;
+    else if (c === ']' || c === '}') state.depth--;
+    i++;
+  }
+}
+
+/** The lines of a table body the entry does not manage: other statements (with their continuation lines) and comments. */
+function unmanagedLines(lines: readonly string[], managed: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length;) {
+    const m = TOML_STATEMENT_KEY_RE.exec(lines[i]);
+    if (!m) {
+      if (lines[i].trim() !== '') out.push(lines[i]);
+      i++;
+      continue;
+    }
+    const raw = m[1];
+    const key = raw.startsWith('"') ? (JSON.parse(raw) as string) : raw.startsWith("'") ? raw.slice(1, -1) : raw;
+    const statement = [lines[i]];
+    const state = { depth: 0, ml: null as string | null };
+    scanValue(lines[i].slice(m[0].length), state);
+    for (i++; (state.depth > 0 || state.ml !== null) && i < lines.length; i++) {
+      statement.push(lines[i]);
+      scanValue(lines[i], state);
+    }
+    if (!managed.has(key)) out.push(...statement);
+  }
+  return out;
+}
+
+/** From our table and its sub-tables (LF text): the unmanaged lines, then each unmanaged sub-table, verbatim. */
+function carriedFromOurTables(text: string, serversKey: string, name: string, managed: ReadonlySet<string>): string {
+  const main = `[${serversKey}.${name}]`;
+  const prefix = `[${serversKey}.${name}.`;
+  const lines: string[] = [];
+  const tables: string[] = [];
+  for (const s of splitTomlSections(text)) {
+    if (!isOurTable(serversKey, name, s)) continue;
+    const h = bareHeader(s.header as string);
+    if (h === main) lines.push(...unmanagedLines(s.text.split('\n').slice(1), managed));
+    else if (!managed.has(h.slice(prefix.length, -1).split('.')[0])) tables.push(s.text.replace(/\n+$/, '\n'));
+  }
+  return (lines.length > 0 ? lines.join('\n') + '\n' : '') + tables.map((t) => '\n' + t).join('');
+}
+
 // A leading UTF-8 BOM (Windows editors write one) is read past and written back: in front of
 // our first header it would hide that table, and an Update would append a duplicate one.
 
+/**
+ * Writes our table (replacing it and its sub-tables) at the end of the file. With `carry`, an
+ * Update of a table of ours keeps the user's other keys, comments and sub-tables verbatim (an
+ * `env` sub-table is dropped: the entry's inline env carries its keys).
+ */
 export async function configureMcpToml(
-  configPath: string, serversKey: string, name: string, entry: Record<string, unknown>,
+  configPath: string, serversKey: string, name: string, entry: Record<string, unknown>, carry?: TomlCarry,
 ): Promise<void> {
   let raw = '';
   try {
@@ -199,7 +282,10 @@ export async function configureMcpToml(
   const { bom, body: existing } = splitBom(raw);
   const eol = existing.includes('\r\n') ? '\r\n' : '\n';
   const kept = removeTomlSections(existing, (s) => isOurTable(serversKey, name, s));
-  const block = renderTomlServer(serversKey, name, entry).replace(/\n/g, eol);
+  const carried = carry
+    ? carriedFromOurTables(existing.replace(/\r\n/g, '\n'), serversKey, name, new Set([...Object.keys(entry), ...carry.drop]))
+    : '';
+  const block = (renderTomlServer(serversKey, name, entry) + carried).replace(/\n/g, eol);
   const next = bom + (kept.trim() === '' ? '' : kept.trimEnd() + eol + eol) + block;
   if (next === raw) return; // a no-op Update leaves the file (and its mtime) alone
   await writeTextAtomic(configPath, next);

@@ -5,7 +5,7 @@ import { configureMcpToml, readMcpTomlEntry, unconfigureMcpToml } from './lsp-co
 import {
   MCP_CLIENTS, resolveConfigPath, samePath, type LegacyLocation, type McpClientRow, type PathContext,
 } from './mcp-clients.js';
-import { ENTRY_SHAPES, isShapeCurrent, readLaunch, type LocalLaunch } from './mcp-entry-shapes.js';
+import { ENTRY_SHAPES, isShapeCurrent, readLaunch, type EntryShapeId, type LocalLaunch, type ShapeContext } from './mcp-entry-shapes.js';
 import { openCodeEntryPaths, openCodeWritePath } from './opencode-layout.js';
 
 /**
@@ -26,6 +26,9 @@ export interface WriterDeps {
 }
 
 export interface FoundEntry { entry: Record<string, unknown>; legacy: boolean; native: boolean }
+
+/** What `build` gets: the container's layout and the entry already under the name there, if any. */
+export interface BuildContext { native: boolean; existing?: Record<string, unknown> }
 
 /**
  * Which entries under a name are ours. Without one, everything under the name is (our local
@@ -177,7 +180,7 @@ export async function hasForeignEntry(row: McpClientRow, name: string, deps: Wri
 export async function setServerEntry(
   row: McpClientRow,
   name: string,
-  build: ((loc: { native: boolean }) => Record<string, unknown>) | null,
+  build: ((loc: BuildContext) => Record<string, unknown>) | null,
   deps: WriterDeps,
   owns?: Owns,
 ): Promise<void> {
@@ -191,15 +194,21 @@ export async function setServerEntry(
 async function editCurrent(
   row: McpClientRow,
   name: string,
-  build: ((loc: { native: boolean }) => Record<string, unknown>) | null,
+  build: ((loc: BuildContext) => Record<string, unknown>) | null,
   deps: WriterDeps,
   owns: Owns | undefined,
 ): Promise<void> {
   const file = resolveConfigPath(row, deps.ctx, deps.exists);
   if (row.format === 'toml') {
     const key = row.serversPath[0];
-    if (build) await configureMcpToml(file, key, name, build({ native: false }));
-    else if (await tomlRemovable(file, key, name, owns)) await unconfigureMcpToml(file, key, name);
+    if (build) {
+      const existing = (await readMcpTomlEntry(file, key, name)) ?? undefined;
+      // Our own table keeps the user's other lines and sub-tables; build renders the managed keys.
+      const carry = existing && owns?.(existing) ? { drop: STALE_KEYS[row.shape] ?? [] } : undefined;
+      await configureMcpToml(file, key, name, build({ native: false, existing }), carry);
+    } else if (await tomlRemovable(file, key, name, owns)) {
+      await unconfigureMcpToml(file, key, name);
+    }
     return;
   }
   const format = row.format;
@@ -211,7 +220,11 @@ async function editCurrent(
   let at: Container | null = null;
   if (build) {
     at = row.layout === 'opencode' ? openCodeWritePath(doc, name, file) : { path: row.serversPath, native: false };
-    next = setJsoncValue(next, [...at.path, name], build({ native: at.native }), format, file);
+    const target = [...at.path, name];
+    const old = valueAt(doc, target);
+    const value = build({ native: at.native, existing: isPlainObject(old) ? old : undefined });
+    // An unchanged entry is not re-set, so an Update never reformats it.
+    if (JSON.stringify(old) !== JSON.stringify(value)) next = setJsoncValue(next, target, value, format, file);
   }
   // A removal clears every current container. A write clears OpenCode's other layout, where a
   // copy would be a second, stale server of the same name.
@@ -274,9 +287,79 @@ export function isOurEntry(entry: Record<string, unknown>, deps: WriterDeps): bo
   return isMainEraCodexBlock(entry);
 }
 
-/** Setup writes our entry in the row's shape. Legacy cleanup moves only copies we wrote. */
+// ── Merging into an entry we wrote ──────────────────────────────────────────
+
+/** Every env key the extension writes (buildServerEntry / buildNpxServerEntry). The rest of an env is the user's. */
+export const MANAGED_ENV_KEYS: ReadonlySet<string> = new Set([
+  'AIRTABLE_HEADLESS_ONLY',
+  'AIRTABLE_PROFILE_DIR',
+  'AIRTABLE_BROWSER_CHANNEL',
+  'AIRTABLE_BROWSER_PATH',
+  'AIRTABLE_AUTH_MODE',
+  'AIRTABLE_HTTP_CLIENT',
+  'AIRTABLE_BROWSER_IDLE_PARK_MS',
+]);
+
+/** Keys an older shape of ours wrote and the current one does not (main's Codex `type`; OpenCode's and fx's `args`/`env`). */
+const STALE_KEYS: Readonly<Partial<Record<EntryShapeId, readonly string[]>>> = {
+  codex: ['type'],
+  opencode: ['args', 'env'],
+  fx: ['args', 'env'],
+};
+
+/** Shape keys the user may set (a server switched off in Cline, OpenCode or fx; Copilot's tool filter): their value wins. */
+const USER_VALUE_KEYS: ReadonlySet<string> = new Set(['disabled', 'enabled', 'tools']);
+
+/** Every key a shape can write, env included where an empty one is omitted. */
+function shapeKeys(shape: EntryShapeId): Set<string> {
+  const sample: LocalLaunch = { command: 'c', args: ['a'], env: { K: 'v' } };
+  return new Set([...Object.keys(ENTRY_SHAPES[shape](sample, { native: false })), ...Object.keys(ENTRY_SHAPES[shape](sample, { native: true }))]);
+}
+
+/** Our managed env keys from `ours`, every other string key of the existing env (env or OpenCode's environment), in their order. */
+function mergeEnv(existing: Record<string, unknown>, ours: Readonly<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const env of [existing.env, existing.environment]) {
+    if (!isPlainObject(env)) continue;
+    for (const [k, v] of Object.entries(env)) {
+      if (k in out) continue;
+      if (MANAGED_ENV_KEYS.has(k)) { if (k in ours) out[k] = ours[k]; }
+      else if (typeof v === 'string') out[k] = v;
+    }
+  }
+  for (const [k, v] of Object.entries(ours)) if (!(k in out)) out[k] = v;
+  return out;
+}
+
+/**
+ * Our entry, written over one we wrote before: the shape's keys are set in place, stale keys of
+ * ours go, every other key stays, and a user's `disabled` / `enabled` / `tools` value wins over
+ * the shape's default. Key order is the existing entry's, new keys last.
+ */
+export function mergeOurEntry(shape: EntryShapeId, existing: Record<string, unknown>, launch: LocalLaunch, ctx: ShapeContext): Record<string, unknown> {
+  const fresh = ENTRY_SHAPES[shape]({ ...launch, env: mergeEnv(existing, launch.env) }, ctx);
+  const managed = new Set([...shapeKeys(shape), ...(STALE_KEYS[shape] ?? [])]);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(existing)) {
+    if (!managed.has(k) || USER_VALUE_KEYS.has(k)) out[k] = v;
+    else if (k in fresh) out[k] = fresh[k];
+  }
+  for (const [k, v] of Object.entries(fresh)) if (!(k in out)) out[k] = v;
+  return out;
+}
+
+/**
+ * Setup writes our entry in the row's shape. Over an entry we wrote it merges (mergeOurEntry; in
+ * TOML the shape's keys with the merged env, and the writer carries the user's other lines over);
+ * over anything else it replaces. Legacy cleanup moves only copies we wrote.
+ */
 export async function configureMcpClient(row: McpClientRow, launch: LocalLaunch, deps: WriterDeps): Promise<void> {
-  await setServerEntry(row, MCP_SERVER_NAME, (loc) => ENTRY_SHAPES[row.shape](launch, loc), deps, (e) => isOurEntry(e, deps));
+  const ours = (e: Record<string, unknown>) => isOurEntry(e, deps);
+  await setServerEntry(row, MCP_SERVER_NAME, ({ native, existing }) => {
+    if (!existing || !ours(existing)) return ENTRY_SHAPES[row.shape](launch, { native });
+    if (row.format === 'toml') return ENTRY_SHAPES[row.shape]({ ...launch, env: mergeEnv(existing, launch.env) }, { native });
+    return mergeOurEntry(row.shape, existing, launch, { native });
+  }, deps, ours);
 }
 
 export async function unconfigureMcpClient(row: McpClientRow, deps: WriterDeps): Promise<void> {

@@ -12,6 +12,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { buildNpxServerEntry, buildServerEntry, isLspConfigured, IDE_CONFIGS } from '../auto-config/index.js';
+import { MANAGED_ENV_KEYS } from '../auto-config/mcp-writer.js';
 
 describe('buildNpxServerEntry', () => {
   it('returns npx command structure', () => {
@@ -55,6 +56,17 @@ describe('auto-config propagates transport/auth-mode settings', () => {
   it('injects AIRTABLE_BROWSER_IDLE_PARK_MS (default 30 min)', () => {
     const env = buildNpxServerEntry().env as any;
     expect(env.AIRTABLE_BROWSER_IDLE_PARK_MS).toBe(String(30 * 60_000));
+  });
+
+  it('every env key the extension writes is one the writer manages (and may replace)', () => {
+    mockConfig['mcp.authMode'] = 'byo';
+    mockConfig['mcp.httpClient'] = 'impit';
+    mockConfig['auth.browserChoice'] = { mode: 'custom', channel: 'chrome', executablePath: '/x/chrome' };
+    for (const entry of [buildNpxServerEntry(), buildServerEntry('/x/dist/mcp/index.mjs')]) {
+      const keys = Object.keys(entry.env as object);
+      expect(keys).toContain('AIRTABLE_BROWSER_PATH');
+      for (const k of keys) expect(MANAGED_ENV_KEYS.has(k), k).toBe(true);
+    }
   });
 
   it('browserIdleParkMinutes=0 disables parking via env 0', () => {
