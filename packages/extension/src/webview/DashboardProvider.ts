@@ -28,7 +28,8 @@ import type { AuthManager } from '../mcp/auth-manager.js';
 import type { ToolProfileManager } from '../mcp/tool-profile.js';
 import type { DebugCollector } from '../debug/collector.js';
 import type { DaemonManager } from '../mcp/daemon-manager.js';
-import { BUILTIN_PROMPT_DEFS, BUILTIN_NAMES } from '../mcp/prompt-defs.js';
+import { BUILTIN_NAMES } from '../mcp/prompt-defs.js';
+import { readMergedPrompts } from '../mcp/prompts-state.js';
 
 const WEBVIEW_LINKS: Record<WebviewLinkId, string> = {
   docs: 'https://marketplace.visualstudio.com/items?itemName=Nskha.airtable-formula',
@@ -1745,25 +1746,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   }
 
   private async _computePromptsState(): Promise<import('@airtable-formula/shared').PromptsState> {
-    const configPath = path.join(os.homedir(), '.airtable-user-mcp', 'prompts.json');
-    let userConfig: { overrides?: Record<string, { name: string; description: string; arguments: import('@airtable-formula/shared').PromptArg[]; template: string }>; custom?: import('@airtable-formula/shared').PromptDef[] } = {};
-    try {
-      const raw = await (await import('fs/promises')).readFile(configPath, 'utf8');
-      userConfig = JSON.parse(raw);
-    } catch { /* no config yet */ }
-
-    const prompts: import('@airtable-formula/shared').PromptDef[] = BUILTIN_PROMPT_DEFS.map(p => {
-      const override = userConfig.overrides?.[p.name];
-      return override
-        ? { ...override, isBuiltin: true, isModified: true }
-        : { ...p, isBuiltin: true, isModified: false };
-    });
-
-    for (const c of (userConfig.custom ?? [])) {
-      prompts.push({ ...c, isBuiltin: false, isModified: false });
-    }
-
-    return { prompts };
+    return { prompts: await readMergedPrompts(os.homedir()) };
   }
 
   private async _writePromptConfig(mutate: (cfg: { overrides: Record<string, unknown>; custom: unknown[] }) => void): Promise<void> {
