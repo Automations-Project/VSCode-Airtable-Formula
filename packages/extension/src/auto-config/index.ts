@@ -10,7 +10,7 @@ import { hostPathContext, type McpClientRow } from './mcp-clients.js';
 import { readLaunch } from './mcp-entry-shapes.js';
 import {
   MCP_SERVER_NAME, configureMcpClient, isOurEntry, readMcpClientHealth, readServerEntry, setServerEntry,
-  unconfigureMcpClient, type FoundEntry, type WriterDeps,
+  unconfigureMcpClient, type FoundEntry, type McpConfigureOptions, type WriterDeps,
 } from './mcp-writer.js';
 
 // Our local entry is MCP_SERVER_NAME ('airtable-user-mcp'); the official remote one:
@@ -126,7 +126,8 @@ export function hostWriterDeps(): WriterDeps {
 
 /**
  * Writes our entry in the client's current location, in the client's shape, and moves any copy
- * from an old location. An editor with no MCP row (Helix, Neovim) has nothing to write. Throws
+ * we wrote from an old location. Foreign duplicates are cleared only with explicit replacement
+ * consent (options.replaceForeign). An editor with no MCP row (Helix, Neovim) has nothing to write. Throws
  * when the client is not detected or a file does not parse; nothing is written then.
  */
 export async function configureMcpForIde(
@@ -134,12 +135,13 @@ export async function configureMcpForIde(
   serverPath: string,
   serverEntry?: Record<string, unknown>,
   deps: WriterDeps = hostWriterDeps(),
+  options: McpConfigureOptions = {},
 ): Promise<void> {
   const row = mcpRowFor(ideId);
   if (!row) return;
   const launch = readLaunch(serverEntry ?? buildServerEntry(serverPath));
   if (!launch) throw new Error('the MCP server entry has no command');
-  await configureMcpClient(row, launch, deps);
+  await configureMcpClient(row, launch, deps, options);
 }
 
 /**

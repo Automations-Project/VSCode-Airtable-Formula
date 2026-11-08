@@ -809,3 +809,58 @@ describe('Cline selected settings file regression', () => {
     expect(fs.readFileSync(defaultFile, 'utf8')).toBe(original);
   });
 });
+
+
+describe('Cline custom-root installation detection regression', () => {
+  it.each(['root', 'data', 'file'] as const)('detects a custom-only Cline root with %s settings precedence', async override => {
+    const root = path.join(home, 'custom-cline');
+    const data = path.join(home, 'custom-data');
+    const file = path.join(home, 'custom-settings.json');
+    fs.mkdirSync(root, { recursive: true });
+    const env = { ...deps.ctx.env, CLINE_DIR: `  ${root}  `,
+      ...(override !== 'root' ? { CLINE_DATA_DIR: data } : {}),
+      ...(override === 'file' ? { CLINE_MCP_SETTINGS_PATH: file } : {}) };
+    const custom: WriterDeps = { ...deps, ctx: { ...deps.ctx, env } };
+    expect((await getIdeStatus('cline', custom)).detected).toBe(true);
+    const selected = override === 'file' ? file : path.join(override === 'data' ? data : path.join(root, 'data'), 'settings', 'cline_mcp_settings.json');
+    await configureMcpForIde('cline', '/unused', { command: 'node', args: [deps.launcher.script], env: ourEnv() }, custom);
+    expect(parse(fs.readFileSync(selected, 'utf8')).mcpServers['airtable-user-mcp']).toBeDefined();
+    expect(fs.existsSync(path.join(home, '.cline'))).toBe(false);
+  });
+
+  it('still detects the default installation when an absent custom root is configured', async () => {
+    detect(MCP_CLIENT_BY_ID.cline);
+    const custom: WriterDeps = { ...deps, ctx: { ...deps.ctx, env: { ...deps.ctx.env, CLINE_DIR: path.join(home, 'absent') } } };
+    expect((await getIdeStatus('cline', custom)).detected).toBe(true);
+  });
+});
+
+describe('OpenCode confirmed replacement versus automatic update regression', () => {
+  for (const location of ['v1', 'sibling'] as const) {
+    it.each(['configure', 'reapply', 'confirmed-replace'] as const)(`${location}: %s only clears foreign duplicates with explicit replacement consent`, async mode => {
+      detect(MCP_CLIENT_BY_ID.opencode);
+      const current = path.join(home, '.config', 'opencode', 'opencode.jsonc');
+      const sibling = path.join(home, '.config', 'opencode', 'opencode.json');
+      const entry = { command: 'node', args: [deps.launcher.script], env: ourEnv() };
+      const ours = ENTRY_SHAPES.opencode(entry, { native: true });
+      const foreign = { type: 'local', command: ['npx', '-y', 'airtable-user-mcp'], environment: { USER_SETTING: 'keep' } };
+      write(current, JSON.stringify({ theme: 'keep', mcp: { servers: { 'airtable-user-mcp': ours }, ...(location === 'v1' ? { 'airtable-user-mcp': foreign } : {}) } }));
+      if (location === 'sibling') write(sibling, JSON.stringify({ theme: 'keep', mcp: { 'airtable-user-mcp': foreign } }));
+      const updated = { ...entry, env: { ...entry.env, USER_UPDATE: 'new-setting' } };
+      if (mode === 'reapply') expect(await reapplyMcpForIde('opencode', '/unused', updated, deps)).toBe(true);
+      else await configureMcpForIde('opencode', '/unused', updated, deps, { replaceForeign: mode === 'confirmed-replace' });
+      const doc = parse(fs.readFileSync(current, 'utf8'));
+      expect(doc.mcp.servers['airtable-user-mcp']).toEqual(ENTRY_SHAPES.opencode(updated, { native: true }));
+      expect(doc.theme).toBe('keep');
+      const secondary = location === 'v1' ? doc : parse(fs.readFileSync(sibling, 'utf8'));
+      if (mode === 'confirmed-replace') {
+        expect(secondary.mcp?.['airtable-user-mcp']).toBeUndefined();
+        expect(await hasForeignMcpEntry('opencode', deps)).toBe(false);
+      } else {
+        expect(secondary.mcp['airtable-user-mcp']).toEqual(foreign);
+        expect(await hasForeignMcpEntry('opencode', deps)).toBe(true);
+      }
+      expect(secondary.theme).toBe('keep');
+    });
+  }
+});

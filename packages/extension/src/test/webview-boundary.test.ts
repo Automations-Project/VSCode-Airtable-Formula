@@ -1152,7 +1152,7 @@ describe('DashboardProvider webview trust boundary', () => {
     inboundMessage({ type: 'action:setupIde', id: 'card02', ideId: 'zed' });
 
     await waitForResult('card02');
-    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything());
+    expect(dependencies.configureMcpForIde).toHaveBeenCalledWith('zed', expect.anything(), expect.anything(), undefined, { replaceForeign: true });
     expect(vscodeMock.postMessage).toHaveBeenCalledWith({ type: 'action:result', id: 'card02', ok: true });
   });
 

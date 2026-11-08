@@ -200,7 +200,8 @@ export const MCP_CLIENTS: readonly McpClientRow[] = [
     label: 'Cline', docsUrl: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
     format: 'json', serversPath: ['mcpServers'], shape: 'cline', official: 'url',
     globalPath: (c) => clineCliConfigPath(c),
-    detect: (c) => [h(c, '.cline'), dirname(c, clineExtensionConfigPath(c))],
+    // Keep default/extension detection even when a custom CLI root is selected.
+    detect: (c) => [...new Set([c.env.CLINE_DIR?.trim() || h(c, '.cline'), h(c, '.cline'), dirname(c, clineExtensionConfigPath(c))])],
   },
 
   // ours (not in add-mcp). ampcode.com/docs/customize/mcp, read 2026-11-07:

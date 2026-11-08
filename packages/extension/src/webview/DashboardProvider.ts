@@ -542,6 +542,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         const settings = getSettings();
         const caps = IDE_CONFIGS[msg.ideId].capabilities;
         // The one place the user points at a client: an entry they wrote may be replaced, after asking.
+        let replaceForeign = false;
         if (caps.includes('mcp') && await hasForeignMcpEntry(msg.ideId)) {
           const choice = await vscode.window.showWarningMessage(
             `Replace the airtable-user-mcp entry you wrote in ${IDE_CONFIGS[msg.ideId].label}?`,
@@ -552,8 +553,12 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
             this.postResult(msg.id, false, 'Cancelled', true);
             return;
           }
+          replaceForeign = true;
         }
-        if (caps.includes('mcp')) await configureMcpForIde(msg.ideId, serverPath, serverEntry);
+        if (caps.includes('mcp')) {
+          if (replaceForeign) await configureMcpForIde(msg.ideId, serverPath, serverEntry, undefined, { replaceForeign: true });
+          else await configureMcpForIde(msg.ideId, serverPath, serverEntry);
+        }
         if (caps.includes('lsp')) await configureLspForIde(msg.ideId);
         await installSkill(settings.ai.installScope, await skillEnv(this.context));
         await this.pushState();

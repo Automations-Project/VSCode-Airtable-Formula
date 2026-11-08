@@ -332,3 +332,15 @@ describe('Cline MCP path override precedence', () => {
     expect(resolve({ CLINE_MCP_SETTINGS_PATH: '', CLINE_DATA_DIR: '', CLINE_DIR: '' })).toBe(P.join(home, '.cline', 'data', 'settings', 'cline_mcp_settings.json'));
   });
 });
+
+
+describe('Cline custom root detection paths', () => {
+  it.each([L, M, W])('$platform preserves default paths and recognizes a trimmed custom root', ctx => {
+    const row = MCP_CLIENT_BY_ID.cline;
+    const root = ctx.platform === 'win32' ? 'D:\\custom-cline' : '/custom-cline';
+    const defaults = row.detect(ctx);
+    expect(row.detect({ ...ctx, env: { ...ctx.env, CLINE_DIR: `  ${root}  ` } })).toEqual([root, ...defaults]);
+    expect(row.detect({ ...ctx, env: { ...ctx.env, CLINE_DIR: '   ' } })).toEqual(defaults);
+    expect(row.detect({ ...ctx, env: { ...ctx.env, CLINE_DIR: defaults[0] } })).toEqual(defaults);
+  });
+});
