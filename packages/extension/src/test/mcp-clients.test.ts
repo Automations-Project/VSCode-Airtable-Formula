@@ -313,3 +313,34 @@ describe('hostPathContext', () => {
     expect(ctx.env).toBe(process.env);
   });
 });
+
+
+describe('Cline MCP path override precedence', () => {
+  it.each(['linux', 'darwin', 'win32'] as const)('%s follows settings file > data directory > Cline directory', platform => {
+    const P = platform === 'win32' ? path.win32 : path.posix;
+    const home = platform === 'win32' ? 'C:\\Users\\u' : '/home/u';
+    const root = platform === 'win32' ? 'D:\\custom' : '/custom';
+    const settings = P.join(root, 'chosen.json');
+    const data = P.join(root, 'data');
+    const cline = P.join(root, 'cline');
+    const resolve = (env: Record<string, string>) => resolveConfigPath(MCP_CLIENT_BY_ID.cline, { platform, home, env }, none);
+    expect(resolve({ CLINE_MCP_SETTINGS_PATH: settings, CLINE_DATA_DIR: data, CLINE_DIR: cline })).toBe(settings);
+    expect(resolve({ CLINE_MCP_SETTINGS_PATH: '', CLINE_DATA_DIR: data, CLINE_DIR: cline })).toBe(P.join(data, 'settings', 'cline_mcp_settings.json'));
+    expect(resolve({ CLINE_MCP_SETTINGS_PATH: '  ', CLINE_DATA_DIR: '  ', CLINE_DIR: '  ' + cline + '  ' })).toBe(P.join(cline, 'data', 'settings', 'cline_mcp_settings.json'));
+    expect(resolve({ CLINE_MCP_SETTINGS_PATH: '  ' + settings + '  ', CLINE_DATA_DIR: data })).toBe(settings);
+    expect(resolve({ CLINE_DATA_DIR: '  ' + data + '  ' })).toBe(P.join(data, 'settings', 'cline_mcp_settings.json'));
+    expect(resolve({ CLINE_MCP_SETTINGS_PATH: '', CLINE_DATA_DIR: '', CLINE_DIR: '' })).toBe(P.join(home, '.cline', 'data', 'settings', 'cline_mcp_settings.json'));
+  });
+});
+
+
+describe('Cline custom root detection paths', () => {
+  it.each([L, M, W])('$platform preserves default paths and recognizes a trimmed custom root', ctx => {
+    const row = MCP_CLIENT_BY_ID.cline;
+    const root = ctx.platform === 'win32' ? 'D:\\custom-cline' : '/custom-cline';
+    const defaults = row.detect(ctx);
+    expect(row.detect({ ...ctx, env: { ...ctx.env, CLINE_DIR: `  ${root}  ` } })).toEqual([root, ...defaults]);
+    expect(row.detect({ ...ctx, env: { ...ctx.env, CLINE_DIR: '   ' } })).toEqual(defaults);
+    expect(row.detect({ ...ctx, env: { ...ctx.env, CLINE_DIR: defaults[0] } })).toEqual(defaults);
+  });
+});

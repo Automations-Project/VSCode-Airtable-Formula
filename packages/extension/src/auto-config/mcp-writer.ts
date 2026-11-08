@@ -365,18 +365,22 @@ export function mergeOurEntry(shape: EntryShapeId, existing: Record<string, unkn
   return out;
 }
 
+/** Only a caller that obtained explicit replacement consent may clear foreign duplicates. */
+export interface McpConfigureOptions { replaceForeign?: boolean }
+
 /**
  * Setup writes our entry in the row's shape. Over an entry we wrote it merges (mergeOurEntry; in
  * TOML the shape's keys with the merged env, and the writer carries the user's other lines over);
- * over anything else it replaces. Legacy cleanup moves only copies we wrote.
+ * over anything else it replaces. Secondary/legacy cleanup moves only copies we wrote,
+ * unless the caller explicitly opted into replacing foreign duplicates after user confirmation.
  */
-export async function configureMcpClient(row: McpClientRow, launch: LocalLaunch, deps: WriterDeps): Promise<void> {
+export async function configureMcpClient(row: McpClientRow, launch: LocalLaunch, deps: WriterDeps, options: McpConfigureOptions = {}): Promise<void> {
   const ours = (e: Record<string, unknown>) => isOurEntry(e, deps);
   await setServerEntry(row, MCP_SERVER_NAME, ({ native, existing }) => {
     if (!isPlainObject(existing) || !ours(existing)) return ENTRY_SHAPES[row.shape](launch, { native });
     if (row.format === 'toml') return ENTRY_SHAPES[row.shape]({ ...launch, env: mergeEnv(existing, launch.env) }, { native });
     return mergeOurEntry(row.shape, existing, launch, { native });
-  }, deps, ours);
+  }, deps, options.replaceForeign === true ? undefined : ours);
 }
 
 export async function unconfigureMcpClient(row: McpClientRow, deps: WriterDeps): Promise<void> {
