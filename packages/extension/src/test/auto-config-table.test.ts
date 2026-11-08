@@ -759,3 +759,53 @@ describe('a reconfigure clears the copies in old places too', () => {
     });
   });
 });
+
+
+describe('OpenCode duplicate ownership confirmation regression', () => {
+  it.each(['v1', 'other-file'] as const)('finds a handwritten %s copy behind our native entry before Remove', async location => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const current = path.join(home, '.config', 'opencode', 'opencode.jsonc');
+    const sibling = path.join(home, '.config', 'opencode', 'opencode.json');
+    const ours = ENTRY_SHAPES.opencode({ command: 'node', args: [deps.launcher.script], env: ourEnv() }, { native: true });
+    const theirs = { type: 'local', command: ['npx', '-y', 'airtable-user-mcp'], environment: { USER_SETTING: 'keep' } };
+    write(current, JSON.stringify({ mcp: { servers: { 'airtable-user-mcp': ours }, ...(location === 'v1' ? { 'airtable-user-mcp': theirs } : {}) } }));
+    if (location === 'other-file') write(sibling, JSON.stringify({ mcp: { 'airtable-user-mcp': theirs }, theme: 'keep' }));
+    const before = fs.readFileSync(current, 'utf8');
+    const beforeSibling = location === 'other-file' ? fs.readFileSync(sibling, 'utf8') : undefined;
+    expect(await hasForeignMcpEntry('opencode', deps)).toBe(true);
+    // The warning check itself must not mutate either copy; cancellation leaves these bytes alone.
+    expect(fs.readFileSync(current, 'utf8')).toBe(before);
+    if (beforeSibling !== undefined) expect(fs.readFileSync(sibling, 'utf8')).toBe(beforeSibling);
+  });
+
+  it('does not warn for managed copies in both layouts and files', async () => {
+    const row = MCP_CLIENT_BY_ID.opencode;
+    detect(row);
+    const ours = ENTRY_SHAPES.opencode({ command: 'node', args: [deps.launcher.script], env: ourEnv() });
+    const dir = path.join(home, '.config', 'opencode');
+    write(path.join(dir, 'opencode.jsonc'), JSON.stringify({ mcp: { 'airtable-user-mcp': ours, servers: { 'airtable-user-mcp': ours } } }));
+    write(path.join(dir, 'opencode.json'), JSON.stringify({ mcp: { 'airtable-user-mcp': ours } }));
+    expect(await hasForeignMcpEntry('opencode', deps)).toBe(false);
+  });
+});
+
+describe('Cline selected settings file regression', () => {
+  it.each(['CLINE_MCP_SETTINGS_PATH', 'CLINE_DATA_DIR'] as const)('configures and removes only the file selected by %s', async key => {
+    const row = MCP_CLIENT_BY_ID.cline;
+    detect(row);
+    const defaultFile = fileOf(row);
+    const original = '{"mcpServers":{"keep":{"command":"mine"}}}\n';
+    write(defaultFile, original);
+    const custom = path.join(home, 'custom', key === 'CLINE_MCP_SETTINGS_PATH' ? 'mcp.json' : 'data');
+    const selected = key === 'CLINE_MCP_SETTINGS_PATH' ? custom : path.join(custom, 'settings', 'cline_mcp_settings.json');
+    const overridden: WriterDeps = { ...deps, ctx: { ...deps.ctx, env: { ...deps.ctx.env, [key]: custom } } };
+    await configureMcpForIde('cline', '/unused', { command: 'node', args: [deps.launcher.script], env: ourEnv() }, overridden);
+    expect(fs.existsSync(selected)).toBe(true);
+    expect(parse(fs.readFileSync(selected, 'utf8')).mcpServers['airtable-user-mcp']).toBeDefined();
+    expect(fs.readFileSync(defaultFile, 'utf8')).toBe(original);
+    await unconfigureMcpForIde('cline', overridden);
+    expect(parse(fs.readFileSync(selected, 'utf8')).mcpServers['airtable-user-mcp']).toBeUndefined();
+    expect(fs.readFileSync(defaultFile, 'utf8')).toBe(original);
+  });
+});

@@ -170,9 +170,11 @@ export async function hasForeignMcpEntry(ideId: IdeId, deps: WriterDeps = hostWr
   const row = mcpRowFor(ideId);
   if (!row) return false;
   try {
-    const found = await readServerEntry(row, MCP_SERVER_NAME, deps);
+    // Search for a foreign copy, not merely the first entry: our native OpenCode entry can
+    // hide a hand-written V1 or sibling-file copy that Remove would also delete.
+    const found = await readServerEntry(row, MCP_SERVER_NAME, deps, entry => !isOurEntry(entry, deps));
     // A copy where the client never looks is no working setup: Setup may write ours beside it.
-    return found !== null && found.readByClient && !isOurEntry(found.entry, deps);
+    return found !== null && found.readByClient;
   } catch { return false; }
 }
 

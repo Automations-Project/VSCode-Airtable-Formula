@@ -99,9 +99,11 @@ const piAgentDir = (c: PathContext): string => E(c, 'PI_CODING_AGENT_DIR') ?? h(
  */
 const kiloConfigDir = (c: PathContext): string => j(c, E(c, 'XDG_CONFIG_HOME') ?? h(c, '.config'), 'kilo');
 
-/** upstream clineCliConfigPath */
+/** Cline's resolveMcpSettingsPath: explicit file > data dir > Cline dir > home; blank overrides are unset. */
 const clineCliConfigPath = (c: PathContext): string =>
-  j(c, E(c, 'CLINE_DIR') ?? h(c, '.cline'), 'data', 'settings', 'cline_mcp_settings.json');
+  c.env.CLINE_MCP_SETTINGS_PATH?.trim() || j(c,
+    c.env.CLINE_DATA_DIR?.trim() || j(c, c.env.CLINE_DIR?.trim() || h(c, '.cline'), 'data'),
+    'settings', 'cline_mcp_settings.json');
 
 /** upstream clineExtensionConfigPath */
 const clineExtensionConfigPath = (c: PathContext): string =>
@@ -190,9 +192,10 @@ export const MCP_CLIENTS: readonly McpClientRow[] = [
   // moves the servers of the old globalStorage file into the shared file once,
   // and a server written to globalStorage after that is never read. Cline finds
   // the file through CLINE_MCP_SETTINGS_PATH, then CLINE_DATA_DIR/settings/…,
-  // then CLINE_DIR (default ~/.cline)/data/settings/…; neither upstream nor we
-  // read the first two. No legacy location: the shared file is where we wrote
-  // before the port.
+  // then CLINE_DIR (default ~/.cline)/data/settings/… (trimmed, with blanks unset).
+  // Unlike the pinned add-mcp helper, honor all three, as Cline itself does in
+  // sdk/packages/shared/src/storage/paths.ts. No legacy location: a default file
+  // beside an override can be a separate setup and must stay untouched.
   { id: 'cline', upstream: 'cline',
     label: 'Cline', docsUrl: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev',
     format: 'json', serversPath: ['mcpServers'], shape: 'cline', official: 'url',
